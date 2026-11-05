@@ -33,11 +33,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-publish:
+  publish-verified:
     # Strict : Jamais de publication sur pull_request.
-    # Uniquement push direct / workflow_dispatch sur main ou develop, ou workflow_call validé.
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || inputs.is_release)
-    runs-on: ubuntu-latest
+    # Only trusted main/develop events; all validation is a caller dependency.
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,6 +64,7 @@ jobs:
         id: meta-standalone
         with:
           bake-target: runtime
+          flavor: suffix=-${{ matrix.arch }},onlatest=true
           images: ghcr.io/${{ github.repository_owner }}/aether
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
@@ -68,6 +77,7 @@ jobs:
         id: meta-core
         with:
           bake-target: runtime-core
+          flavor: suffix=-${{ matrix.arch }},onlatest=true
           images: ghcr.io/${{ github.repository_owner }}/aether-core
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
@@ -80,6 +90,7 @@ jobs:
         id: meta-node
         with:
           bake-target: runtime-node
+          flavor: suffix=-${{ matrix.arch }},onlatest=true
           images: ghcr.io/${{ github.repository_owner }}/aether-node
           tags: |
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' && !inputs.is_release }}
@@ -88,47 +99,43 @@ jobs:
             type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
-      # One solve shares Rust/Web/FFmpeg stages across all three published images.
-      - uses: docker/bake-action@v6
-        id: build
+      - uses: actions/download-artifact@v4
         with:
-          files: |
-            docker-bake.ci.hcl
-            cwd://${{ steps.meta-standalone.outputs.bake-file }}
-            cwd://${{ steps.meta-core.outputs.bake-file }}
-            cwd://${{ steps.meta-node.outputs.bake-file }}
-          push: ${{ inputs.push }}
-          load: ${{ !inputs.push }}
-          set: |
-            runtime.cache-to=type=gha,mode=max,scope=publish-images
+          name: verified-images-${{ matrix.arch }}
+          path: verified-images
+      - name: Charger les images natives vérifiées, sans build
         env:
-          GIT_BRANCH: ${{ github.ref_name }}
-          MEDIA_VERSION: ${{ inputs.version }}
-
-      - name: Vérifier les trois images (provenance, version et runtime Node)
-        env:
-          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
           OWNER: ${{ github.repository_owner }}
           EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
           EXPECTED_REVISION: ${{ github.sha }}
           EXPECTED_VERSION: ${{ inputs.version }}
-          PUSH_IMAGES: ${{ inputs.push }}
+          TARGET_ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
-          mkdir -p digests
+          python3 scripts/ci-image-archive.py load --directory verified-images \
+            --revision "$EXPECTED_REVISION" --arch "$TARGET_ARCH" \
+            --version "$EXPECTED_VERSION" --source "$EXPECTED_SOURCE"
+          for pair in aether:runtime aether-core:runtime-core aether-node:runtime-node; do
+            image=${pair%:*}
+            target=${pair#*:}
+            docker tag "media-ci:$target" "ghcr.io/${OWNER,,}/$image:sha-${EXPECTED_REVISION}-${TARGET_ARCH}"
+          done
+
+      - name: Vérifier les trois images (provenance, version et runtime Node)
+        env:
+          OWNER: ${{ github.repository_owner }}
+          EXPECTED_SOURCE: ${{ github.server_url }}/${{ github.repository }}
+          EXPECTED_REVISION: ${{ github.sha }}
+          EXPECTED_VERSION: ${{ inputs.version }}
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
           for pair in aether:runtime aether-core:runtime-core aether-node:runtime-node; do
             image=${pair%:*}
             target=${pair#*:}
             # metadata-action normalizes repository names to lowercase.
             image_repo="ghcr.io/${OWNER,,}/$image"
-            if [ "$PUSH_IMAGES" = "true" ]; then
-              digest=$(jq -er --arg target "$target" '.[$target]["containerimage.digest"] | select(startswith("sha256:"))' <<< "$BUILD_METADATA")
-              target_ref="${image_repo}@${digest}"
-              docker pull "$target_ref"
-              printf '%s\n' "$digest" > "digests/$image.digest"
-            else
-              target_ref="${image_repo}:sha-${EXPECTED_REVISION}"
-            fi
+            target_ref="${image_repo}:sha-${EXPECTED_REVISION}-${TARGET_ARCH}"
             test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$target_ref")" = "$EXPECTED_SOURCE"
             test "$(docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$target_ref")" = "$EXPECTED_REVISION"
             output=$(docker run --rm "$target_ref" "$image" --version)
@@ -146,11 +153,73 @@ jobs:
             fi
           done
 
+      - name: Pousser uniquement les références immuables de l’architecture vérifiée
+        if: inputs.push
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REVISION: ${{ github.sha }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          METADATA_STANDALONE: ${{ steps.meta-standalone.outputs.json }}
+          METADATA_CORE: ${{ steps.meta-core.outputs.json }}
+          METADATA_NODE: ${{ steps.meta-node.outputs.json }}
+        run: |
+          set -euo pipefail
+          mkdir -p "digests/$TARGET_ARCH"
+          for image in aether aether-core aether-node; do
+            image_repo="ghcr.io/${OWNER,,}/$image"
+            target_ref="${image_repo}:sha-${REVISION}-${TARGET_ARCH}"
+            docker push "$target_ref"
+            digest=$(docker inspect --format '{{json .RepoDigests}}' "$target_ref" | jq -er --arg prefix "$image_repo@" '.[] | select(startswith($prefix)) | split("@")[1]' | head -n 1)
+            case "$image" in
+              aether) metadata=$METADATA_STANDALONE ;;
+              aether-core) metadata=$METADATA_CORE ;;
+              aether-node) metadata=$METADATA_NODE ;;
+            esac
+            image_id=$(docker inspect --format '{{.Id}}' "$target_ref")
+            jq --arg image_id "$image_id" --arg digest "$digest" --arg arch "$TARGET_ARCH" --arg revision "$REVISION" --arg image "$image" \
+              '{image:$image,architecture:$arch,revision:$revision,digest:$digest,image_id:$image_id,tags:.tags}' <<< "$metadata" > "digests/$TARGET_ARCH/$image.json"
+          done
+
       - name: Sauvegarder les digests en artifact
         if: inputs.push
         uses: actions/upload-artifact@v4
         with:
-          name: digest-images
+          name: digest-images-${{ matrix.arch }}
+          overwrite: true
+          path: digests/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-manifests:
+    name: Publier les manifests après les deux validations natives
+    needs: [publish-verified]
+    if: inputs.push && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: digest-images-*
+          path: digests
+          merge-multiple: true
+      - name: Vérifier les six références et publier les trois manifests
+        env:
+          OWNER: ${{ github.repository_owner }}
+          REVISION: ${{ github.sha }}
+        run: python3 scripts/publish-multiarch-manifests.py --directory digests --owner "$OWNER" --revision "$REVISION" --publish
+      - name: Conserver les digests des manifests pour la release
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-manifests
+          overwrite: true
           path: digests/*.digest
           if-no-files-found: error
           retention-days: 1

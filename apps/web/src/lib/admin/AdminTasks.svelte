@@ -1,279 +1,155 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
-  import AutomationTasks from './AutomationTasks.svelte';
-  import DistributedTasks from './DistributedTasks.svelte';
   import { adminRequest } from './request';
   import type { AdminNode, Library, Scan } from './types';
-  import { scanLabels } from './types';
+  import { t } from '../i18n';
+  import {
+    type ScheduledTask, type TaskTrigger, type TriggerDraft, type TriggerType,
+    categoryLabel, categoryOrder, clockLabel, dayLabel, durationLabel, intervalLabel, intervalOptions,
+    lastRunSummary, taskName, timeSlots, triggerLabel, triggerPayload, weekdays
+  } from './task-schedule';
 
-  let { libraries, scans, pending, nodes = [], onscan, selectedId = null, active = false }: {
-    libraries: Library[]; scans: Record<string, Scan>; pending: string[]; nodes?: AdminNode[];
+  // `scans`, `pending` and `nodes` stay accepted for the host page; the unified task API is the source of truth.
+  let { libraries, pending = [], onscan, selectedId = null, active = false }: {
+    libraries: Library[]; scans?: Record<string, Scan>; pending?: string[]; nodes?: AdminNode[];
     onscan: (library: Library) => void; selectedId?: string | null; active?: boolean;
   } = $props();
 
-  type Schedule = { libraryId: string; intervalMinutes: number; enabled: number; nextRunAt: number; lastRunAt: number | null; lastOutcome: string };
-  type Backup = { available: boolean; reason?: string | null; running: boolean; schedule: { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string } };
-  type SystemTask = { id: string; name: string; description: string; category: string; intervalMinutes: number; enabled: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string };
-  type Task = {
-    id: string;
-    systemId?: string;
-    name: string;
-    description: string;
-    library?: Library;
-    category: string;
-    running: boolean;
-    reason: string | null;
-    plan: { enabled: boolean; interval: number; next: number; last: number | null; outcome: string } | null;
-  };
-
-  let schedules = $state<Record<string, Schedule>>({});
-  let backup = $state<Backup | null>(null);
-  let systemTasks = $state<SystemTask[]>([]);
-  let runningSystemTasks = $state<Record<string, boolean>>({});
-
-  let scanError = $state('');
-  let backupError = $state('');
-  let systemTasksError = $state('');
+  let tasks = $state<ScheduledTask[]>([]);
+  let loaded = $state(false);
+  let loadError = $state('');
   let error = $state('');
   let notice = $state('');
-  let loaded = $state(false);
-  let refreshing = $state(false);
+  let busy = $state<Record<string, boolean>>({});
   let saving = $state(false);
-  let creatingBackup = $state(false);
+  let now = $state(Math.floor(Date.now() / 1000));
   let editor = $state<HTMLDialogElement>();
-  let frequency = $state(24);
-  let unit = $state(60);
+  let draft = $state<TriggerDraft>({ type: 'daily', dayOfWeek: 1, timeOfDayMinutes: 180, intervalMinutes: 1440, maxRuntimeHours: null });
+  let refreshPromise: Promise<void> | undefined;
 
-  const tasks = $derived<Task[]>([
-    ...libraries.filter(l => !l.id.startsWith('fixture-')).map(library => {
-      const plan = schedules[library.id];
-      return {
-        id: `scan-${library.id}`,
-        name: `Indexer ${library.name}`,
-        category: 'Bibliothèques',
-        library,
-        description: `Analyse les fichiers ${library.kind === 'series' ? 'de séries' : library.kind === 'music' ? 'de musique' : 'de films'} et actualise le catalogue. Les médias restent en lecture seule.`,
-        running: pending.includes(library.id) || ['queued', 'running'].includes(scans[library.id]?.status),
-        reason: !library.enabled ? 'Bibliothèque désactivée.' : library.nodeId !== 'local' && !nodes.some(n => n.id === library.nodeId && n.status === 'connected') ? 'Media Node indisponible.' : null,
-        plan: plan ? { enabled: plan.enabled === 1, interval: plan.intervalMinutes, next: plan.nextRunAt, last: plan.lastRunAt, outcome: plan.lastOutcome } : null
-      };
-    }),
-    ...systemTasks.filter(st => st.category === 'Extensions').map(st => ({
-      id: `system-${st.id}`,
-      systemId: st.id,
-      name: st.name,
-      category: 'Extensions',
-      description: st.description,
-      running: !!runningSystemTasks[st.id] || ['queued', 'running'].includes(st.lastOutcome),
-      reason: null,
-      plan: { enabled: st.enabled === 1, interval: st.intervalMinutes, next: st.nextDueAt, last: st.lastStartedAt, outcome: st.lastOutcome }
-    })),
-    {
-      id: 'backup',
-      name: 'Sauvegarder le serveur',
-      category: 'Maintenance',
-      description: 'Crée une archive non chiffrée de la base et de la configuration du serveur. Réservez son accès à l’administrateur. Les fichiers médias ne sont pas inclus.',
-      running: creatingBackup || backup?.running === true,
-      reason: backupError ? 'État des sauvegardes indisponible.' : !backup ? 'Chargement des sauvegardes…' : !backup.available ? (backup.reason ?? 'Sauvegardes indisponibles.') : null,
-      plan: backup ? { enabled: backup.schedule.enabled, interval: backup.schedule.intervalMinutes, next: backup.schedule.nextDueAt, last: backup.schedule.lastStartedAt, outcome: backup.schedule.lastOutcome } : null
-    },
-    ...systemTasks.filter(st => st.category !== 'Extensions').map(st => ({
-      id: `system-${st.id}`,
-      systemId: st.id,
-      name: st.name,
-      category: st.category,
-      description: st.description,
-      running: !!runningSystemTasks[st.id] || ['queued', 'running'].includes(st.lastOutcome),
-      reason: null,
-      plan: { enabled: st.enabled === 1, interval: st.intervalMinutes, next: st.nextDueAt, last: st.lastStartedAt, outcome: st.lastOutcome }
-    }))
-  ]);
-
-  const selected = $derived(tasks.find(task => task.id === selectedId));
-  const selectedScan = $derived(selected?.library ? scans[selected.library.id] : undefined);
-  const selectedSystemTask = $derived(selected?.systemId ? systemTasks.find(st => st.id === selected.systemId) : undefined);
-
-  const outcomes: Record<string, string> = {
-    never: 'Jamais exécutée',
-    queued: 'En attente',
-    running: 'En cours',
-    completed: 'Terminée',
-    error: 'Échec',
-    interrupted: 'Interrompue',
-    dispatching: 'Démarrage',
-    already_running: 'Déjà en cours',
-    unavailable: 'Bibliothèque indisponible',
-    stopped: 'Serveur en arrêt',
-    succeeded: 'Réussie',
-    failed: 'Échec'
+  const libraryNames = $derived(Object.fromEntries(libraries.map(library => [library.id, library.name])));
+  const selected = $derived(selectedId ? tasks.find(task => task.id === selectedId || `system-${task.id}` === selectedId) : undefined);
+  const groups = $derived(
+    [...new Set(tasks.map(task => task.category))]
+      .sort((a, b) => categoryOrder(a) - categoryOrder(b) || a.localeCompare(b))
+      .map(category => ({ category, tasks: tasks.filter(task => task.category === category) }))
+  );
+  const anyActive = $derived(tasks.some(task => task.state !== 'idle'));
+  const triggerTypes: TriggerType[] = ['daily', 'weekly', 'interval', 'startup'];
+  const typeKeys = { daily: 'sched_type_daily', weekly: 'sched_type_weekly', interval: 'sched_type_interval', startup: 'sched_type_startup' } as const;
+  const outcomeKeys: Record<string, 'sched_outcome_succeeded' | 'sched_outcome_failed' | 'sched_outcome_interrupted' | 'sched_outcome_cancelled'> = {
+    succeeded: 'sched_outcome_succeeded', failed: 'sched_outcome_failed', interrupted: 'sched_outcome_interrupted', cancelled: 'sched_outcome_cancelled'
   };
 
-  const categories = $derived([...new Set(tasks.map(t => t.category))]);
-
+  function nameOf(task: ScheduledTask) { return taskName(task, task.libraryId ? libraryNames[task.libraryId] : undefined, $t); }
   function taskHref(id?: string) { return resolve(`admin/libraries/#tasks-section${id ? `?task=${encodeURIComponent(id)}` : ''}`); }
   function date(value: number) { return new Date(value * 1000).toLocaleString(); }
-  function intervalLabel(minutes: number) {
-    // These plans repeat after a duration; they do not run at a fixed calendar hour.
-    if (minutes % 1440 === 0) return `Toutes les ${minutes / 60} heures`;
-    const count = minutes % 60 === 0 ? minutes / 60 : minutes;
-    const suffix = minutes % 60 === 0 ? 'heure' : 'minute';
-    return `Toutes les ${count} ${suffix}${count > 1 ? 's' : ''}`;
+  function running(task: ScheduledTask) { return task.state !== 'idle' || (task.libraryId !== null && pending.includes(task.libraryId)); }
+  function message(cause: unknown) { return cause instanceof Error ? cause.message : $t('sched_action_failed'); }
+
+  function refresh(): Promise<void> {
+    if (!refreshPromise) refreshPromise = load().finally(() => { refreshPromise = undefined; });
+    return refreshPromise;
+  }
+  async function load() {
+    try {
+      tasks = await adminRequest<ScheduledTask[]>('/api/v1/admin/tasks');
+      loadError = '';
+    } catch {
+      loadError = $t('sched_load_failed');
+    } finally {
+      now = Math.floor(Date.now() / 1000);
+      loaded = true;
+    }
   }
 
-  function lastRun(task: Task) {
-    if (!loaded) return 'Chargement du dernier lancement…';
-    if (task.library && scanError) return 'Dernier lancement indisponible';
-    if (task.id === 'backup' && backupError) return 'Dernier lancement indisponible';
-    if (task.systemId && systemTasksError) return 'Dernier lancement indisponible';
-    return task.plan?.last ? `Dernier lancement planifié : ${date(task.plan.last)}` : 'Aucun lancement planifié enregistré';
-  }
-
-  async function refresh() {
-    refreshing = true;
-    const [plans, archives, sys] = await Promise.allSettled([
-      adminRequest<Schedule[]>('/api/v1/admin/tasks/schedules'),
-      adminRequest<Backup>('/api/v1/admin/backups'),
-      adminRequest<SystemTask[]>('/api/v1/admin/tasks/system')
-    ]);
-    if (plans.status === 'fulfilled') {
-      schedules = Object.fromEntries(plans.value.map(p => [p.libraryId, p]));
-      scanError = '';
-    } else {
-      scanError = 'Les planifications des bibliothèques sont indisponibles. Actualisez pour réessayer.';
-    }
-
-    if (archives.status === 'fulfilled') {
-      backup = archives.value;
-      backupError = '';
-    } else {
-      backupError = 'Les sauvegardes sont indisponibles. Actualisez pour réessayer.';
-    }
-
-    if (sys.status === 'fulfilled') {
-      systemTasks = sys.value;
-      systemTasksError = '';
-    } else {
-      systemTasksError = 'Les tâches système planifiées sont indisponibles.';
-    }
-
-    loaded = true;
-    refreshing = false;
-  }
-
-  $effect(() => { if (active) void refresh(); });
+  $effect(() => {
+    if (!active) return;
+    untrack(() => void refresh());
+    // Faster refresh while a task runs, so progress bars move.
+    const period = anyActive || pending.length ? 3000 : 15000;
+    const update = () => { if (document.visibilityState === 'visible' && !saving) void refresh(); };
+    const timer = setInterval(update, period);
+    document.addEventListener('visibilitychange', update);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); };
+  });
   $effect(() => { if (selectedId !== undefined) { error = ''; notice = ''; editor?.close(); } });
 
-  function editTrigger() {
-    if (!selected) return;
-    const interval = selected.plan?.interval ?? 1440;
-    unit = interval % 1440 === 0 ? 1440 : interval % 60 === 0 ? 60 : 1;
-    frequency = interval / unit;
+  async function start(task: ScheduledTask) {
+    if (running(task) || task.reason || busy[task.id]) return;
+    error = ''; notice = '';
+    const library = task.kind === 'scan' ? libraries.find(candidate => candidate.id === task.libraryId) : undefined;
+    if (library) {
+      // Library scans keep the page's scan flow (refresh mode, pending state).
+      onscan(library);
+      setTimeout(() => void refresh(), 1000);
+      return;
+    }
+    busy[task.id] = true;
+    try {
+      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/run`, { method: 'POST' });
+      notice = $t('sched_task_queued', { name: nameOf(task) });
+      await refresh();
+    } catch (cause) {
+      error = message(cause);
+    } finally {
+      busy[task.id] = false;
+    }
+  }
+
+  async function stop(task: ScheduledTask) {
+    if (busy[task.id]) return;
+    error = ''; notice = '';
+    busy[task.id] = true;
+    try {
+      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/cancel`, { method: 'POST' });
+      notice = $t('sched_task_stopped', { name: nameOf(task) });
+      await refresh();
+    } catch (cause) {
+      error = message(cause);
+    } finally {
+      busy[task.id] = false;
+    }
+  }
+
+  function openEditor() {
+    draft = { type: 'daily', dayOfWeek: 1, timeOfDayMinutes: 180, intervalMinutes: selected?.kind === 'backup' ? 1440 : 720, maxRuntimeHours: null };
     error = '';
     editor?.showModal();
   }
 
-  async function saveTrigger(event: SubmitEvent) {
+  async function addTrigger(event: SubmitEvent) {
     event.preventDefault();
     const task = selected;
     if (!task || saving) return;
-    const minutes = frequency * unit;
-    const minAllowed = task.library || task.systemId ? 5 : 60;
-    if (!Number.isInteger(minutes) || minutes < minAllowed || minutes > 10080) {
-      error = 'Intervalle invalide. Vérifiez les limites indiquées.';
-      return;
-    }
-    saving = true;
-    error = '';
-    notice = '';
+    if (draft.maxRuntimeHours !== null && !(draft.maxRuntimeHours >= 0 && draft.maxRuntimeHours <= 168)) { error = $t('sched_action_failed'); return; }
+    saving = true; error = ''; notice = '';
     try {
-      if (task.library) {
-        await adminRequest(`/api/v1/admin/tasks/schedules/${encodeURIComponent(task.library.id)}`, {
-          method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: minutes, enabled: true })
-        });
-      } else if (task.systemId) {
-        await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/schedule`, {
-          method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: minutes, enabled: true })
-        });
-      } else {
-        await adminRequest('/api/v1/admin/backups/schedule', {
-          method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: minutes, enabled: true })
-        });
-      }
-      await refresh();
+      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/triggers`, { method: 'POST', body: JSON.stringify(triggerPayload(draft)) });
       editor?.close();
-      notice = 'Déclencheur enregistré.';
+      notice = $t('sched_trigger_added');
+      await refresh();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Enregistrement impossible.';
+      const text = message(cause);
+      error = text.startsWith('Ce nom existe déjà') ? $t('sched_trigger_conflict') : text;
     } finally {
       saving = false;
     }
   }
 
-  async function removeTrigger() {
-    const task = selected;
-    if (!task || saving) return;
-    saving = true;
-    error = '';
-    notice = '';
+  async function removeTrigger(task: ScheduledTask, trigger: TaskTrigger) {
+    if (saving) return;
+    saving = true; error = ''; notice = '';
     try {
-      if (task.library) {
-        await adminRequest(`/api/v1/admin/tasks/schedules/${encodeURIComponent(task.library.id)}`, { method: 'DELETE' });
-      } else if (task.systemId) {
-        await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/schedule`, {
-          method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: task.plan?.interval ?? 1440, enabled: false })
-        });
-      } else {
-        await adminRequest('/api/v1/admin/backups/schedule', {
-          method: 'PUT',
-          body: JSON.stringify({ intervalMinutes: task.plan?.interval ?? 1440, enabled: false })
-        });
-      }
+      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/triggers/${encodeURIComponent(trigger.id)}`, { method: 'DELETE' });
+      notice = $t('sched_trigger_removed');
       await refresh();
-      notice = 'Déclencheur supprimé. Le lancement manuel reste disponible.';
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Suppression impossible.';
+      error = message(cause);
     } finally {
       saving = false;
-    }
-  }
-
-  async function run(task: Task) {
-    if (task.running || task.reason) return;
-    if (task.library) {
-      onscan(task.library);
-      return;
-    }
-    if (task.systemId) {
-      runningSystemTasks[task.systemId] = true;
-      error = '';
-      notice = '';
-      try {
-        await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/run`, { method: 'POST' });
-        notice = `Tâche ${task.name} démarrée.`;
-        await refresh();
-      } catch (cause) {
-        error = cause instanceof Error ? cause.message : 'Démarrage de la tâche impossible.';
-      } finally {
-        runningSystemTasks[task.systemId] = false;
-      }
-      return;
-    }
-    creatingBackup = true;
-    error = '';
-    notice = '';
-    try {
-      await adminRequest('/api/v1/admin/backups', { method: 'POST' });
-      notice = 'Sauvegarde créée.';
-      await refresh();
-    } catch (cause) {
-      error = `${cause instanceof Error ? cause.message : 'Sauvegarde impossible.'} Actualisez son état avant de relancer : elle peut continuer côté serveur.`;
-    } finally {
-      creatingBackup = false;
     }
   }
 </script>
@@ -281,170 +157,235 @@
 <section id="tasks-section" aria-labelledby="tasks-heading">
   {#if selectedId}
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
-    <a class="back" href={taskHref()}><Icon name="back" size={24} /><span>Retour aux tâches</span></a>
+    <a class="back" href={taskHref()} aria-label={$t('sched_back')}><Icon name="back" size={24} /></a>
     {#if selected}
+      {@const task = selected}
+      {@const summary = lastRunSummary(task, now, $t)}
       <header class="detail-header">
-        <h2 id="tasks-heading">{selected.name}</h2>
-        <button class="run" aria-label={`Exécuter ${selected.name}`} disabled={selected.running || !!selected.reason || !loaded} onclick={() => void run(selected)}>
-          <Icon name="play" size={22} />
-        </button>
+        <h2 id="tasks-heading">{nameOf(task)}</h2>
+        {#if running(task)}
+          <button class="run" aria-label={$t('sched_stop', { name: nameOf(task) })} title={$t('sched_stop', { name: nameOf(task) })} disabled={busy[task.id] || task.state === 'idle'} onclick={() => void stop(task)}><Icon name="close" size={22} /></button>
+        {:else}
+          <button class="run" aria-label={$t('sched_run', { name: nameOf(task) })} title={$t('sched_run', { name: nameOf(task) })} disabled={!!task.reason || busy[task.id]} onclick={() => void start(task)}><Icon name="play" size={22} /></button>
+        {/if}
       </header>
-      <p class="description">{selected.description}</p>
-      {#if selected.reason}<p class="reason">{selected.reason} {#if !selected.library && !selected.systemId}<a href={resolve('admin/libraries/#backups-section')}>Ouvrir les sauvegardes</a>{/if}</p>{/if}
-      <button class="primary" disabled={!loaded || saving || refreshing || !!(selected.library ? scanError : selected.systemId ? systemTasksError : backupError) || (selected.id === 'backup' && !backup?.available)} onclick={editTrigger}>
-        <span aria-hidden="true">+</span> {selected.plan?.enabled ? 'Modifier le déclencheur' : 'Ajouter un déclencheur'}
-      </button>
-      <div class="trigger-list" aria-label="Déclencheurs">
-        <h3>Intervalle</h3>
-        {#if selected.plan?.enabled}
-          <div class="trigger-row">
+      <p class="description">{task.description}</p>
+      {#if task.reason}<p class="reason">{task.reason}</p>{/if}
+      {#if task.kind === 'backup'}<p class="hint"><a href={resolve('admin/libraries/#backups-section')}>{$t('sched_backups_link')}</a></p>{/if}
+
+      <button class="primary" disabled={saving || !!loadError} onclick={openEditor}><span aria-hidden="true">+</span> {$t('sched_add_trigger')}</button>
+
+      <div class="panel" role="region" aria-label={$t('sched_triggers')}>
+        <h3>{$t('sched_triggers')}</h3>
+        {#each task.triggers as trigger (trigger.id)}
+          <div class="trigger-row" class:disabled={!trigger.enabled}>
             <div>
-              <p>{intervalLabel(selected.plan.interval)}</p>
-              <small>Prochaine échéance : {date(selected.plan.next)}</small>
+              <p>{triggerLabel(trigger, $t)}</p>
+              <small>
+                {#if trigger.nextFireAt}{$t('sched_next', { date: date(trigger.nextFireAt) })}{/if}
+                {#if trigger.maxRuntimeSeconds}{trigger.nextFireAt ? ' · ' : ''}{$t('sched_time_limit', { duration: durationLabel(trigger.maxRuntimeSeconds) })}{/if}
+              </small>
             </div>
-            <button class="remove" disabled={saving} aria-label="Supprimer le déclencheur" title="Supprimer le déclencheur" onclick={() => void removeTrigger()}>−</button>
+            <button class="remove" disabled={saving} aria-label={$t('sched_delete_trigger')} title={$t('sched_delete_trigger')} onclick={() => void removeTrigger(task, trigger)}><Icon name="trash" size={18} /></button>
           </div>
         {:else}
-          <p class="no-trigger">Aucun déclencheur actif. Cette tâche peut être lancée manuellement.</p>
-        {/if}
+          <p class="empty">{$t('sched_no_trigger')}</p>
+        {/each}
       </div>
-      <div class="results">
-        <h3>Dernier résultat</h3>
-        <p>{lastRun(selected)}</p>
-        <p>{selected.running ? 'En cours…' : selected.plan ? outcomes[selected.plan.outcome] ?? selected.plan.outcome : 'Aucune exécution planifiée'}</p>
-        {#if selected.id === 'backup' && backup?.schedule.lastStartedAt && backup.schedule.lastCompletedAt && backup.schedule.lastCompletedAt >= backup.schedule.lastStartedAt}
-          <p>Durée : {backup.schedule.lastCompletedAt - backup.schedule.lastStartedAt} secondes</p>
-        {/if}
-        {#if selectedSystemTask && selectedSystemTask.lastStartedAt && selectedSystemTask.lastCompletedAt && selectedSystemTask.lastCompletedAt >= selectedSystemTask.lastStartedAt}
-          <p>Durée : {selectedSystemTask.lastCompletedAt - selectedSystemTask.lastStartedAt} secondes</p>
-        {/if}
-        {#if selectedScan}
-          <p>Dernier scan connu : {scanLabels[selectedScan.status]}</p>
+
+      <div class="panel">
+        <h3>{$t('sched_last_execution')}</h3>
+        {#if running(task)}
+          <p class="status" data-tone={summary.tone}>{summary.text}</p>
+          {#if task.progress !== null && task.state === 'running'}<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${task.progress}%`}></span></div>{/if}
+        {:else if task.lastRun}
+          {@const run = task.lastRun}
           <dl>
-            <div><dt>Découverts</dt><dd>{selectedScan.discovered}</dd></div>
-            <div><dt>Analysés</dt><dd>{selectedScan.probed}</dd></div>
-            <div><dt>Réutilisés</dt><dd>{selectedScan.reused}</dd></div>
-            <div><dt>Erreurs</dt><dd>{selectedScan.errorsCount ?? selectedScan.errors.length}</dd></div>
+            {#if run.start}<div><dt>{$t('sched_started')}</dt><dd>{date(run.start)}</dd></div>{/if}
+            {#if run.start && run.end && run.end >= run.start}<div><dt>{$t('sched_duration')}</dt><dd>{durationLabel(run.end - run.start)}</dd></div>{/if}
+            <div><dt>{$t('sched_outcome')}</dt><dd data-tone={summary.tone}>{outcomeKeys[run.outcome] ? $t(outcomeKeys[run.outcome]) : run.outcome}</dd></div>
           </dl>
-          {#if selectedScan.errors.length}
-            <details>
-              <summary>Consulter les anomalies</summary>
-              <ul>
-                {#each selectedScan.errors as issue, i (i)}
-                  <li>{issue}</li>
-                {/each}
-              </ul>
-            </details>
-          {/if}
+          {#if run.message}<p class="message" class:error={run.outcome === 'failed'}>{run.message}</p>{/if}
+          {#if run.errorKind}<p class="meta">{$t('sched_error_type')} : {run.errorKind}{run.errorScope ? ` · ${run.errorScope}` : ''}</p>{/if}
+        {:else}
+          <p class="empty">{$t('sched_never')}</p>
+        {/if}
+        {#if task.issues.length}
+          <details>
+            <summary>{$t('sched_issues', { count: task.warningsCount || task.issues.length })}</summary>
+            <ul>{#each task.issues as issue, index (index)}<li>{issue}</li>{/each}</ul>
+          </details>
         {/if}
       </div>
+    {:else if !loaded}
+      <h2 id="tasks-heading">{$t('sched_loading')}</h2>
     {:else}
-      <h2 id="tasks-heading">Tâche introuvable</h2>
-      <p>Cette tâche a peut-être été supprimée ou renommée.</p>
+      <h2 id="tasks-heading">{$t('sched_not_found')}</h2>
+      <p class="description">{$t('sched_not_found_hint')}</p>
     {/if}
   {:else}
     <header class="list-header">
-      <h2 id="tasks-heading">Tâches et indexations</h2>
+      <h2 id="tasks-heading">{$t('sched_title')}</h2>
     </header>
-    <DistributedTasks {active} {libraries} {nodes} />
-    <details class="plans-section"><summary>Planifications et lancement manuel</summary><p class="section-intro">Choisissez une opération pour régler sa fréquence ou la lancer maintenant.</p><button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser les planifications</button>
-    {#each categories as category (category)}
+    <p class="description">{$t('sched_intro')}</p>
+    {#if !loaded}<p role="status">{$t('sched_loading')}</p>{/if}
+    {#each groups as group (group.category)}
       <div class="category">
-        <h3>{category}</h3>
+        <h3>{categoryLabel(group.category, $t)}</h3>
         <div class="task-list">
-          {#each tasks.filter(task => task.category === category) as task (task.id)}
+          {#each group.tasks as task (task.id)}
+            {@const summary = lastRunSummary(task, now, $t)}
             <div class="task-row">
               <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
-              <a class="task-link" href={taskHref(task.id)} aria-label={`Configurer ${task.name}`}>
-                <span class="clock"><Icon name="clock" size={26} /></span>
-                <span class="task-copy">
-                  <span class="task-title">{task.name}</span>
-                  <span class="task-subtitle">{task.running ? 'En cours…' : task.plan ? outcomes[task.plan.outcome] ?? task.plan.outcome : 'Aucun lancement planifié'}</span>
-                  <span class="task-subtitle">{lastRun(task)}</span>
-                  {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
-                </span>
+              <a class="task-link" href={taskHref(task.id)}>
+                <span class="task-title">{nameOf(task)}</span>
+                {#if task.state === 'running' && task.progress !== null}
+                  <span class="progress" role="progressbar" aria-label={summary.text} aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${Math.max(task.progress, 2)}%`}></span></span>
+                {:else}
+                  <span class="task-subtitle" data-tone={summary.tone}>{summary.text}</span>
+                {/if}
+                {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
               </a>
-              <button class="run" aria-label={`Exécuter ${task.name}`} title="Exécuter maintenant" disabled={task.running || !!task.reason || !loaded} onclick={() => void run(task)}>
-                <Icon name={task.running ? 'refresh' : 'play'} size={22} />
-              </button>
+              {#if running(task)}
+                <button class="run" aria-label={$t('sched_stop', { name: nameOf(task) })} title={$t('sched_stop', { name: nameOf(task) })} disabled={busy[task.id] || task.state === 'idle'} onclick={() => void stop(task)}><Icon name="close" size={22} /></button>
+              {:else}
+                <button class="run" aria-label={$t('sched_run', { name: nameOf(task) })} title={$t('sched_run', { name: nameOf(task) })} disabled={!!task.reason || busy[task.id] || !loaded} onclick={() => void start(task)}><Icon name="play" size={22} /></button>
+              {/if}
             </div>
-          {:else}
-            <p class="no-trigger">Aucune tâche disponible dans cette catégorie.</p>
           {/each}
         </div>
       </div>
     {/each}
-    </details>
-    <details class="automation-section"><summary>Automatisation des métadonnées</summary><AutomationTasks {active} {libraries} /></details>
   {/if}
-  {#if scanError}<p class="feedback error" role="alert">{scanError}</p>{/if}
-  {#if backupError}<p class="feedback error" role="alert">{backupError}</p>{/if}
-  {#if systemTasksError}<p class="feedback error" role="alert">{systemTasksError}</p>{/if}
+  {#if loadError}<p class="feedback error" role="alert">{loadError} <button onclick={() => void refresh()}><Icon name="refresh" size={16} /></button></p>{/if}
   {#if error && !editor?.open}<p class="feedback error" role="alert">{error}</p>{/if}
   {#if notice}<p class="feedback" role="status">{notice}</p>{/if}
 </section>
 
 <dialog bind:this={editor} aria-labelledby="trigger-title" oncancel={(event) => { if (saving) event.preventDefault(); }}>
-  <form onsubmit={saveTrigger}>
-    <h2 id="trigger-title">Déclencheur périodique</h2>
-    <p>{selected?.name}</p>
-    <label>Toutes les<input type="number" min="1" max="10080" step="1" required bind:value={frequency} disabled={saving} /></label>
-    <label>Unité
-      <select aria-label="Unité" bind:value={unit} disabled={saving}>
-        <option value={1}>Minutes</option>
-        <option value={60}>Heures</option>
-        <option value={1440}>Jours</option>
+  <form onsubmit={addTrigger}>
+    <h2 id="trigger-title">{$t('sched_add_trigger')}</h2>
+    {#if selected}<p>{nameOf(selected)}</p>{/if}
+    <label>{$t('sched_trigger_type')}
+      <select bind:value={draft.type} disabled={saving}>
+        {#each triggerTypes as type (type)}<option value={type}>{$t(typeKeys[type])}</option>{/each}
       </select>
     </label>
-    <p>De {selected?.library || selected?.systemId ? '5 minutes' : '1 heure'} à 7 jours. Un déclencheur périodique par tâche.</p>
+    {#if draft.type === 'weekly'}
+      <label>{$t('sched_day')}
+        <select bind:value={draft.dayOfWeek} disabled={saving}>
+          {#each weekdays as day (day)}<option value={day}>{dayLabel(day, $t)}</option>{/each}
+        </select>
+      </label>
+    {/if}
+    {#if draft.type === 'daily' || draft.type === 'weekly'}
+      <label>{$t('sched_time')}
+        <select bind:value={draft.timeOfDayMinutes} disabled={saving}>
+          {#each timeSlots as slot (slot)}<option value={slot}>{clockLabel(slot)}</option>{/each}
+        </select>
+        <small>{$t('sched_server_time')}</small>
+      </label>
+    {/if}
+    {#if draft.type === 'interval'}
+      <label>{$t('sched_interval')}
+        <select bind:value={draft.intervalMinutes} disabled={saving}>
+          {#each intervalOptions.filter(minutes => selected?.kind !== 'backup' || minutes >= 60) as minutes (minutes)}<option value={minutes}>{intervalLabel(minutes, $t)}</option>{/each}
+        </select>
+      </label>
+    {/if}
+    <label>{$t('sched_time_limit_hours')}
+      <input type="number" min="0" max="168" step="0.5" bind:value={draft.maxRuntimeHours} disabled={saving} />
+      <small>{$t('sched_time_limit_hint')}</small>
+    </label>
     {#if error}<p class="feedback error" role="alert">{error}</p>{/if}
     <div class="dialog-actions">
-      <button type="button" disabled={saving} onclick={() => editor?.close()}>Annuler</button>
-      <button class="primary" type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+      <button type="button" disabled={saving} onclick={() => editor?.close()}>{$t('sched_cancel')}</button>
+      <button class="primary" type="submit" disabled={saving}>{$t('sched_add')}</button>
     </div>
   </form>
 </dialog>
 
 <style>
-  section { min-width: 0; color: var(--text-primary); }
-  .plans-section,.automation-section { margin-top:32px; border-top:1px solid var(--border-subtle); }
-  .plans-section > summary,.automation-section > summary { cursor:pointer; padding:20px 0; min-height:44px; font-size:18px; font-weight:600; }
-  .section-intro { margin:0; color:var(--text-secondary); line-height:1.6; }
-  h2 { font-size: clamp(24px, 2.2vw, 32px); font-weight: 400; margin: 0; overflow-wrap: anywhere; }
-  .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .category { margin-top: 32px; } .category > h3 { font-size: 24px; font-weight: 400; margin: 0 0 18px; }
-  .task-list, .trigger-list { background: var(--bg-surface); }
-  .task-row { display: flex; align-items: center; min-height: 96px; padding-right: 20px; }
-  .task-row:hover { background: var(--bg-elevated); }
-  .task-link { display: flex; align-items: center; gap: 20px; flex: 1; min-width: 0; padding: 20px 24px; }
-  .clock { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; color: var(--text-secondary); }
-  .task-copy { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
-  .task-title { font-size: 18px; } .task-subtitle { font-size: 14px; color: var(--text-secondary); line-height: 1.45; }
-  button { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 16px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
-  button:hover:not(:disabled) { background: var(--bg-elevated); }
-  .run { display: grid; place-items: center; width: 48px; padding: 8px; flex-shrink: 0; border: 0; background: transparent; }
-  .refresh { display: inline-flex; align-items: center; gap: 8px; }
-  .primary { display: inline-flex; align-items: center; gap: 12px; border: 0; background: var(--color-play); color: var(--color-on-play); }
-  .primary:hover:not(:disabled) { background: var(--color-play); box-shadow: var(--shadow-sm); } .primary > span { font-size: 24px; line-height: 1; }
-  .back { display: inline-flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 24px; color: var(--text-secondary); }
-  .description { margin: 24px 0; font-size: 16px; color: var(--text-secondary); line-height: 1.6; }
-  .reason { color: var(--text-secondary); line-height: 1.6; } .reason a { color: var(--accent-primary); text-decoration: underline; }
-  .trigger-list { margin: 24px 0 32px; } .trigger-list h3 { margin: 0; padding: 18px 24px; font-size: 16px; border-bottom: 1px solid var(--border-subtle); }
-  .trigger-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
-  .trigger-row p { margin: 0 0 6px; font-size: 18px; } small, .results p { color: var(--text-secondary); }
-  .remove { border: 0; background: var(--status-error); color: white; font-size: 24px; border-radius: 50%; width: 44px; padding: 0; flex-shrink: 0; }
-  .remove:hover:not(:disabled) { background: var(--status-error); opacity: .85; }
-  .no-trigger { padding: 24px; color: var(--text-secondary); line-height: 1.6; } .results h3 { font-weight: 500; }
-  dl { display: flex; flex-wrap: wrap; gap: 24px; margin: 24px 0; } dt { font-size: 13px; color: var(--text-secondary); } dd { margin: 6px 0 0; font-size: 18px; }
-  li { overflow-wrap: anywhere; line-height: 1.6; } .feedback { padding: 16px; background: var(--color-success-soft); margin-top: 20px; }
-  .error { background: var(--color-danger-soft); border-left: 3px solid var(--status-error); }
-  dialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-xl); background: var(--bg-elevated); color: var(--text-primary); padding: 24px; }
-  dialog::backdrop { background: rgb(0 0 0 / .65); } dialog form, label { display: grid; gap: 10px; }
-  dialog form { gap: 20px; } dialog p { margin: 0; line-height: 1.5; color: var(--text-secondary); }
-  input { min-width: 0; width: 100%; padding: 12px; background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-  .dialog-actions { display: flex; justify-content: flex-end; gap: 12px; }
+  section { min-width: 0; color: var(--color-text); font-family: var(--font-sans); }
+  h2 { margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+  h3 { margin: 0; font-size: 16px; font-weight: 600; }
+  .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+  .description { max-width: 75ch; margin: 0 0 20px; font-size: 15px; line-height: 1.5; color: var(--color-muted); }
+
+  .category { margin-top: 24px; }
+  .category > h3 { margin: 0 0 4px; padding: 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
+  .task-list { display: grid; background: var(--color-surface); border-radius: var(--radius-md); }
+  .task-row { display: flex; align-items: center; gap: 8px; padding-right: 8px; border-top: 1px solid var(--color-line-subtle); transition: background-color var(--transition-fast); }
+  .task-row:first-child { border-top: 0; }
+  .task-row:hover { background: var(--color-surface-hover); }
+  .task-link { display: grid; gap: 4px; flex: 1; min-width: 0; padding: 12px 16px; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+  .task-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: var(--radius-sm); }
+  .task-title { font-size: 15px; font-weight: 600; color: var(--color-text); }
+  .task-subtitle { font-size: 13px; line-height: 1.4; color: var(--color-muted); }
+  [data-tone='error'] { color: var(--color-danger); }
+  [data-tone='warning'] { color: var(--color-warning); }
+  [data-tone='active'] { color: var(--color-accent); }
+
+  .progress { display: block; width: min(320px, 100%); height: 6px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-full); background: var(--color-line-subtle); }
+  .progress > span { display: block; height: 100%; border-radius: inherit; background: var(--color-accent-solid); transition: width var(--transition-normal); }
+
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 16px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: 13px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast); }
+  button:hover:not(:disabled) { background: var(--color-raised); }
+  button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .run { display: grid; place-items: center; flex: none; width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: var(--radius-full); color: var(--color-muted); }
+  .run:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent); }
+  .primary { border: 0; background: var(--color-accent-solid); color: var(--color-on-accent); font-weight: 600; }
+  .primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+  .primary > span { font-size: 20px; line-height: 1; }
+
+  .back { display: inline-grid; place-items: center; width: 44px; height: 44px; margin: 0 0 8px -10px; border-radius: var(--radius-full); color: var(--color-muted); transition: color var(--transition-fast), background-color var(--transition-fast); }
+  .back:hover { color: var(--color-text); background: var(--color-raised); }
+  .back:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .reason { margin: 0 0 16px; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--color-warning-soft); font-size: 14px; line-height: 1.5; }
+  .hint { margin: -8px 0 16px; font-size: 14px; }
+  .hint a { color: var(--color-accent); text-underline-offset: 3px; }
+
+  .panel { margin: 20px 0 0; padding: 4px 20px 12px; background: var(--color-surface); border-radius: var(--radius-md); }
+  .panel h3 { padding: 14px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
+  .trigger-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0; border-top: 1px solid var(--color-line-subtle); }
+  .trigger-row.disabled { opacity: 0.6; }
+  .trigger-row p { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+  small { font-size: 13px; color: var(--color-muted); }
+  .remove { display: grid; place-items: center; flex: none; width: 40px; min-height: 40px; padding: 0; border: 0; border-radius: var(--radius-full); color: var(--color-danger); }
+  .remove:hover:not(:disabled) { background: var(--color-danger-soft); }
+  .empty, .meta, .status { margin: 0; padding: 8px 0; color: var(--color-muted); font-size: 14px; line-height: 1.5; }
+  .message { margin: 4px 0 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .message.error { padding: 10px 14px; border-radius: var(--radius-sm); background: var(--color-danger-soft); }
+  dl { display: flex; flex-wrap: wrap; gap: 12px 32px; margin: 8px 0; }
+  dt { font-size: 12px; color: var(--color-muted); }
+  dd { margin: 4px 0 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  details summary { display: flex; align-items: center; min-height: 40px; cursor: pointer; color: var(--color-accent); font-size: 13px; }
+  li { color: var(--color-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+
+  .feedback { display: flex; align-items: center; gap: 12px; margin: 16px 0 0; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--color-success-soft); font-size: 14px; line-height: 1.5; }
+  .feedback.error { background: var(--color-danger-soft); }
+  [role='status'] { color: var(--color-muted); }
+
+  dialog { width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 24px; border: 0; border-radius: var(--radius-xl); background: var(--color-surface-elevated); color: var(--color-text); font-family: var(--font-sans); box-shadow: var(--shadow-lg); }
+  dialog::backdrop { background: var(--color-overlay); }
+  dialog form { display: grid; gap: 16px; }
+  dialog h2 { font-size: 20px; }
+  dialog p { margin: 0; font-size: 14px; color: var(--color-muted); }
+  dialog .feedback { margin: 0; color: var(--color-text); }
+  label { display: grid; gap: 8px; font-size: 13px; color: var(--color-muted); }
+  input, select { box-sizing: border-box; width: 100%; min-width: 0; min-height: 40px; padding: 8px 12px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font: inherit; font-size: 14px; }
+  input:focus-visible, select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .dialog-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 12px; }
+
   @media (max-width: 640px) {
-    .list-header { flex-wrap: wrap; } .task-link { padding: 16px 12px; gap: 12px; } .task-row { padding-right: 8px; }
-    .clock { width: 40px; height: 40px; } .task-title { font-size: 16px; } .task-subtitle { font-size: 13px; } .trigger-list h3, .trigger-row { padding: 16px; }
+    .task-link { padding: 10px 12px; }
+    .task-title { font-size: 14px; }
+    dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: var(--radius-xl) var(--radius-xl) 0 0; }
+    .dialog-actions button { flex: 1 1 auto; }
+    input, select { font-size: 16px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button, .task-row, .back, .progress > span { transition: none; }
   }
 </style>

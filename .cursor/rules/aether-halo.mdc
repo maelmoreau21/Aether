@@ -1,0 +1,6 @@
+---
+description: Thème et design system « Halo » d'Aether. À appliquer pour toute création, modification ou revue d'interface dans apps/web.
+globs: apps/web/**
+alwaysApply: false
+---
+Avant toute intervention sur l'interface, lire et appliquer `.agents/skills/aether-halo/SKILL.md`, puis `.agents/skills/aether-halo/reference/screens.md` et les feuilles de style de référence dans `.agents/skills/aether-halo/assets/`.

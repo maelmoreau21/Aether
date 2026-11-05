@@ -268,7 +268,7 @@ async fn install_automatic_metadata_fixture(store: &IdentityStore, libraries: &[
     .execute(store.pool())
     .await
     .unwrap();
-    media_poc::extension_storage::persist(store, &package)
+    media_poc::extensions::storage::persist(store, &package)
         .await
         .unwrap();
     media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('distributed.fixture','distributed-fixture',?,1,'distributed-generation')")
@@ -1466,7 +1466,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     )
     .await;
     assert_eq!(preview_relay_status, StatusCode::OK);
-    assert_eq!(preview_relay_headers[header::CONTENT_TYPE], "image/jpeg");
+    assert_eq!(preview_relay_headers[header::CONTENT_TYPE], "image/webp");
     let decoded_preview = image::load_from_memory(&preview_relay_bytes).unwrap();
     assert_eq!(
         (decoded_preview.width(), decoded_preview.height()),
@@ -1482,7 +1482,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     )
     .await;
     assert_eq!(preview_direct_status, StatusCode::OK);
-    assert_eq!(preview_direct_headers[header::CONTENT_TYPE], "image/jpeg");
+    assert_eq!(preview_direct_headers[header::CONTENT_TYPE], "image/webp");
     assert_eq!(preview_direct_bytes, preview_relay_bytes);
 
     // 10. Rescan Node 1 Films and verify UUID preservation + reused cache + zero writes in media folder

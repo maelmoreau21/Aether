@@ -23,6 +23,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -158,7 +159,7 @@ class AetherReleasePolicyTests(unittest.TestCase):
         self.assertTrue(release_workflow.exists())
 
         ci_content = ci_workflow.read_text(encoding="utf-8")
-        self.assertIn("needs: [workflows, rust, security-audit, frontend, browser, images]", ci_content)
+        self.assertIn("needs: [workflows, rust, security-audit, frontend, browser, images, calculate-beta]", ci_content)
 
         rel_content = release_workflow.read_text(encoding="utf-8")
         self.assertIn("needs: [calculate-and-tag, publish-docker]", rel_content)
@@ -223,6 +224,26 @@ class AetherReleasePolicyTests(unittest.TestCase):
         self.assertNotIn("git push origin main", content)
         # Git tags are pushed, which point to the exact commit
         self.assertIn('git push origin "$TAG"', content)
+
+    def test_only_validation_builds_and_promotion_loads_the_verified_images(self):
+        root = Path(__file__).resolve().parent.parent
+        ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        publish = (root / ".github/workflows/publish.yml").read_text(encoding="utf-8")
+        release_wf = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertEqual(ci.count("uses: docker/bake-action@v6"), 1)
+        self.assertRegex(ci, r"(?m)^ +source: \.\s*$")
+        self.assertIn("ref: ${{ github.sha }}", ci)
+        self.assertIn("docker-bake.ci.hcl", ci)
+        self.assertNotIn("docker/bake-action", publish)
+        self.assertNotRegex(publish, r"docker (build|buildx bake)")
+        self.assertIn("ci-image-archive.py load", publish)
+        self.assertIn("name: verified-images-${{ matrix.arch }}", ci)
+        self.assertIn("name: verified-images-${{ matrix.arch }}", publish)
+        self.assertIn("github.event_name != 'pull_request'", publish)
+        self.assertIn("needs: [calculate-beta, publish]", ci)
+        self.assertIn("needs: [calculate-and-tag, validate]", release_wf)
+        self.assertIn("uses: ./.github/workflows/ci.yml", release_wf)
+        self.assertNotIn("packages: write", ci.split("  images:")[1].split("  tag-beta:")[0])
 
 if __name__ == "__main__":
     unittest.main()

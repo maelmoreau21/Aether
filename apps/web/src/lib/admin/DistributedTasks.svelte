@@ -123,7 +123,7 @@
     <div class="jobs" aria-busy={loading}>
       {#each visibleJobs as job (job.id)}
         <article aria-label={`Tâche ${job.id}`}>
-          <div class="job-heading"><div><h4>{categories[job.category] ?? job.category}</h4><p>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</p></div><span class="status" class:failed={job.status === 'error'}>{labels[job.status] ?? job.status}</span></div>
+          <div class="job-heading"><div><h4>{categories[job.category] ?? job.category}</h4><p>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</p></div><span class="status" data-status={job.status} class:failed={job.status === 'error'}>{labels[job.status] ?? job.status}</span></div>
           <dl>
             <div><dt>Nœud exécutant</dt><dd>{nodes.find(node => node.id === job.nodeId)?.name ?? (job.nodeId === 'local' ? 'Nœud local' : job.nodeId || 'En attente d’attribution')}</dd></div>
             <div><dt>Durée</dt><dd>{duration(job)}</dd></div>
@@ -147,28 +147,101 @@
 </section>
 
 <style>
-  section { margin-top: 24px; min-width: 0; }
+  section { display: grid; gap: 16px; min-width: 0; margin-top: 8px; color: var(--color-text); font-family: var(--font-sans); }
   header, .job-heading, .actions, nav, .progress { display: flex; align-items: center; gap: 12px; }
   header, .job-heading { justify-content: space-between; }
-  h3 { margin: 0; font-size: 21px; font-weight: 600; }
-  h4 { margin:0; font-size:17px; font-weight:600; } .job-heading > div { min-width:0; } .job-heading p { margin:6px 0 0; font-size:14px; color:var(--text-secondary); }
-  .queue-tools { display:flex; align-items:end; justify-content:space-between; gap:16px; margin:24px 0 16px; }
-  .queue-tools label { flex:0 1 260px; min-width:0; } .queue-tools p { margin:0; text-align:right; font-size:12px; color:var(--text-secondary); line-height:1.6; } .queue-tools span { display:block; }
-  .enqueue { border-block:1px solid var(--border-subtle); padding-block:4px; } .enqueue > summary { font-size:14px; color:var(--text-primary); }
-  .explanation, dt, details, .empty { color: var(--text-secondary); line-height: 1.6; }
-  form { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
-  label { display: grid; gap: 8px; flex: 1; min-width: min(240px, 100%); }
-  button, select, input { font: inherit; color: var(--text-primary); min-height: 44px; padding: 10px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
-  select, input { width: 100%; min-width: 0; } .form-help { flex-basis: 100%; margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-  button { flex-shrink: 0; } button:hover:not(:disabled) { background: var(--bg-elevated); }
-  .jobs { display: grid; gap: 12px; } article { padding: 20px; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); min-width: 0; overflow-wrap: anywhere; }
-  .job-heading { align-items: start; } .status { color: var(--text-secondary); flex-shrink: 0; }
-  dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; font-size: 14px; } dd { margin: 4px 0 0; } dt { font-size: 12px; }
-  .progress { margin: 16px 0; } progress { flex: 1; min-width: 0; accent-color: var(--accent-primary); } .progress span { font-variant-numeric: tabular-nums; font-size: 13px; }
-  .processed { color: var(--text-secondary); font-size: 13px; }
-  details { font-size: 13px; } details p { margin: 8px 0; } summary { cursor: pointer; min-height: 44px; padding-block:12px; } .failed { color:var(--text-primary); font-weight:600; } .empty { padding:24px 0; border-block:1px solid var(--border-subtle); }
-  pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; font-size: 12px; }
-  .actions { margin: 12px 0; flex-wrap: wrap; } nav { justify-content: end; margin-top: 16px; flex-wrap: wrap; } nav span { color: var(--text-secondary); font-size: 14px; }
-  .error, .job-error, .notice { padding: 12px; line-height: 1.5; overflow-wrap: anywhere; } .error, .job-error { background: var(--color-danger-soft); border-left: 3px solid var(--status-error); } .notice { background: var(--color-success-soft); }
-  @media (max-width: 640px) { header { flex-wrap: wrap; } article { padding: 14px; } .job-heading { flex-wrap: wrap; } .queue-tools { align-items:stretch; flex-direction:column; gap:8px; } .queue-tools label { flex:auto; } .queue-tools p { text-align:left; } input,select { font-size:16px; } }
+  h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  h4 { margin: 0; font-size: 15px; font-weight: 600; }
+  .job-heading { align-items: flex-start; }
+  .job-heading > div { min-width: 0; }
+  .job-heading p { margin: 2px 0 0; font-size: 13px; color: var(--color-muted); }
+  .explanation, dt, details, .empty { color: var(--color-muted); line-height: 1.5; }
+  .explanation { max-width: 75ch; margin: 0; font-size: 14px; }
+
+  /* Ajout d'une tâche */
+  .enqueue { padding: 0 20px; background: var(--color-raised); border-radius: var(--radius-md); }
+  .enqueue > summary { font-size: 14px; color: var(--color-text); }
+  .form-help { flex-basis: 100%; margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-muted); }
+  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 8px 0 16px; }
+  label { display: grid; gap: 6px; flex: 1; min-width: min(240px, 100%); font-size: 13px; color: var(--color-muted); }
+  select, input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 40px; padding: 8px 14px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font: inherit; font-size: 14px; }
+  .enqueue select, .enqueue input { background: var(--color-surface); }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  select:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Boutons : ghost, un seul primaire */
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; min-height: 40px; padding: 8px 16px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: 13px; cursor: pointer; transition: background-color var(--transition-fast); }
+  button:hover:not(:disabled) { background: var(--color-raised); }
+  button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  form button[type='submit'] { border-color: transparent; background: var(--color-accent-solid); color: var(--color-on-accent); font-weight: 600; }
+  form button[type='submit']:hover:not(:disabled) { background: var(--color-accent-hover); opacity: 0.9; }
+
+  /* Outils de la file */
+  .queue-tools { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+  .queue-tools label { flex: 0 1 240px; min-width: 0; }
+  .queue-tools p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--color-muted); text-align: right; font-variant-numeric: tabular-nums; }
+  .queue-tools span { display: block; }
+
+  /* Tâches : lignes dans une surface plate */
+  .jobs { display: grid; padding: 4px 20px; background: var(--color-surface); border-radius: var(--radius-md); }
+  article { min-width: 0; padding: 14px 0; border-top: 1px solid var(--color-line-subtle); overflow-wrap: anywhere; }
+  article:first-child { border-top: 0; }
+  .status { flex-shrink: 0; color: var(--color-muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .status[data-status='completed'] { color: var(--color-success); }
+  .status[data-status='error'], .failed { color: var(--color-danger); }
+  .status[data-status='paused'] { color: var(--color-warning); }
+  .status[data-status='running'], .status[data-status='queued'] { color: var(--color-accent); }
+  dl { display: flex; flex-wrap: wrap; gap: 4px 24px; margin: 8px 0 0; font-size: 13px; }
+  dl div { display: flex; gap: 6px; }
+  dt { font-size: 13px; }
+  dt::after { content: ' :'; }
+  dd { margin: 0; color: var(--color-text); }
+
+  /* Progression */
+  .progress { margin: 10px 0 0; }
+  progress { flex: 1; min-width: 0; height: 4px; border: 0; border-radius: var(--radius-pill); background: var(--color-line-strong); overflow: hidden; appearance: none; -webkit-appearance: none; accent-color: var(--color-accent); }
+  progress::-webkit-progress-bar { background: var(--color-line-strong); border-radius: var(--radius-pill); }
+  progress::-webkit-progress-value { background: var(--color-accent); border-radius: var(--radius-pill); }
+  progress::-moz-progress-bar { background: var(--color-accent); border-radius: var(--radius-pill); }
+  .progress span { min-width: 40px; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--color-muted); text-align: right; }
+  .processed { margin: 6px 0 0; font-size: 13px; color: var(--color-muted); }
+
+  .actions { flex-wrap: wrap; margin: 8px 0 0; }
+  .actions button { min-height: 34px; padding: 4px 12px; }
+  details { font-size: 13px; }
+  details p { margin: 6px 0; }
+  summary { min-height: 36px; padding-block: 8px; box-sizing: border-box; cursor: pointer; color: var(--color-accent); }
+  .enqueue > summary { min-height: 48px; padding-block: 0; display: flex; align-items: center; color: var(--color-text); }
+  summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+  pre { max-height: 320px; margin: 8px 0; padding: 10px 12px; overflow: auto; border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .empty { padding: 20px 0; font-size: 14px; }
+  .empty p { margin: 0 0 8px; }
+
+  /* Pagination */
+  nav { justify-content: flex-end; flex-wrap: wrap; }
+  nav span { font-size: 13px; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+
+  /* Retours */
+  .error, .job-error, .notice { margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); color: var(--color-text); font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+  .error, .job-error { background: var(--color-danger-soft); }
+  .job-error { margin-top: 8px; }
+  .error p { margin: 0 0 8px; }
+  .notice { background: var(--color-success-soft); }
+  [role='status']:not(.notice) { color: var(--color-muted); }
+
+  @media (max-width: 640px) {
+    header { flex-wrap: wrap; }
+    .jobs { padding: 4px 14px; }
+    .job-heading { flex-wrap: wrap; }
+    .queue-tools { flex-direction: column; align-items: stretch; gap: 8px; }
+    .queue-tools label { flex: auto; }
+    .queue-tools p { text-align: left; }
+    form > button { flex: 1 1 100%; }
+    input, select { font-size: 16px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
 </style>

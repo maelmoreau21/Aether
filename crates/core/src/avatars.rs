@@ -1,4 +1,5 @@
 //! Account-owned normalized avatars. No client paths, remote URLs or original metadata persisted.
+use crate::image_import::DECODERS;
 use crate::{
     auth::AuthState,
     database::{query, query_scalar},
@@ -11,11 +12,11 @@ use axum::{
     response::Response,
     routing::get,
 };
-use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
+#[cfg(test)]
+use image::ImageFormat;
+#[cfg(test)]
 use std::io::Cursor;
-use tokio::sync::Semaphore;
 const MAX_UPLOAD: usize = 2 * 1024 * 1024;
-static DECODERS: Semaphore = Semaphore::const_new(2);
 pub(crate) static POLICY_LOCK: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
 pub fn router(auth: AuthState) -> Router {
@@ -44,44 +45,21 @@ pub(crate) fn normalize_image(
     content_type: &str,
     poster: bool,
 ) -> Result<Vec<u8>, StatusCode> {
-    let mut reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    let expected = match reader.format() {
-        Some(ImageFormat::Png) => "image/png",
-        Some(ImageFormat::Jpeg) => "image/jpeg",
-        Some(ImageFormat::WebP) => "image/webp",
-        _ => return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE),
-    };
-    if content_type != expected {
-        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    let image = crate::image_import::decode(&bytes, content_type)?;
+    let (max_w, max_h) = if poster { (1000, 1500) } else { (256, 256) };
+    let not_resized = image.width() <= max_w && image.height() <= max_h;
+    if content_type == "image/webp"
+        && not_resized
+        && media_node::image_encoding::reusable_webp(&bytes, image.color().has_alpha())
+    {
+        return Ok(bytes.to_vec());
     }
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(4096);
-    limits.max_image_height = Some(4096);
-    limits.max_alloc = Some(32 * 1024 * 1024);
-    reader.limits(limits);
-    let decoder = reader
-        .into_decoder()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    if decoder.total_bytes() > 32 * 1024 * 1024 {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
-    let image =
-        image::DynamicImage::from_decoder(decoder).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    if image.width() == 0 || image.height() == 0 {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
-    let resized = if poster {
-        image.resize(1000, 1500, image::imageops::FilterType::Triangle)
+    let resized = if not_resized {
+        image
     } else {
-        image.resize_to_fill(256, 256, image::imageops::FilterType::Triangle)
+        image.thumbnail(max_w, max_h)
     };
-    let mut output = Cursor::new(Vec::new());
-    resized
-        .write_to(&mut output, ImageFormat::Png)
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    Ok(output.into_inner())
+    crate::image_import::encode(&resized, resized.color().has_alpha())
 }
 /// Deliberately small inert SVG subset for extension avatars: no scripts, links,
 /// styles, embedded images, references, entities or animation. Never inline HTML.
@@ -186,6 +164,8 @@ pub(crate) fn validate_svg(svg: &str) -> Result<(), StatusCode> {
 pub(crate) fn content_type(bytes: &[u8]) -> &'static str {
     if bytes.starts_with(b"<svg ") {
         "image/svg+xml"
+    } else if bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP") {
+        "image/webp"
     } else {
         "image/png"
     }
@@ -367,9 +347,9 @@ mod tests {
                 .write_to(&mut buffer, format)
                 .unwrap();
             let normalized = normalize(Bytes::from(buffer.into_inner()), mime).unwrap();
-            assert_eq!(image::guess_format(&normalized).unwrap(), ImageFormat::Png);
+            assert_eq!(image::guess_format(&normalized).unwrap(), ImageFormat::WebP);
             let image = image::load_from_memory(&normalized).unwrap();
-            assert_eq!((image.width(), image.height()), (256, 256));
+            assert_eq!((image.width(), image.height()), (32, 16));
         }
         let mut large = Cursor::new(Vec::new());
         image::DynamicImage::new_rgb8(4097, 1)

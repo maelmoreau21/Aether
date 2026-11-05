@@ -27,7 +27,7 @@ navigateur a terminé le seek et dispose de données. Une attente réellement
 bloquée reste signalée. Une fenêtre audio MSE demandée après un seek n'attend
 plus la fin d'une opération devenue obsolète pour commencer son téléchargement ;
 le nouvel append attend toujours la fin de l'opération MSE. Les plages déjà
-présentes sont réutilisées. Tests et limites : [mesures locales](PLAYER_SEEK_2026_10_30.md).
+présentes sont réutilisées. Tests et limites : [mesures locales](archive/player-experiments/PLAYER_SEEK_2026_10_30.md).
 
 ## Sous-titres au démarrage — 30 octobre 2026
 
@@ -101,7 +101,7 @@ reste à mesurer avant modification du protocole de récupération.
 
 Les correctifs ne changent ni les codecs, ni les canaux, ni les autorisations.
 Mesures, scénarios exécutés et limites :
-[rapport du 29 octobre](PLAYER_RELIABILITY_2026_10_29.md).
+[rapport du 29 octobre](archive/player-experiments/PLAYER_RELIABILITY_2026_10_29.md).
 
 ## Démarrage progressif et reprise — 23 octobre 2026
 
@@ -179,7 +179,7 @@ sortie matérielle 5.1/7.1 dépend du navigateur, de l'OS et de l'équipement et
 n'est pas certifiée par ces tests. Les sondes de type MIME/codec guident le choix,
 elles ne remplacent pas une preuve de décodage.
 
-Résultats et limites : [audit et corrections](PLAYER_PLAYBACK_AUDIT.md).
+Résultats et limites : [audit et corrections](archive/audits/PLAYER_PLAYBACK_AUDIT.md).
 
 Le texte historique ci-dessous décrit le premier jalon ; les points ci-dessus
 et les nouvelles limites remplacent ses anciennes restrictions.
@@ -261,7 +261,7 @@ identifiant. L'accueil utilise `added-desc`. Aucune date inventée par migration
 
 ## Validation
 
-Commandes et résultats effectivement exécutés dans MEMORY.md ; preuves Chrome
+Commandes et résultats effectivement exécutés dans .ai/MEMORY.md ; preuves Chrome
 sous `evidence/2026-10-18/player-finalization/` et essais longs séparés sous
 `player-long/`. Un fichier de 90 minutes et une minute observée ne constituent
 pas une preuve de lecture continue de 90 minutes ni une mesure de fuite RSS.

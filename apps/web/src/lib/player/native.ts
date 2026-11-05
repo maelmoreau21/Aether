@@ -11,12 +11,25 @@ class VideoSeekTimeoutError extends Error {}
 
 // Bounded source replacement; failures and recovery remain visible to the UI.
 export class NativePlayer implements Player {
+  playbackInfo(): import('../statistics/collector').PlaybackInfo {
+    const source = this.source;
+    const audios = source?.tracks?.filter(t => t.codec_type === 'audio') ?? [];
+    const index = source?.audioTrackId.match(/^internal-(\d+)$/)?.[1];
+    const track = index === undefined ? (audios.length === 1 ? audios[0] : undefined) : audios.find(t => t.index === Number(index));
+    return {
+      mediaId: this.media?.id,
+      method: !source ? 'unknown' : this.externalAudio ? 'separate_audio' : this.progressiveVideo ? 'remux' : this.video.currentSrc?.includes('/prepared/video') ? 'prepared' : source.prepare ? 'remux' : 'direct',
+      audio: source ? { id: source.audioTrackId, language: source.audioTrackId === 'internal-default' && audios.length > 1 ? 'und' : source.language || 'und', codec: track?.codec_name ?? '' } : undefined
+    };
+  }
   private media?: Media;
   private source?: Source;
   private externalAudio?: ExternalAudio;
   private pendingAudio?: ExternalAudio;
   private progressiveVideo?: ProgressiveVideo;
   private subtitle: string | null = null;
+  private subtitleRevision = 0;
+  private ass?: { timeOffset: number; destroy(): Promise<void> };
   private audioOffset = 0;
   private subtitleOffset = 0;
   private cueTimes = new WeakMap<TextTrackCue, [number, number]>();
@@ -198,7 +211,7 @@ export class NativePlayer implements Player {
     this.externalAudio?.destroy(); this.externalAudio = undefined;
     this.clearStall();
     // Hide obsolete captions before the new resource is ready.
-    this.video.querySelectorAll('track').forEach(track => track.remove());
+    this.removeNativeSubtitles();
     const nowSecs = Math.floor(Date.now() / 1000);
     const hasFreshDirect = Boolean(
       source.directUrl && (!source.tokenExpiresAt || source.tokenExpiresAt > nowSecs + 5)
@@ -380,12 +393,38 @@ export class NativePlayer implements Player {
       throw new Error(message);
     }
   }
+  private removeNativeSubtitles() {
+    this.video.querySelectorAll('track').forEach(track => {
+      // Disable before detaching: Chromium can retain the last native cue on
+      // a paused frame, including underneath a new libass canvas.
+      track.track.mode = 'disabled';
+      track.remove();
+    });
+  }
   async selectSubtitle(id: string | null) {
+    const revision = ++this.subtitleRevision;
     this.subtitle = id;
-    this.video.querySelectorAll('track').forEach(track => track.remove());
+    const previousAss = this.ass; this.ass = undefined;
+    if (previousAss) await previousAss.destroy().catch(() => {});
+    if (this.destroyed || revision !== this.subtitleRevision) return;
+    this.removeNativeSubtitles();
     if (id === null) return;
     const subtitle = this.media?.subtitles.find(s => s.id === id);
     if (!subtitle) throw new Error('Sous-titres indisponibles.');
+    if (subtitle.assUrl && typeof OffscreenCanvas !== 'undefined' && typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined') {
+      try {
+        if (subtitle.assUrl.includes('/prepared/')) await this.prepareUrl(subtitle.assUrl);
+        const { createAssRenderer } = await import('./ass-renderer');
+        if (this.destroyed || revision !== this.subtitleRevision) return;
+        const renderer = await createAssRenderer(this.video, subtitle.assUrl, this.subtitleOffset);
+        if (this.destroyed || revision !== this.subtitleRevision) { await renderer.destroy(); return; }
+        this.ass = renderer;
+        return;
+      } catch {
+        if (this.destroyed || revision !== this.subtitleRevision) return;
+        this.status('Rendu ASS indisponible sur ce client : sous-titres en texte simple.');
+      }
+    }
     const track = document.createElement('track');
     track.kind = 'subtitles'; track.label = subtitle.label; track.srclang = subtitle.language;
     track.addEventListener('load', () => {
@@ -398,7 +437,7 @@ export class NativePlayer implements Player {
     }, { once: true });
     track.addEventListener('error', () => this.onError('Échec du chargement des sous-titres WebVTT.'), { once: true });
     if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
-    if (this.destroyed || this.subtitle !== id) return;
+    if (this.destroyed || revision !== this.subtitleRevision) return;
     track.src = subtitle.url;
     this.video.append(track);
     track.track.mode = 'showing';
@@ -447,11 +486,13 @@ export class NativePlayer implements Player {
   setSubtitleOffset(seconds: number) {
     if (!Number.isFinite(seconds) || Math.abs(seconds) > 30) return;
     this.subtitleOffset = seconds;
+    if (this.ass) this.ass.timeOffset = -seconds;
     for (const track of Array.from(this.video.textTracks)) for (const cue of Array.from(track.cues ?? [])) this.shiftCue(cue);
   }
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
+    if (this.ass) { void this.ass.destroy().catch(() => {}); this.ass = undefined; }
     this.startup?.abort();
     for(const controller of this.preparations)controller.abort();this.preparations.clear();
     this.cancel?.();

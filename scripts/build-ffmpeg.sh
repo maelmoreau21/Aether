@@ -47,7 +47,10 @@ if [ "$profile" = fixtures ]; then
   set -- "$@" --enable-avdevice --enable-indev=lavfi \
     --enable-gpl --enable-libaom --enable-libopus --enable-libx264 --enable-libx265
 else
-  set -- "$@" --disable-swscale --disable-encoders --enable-encoder=webvtt --disable-filters
+  # Preview images are application derivatives, separate from playback/remux.
+  # Keep only the JPEG/WebVTT encoders and the filters used by the Node.
+  set -- "$@" --enable-libdav1d --disable-encoders --enable-encoder=webvtt,mjpeg \
+    --disable-filters --enable-filter=fps,scale,format,tile
 fi
 ./configure "$@"
 make -j "${MEDIA_BUILD_JOBS:-2}"

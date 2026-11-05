@@ -1,8 +1,8 @@
 use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
 use media_poc::{
     database::{begin_write, begin_write_scoped, query, query_scalar},
-    extension_data::{self, Context},
-    extension_data_lifecycle,
+    extensions::data::{self as extension_data, Context},
+    extensions::data_lifecycle as extension_data_lifecycle,
     identity::IdentityStore,
 };
 
@@ -111,7 +111,7 @@ async fn uninstall_contract(store: &IdentityStore) {
     };
     // Completed durable objects survive; cache and incomplete reservations do not.
     for (durability, complete) in [("durable", true), ("cache", true), ("durable", false)] {
-        let object = media_poc::extension_objects::execute(
+        let object = media_poc::extensions::objects::execute(
             store,
             &c,
             objects(ObjectOperation::Begin {
@@ -127,7 +127,7 @@ async fn uninstall_contract(store: &IdentityStore) {
         .metadata
         .unwrap();
         if complete {
-            media_poc::extension_objects::execute(
+            media_poc::extensions::objects::execute(
                 store,
                 &c,
                 objects(ObjectOperation::Finish { id: object.id }),

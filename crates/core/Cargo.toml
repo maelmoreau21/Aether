@@ -4,10 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 publish = false
-default-run = "media-poc"
+default-run = "aether-core"
 
 [dependencies]
 quick-xml = "=0.42.0"
+qrcode = { version = "=0.14.1", default-features = false }
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 media-contracts = { path = "../shared" }
 media-extension-sdk = { path = "../extension-sdk" }
@@ -30,12 +31,16 @@ sha2 = "0.10.9"
 bytes = "1"
 http-body-util = "0.1"
 httpdate = "1"
+lettre = { version = "=0.11.23", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
+time = { version = "0.3", features = ["parsing"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "tzdb-bundle-always"] }
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
 url = "2"
 jsonwebtoken = { version = "11.1.0", features = ["aws_lc_rs"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json", "form"] }
 base64 = "0.23.1"
+flate2 = "1.1.10"
 ring = "0.17.14"
 wasmi = "=2.0.0"
 

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { session, getSessionGeneration } from '../auth/session';
   type Feedback = {favorite:boolean;rating:number|null};
-  let { workId }: { workId:string } = $props();
+  let { workId, compact = false }: { workId:string; compact?: boolean } = $props();
   let value = $state<Feedback>({favorite:false,rating:null});
   let loaded = $state(false); let saving = $state(false); let error = $state(''); let preview = $state<number|null>(null);
   let confirmed:Feedback = {favorite:false,rating:null};
@@ -40,21 +40,24 @@
     } finally { if(current===epoch){processing=false;saving=false;} }
   }
 </script>
-<div class="personal-feedback" aria-label="Vos préférences privées" aria-busy={saving}>
+<div class="personal-feedback" class:compact aria-label="Vos préférences privées" aria-busy={saving}>
   <button
     type="button"
     class="favorite-btn"
+    class:compact
     disabled={!loaded}
     aria-label={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
     title={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
     aria-pressed={value.favorite}
     onclick={() => save({ ...value, favorite: !value.favorite })}
   >
-    <span class="heart-glyph" aria-hidden="true">{value.favorite ? '♥' : '♡'}</span>
-    <span class="fav-label">{value.favorite ? 'Favori' : 'Favoris'}</span>
+    <svg class="heart-glyph" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78Z" stroke-width="2" stroke-linejoin="round" />
+    </svg>
+    {#if !compact}<span class="fav-label">{value.favorite ? 'Favori' : 'Favoris'}</span>{/if}
   </button>
 
-  <div class="rating-pill">
+  <div class="rating-pill" class:rated={Boolean(value.rating)}>
     <div class="stars" role="group" aria-label="Ma note privée sur 5, par demi-étoile" onpointerleave={() => (preview = null)}>
       {#each [1, 2, 3, 4, 5] as star (star)}
         <span class="star">
@@ -81,8 +84,8 @@
       {/each}
     </div>
     {#if shownRating}
-      <span class="rating-value">{shownRating.toLocaleString('fr-FR')}/5</span>
-    {:else}
+      <span class="rating-value">{shownRating.toLocaleString('fr-FR')}</span>
+    {:else if !compact}
       <span class="rating-placeholder">Noter</span>
     {/if}
   </div>
@@ -98,21 +101,21 @@
   }
 
   button {
-    color: var(--color-text);
+    color: var(--tx);
     border: 0;
     background: transparent;
     cursor: pointer;
   }
 
   button:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: wait;
   }
 
   button:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-    border-radius: var(--radius-xs);
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
+    border-radius: var(--r-xs);
   }
 
   .favorite-btn {
@@ -120,46 +123,66 @@
     align-items: center;
     gap: 8px;
     min-height: 44px;
-    padding: 0 16px;
-    border-radius: var(--radius-pill);
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
-    font-size: 13.5px;
-    font-weight: 650;
-    transition: all var(--transition-fast);
+    padding: 0 16px 0 12px;
+    border-radius: 14px;
+    background: var(--pn);
+    border: 1px solid transparent;
+    color: var(--tx);
+    font-size: 14px;
+    font-weight: 700;
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+
+  .favorite-btn:focus-visible {
+    border-radius: 14px;
   }
 
   .favorite-btn:hover:not(:disabled) {
-    background: var(--color-raised-hover);
-    border-color: var(--color-text);
-    transform: translateY(-1px);
+    background: var(--pn-2);
   }
 
-  .favorite-btn[aria-pressed="true"] {
-    background: rgba(239, 68, 68, 0.16);
-    border-color: rgba(239, 68, 68, 0.45);
-    color: #F87171;
+  .favorite-btn:active:not(:disabled) {
+    transform: scale(0.98);
   }
 
   .heart-glyph {
-    font-size: 18px;
-    line-height: 1;
+    flex: none;
+    fill: transparent;
+    stroke: currentColor;
+    color: var(--tx);
+    transition: fill var(--t-fast) var(--ease), color var(--t-fast) var(--ease), transform var(--t-med) var(--ease);
   }
+
+  .favorite-btn[aria-pressed="true"] .heart-glyph {
+    color: var(--ac);
+    fill: var(--ac);
+    animation: heart-pop var(--t-slow) var(--ease);
+  }
+
+  @keyframes heart-pop {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.28); }
+    100% { transform: scale(1); }
+  }
+
+  .favorite-btn.compact {
+    width: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .personal-feedback.compact { gap: 10px; flex-wrap: nowrap; }
+  .personal-feedback.compact .rating-pill { padding: 0 12px 0 8px; }
+  .personal-feedback.compact .star { width: 22px; font-size: 19px; }
 
   .rating-pill {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     min-height: 44px;
-    padding: 0 14px;
-    border-radius: var(--radius-pill);
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid var(--color-line-strong);
+    padding: 0 14px 0 8px;
+    border-radius: 14px;
+    background: var(--pn);
   }
 
   .stars {
@@ -171,9 +194,9 @@
     position: relative;
     display: flex;
     width: 26px;
-    height: 36px;
-    font-size: 22px;
-    line-height: 36px;
+    height: 40px;
+    font-size: 21px;
+    line-height: 40px;
   }
 
   .outline,
@@ -185,12 +208,11 @@
   }
 
   .outline {
-    color: var(--color-muted);
-    opacity: 0.45;
+    color: var(--line-2);
   }
 
   .fill {
-    color: #F59E0B;
+    color: var(--ac);
     clip-path: inset(0 100% 0 0);
   }
 
@@ -206,26 +228,30 @@
     z-index: 1;
     width: 50%;
     height: 100%;
+    min-height: 0;
     padding: 0;
     background: transparent;
   }
 
+  .rating-pill.rated { background: var(--ac-soft); }
+
   .rating-value {
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 700;
-    color: #FBBF24;
+    color: var(--tx);
+    font-variant-numeric: tabular-nums;
     min-width: 32px;
   }
 
   .rating-placeholder {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    color: var(--color-muted);
+    color: var(--mu);
   }
 
   .feedback-error {
     flex-basis: 100%;
-    font-size: 12px;
-    color: var(--color-danger);
+    font-size: 13px;
+    color: var(--err);
   }
 </style>

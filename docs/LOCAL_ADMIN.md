@@ -22,7 +22,7 @@ Depuis la racine du dépôt, terminal local interactif :
 New-Item -ItemType Directory -Path data
 $env:MEDIA_DB_PATH = Join-Path (Get-Location) 'data/core.sqlite3'
 cargo run --locked -p media-poc --bin media-bootstrap
-cargo run --locked -p media-poc --bin media-poc
+cargo run --locked -p media-poc --bin aether-core
 ```
 
 Choisir son propre login et son propre mot de passe ; aucune valeur prédéfinie.

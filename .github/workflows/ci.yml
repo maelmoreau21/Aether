@@ -3,13 +3,23 @@ name: CI
 on:
   push:
     branches:
-      - main
       - develop
   pull_request:
     branches:
       - main
       - develop
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+        default: ''
+
+# Serialize trusted version allocation through publication; PR updates cancel safely.
+concurrency:
+  group: ci-complete-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -21,10 +31,48 @@ env:
   CARGO_PROFILE_TEST_DEBUG: '0'
 
 jobs:
+  calculate-beta:
+    name: Version des images avant compilation
+    runs-on: ubuntu-latest
+    outputs:
+      has_release: ${{ steps.calc.outputs.has_release }}
+      version: ${{ steps.calc.outputs.version }}
+      next_tag: ${{ steps.calc.outputs.next_tag }}
+      series: ${{ steps.calc.outputs.series }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: calc
+        env:
+          SUPPLIED_VERSION: ${{ inputs.version || '' }}
+          ALLOCATE_BETA: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/develop' }}
+        run: |
+          set -euo pipefail
+          if [ "$ALLOCATE_BETA" != true ]; then
+            echo 'has_release=false' >> "$GITHUB_OUTPUT"
+            echo "version=$SUPPLIED_VERSION" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python scripts/calculate_release.py --json --channel develop > beta_info.json
+          cat beta_info.json
+          HAS_REL=$(jq -r '.has_release' beta_info.json)
+          {
+            echo "has_release=$HAS_REL"
+            echo "version=$(jq -r '.version // empty' beta_info.json)"
+            if [ "$HAS_REL" = "true" ]; then
+              echo "next_tag=$(jq -r '.next_tag' beta_info.json)"
+              echo "series=$(jq -r '.series' beta_info.json)"
+            fi
+          } >> "$GITHUB_OUTPUT"
+
   workflows:
     concurrency:
       group: ci-workflows-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Validation des workflows
     runs-on: ubuntu-latest
     steps:
@@ -37,6 +85,12 @@ jobs:
         run: python scripts/test-release-policy.py
       - name: Verify FFmpeg source download fallback and integrity
         run: python scripts/test-build-ffmpeg.py
+      - name: Verify exact image archive identity offline
+        run: python scripts/test-ci-image-archive.py
+      - name: Verify disposable Docker health timeout and cleanup
+        run: python scripts/test-smoke-docker-images.py
+      - name: Verify multiarchitecture manifest publication gates offline
+        run: python scripts/test-docker-multiarch.py
 
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)
@@ -44,7 +98,7 @@ jobs:
   rust-tests:
     concurrency:
       group: ci-rust-${{ github.ref }}-${{ matrix.shard }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Rust (${{ matrix.shard == 'checks' && 'contrôles et contrats' || format('partition {0}', matrix.shard) }})
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -70,18 +124,27 @@ jobs:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
-      - name: Libérer de l'espace disque sur le runner
-        run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/.ghcup
-
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
-          targets: wasm32-unknown-unknown
+          components: ${{ matrix.shard == 'checks' && 'rustfmt, clippy' || '' }}
+          targets: ${{ matrix.shard == 'checks' && 'wasm32-unknown-unknown' || '' }}
+
+      - name: Vérifier le formatage (cargo fmt)
+        if: matrix.shard == 'checks'
+        run: cargo fmt --check
+
+      - name: Libérer de l'espace seulement si nécessaire
+        shell: bash
+        run: |
+          available_kb=$(df -Pk "$GITHUB_WORKSPACE" | awk 'NR == 2 {print $4}')
+          echo "Available before Cargo cache: $available_kb KiB"
+          # No unconditional recursive deletion (68–164 seconds in the baseline).
+          # Keep headroom for all-targets linking; never delete project/cache data.
+          if [ "$available_kb" -lt 20000000 ]; then
+            sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          fi
+          df -h "$GITHUB_WORKSPACE"
 
       - name: Cache des dépendances Cargo
         uses: Swatinem/rust-cache@v2
@@ -142,17 +205,17 @@ jobs:
         if: matrix.shard == 'checks'
         run: node --test scripts/audio-seek-policy.test.cjs
 
-      - name: Vérifier le formatage (cargo fmt)
-        if: matrix.shard == 'checks'
-        run: cargo fmt --check
-
       - name: Analyse statique stricte (cargo clippy)
         if: matrix.shard == 'checks'
-        run: cargo clippy --locked --workspace --all-features --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-features --all-targets --timings -- -D warnings
 
       - name: Exécuter les tests unitaires (cargo test --lib --bins)
         if: matrix.shard == 'checks'
-        run: cargo test --locked --workspace --all-features --lib --bins
+        # Les tests unitaires d'extensions lancent le vrai worker isolé, situé à
+        # côté de target/debug/deps ; `--lib --bins` ne le produit pas seul.
+        run: |
+          cargo build --locked -p media-poc --all-features --bin media-extension-worker
+          cargo test --locked --workspace --all-features --lib --bins --timings
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
         if: matrix.shard == 'checks'
@@ -179,6 +242,16 @@ jobs:
           cargo test --locked --all-features -p media-poc --lib oidc::tests -- --test-threads=1
           cargo test --locked --all-features -p media-poc --test distributed_multi_node -- --test-threads=1
 
+      - name: Conserver les temps de compilation Cargo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings-${{ matrix.shard }}
+          overwrite: true
+          path: target/cargo-timings/
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Keep the existing required-check name and gate publication on all partitions.
   rust:
     name: Rust (Format, Clippy, Tests)
@@ -198,7 +271,7 @@ jobs:
   security-audit:
     concurrency:
       group: ci-audit-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Audit de sécurité (cargo audit)
     runs-on: ubuntu-latest
     steps:
@@ -217,7 +290,7 @@ jobs:
   frontend:
     concurrency:
       group: ci-frontend-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Frontend SvelteKit
     runs-on: ubuntu-latest
     defaults:
@@ -258,7 +331,7 @@ jobs:
   browser:
     concurrency:
       group: ci-browser-${{ github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Navigateur Chrome (Films & Séries)
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -341,7 +414,7 @@ jobs:
           MEDIA_TEST_PLAYLIST_BROWSER: '1'
           MEDIA_WEB_DIST: ${{ github.workspace }}/apps/web/build
           MEDIA_REPORT_DIR: docs/evidence/2026-10-22/playlists/ci
-        run: cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1
+        run: cargo test --locked -p media-poc --lib product::tests::mixed_playlists -- --test-threads=1
 
       - name: Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté
         env:
@@ -406,21 +479,38 @@ jobs:
             docs/evidence/2026-10-22/playlists/ci/
 
   images:
+    needs: [calculate-beta]
+    timeout-minutes: 35
     concurrency:
-      group: ci-images-${{ github.ref }}
-      cancel-in-progress: true
-    name: Images Docker (compilation partagée)
-    runs-on: ubuntu-latest
+      group: ci-images-${{ github.ref }}-${{ matrix.arch }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    name: Images Docker (${{ matrix.arch }}, compilation native partagée)
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
       - uses: docker/setup-buildx-action@v3
       - uses: docker/bake-action@v6
         with:
+          # Bake v6 otherwise refetches the event's ephemeral PR merge ref.
+          source: .
           files: docker-bake.ci.hcl
           load: true
           push: false
         env:
           GIT_BRANCH: ${{ github.ref_name }}
+          TARGET_ARCH: ${{ matrix.arch }}
+          MEDIA_VERSION: ${{ needs.calculate-beta.outputs.version }}
+          GIT_COMMIT: ${{ github.sha }}
       - name: Vérifier le runtime Node optimisé avant publication
         run: |
           set -euo pipefail
@@ -430,47 +520,71 @@ jobs:
             test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
           '
           test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
+      - name: Réutiliser la fixture AV1/Opus des tests Rust
+        id: image-fixtures
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/fixtures/generated
+          key: fixtures-p0-full-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py', 'scripts/validate-prepared-fixtures.py') }}
+      - name: Préparer un générateur seulement si les fixtures ne sont pas en cache
+        if: steps.image-fixtures.outputs.cache-hit != 'true'
+        uses: ./.github/actions/setup-ffmpeg
+      - name: Vérifier les trois services et une vraie image AV1 de chapitre
+        # Baseline normally 21–52 s; fail a stalled apt/Docker call instead of
+        # spending 27 minutes until another commit cancels the job.
+        timeout-minutes: 5
+        env:
+          CACHED_FIXTURE: ${{ steps.image-fixtures.outputs.cache-hit }}
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ needs.calculate-beta.outputs.version }}
+        run: |
+          set -euo pipefail
+          fixture=()
+          if [ "$CACHED_FIXTURE" = true ]; then
+            fixture=(--fixture tests/fixtures/generated/av1-opus.mkv)
+          fi
+          python3 scripts/smoke-docker-images.py --arch "$ARCH" --version "$VERSION" "${fixture[@]}" --report "target/docker-smoke-$ARCH/report.json"
+      - name: Archiver exactement les images validées pour la publication
+        env:
+          REVISION: ${{ github.sha }}
+          VERSION: ${{ needs.calculate-beta.outputs.version }}
+          ARCH: ${{ matrix.arch }}
+          SOURCE: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p verified-images
+          time docker save media-ci:runtime media-ci:runtime-core media-ci:runtime-node | gzip -1 > verified-images/images.tar.gz
+          python3 scripts/ci-image-archive.py record --directory verified-images \
+            --revision "$REVISION" --arch "$ARCH" --version "$VERSION" --source "$SOURCE" \
+            --report "target/docker-smoke-$ARCH/report.json"
+          python3 scripts/ci-image-archive.py load --directory verified-images \
+            --revision "$REVISION" --arch "$ARCH" --version "$VERSION" --source "$SOURCE"
+      - name: Transférer les images validées sans nouvelle compilation
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-images-${{ matrix.arch }}
+          overwrite: true
+          path: verified-images/
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+      - name: Conserver les mesures et aperçus Docker
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-${{ matrix.arch }}
+          overwrite: true
+          path: target/docker-smoke-${{ matrix.arch }}/
+          if-no-files-found: warn
 
   # =========================================================================
   # 5. Publication des images Docker sur GHCR
   # Push ou lancement manuel de CI (develop), après tous les contrôles.
   # Les pull requests non fiables ne publient jamais d'image.
   # =========================================================================
-  calculate-beta:
-    name: Calcul du numéro bêta
-    needs: [workflows, rust, security-audit, frontend, browser, images]
-    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/develop' || (github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'))
-    runs-on: ubuntu-latest
-    outputs:
-      has_release: ${{ steps.calc.outputs.has_release }}
-      version: ${{ steps.calc.outputs.version }}
-      next_tag: ${{ steps.calc.outputs.next_tag }}
-      series: ${{ steps.calc.outputs.series }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - id: calc
-        run: |
-          set -euo pipefail
-          python scripts/calculate_release.py --json --channel develop > beta_info.json
-          cat beta_info.json
-          HAS_REL=$(jq -r '.has_release' beta_info.json)
-          {
-            echo "has_release=$HAS_REL"
-            if [ "$HAS_REL" = "true" ]; then
-              echo "version=$(jq -r '.version' beta_info.json)"
-              echo "next_tag=$(jq -r '.next_tag' beta_info.json)"
-              echo "series=$(jq -r '.series' beta_info.json)"
-            fi
-          } >> "$GITHUB_OUTPUT"
-
   tag-beta:
     name: Création du tag bêta Git
-    needs: [calculate-beta]
+    needs: [calculate-beta, publish]
     if: needs.calculate-beta.outputs.has_release == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -493,8 +607,8 @@ jobs:
 
   publish:
     name: Publication Docker GHCR (develop)
-    needs: [calculate-beta, tag-beta]
-    if: needs.calculate-beta.outputs.has_release == 'true'
+    needs: [workflows, rust, security-audit, frontend, browser, images, calculate-beta]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop' && needs.calculate-beta.outputs.has_release == 'true'
     permissions:
       contents: read
       packages: write

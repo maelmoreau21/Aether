@@ -1,5 +1,10 @@
 # Extensions API v1 — premier parcours local
 
+Les capacités signées `requests` et `reports` raccordent les applications
+facultatives Demandes et Signalements à des écrans natifs. Elles n'accordent
+aucun accès réseau arbitraire au Wasm. Contrats et limites :
+[Demandes et Signalements](REQUESTS_AND_REPORTS.md).
+
 > Stockage privé du 25 octobre : [contrat KV/objets v1](EXTENSION_STORAGE.md).
 > `storage.private` est une capacité signée reconnue ; imports hôtes versionnés,
 > SQLite/PostgreSQL et conservation explicite remplacent les exclusions de
@@ -20,7 +25,7 @@ la confiance explicite et l’activation séparée du parcours local ci-dessous.
 Contrat indépendant du protocole interne Node, implémenté par le Core existant.
 Ce sous-ensemble permet une extension de propositions de métadonnées, installée
 sans recompiler le serveur. Il ne livre pas les quinze sections de la plateforme.
-Voir `EXTENSIONS_AUDIT.md` pour les écarts et `extensions-v1.openapi.json` pour le
+Voir `docs/archive/audits/EXTENSIONS_AUDIT.md` pour les écarts et `extensions-v1.openapi.json` pour le
 contrat HTTP. SQLite reste le défaut; migrations PostgreSQL équivalentes.
 
 ## Paquet et identité
@@ -35,7 +40,10 @@ Le paquet est un objet JSON borné à 400 000 octets, sans archive à extraire :
 `signature` (Ed25519, Base64 standard). Le manifeste Rust est dans
 `crates/extension-sdk/src/lib.rs`; les champs d’identité sont obligatoires et les champs
 inconnus sont refusés. Les permissions reconnues sont `metadata.read`,
-`metadata.write`, `avatars`, `images` et `providers`. Un identifiant de permission
+`metadata.write`, `avatars`, `images`, `providers`, `storage.private`,
+`playback.markers` et `subtitles`. Le parcours `subtitles.search` /
+`subtitles.download` est décrit dans [Sous-titres manuels](OPENSUBTITLES.md).
+Un identifiant de permission
 ne crée pas à lui seul une opération métier dans l’interface.
 Les identifiants comportent 1–80 caractères ASCII minuscules, chiffres, `._-`.
 Version : trois composantes numériques. `apiVersion` doit valoir 1.
@@ -172,7 +180,7 @@ Le choix ne prouve pas encore l'adéquation de Wasm/WASI pour FFmpeg ou les
 empreintes audio; ces opérations Node demandent leur propre contrat contrôlé.
 
 Limites fixes du premier runtime : module 256 Kio, entrée/sortie 64 Kio,
-une mémoire linéaire de 16 Mio, une table de 4096 éléments, 2 millions d'unités
+une mémoire linéaire de 16 Mio, une table de 4096 éléments, 200 millions d'unités
 de fuel et délai maximal de 65 secondes. L'admission commune limite le Core à
 quatre opérations simultanées et une par extension. Les tâches automatiques
 occupent au plus trois places, conservant une place pour les opérations

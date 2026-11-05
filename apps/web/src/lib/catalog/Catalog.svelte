@@ -14,6 +14,8 @@
   import Navbar from '../ui/Navbar.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
+  import { selectArtwork } from './artwork-selection';
+  import { imagePreviewUrl } from './image-url';
   import CatalogGrid from './CatalogGrid.svelte';
   import CatalogSkeleton from './CatalogSkeleton.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -27,6 +29,7 @@
   } from './api';
   import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
+  import { t } from '../i18n';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
   let name = $state(DEFAULT_NAME);
@@ -109,7 +112,7 @@
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
-        mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
+        mediaError = err instanceof Error ? err.message : $t('episode_load_failed');
         // Revalidation failed (e.g. HTTP 403): do not leave the player open on an unusable source.
         immersive?.close();
       }
@@ -165,14 +168,14 @@
   const offset = $derived(Math.max(0, Number(page.url.searchParams.get('offset')) || 0));
   const title = $derived(
     library?.name ?? (section === 'settings'
-      ? 'Paramètres'
+      ? $t('settings_title')
       : section === 'films'
-        ? 'Films'
+        ? $t('films')
         : section === 'series'
-          ? 'Séries'
+          ? $t('series')
           : section === 'search'
-            ? 'Recherche'
-            : 'Accueil')
+            ? $t('search')
+            : $t('home'))
   );
   const allowedIds = $derived(detail ? playbackIds(detail) : []);
   const playableMedia = $derived(media.filter(item => allowedIds.includes(item.id)));
@@ -187,6 +190,14 @@
     return index >= 0 ? episodes[index + 1] : undefined;
   });
 
+  // Carte « À suivre » du lecteur : vignette de l'épisode, sinon images de la série.
+  const nextImage = $derived.by(() => {
+    if (!nextEpisode) return '';
+    const episode = selectArtwork(nextEpisode, $session);
+    const show = selectArtwork(detail, $session);
+    return imagePreviewUrl(episode.thumb || episode.landscape || episode.backdrop || show.landscape || show.backdrop || show.poster, 640);
+  });
+  const nextLabel = $derived(nextEpisode ? [nextEpisode.seasonNumber ? `Saison ${nextEpisode.seasonNumber}` : '', nextEpisode.number ? `Épisode ${nextEpisode.number}` : ''].filter(Boolean).join(' · ') : '');
   $effect(() => {
     const work = detail;
     const episode = playingEpisode;
@@ -208,7 +219,7 @@
     const next = nextEpisode;
     const id = playbackIds(next)[0];
     if (!id) {
-      mediaError = 'Épisode suivant sans source disponible.';
+      mediaError = $t('next_episode_unavailable');
       return;
     }
     void launchEpisode(next, id);
@@ -239,7 +250,7 @@
       media = [...media.filter(m => m.id !== item.id), item];
       selected = item.id;
     } catch (err) {
-      mediaError = err instanceof Error ? err.message : 'Impossible de rejoindre la séance.';
+      mediaError = err instanceof Error ? err.message : $t('party_join_failed');
       immersive?.close();
     } finally {
       launching = false;
@@ -278,7 +289,7 @@
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== targetId && getCachedMedia(m.id) !== undefined);
-        mediaError = err instanceof Error ? err.message : 'Chargement des sources impossible.';
+        mediaError = err instanceof Error ? err.message : $t('sources_load_failed');
         immersive?.close();
       }
     } finally {
@@ -324,7 +335,7 @@
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          mediaError = 'La lecture est temporairement indisponible. Rechargez la page pour réessayer.';
+          mediaError = $t('source_unavailable');
         }
       });
 
@@ -414,7 +425,7 @@
         if (currentSection === 'settings') return;
         if (id) {
           if (currentSection !== 'films' && currentSection !== 'series') {
-            throw new Error('Ouvrez ce média depuis sa bibliothèque Films ou Séries.');
+            throw new Error($t('open_media_from_library'));
           }
           void loadPlayer().catch(() => { /* A playback attempt reports the import error and can retry. */ });
           const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}?episodeLimit=24&episodeOffset=0`, controller.signal);
@@ -423,7 +434,7 @@
             (currentSection === 'films' && work.kind !== 'film') ||
             (currentSection === 'series' && work.kind !== 'series')
           ) {
-            throw new Error('Ce média appartient à une autre bibliothèque.');
+            throw new Error($t('wrong_library_media'));
           }
           detail = work;
           busy = false;
@@ -441,7 +452,7 @@
               }
             } catch (failure) {
               if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
-                mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.';
+                mediaError = failure instanceof Error ? failure.message : $t('sources_load_failed');
               }
             }
           } else {
@@ -480,12 +491,12 @@
           if (failure?.status === 'rejected') {
             if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
             if (completedKinds === 0 && cachedKinds === 0) throw failure.reason;
-            partialCatalogError = 'Une partie du catalogue est indisponible. Rechargez la page pour réessayer.';
+            partialCatalogError = $t('partial_catalog_unavailable');
           }
         }
       } catch (e) {
         if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
-          error = e instanceof Error ? e.message : 'Connexion au catalogue impossible.';
+          error = e instanceof Error ? e.message : $t('catalog_connection_failed');
         }
       } finally {
         if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
@@ -510,30 +521,30 @@
   <meta name="description" content="Films et séries en haute fidélité. Bibliothèques locales et lecture directe." />
 </svelte:head>
 
-<a class="skip-link" href="#main-content">Aller au contenu</a>
+<a class="skip-link" href="#main-content">{$t('skip_to_content')}</a>
 
 <Navbar {section} {name} />
 
 <main id="main-content" tabindex="-1">
-  {#if launching}<p role="status">Connexion à la source… <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>Annuler</button></p>{/if}
-  {#if !busy && pendingCatalogKinds > 0}<p role="status">Chargement du reste du catalogue…</p>{/if}
+  {#if launching}<p role="status">{$t('connecting_source')} <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>{$t('cancel')}</button></p>{/if}
+  {#if !busy && pendingCatalogKinds > 0}<p role="status">{$t('loading_catalog_remainder')}</p>{/if}
   {#if partialCatalogError}<p role="alert">{partialCatalogError}</p>{/if}
   {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}
   {#if section === 'settings'}
     {#await import('./SettingsView.svelte')}
-      <CatalogSkeleton label="Chargement des paramètres…" />
+      <CatalogSkeleton label={$t('loading_settings')} />
     {:then { default: SettingsView }}
     <SettingsView
       bind:prefAudio
       bind:prefSubtitles
       onSavePreference={savePreference}
     />
-    {:catch}<p role="alert">Chargement des paramètres impossible. Rechargez la page pour réessayer.</p>{/await}
+    {:catch}<p role="alert">{$t('settings_load_failed')}</p>{/await}
 
   {:else if busy}
     <div class="page-heading">
       <span class="eyebrow">{title}</span>
-      <h1>Votre médiathèque</h1>
+      <h1>{$t('all_media_library')}</h1>
     </div>
     <CatalogSkeleton />
 
@@ -543,7 +554,7 @@
     </div>
     <div class="empty error" role="alert">
       <Icon name="alert" size={32} />
-      <h2>Le catalogue ne répond pas</h2>
+      <h2>{$t('catalog_unavailable')}</h2>
       <p>{error}</p>
       <a
         class="retry-action-btn"
@@ -558,14 +569,14 @@
         )}
         data-sveltekit-reload
       >
-        Réessayer
+        {$t('retry')}
       </a>
     </div>
 
   {:else if detail}
     {#if detail.kind === 'film'}
       {#await import('./FilmDetail.svelte')}
-        <CatalogSkeleton label="Chargement du film…" />
+        <CatalogSkeleton label={$t('loading_movie')} />
       {:then { default: FilmDetail }}
       <FilmDetail
         work={detail}
@@ -576,10 +587,10 @@
         similarCandidates={films}
         onPlay={openPlayer}
       />
-      {:catch}<p role="alert">Chargement du film impossible. Rechargez la page pour réessayer.</p>{/await}
+      {:catch}<p role="alert">{$t('movie_load_failed')}</p>{/await}
     {:else}
       {#await import('./SeriesDetail.svelte')}
-        <CatalogSkeleton label="Chargement des épisodes…" />
+        <CatalogSkeleton label={$t('loading_episodes')} />
       {:then { default: SeriesDetail }}
       <SeriesDetail
         work={detail}
@@ -592,7 +603,7 @@
         onLaunchEpisode={launchEpisode}
         onSelectEpisode={episode => (playingEpisode = episode)}
       />
-      {:catch}<p role="alert">Chargement des épisodes impossible. Rechargez la page pour réessayer.</p>{/await}
+      {:catch}<p role="alert">{$t('episodes_load_failed')}</p>{/await}
     {/if}
 
   {:else if section === 'home'}
@@ -632,109 +643,163 @@
     catalogue={playerMedia}
     {createPlayer}
     nextTitle={nextEpisode?.title}
+    {nextLabel}
+    {nextImage}
     onNext={nextEpisode ? playNext : undefined}
   />
 {/if}
 
 <style>
-  .server-welcome { color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; padding-block: 16px; }
+  .server-welcome { margin: 0; padding: 16px 0; color: var(--mu); font-size: 15px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
   .skip-link {
     position: fixed;
     top: -80px;
     left: 20px;
     z-index: 50;
-    background: var(--color-text-bright);
-    color: var(--color-canvas);
+    background: var(--btn);
+    color: var(--btn-tx);
     padding: 12px 18px;
-    border-radius: var(--radius-sm);
+    border-radius: var(--r-md);
     font-weight: 700;
-    transition: top var(--transition-fast);
+    transition: top var(--t-fast) ease;
   }
 
   .skip-link:focus {
     top: 14px;
   }
 
+  .skip-link:focus-visible,
+  .retry-action-btn:focus-visible,
+  main button:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
+  }
+
   main {
     width: 100%;
-    max-width: none;
-    margin: 0;
-    padding: 0 var(--page-gutter) 80px;
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 0 var(--gutter) 80px;
     min-height: 75vh;
+    min-width: 0;
   }
+
+  main:focus { outline: none; }
+
+  main > [role='status'],
+  main > [role='alert'] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0 0;
+    padding: 12px 16px;
+    border-radius: var(--r-md);
+    background: var(--pn);
+    color: var(--mu);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  main > [role='alert'] {
+    background: var(--err-soft);
+    color: var(--err);
+  }
+
+  main > [role='status'] button {
+    min-height: 40px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: var(--pn-2);
+    color: var(--tx);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  main > [role='status'] button:hover { background: var(--pn-3); }
 
   .page-heading {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding-top: 16px;
+    gap: 4px;
+    padding-top: 20px;
+  }
+
+  .page-heading .eyebrow {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--mu);
   }
 
   h1 {
-    font-family: var(--font-display);
-    font-size: clamp(32px, 4vw, 52px);
-    font-weight: 750;
-    line-height: 1.15;
-    letter-spacing: -0.04em;
-    color: var(--color-text-bright);
-    margin: 8px 0 16px;
+    font-size: clamp(32px, 4vw, calc(44px * var(--ui-scale, 1)));
+    font-weight: 800;
+    line-height: 1.02;
+    letter-spacing: -0.03em;
+    color: var(--tx);
+    margin: 4px 0 16px;
   }
 
-  /* Empty / Loading States */
+  /* États vide / erreur */
   .empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 16px;
-    padding: 80px 24px;
-    border-radius: var(--radius-lg);
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
+    gap: 12px;
+    max-width: 640px;
+    margin: 32px auto;
+    padding: 48px 24px;
+    border-radius: var(--r-lg);
+    background: var(--bg-2);
+    border: 1px solid var(--line);
     text-align: center;
-    margin: 32px 0;
   }
 
-
-
   .error {
-    border-color: rgba(248, 113, 113, 0.3);
-    color: var(--color-danger);
+    color: var(--err);
   }
 
   .error h2 {
-    font-size: 20px;
-    font-weight: 700;
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
     margin: 0;
-    color: var(--color-text-bright);
+    color: var(--tx);
   }
 
   .error p {
     margin: 0;
-    color: var(--color-muted);
-    font-size: 14px;
+    color: var(--mu);
+    font-size: 15px;
+    line-height: 1.6;
     max-width: 500px;
   }
 
   .retry-action-btn {
     display: inline-flex;
     align-items: center;
-    padding: 10px 22px;
-    border-radius: var(--radius-sm);
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    color: var(--color-text-bright);
-    font-size: 13px;
-    font-weight: 600;
+    height: 48px;
+    padding: 0 22px;
+    border-radius: var(--r-md);
+    background: var(--btn);
+    color: var(--btn-tx);
+    font-size: 15px;
+    font-weight: 700;
     margin-top: 8px;
-    transition: all var(--transition-fast);
+    transition: opacity var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
 
   .retry-action-btn:hover {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent);
-    color: var(--color-accent-hover);
-    transform: translateY(-1px);
+    opacity: 0.9;
   }
 
+  .retry-action-btn:active {
+    transform: scale(0.98);
+  }
 </style>

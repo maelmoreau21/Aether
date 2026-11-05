@@ -1,58 +1,5 @@
 import { describe, expect, it } from 'vitest';
-
-export interface TrickplayManifest {
-  intervalMs: number;
-  width: number;
-  height: number;
-  columns: number;
-  rows: number;
-  sheetCount: number;
-  thumbnailCount: number;
-  urlPrefix: string;
-}
-
-export function computePreviewFrame(
-  hoverTime: number | null,
-  duration: number,
-  trickplay: TrickplayManifest | null,
-  failedSheets: Set<number> = new Set()
-) {
-  if (hoverTime === null || !trickplay || !duration) return null;
-  const count = Math.min(
-    trickplay.thumbnailCount,
-    trickplay.sheetCount * trickplay.columns * trickplay.rows
-  );
-  const frame = Math.max(
-    0,
-    Math.min(count - 1, Math.floor((hoverTime * 1000) / trickplay.intervalMs))
-  );
-  const perSheet = trickplay.columns * trickplay.rows;
-  const sheet = Math.floor(frame / perSheet);
-  if (failedSheets.has(sheet)) return null;
-  const local = frame % perSheet;
-  return {
-    sheet,
-    url: trickplay.urlPrefix + sheet,
-    width: trickplay.width,
-    height: trickplay.height,
-    x: (local % trickplay.columns) * trickplay.width,
-    y: Math.floor(local / trickplay.columns) * trickplay.height,
-    fullWidth: trickplay.columns * trickplay.width,
-    fullHeight: trickplay.rows * trickplay.height,
-  };
-}
-
-export function getAdjacentSheets(currentSheet: number, sheetCount: number): number[] {
-  const result: number[] = [currentSheet];
-  if (currentSheet > 0) result.push(currentSheet - 1);
-  if (currentSheet + 1 < sheetCount) result.push(currentSheet + 1);
-  return result;
-}
-
-export function clampHoverPosition(clientX: number, rect: { left: number; width: number }, duration: number): number {
-  if (duration <= 0 || rect.width <= 0) return 0;
-  return Math.max(0, Math.min(duration, ((clientX - rect.left) / rect.width) * duration));
-}
+import { clampHoverPosition, computePreviewFrame, getAdjacentSheets, readyTrickplay, trickplaySheetFor, type TrickplayManifest } from './trickplay';
 
 describe('Trickplay player previews', () => {
   const sampleTrickplay: TrickplayManifest = {
@@ -140,5 +87,16 @@ describe('Trickplay player previews', () => {
 
     // Dragged past the track end
     expect(clampHoverPosition(950, rect, duration)).toBe(120);
+  });
+
+  it('finds the sheet of a hovered time and validates ready manifests', () => {
+    expect(trickplaySheetFor(sampleTrickplay, 1050)).toBe(1);
+    expect(trickplaySheetFor(sampleTrickplay, 99999)).toBe(4);
+    const ready = { ...sampleTrickplay, status: 'ready' };
+    expect(readyTrickplay(true, ready, 'test-asset')).not.toBeNull();
+    expect(readyTrickplay(false, ready, 'test-asset')).toBeNull();
+    expect(readyTrickplay(true, { ...ready, urlPrefix: '/x/' }, 'test-asset')).toBeNull();
+    expect(readyTrickplay(true, { ...ready, status: 'generating' }, 'test-asset')).toBeNull();
+    expect(readyTrickplay(true, { ...ready, intervalMs: 500 }, 'test-asset')).toBeNull();
   });
 });

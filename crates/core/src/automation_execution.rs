@@ -15,9 +15,9 @@ pub(crate) async fn dispatch(
     let Some(link) = crate::automation::task_link(&auth.store, &job.id).await? else {
         return Ok(false);
     };
-    let Some(permit) = crate::extension_runtime::try_acquire_execution(
+    let Some(permit) = crate::extensions::runtime::try_acquire_execution(
         &link.extension_id,
-        crate::extension_runtime::ExecutionClass::Background,
+        crate::extensions::runtime::ExecutionClass::Background,
     ) else {
         // Saturation is backpressure, not an extension failure; no future waits for a worker.
         task_engine::finish(

@@ -1,89 +1,134 @@
-# Cycle de mise à jour des extensions — contrat à réaliser
+# Mise à jour et retour arrière des extensions
 
-État au 2 novembre 2026 : mise à jour en place disponible pour les fournisseurs
-sans stockage privé. Les deux modules doivent importer uniquement le broker HTTP
-(ou aucun import), demander uniquement des capacités de métadonnées/images et
-ne posséder aucune donnée KV/objet privée. Signature, éditeur, clé, version et
-absence de nouveau droit/domaine sont vérifiés. Les champs facultatifs ajoutés
-sont compatibles ; les changements de types restent refusés.
+## Contrat implémenté — 2 novembre 2026
 
-L'ancien paquet signé est conservé dans `plugins/.revisions/<id>/` avant toute
-mutation. La bascule du paquet et de sa génération est transactionnelle avec
-comparaison de la version chargée ; paramètres, activation et bibliothèques sont
-conservés. Les résultats des anciens workers sont rejetés par leur génération.
-La base reste la source de vérité et le cache disque est resynchronisable.
-Les extensions avec données privées restent refusées : les exigences ci-dessous
-concernent leur future migration et le retour arrière automatisé.
+Les routes `POST /api/v1/admin/extensions/{id}/upgrade` et installation avec
+`upgrade:true` conservent paramètres, activation et bibliothèques. Elles exigent
+le même ID, éditeur et clé de signature, une version numérique strictement
+supérieure, un ABI/module compatible et aucun nouveau droit ou domaine réseau.
+Une extension ne peut donc pas s'accorder de nouvelles permissions par mise à jour.
+Un namespace conservé sous une autre identité d'éditeur ou clé bloque également
+la migration : la mise à jour ne modifie jamais ces données inaccessibles.
+Les champs de configuration facultatifs sont additifs ; les changements de type
+et nouvelles valeurs obligatoires sans défaut restent refusés.
 
-## Identité et compatibilité
+L'ancien paquet signé est aussi conservé dans `plugins/.revisions/<id>/`.
+La source de vérité est la base : le cache disque est reconstructible et son
+échec après commit ne défait pas la version installée.
 
-- Une mise à jour garde le même `manifest.id`, `publisherId` et la même clé
-  publique vérifiée. Une rotation de clé d'éditeur exige un parcours distinct,
-  audité et approuvé par l'administrateur ; le seul nom d'éditeur ne suffit pas.
-- La version cible doit être strictement supérieure à la version installée,
-  selon les trois composantes numériques actuellement acceptées. Une version
-  égale avec un digest différent est un conflit, pas une correction silencieuse.
-- Vérifier avant toute mutation la signature, le digest, `apiVersion`, l'ABI,
-  `minServerVersion`/`maxServerVersion`, les imports hôtes, les limites Wasm,
-  le schéma des paramètres et les capacités demandées.
-- Afficher le diff entre versions : permissions, domaines réseau, schéma de
-  configuration, compatibilité serveur et migration de données. Toute nouvelle
-  capacité, portée ou domaine attend un accord explicite. Les anciens grants
-  ne doivent jamais autoriser implicitement un droit ajouté.
+## Migrations privées signées et bornées
 
-## Préparation et sauvegarde
+Une extension ayant `storage.private` ou des données privées doit inclure dans
+le manifeste du paquet cible :
 
-1. Télécharger le paquet en quarantaine, le vérifier et l'identifier par son
-   digest. Préparer les paramètres et migrations avec un plan versionné.
-2. Sauvegarder de façon cohérente la base, les paramètres, collections,
-   données privées KV/objets et le paquet précédent. Vérifier que la sauvegarde
-   est restaurable dans un environnement privé. Le format courant est non
-   chiffré : restreindre l'accès à l'archive et à ses copies. Conserver la version de
-   l'ABI/Core et l'identité de l'éditeur. Les médias `ro` restent hors du plan.
-3. Arrêter les nouvelles invocations du plugin, attendre ou annuler les tâches
-   en cours avec une borne de temps, puis figer sa génération. Les opérations
-   d'un ancien worker ne doivent plus écrire dans le nouveau namespace.
+```json
+"storageMigration": {
+  "fromVersion": "0.1.0",
+  "keyRenames": [{"from":"ancienne-cle","to":"nouvelle-cle"}]
+}
+```
 
-## Bascule, échec et retour arrière
+`fromVersion` doit correspondre exactement à la version installée. Une liste
+vide déclare explicitement que le format privé reste compatible. Ce champ est
+couvert par la signature ; les paquets historiques sans ce champ conservent
+exactement leur entrée de signature existante.
 
-L'état visé est `installé v1 → préparé v2 → attente d'accord → sauvegardé →
-bascule → vérification → actif v2`. Un refus, une signature invalide ou une
-incompatibilité laissent v1 active et ses données intactes. Une migration privée
-doit être idempotente, bornée, liée aux versions source/cible et exécutée sur
-une copie ou dans une transaction dont le résultat peut être abandonné.
+Le Core accepte au plus 32 renommages de clés de 256 octets au maximum. Il les
+applique dans toutes les portées du plugin, sans modifier valeur, empreinte,
+expiration ou durabilité. Il renouvelle la version CAS des entrées renommées.
+Doublons, cycles et destinations déjà occupées dans une même portée sont refusés.
+Les transformations arbitraires de valeurs, SQL guest et migrations irréversibles
+ne sont pas exposés : les changements de format au-delà de ces renommages
+nécessitent un autre contrat explicite et restent refusés.
 
-La bascule de la version active, des grants, des paramètres et de la version de
-schéma doit être atomique dans la base. La copie de paquet sur disque est un
-cache reconstructible depuis le paquet signé en base ; son échec ne doit pas
-laisser une version active partiellement installée. En cas d'échec avant commit,
-réactiver v1 avec sa génération et ses droits. Après commit, vérifier une
-invocation synthétique bornée avant réactivation générale ; si elle échoue,
-désactiver v2 et restaurer le snapshot v1 si aucune migration irréversible n'a
-été appliquée. Une migration irréversible interdit le rollback automatique :
-laisser le plugin désactivé et proposer une restauration complète de la
-sauvegarde hors ligne, avec avertissement sur les écritures postérieures.
+Tout paquet déclarant une migration doit répondre à l'opération
+`lifecycle.verify` avec `{"apiVersion":1,"result":{"healthy":true}}`.
+Ce contrôle s'exécute **avant mutation** dans un worker jetable, sans hôtes HTTP
+ni broker de données privées, avec les limites Wasm existantes et un délai de
+10 secondes. Un échec laisse l'installation intacte. Ce contrôle synthétique ne
+valide pas un fournisseur externe ou la qualité de détection d'Intro Skipper.
 
-Une désinstallation avec `deleteData=false` n'est pas une sauvegarde. Elle peut
-conserver les données privées, mais ne garantit ni les paramètres, ni les
-collections, ni un rollback cohérent. `deleteData=true` reste une suppression
-explicite et distincte de toute mise à jour.
+Sous le verrou d'écriture partagé SQLite/PostgreSQL, le Core sauvegarde la
+révision précédente, les paramètres, grants et tout le namespace privé
+(KV, compteurs, objets et blocs) dans les tables `extension_update_*`, applique
+la migration, change paquet et génération et écrit l'audit dans **une seule
+transaction**. Une erreur abandonne aussi la sauvegarde préparée. Les anciens
+workers ne peuvent plus écrire avec leur génération périmée.
+Une seule sauvegarde, celle de la dernière mise à jour, est retenue par plugin.
+La copie reste dans la base, sans charger les objets complets en mémoire Core ;
+elle peut ajouter jusqu'au quota privé du plugin à la taille de la base et des
+sauvegardes générales. Elle contient des secrets au même titre que les tables
+actives et n'est jamais envoyée dans les réponses API.
 
-## Critères avant de déclarer la mise à jour disponible
+## Restauration explicite
 
-- Tests de version égale/inférieure, signature/digest erronés, clé différente,
-  ABI/Core incompatibles, nouveau droit ou domaine sans consentement.
-- Tests de panne avant, pendant et après la transaction, cache absent/corrompu,
-  migration interrompue, redémarrage Core et ancien worker encore actif.
-- Tests de conservation et restauration des paramètres, collections, KV et
-  objets privés, avec sauvegarde vérifiée et retour arrière d'une migration
-  réversible. Tester séparément le refus de rollback irréversible.
-- Parcours administrateur montrant le diff, l'accord et l'état d'échec sans
-  dévoiler de secret. Vérifier les deux moteurs de base utilisés.
+La fiche administrateur affiche la version restaurable et une confirmation
+expliquant la perte des changements postérieurs. Elle appelle :
 
-Jusqu'à ces preuves, aucune mise à jour n'est effectuée par ces routes. Aucune
-migration automatique des bases ou des données privées n'est prévue dans ce
-chantier ; une incompatibilité doit être refusée en conservant l'installation.
+```http
+POST /api/v1/admin/extensions/{id}/rollback
+Content-Type: application/json
 
-## Vérification locale ciblée
+{"expectedSha256":"<digest actif>","expectedVersion":"0.2.0","confirmDataRestore":true}
+```
 
-`cargo test --locked -p media-poc --test extensions test_extension_upgrade_refuses_unverified_compatibility_without_mutation -j 1 -- --nocapture` : réussite sur SQLite temporaire. Le test vérifie aussi le refus de `upgrade=true` sur la route d'installation et celui d'une installation en doublon, puis la conservation de la génération et des données privées. Il ne démontre ni bascule, ni rollback, ni exécution PostgreSQL.
+RBAC administrateur, session et CSRF sont obligatoires. Le Core revérifie la
+signature précédente et l'éditeur actif ; version/digest périmés et absence de
+snapshot sont refusés. Paquet, paramètres, grants, compteurs, KV, objets et blocs
+sont restaurés atomiquement avec une nouvelle génération. L'extension revient
+**désactivée**, pour inspection et réactivation par l'administrateur. Le snapshot
+consommé est supprimé. Une désinstallation nettoie aussi ces copies privées,
+y compris `deleteData=false` ; les règles de conservation des données actives
+restent celles du stockage privé.
+
+Les deux schémas et la création idempotente sur réouverture sont alignés.
+Les nouvelles tables sont ajoutées sans réécriture des tables médias.
+Ce mécanisme n'est pas une sauvegarde générale du serveur ni un historique
+illimité des versions.
+
+## Versions depuis le catalogue et rétrogradation
+
+La fiche présente la version active, les versions réellement annoncées par les
+catalogues et la version restaurable du snapshot même si elle n’est plus publiée.
+La date d’actualisation du dépôt ne prouve pas la date de publication d’une version.
+
+Une version antérieure publiée peut être installée après confirmation explicite
+via la route d’installation du dépôt avec `upgrade:true`, `confirmDowngrade:true`,
+`expectedVersion` et `expectedSha256`. Le paquet reste signé, vérifié, compatible,
+et lié au même éditeur et à la même clé ; aucun nouveau droit n’est accordé.
+Le Core refuse une rétrogradation si un snapshot existe déjà, si une des versions
+utilise le stockage privé ou si des données privées subsistent, si une migration
+est déclarée ou si les schémas de paramètres ne sont pas identiques. La vérification
+du snapshot et des données est répétée sous verrou de transaction. L’ancienne
+version installée et les paramètres sont sauvegardés atomiquement pour un retour ;
+la version choisie reste désactivée. Sans publication historique et sans snapshot,
+aucune ancienne version n’est inventée.
+
+## Installation réelle : constat en lecture seule
+
+Le 2 novembre 2026, SSH et requêtes PostgreSQL `BEGIN READ ONLY` sur le NAS
+montrent TMDb, IMDb, OMDb, fanart.tv et Intro Skipper installés en `0.1.1`.
+Les quatre fournisseurs sont activés ; Intro Skipper est désactivé.
+Dernières exécutions à 20 h 53 (Paris) : TMDb et fanart.tv `completed`, IMDb et
+OMDb `error` avec code générique `extension_error`. Le détail fonctionnel des
+résultats et la précision d'Intro ne sont donc pas validés par cette observation.
+Aucun réglage, plugin, conteneur ni média du NAS n'a été modifié. Le nouveau
+cycle de mise à jour/rollback n'a pas été exécuté sur cette installation.
+
+## Vérification ciblée
+
+Le scénario HTTP SQLite
+`private_extension_update_migrates_atomically_and_rollback_restores_snapshot`
+couvre santé refusée, conflit de destination sans changement de génération,
+migration signée, paramètres conservés, snapshot présent après réouverture,
+restauration des KV/objets/blocs, confirmation obligatoire, version périmée,
+désactivation après rollback et refus de réutiliser un snapshot consommé.
+Le test de refus historique couvre droits/domaines, signature/éditeur, ABI,
+version égale ou inférieure et absence de déclaration de compatibilité privée.
+Le dépôt Aether-Plugins conserve désormais `storageMigration` lors de la
+projection du manifeste avant signature ; un test de contrat vérifie ce point.
+Son modèle `templates/persistent-storage` répond à `lifecycle.verify` sans
+incrémenter le compteur privé, et documente la déclaration de compatibilité.
+Les résultats réellement exécutés sont consignés dans `.ai/MEMORY.md` ; le schéma
+PostgreSQL aligné ne constitue pas une preuve d'exécution du nouveau rollback
+sur PostgreSQL ni sur NAS.

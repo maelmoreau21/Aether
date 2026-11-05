@@ -1,5 +1,18 @@
 # Moteur de tâches distribué — 24 octobre 2026
 
+## Présentation du planificateur — 5 novembre 2026
+
+Le planificateur affiche les planifications et le lancement manuel des tâches.
+Les panneaux « File d’exécution et opérations en cours » et « Automatisation
+des métadonnées » sont retirés de cet écran et de sa recherche administrative.
+Le moteur de tâches, ses routes API et les planifications déjà enregistrées
+continuent de fonctionner. Cette simplification ne modifie pas leur exécution.
+
+Vérifications locales : lint ciblé et 8 tests de navigation passent ; Chrome 156
+avec APIs synthétiques valide 4 scénarios clair/sombre à 390/1 440 px et les
+2 parcours de réglage des intervalles de `browser-scheduler-settings.cjs`.
+Ces vérifications ne constituent pas une exécution réelle des tâches sur le NAS.
+
 Le canal sortant d'un Node applique un délai de reconnexion progressif, plafonné
 à cinq secondes, aux erreurs réseau et aux réponses signées mal formées. Une
 commande valide rétablit le délai initial. Ce mécanisme ne prouve pas à lui seul

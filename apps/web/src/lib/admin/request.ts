@@ -10,7 +10,10 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
     headers: { ...(init.body instanceof FormData ? {} : {'content-type':'application/json'}), 'x-csrf-token': current.csrfToken, ...init.headers }
   });
   if (!response.ok) {
-    const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string } | null;
+    const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string; code?: string; message?: string } | null;
+    if (path.startsWith('/api/v1/admin/backups') && detail?.code?.startsWith('backup_') && typeof detail.message === 'string') {
+      throw new Error(detail.message);
+    }
     const messages: Record<string,string> = {
       avatar_collection_full: 'Cette collection ne peut pas contenir plus de 500 images.',
       avatar_migration_required: 'Transférez d’abord les anciennes collections dans Administration → Avatars avant de désinstaller cette extension.',
@@ -53,12 +56,21 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       repository_unavailable: 'Le dépôt de plugins est actuellement injoignable.',
       repository_http_error: 'Le serveur du dépôt a renvoyé une erreur de téléchargement.',
       repository_response_too_large: 'La réponse du dépôt dépasse la taille autorisée.',
+      repository_redirect_forbidden: 'Le dépôt redirige vers une adresse non autorisée.',
+      invalid_repository_manifest: 'Le manifeste du dépôt est invalide (format, limites ou empreintes SHA-256).',
+      invalid_package_archive: 'L’archive du paquet est corrompue ou non prise en charge.',
+      package_archive_ambiguous: 'L’archive contient plusieurs paquets ; un seul fichier .package.json est attendu.',
+      package_archive_without_package: 'L’archive ne contient aucun fichier .package.json.',
+      package_too_large: 'Le paquet dépasse la taille autorisée.',
       repository_limit: 'La limite de dépôts enregistrés est atteinte.',
       repository_exists: 'Ce dépôt est déjà enregistré.',
       unknown_repository: 'Dépôt introuvable.',
       unknown_catalogue_version: 'Cette version de l’extension n’existe pas dans le catalogue.',
       repository_changed: 'Le catalogue a changé. Veuillez réactualiser les dépôts.',
       extension_exists: 'Cette extension est déjà installée.',
+      extension_downgrade_incompatible: 'Cette ancienne version ne peut pas être installée sans risque pour ses données ou ses paramètres.',
+      extension_downgrade_snapshot_exists: 'La sauvegarde existante contient des données privées. Restaurez-la avant d’installer une autre version.',
+      extension_changed: 'La version installée a changé. Actualisez la page avant de réessayer.',
       extension_version_not_newer: 'La version proposée doit être supérieure à la version installée.',
       publisher_key_mismatch: 'La clé de signature ne correspond pas à celle de l’extension installée.',
       extension_update_compatibility_unverified: 'La mise à jour est refusée : la compatibilité des données et l’arrêt des anciennes écritures ne peuvent pas encore être garantis. La version installée est conservée.',

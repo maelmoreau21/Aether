@@ -11,11 +11,16 @@ fn test_structured_metadata_roundtrip() {
     ext_ids.insert("imdb".into(), "tt0137523".into());
 
     let meta = StructuredMetadata {
+        collection: Some(media_extension_sdk::MetadataCollection {
+            id: "tmdb:42".into(),
+            name: "Synthetic collection".into(),
+        }),
         provider: "tmdb".into(),
         provider_id: "550".into(),
         external_ids: ext_ids,
         title: Some("Fight Club".into()),
         original_title: Some("Fight Club".into()),
+        original_language: Some("en".into()),
         tagline: Some("Mischief. Mayhem. Soap.".into()),
         synopsis: Some("An insomniac office worker...".into()),
         year: Some(1999),

@@ -1,11 +1,27 @@
+import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { session } from './auth/session';
-import { ensurePreferences, hydratePreferences, preferences, savePreferences } from './preferences';
+import { ensurePreferences, hydratePreferences, preferences, preferenceState, savePreferences } from './preferences';
 
 const account = (id: string) => ({ user: { id, login: id, role: 'user' as const }, csrfToken: `csrf-${id}` });
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 
 describe('account preferences', () => {
+  it('publishes account appearance after hydration, focus refresh and logout', async () => {
+    session.set(account('appearance'));
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json({ homeSections: ['series', 'continue'], cardSize: 'small', accentColor: 'blue' }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(Response.json({ homeSections: [], cardSize: 'large', accentColor: 'green' }));
+    vi.stubGlobal('fetch', fetch);
+    await hydratePreferences();
+    expect(get(preferenceState).homeSections).toEqual(['series', 'continue']);
+    expect(await savePreferences({ cardDensity: 'compact' })).toBe(true);
+    expect(get(preferenceState).cardDensity).toBe('compact');
+    await hydratePreferences();
+    expect(get(preferenceState)).toEqual({ homeSections: [], cardSize: 'large', accentColor: 'green' });
+    session.set(null);
+    expect(get(preferenceState)).toEqual({});
+  });
   it('reports a failed server save without claiming successful persistence', async () => {
     session.set(account('failure'));
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({})).mockResolvedValueOnce(new Response(null, { status: 503 })));

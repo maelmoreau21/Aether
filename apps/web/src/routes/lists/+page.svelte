@@ -14,7 +14,7 @@
   let query=$state(''),results=$state<Entry[]>([]),policy=$state({allowPublic:false,allowSharing:false});let generation=0,searchGeneration=0;
   const pageSize=50;let entryOffset=$state(0),listOffset=$state(0);
   $effect(()=>{void tab;listOffset=0;});
-  const visible=$derived(lists.filter(list=>tab==='mine'?list.owned:tab==='public'?list.visibility==='public'&&!list.owned:!list.owned&&list.visibility==='shared'));
+  const visible=$derived(lists.filter(list=>tab==='collections'?list.visibility==='collection':tab==='mine'?list.owned:tab==='public'?list.visibility==='public'&&!list.owned:!list.owned&&list.visibility==='shared'));
   const songs=$derived(selected?.entries.filter(entry=>entry.kind==='music').map(entry=>entry.media as MusicTrack)??[]);
   async function load(){const [data,flags]=await Promise.all([playlistRequest<{lists:Playlist[]}>('/api/v1/lists'),playlistRequest<typeof policy>('/api/v1/playlists/policy')]);lists=data.lists;policy=flags;}
   async function show(id:string){if(selected?.id!==id)entryOffset=0;const current=++generation;error='';try{const detail=await playlistRequest<Detail>(`/api/v1/lists/${encodeURIComponent(id)}?compact=true`);if(current!==generation)return;selected=detail;entryOffset=Math.min(entryOffset,Math.max(0,Math.floor((detail.entries.length-1)/pageSize)*pageSize));editName=detail.name;visibility=detail.visibility;shares=detail.shares;results=[];notice='';}catch(cause){if(current===generation){selected=null;error=(cause as Error).message;}}}
@@ -32,7 +32,7 @@
 <Navbar section="lists" />
 <main><header><div><p class="eyebrow">VOTRE COLLECTION</p><h1>Playlists</h1><p>Films, séries et musique, réunis à votre façon.</p></div><form onsubmit={create}><label>Nouvelle playlist<input required maxlength="100" placeholder="Une soirée, une humeur…" bind:value={name} /></label><button disabled={busy}>Créer</button></form></header>
 {#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}
-<div class="workspace"><aside><nav aria-label="Playlists"><button class:active={tab==='mine'} onclick={()=>tab='mine'}>Mes playlists</button><button class:active={tab==='shared'} onclick={()=>tab='shared'}>Partagées avec moi</button><button class:active={tab==='public'} onclick={()=>tab='public'}>Publiques</button></nav><div class="collection">{#each visible.slice(listOffset,listOffset+pageSize) as list(list.id)}<button disabled={busy} class:chosen={selected?.id===list.id} onclick={()=>show(list.id)}><span class="tile" aria-hidden="true">♫</span><span><strong>{list.name}</strong><small>{list.visibility==='private'?'Privée':list.visibility==='shared'?'Sur invitation':'Publique sur le serveur'}</small></span></button>{:else}<p>Aucune playlist dans cette catégorie.</p>{/each}</div>{#if visible.length>pageSize}<nav class="pagination" aria-label="Pagination des playlists"><button disabled={listOffset===0} onclick={()=>listOffset=Math.max(0,listOffset-pageSize)}>Précédentes</button><span>{listOffset+1}–{Math.min(listOffset+pageSize,visible.length)} / {visible.length}</span><button disabled={listOffset+pageSize>=visible.length} onclick={()=>listOffset+=pageSize}>Suivantes</button></nav>{/if}</aside>
+<div class="workspace"><aside><nav aria-label="Playlists"><button class:active={tab==='collections'} onclick={()=>tab='collections'}>Collections</button><button class:active={tab==='mine'} onclick={()=>tab='mine'}>Mes playlists</button><button class:active={tab==='shared'} onclick={()=>tab='shared'}>Partagées avec moi</button><button class:active={tab==='public'} onclick={()=>tab='public'}>Publiques</button></nav><div class="collection">{#each visible.slice(listOffset,listOffset+pageSize) as list(list.id)}<button disabled={busy} class:chosen={selected?.id===list.id} onclick={()=>show(list.id)}><span class="tile" aria-hidden="true">♫</span><span><strong>{list.name}</strong><small>{list.visibility==='collection'?'Collection automatique':list.visibility==='private'?'Privée':list.visibility==='shared'?'Sur invitation':'Publique sur le serveur'}</small></span></button>{:else}<p>Aucune playlist dans cette catégorie.</p>{/each}</div>{#if visible.length>pageSize}<nav class="pagination" aria-label="Pagination des playlists"><button disabled={listOffset===0} onclick={()=>listOffset=Math.max(0,listOffset-pageSize)}>Précédentes</button><span>{listOffset+1}–{Math.min(listOffset+pageSize,visible.length)} / {visible.length}</span><button disabled={listOffset+pageSize>=visible.length} onclick={()=>listOffset+=pageSize}>Suivantes</button></nav>{/if}</aside>
 <section class="detail">{#if selected}<div class="detail-heading"><div><span class="badge">{selected.owned?'Votre playlist':'Lecture seule'}</span><h2>{selected.name}</h2><p>{selected.entries.length} élément(s) accessible(s)</p></div>{#if songs.length}<button disabled={busy} onclick={()=>playMusic(songs)}>Lire les titres musicaux</button>{/if}</div>
 {#if selected.owned}<details class="settings"><summary>Nom et partage</summary><form onsubmit={save}><label>Nom<input bind:value={editName} maxlength="100" required /></label><div class="field"><label for="playlist-visibility">Visibilité</label><select id="playlist-visibility" bind:value={visibility}><option value="private">Privée</option><option value="shared" disabled={!policy.allowSharing}>Partagée avec des personnes</option><option value="public" disabled={!policy.allowPublic}>Publique sur ce serveur</option></select></div><p>Le partage ne donne aucun droit supplémentaire sur les bibliothèques.</p>{#if !policy.allowSharing&&!policy.allowPublic}<p>Le partage est désactivé par l’administrateur.</p>{/if}<button disabled={busy}>Enregistrer</button></form>{#if visibility==='shared'&&policy.allowSharing}<form onsubmit={findPeople}><label>Rechercher une personne<input bind:value={personQuery} minlength="2" maxlength="100" required /></label><button disabled={busy}>Rechercher</button></form><div class="people">{#each shares as person(person.id)}<button onclick={()=>shares=shares.filter(item=>item.id!==person.id)}>{person.name} ×</button>{/each}{#each people.filter(person=>!shares.some(item=>item.id===person.id)) as person(person.id)}<button onclick={()=>shares=[...shares,person]}>+ {person.name}</button>{/each}</div>{/if}
 {#if selected.visibility!=='private'}<label>Lien de la playlist<input readonly value={new URL(resolve(`lists/?id=${selected.id}`),page.url.origin).href} onclick={event=>event.currentTarget.select()} /></label><small>Connexion obligatoire. Seules les personnes autorisées peuvent l’ouvrir.</small>{/if}</details>
@@ -43,7 +43,119 @@
 {:else}<div class="empty"><span aria-hidden="true">♫</span><h2>Une collection qui vous ressemble</h2><p>Créez une playlist ou choisissez-en une pour retrouver ses films, séries et titres musicaux.</p><a href={resolve('music/')}>Explorer la musique</a></div>{/if}</section></div>
 {#if $session?.user.role==='administrator'}<details class="admin-policy"><summary>Administration du partage des playlists</summary><p>Ces options s’appliquent à tous les comptes du serveur. Les liens ne sont jamais accessibles sans connexion.</p><label><input type="checkbox" bind:checked={policy.allowSharing} /> Autoriser le partage entre utilisateurs</label><label><input type="checkbox" bind:checked={policy.allowPublic} /> Autoriser les playlists publiques sur le serveur</label><button disabled={busy} onclick={()=>action(async()=>{await playlistRequest('/api/v1/admin/playlists/policy','PUT',policy);notice='Autorisations de partage enregistrées.';})}>Enregistrer les autorisations</button></details>{/if}</main>
 <style>
-.pagination{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-top:18px;font-size:13px}
+  main { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 20px var(--gutter) 80px; min-width: 0; color: var(--tx); }
+  header, .detail-heading { display: flex; justify-content: space-between; gap: 24px; align-items: flex-end; flex-wrap: wrap; }
+  h1 { margin: 4px 0 0; font-size: clamp(32px, 4vw, 44px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.02; overflow-wrap: anywhere; }
+  h2 { margin: 8px 0 4px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+  .eyebrow { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mu); }
+  p, small { color: var(--mu); }
+  p { margin: 8px 0 0; font-size: 14px; line-height: 1.6; }
+  small { font-size: 13px; }
+  .field { display: grid; gap: 8px; }
+  label { display: flex; flex-direction: column; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  form { display: flex; gap: 8px; align-items: end; flex-wrap: wrap; }
+  input, select { max-width: 100%; box-sizing: border-box; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  select { padding-right: 40px; }
+  input:hover, select:hover { background-color: var(--pn-2); }
+  input:focus, select:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; box-sizing: border-box; min-height: 46px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
+  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  header form button, .detail-heading > button, .settings form:first-of-type > button { background: var(--btn); color: var(--btn-tx); }
+  header form button:hover:not(:disabled), .detail-heading > button:hover:not(:disabled), .settings form:first-of-type > button:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  header form label { min-width: min(320px, 100%); }
+  a { color: var(--tx); font-weight: 700; }
+  [role='alert'] { margin: 20px 0 0; padding: 12px 14px; border-radius: var(--r-sm); background: var(--err-soft); color: var(--err); font-weight: 600; }
+  main > [role='status'] { margin: 20px 0 0; padding: 12px 14px; border-radius: var(--r-sm); background: var(--ok-soft); color: var(--ok); font-weight: 600; }
 
-main{width:100%;max-width:none;margin:0;padding:36px var(--page-gutter)}header,.detail-heading{display:flex;justify-content:space-between;gap:24px;align-items:center}h1{font-size:clamp(28px,3.2vw,38px);font-weight:800;letter-spacing:-0.025em;margin:5px 0}h2{font-size:24px;font-weight:700;margin:10px 0}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;color:var(--color-accent)}p,small{color:var(--color-muted)}.field{display:grid;gap:7px}label{display:flex;flex-direction:column;gap:7px;font-size:13px;font-weight:500}form{display:flex;gap:12px;align-items:end;flex-wrap:wrap}input,select,button{max-width:100%;box-sizing:border-box;border:1px solid var(--color-line-strong);border-radius:var(--radius-sm);padding:10px 14px;min-height:42px;background:var(--color-raised);color:var(--color-text);font:inherit;transition:border-color var(--transition-fast),background var(--transition-fast)}button{cursor:pointer;font-weight:600}button:hover:not(:disabled){background:var(--color-raised-hover);border-color:rgba(255,255,255,0.24)}button:disabled{opacity:.45;cursor:default}a{color:var(--color-accent);font-weight:600}.workspace>aside,.detail{min-width:0}.workspace{display:grid;grid-template-columns:280px minmax(0,1fr);gap:32px;margin-top:32px}aside nav{display:grid;gap:6px}aside nav button{text-align:left;border-color:transparent;background:transparent}.active{color:var(--color-text)!important;background:var(--color-raised)!important;border-left:3px solid var(--color-accent)!important}.collection{display:grid;gap:8px;margin-top:20px}.collection button{display:flex;align-items:center;gap:12px;text-align:left;background:var(--color-surface);border-radius:var(--radius-md);padding:10px 12px}.collection small,.entry-title small{display:block;margin-top:4px}.chosen{border-color:var(--color-accent)!important;background:var(--color-raised)!important}.tile{display:grid;place-items:center;width:42px;height:46px;background:var(--color-raised);font-size:20px;border-radius:var(--radius-sm);color:var(--color-accent)}.detail{background:var(--color-surface);border:1px solid var(--color-line);border-radius:var(--radius-lg);padding:28px;min-height:420px;box-shadow:var(--shadow-sm)}.badge{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--color-accent)}.settings{padding:18px 0;border-bottom:1px solid var(--color-line)}summary{cursor:pointer;font-weight:600}.settings form{margin-top:15px}.settings p{flex-basis:100%;font-size:13px}.settings>label{margin-top:14px}.search{margin-top:22px}.search label{flex:1}.results{max-height:260px;overflow:auto;margin:15px 0;border:1px solid var(--color-line);border-radius:var(--radius-md);background:var(--color-raised)}.results>div{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--color-line)}.results>div:last-child{border-bottom:0}.results small{display:block}.entries{padding:0;list-style:none;margin-top:24px}.entries li{display:flex;align-items:center;gap:10px;padding:14px 8px;border-bottom:1px solid var(--color-line);border-radius:var(--radius-sm);transition:background var(--transition-fast)}.entries li:hover{background:rgba(255,255,255,0.03)}.number{font-size:12px;font-weight:600;color:var(--color-muted);width:24px}.entry-title{flex:1;min-width:0}.entry-title strong{overflow-wrap:anywhere}.entries button{padding:7px;min-width:34px;min-height:34px}.people{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.empty{text-align:center;padding:60px 25px}.empty>span{font-size:56px;color:var(--color-accent);display:block;margin-bottom:12px}.admin-policy{margin-top:28px;padding:20px;border:1px solid var(--color-line);border-radius:var(--radius-md);background:var(--color-surface)}.admin-policy label{display:flex;flex-direction:row;align-items:center;margin:15px 0}.delete{margin-top:30px;font-size:13px}input[type=checkbox]{accent-color:var(--color-accent);min-height:auto}@media(max-width:800px){main{padding:22px 16px calc(92px + env(safe-area-inset-bottom, 0px))}header{align-items:start;flex-direction:column}.workspace{grid-template-columns:minmax(0,1fr);gap:18px}aside nav{grid-template-columns:repeat(3,1fr);font-size:12px}.collection{display:flex;overflow:auto;max-width:100%}.collection button{flex:0 0 200px;min-width:0}.detail{padding:18px}.detail-heading{align-items:start;flex-direction:column}.entries{font-size:13px}.entries li{flex-wrap:wrap}h1{font-size:28px}}
+  .workspace > aside, .detail { min-width: 0; }
+  .workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 32px; }
+  aside nav { display: grid; gap: 2px; }
+  aside nav button { justify-content: flex-start; min-height: 42px; padding: 0 12px; border-radius: 12px; background: transparent; color: var(--mu); font-weight: 600; text-align: left; }
+  aside nav button:hover:not(:disabled) { background: var(--pn); color: var(--tx); }
+  aside nav button.active, aside nav button.active:hover:not(:disabled) { background: var(--pn-2); color: var(--tx); }
+  .collection { display: grid; gap: 4px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .collection button { justify-content: flex-start; gap: 12px; min-height: 60px; padding: 8px 10px; border-radius: var(--r-md); background: transparent; font-weight: 600; text-align: left; }
+  .collection button:hover:not(:disabled) { background: var(--pn); }
+  .collection button > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+  .collection strong { font-size: 15px; font-weight: 700; }
+  .collection small, .entry-title small { display: block; margin-top: 2px; font-weight: 500; }
+  .collection button.chosen, .collection button.chosen:hover:not(:disabled) { background: var(--ac-soft); }
+  .tile { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 14px; background: var(--pn-2); color: var(--mu); font-size: 18px; }
+  .chosen .tile { color: var(--ac); }
+  .collection p { margin: 0; padding: 8px 10px; }
+
+  .detail { min-height: 420px; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  .detail-heading { align-items: center; }
+  .detail-heading p { margin-top: 0; }
+  .badge { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--mu); font-size: 12px; font-weight: 700; }
+  .settings { margin-top: 20px; padding: 4px 0 20px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  summary { display: flex; align-items: center; min-height: 48px; font-size: 15px; font-weight: 700; cursor: pointer; border-radius: var(--r-xs); }
+  .settings form { margin-top: 12px; }
+  .settings p { flex-basis: 100%; margin: 0; font-size: 13px; }
+  .settings > label { margin-top: 16px; }
+  .settings > label input { font-family: var(--font-mono); font-size: 13px; }
+  .settings > small { display: block; margin-top: 8px; }
+  .people { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .people button { min-height: 38px; padding: 0 14px; border-radius: var(--r-pill); background: var(--pn); font-size: 14px; font-weight: 600; }
+  .people button:hover:not(:disabled) { background: var(--pn-2); }
+  .search { margin-top: 20px; }
+  .search label { flex: 1; min-width: min(240px, 100%); }
+  .results { max-height: 260px; overflow: auto; margin: 16px 0; border-radius: var(--r-md); background: var(--pn); overscroll-behavior: contain; }
+  .results > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 6px 8px 6px 16px; border-bottom: 1px solid var(--line); }
+  .results > div:last-child { border-bottom: 0; }
+  .results > div > span { min-width: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .results small { display: block; margin-top: 2px; font-weight: 500; }
+  .results button { min-height: 40px; background: transparent; }
+  .results button:hover:not(:disabled) { background: var(--pn-2); }
+  .entries { margin: 20px 0 0; padding: 0; list-style: none; }
+  .entries li { display: flex; align-items: center; gap: 8px; min-height: 60px; padding: 8px; border-top: 1px solid var(--line); transition: background-color var(--t-fast) ease; }
+  .entries li:first-child { border-top: 0; }
+  .entries li:hover { background: var(--pn); }
+  .number { flex: none; width: 28px; font-size: 13px; font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; text-align: center; }
+  .entry-title { flex: 1; min-width: 0; }
+  .entry-title strong { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+  .entries a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 14px; font-size: 14px; }
+  .entries a:hover { background: var(--pn-2); }
+  .entries button { min-width: 44px; min-height: 44px; padding: 0 12px; border-radius: 14px; background: transparent; color: var(--mu); }
+  .entries button:hover:not(:disabled) { background: var(--pn-2); color: var(--tx); }
+  .entries > p { margin: 0; padding: 24px 8px; }
+  .pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; font-size: 14px; }
+  .pagination span { font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; }
+  .delete { margin-top: 28px; padding-top: 4px; border-top: 1px solid var(--line); font-size: 14px; }
+  .delete summary { color: var(--err); }
+  .delete p { margin: 0 0 12px; }
+  .delete button { background: var(--err-soft); color: var(--err); }
+  .delete button:hover:not(:disabled) { background: var(--err-soft); opacity: 0.85; }
+  .empty { display: flex; flex-direction: column; align-items: center; max-width: 65ch; margin: 0 auto; padding: 56px 24px; text-align: center; }
+  .empty > span { display: grid; place-items: center; width: 64px; height: 64px; margin-bottom: 8px; border-radius: var(--r-md); background: var(--pn-2); color: var(--mu); font-size: 28px; }
+  .empty a { display: inline-flex; align-items: center; height: 48px; margin-top: 20px; padding: 0 22px; border-radius: var(--r-md); background: var(--pn-2); transition: background-color var(--t-fast) ease; }
+  .empty a:hover { background: var(--pn-3); }
+  .admin-policy { margin-top: 28px; padding: 8px 24px 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
+  .admin-policy p { margin: 0 0 8px; }
+  .admin-policy label { display: flex; flex-direction: row; align-items: center; gap: 12px; min-height: 44px; margin: 4px 0; font-weight: 600; }
+  .admin-policy > button { margin-top: 12px; background: var(--btn); color: var(--btn-tx); }
+  .admin-policy > button:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--ac); }
+
+  @media (max-width: 1023px) {
+    .workspace { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    aside nav { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+    aside nav::-webkit-scrollbar { display: none; }
+    aside nav button { flex: none; min-height: 40px; white-space: nowrap; background: var(--pn); }
+    .collection { display: flex; overflow-x: auto; max-width: 100%; margin-top: 12px; padding-top: 12px; scrollbar-width: none; }
+    .collection::-webkit-scrollbar { display: none; }
+    .collection button { flex: 0 0 220px; min-width: 0; background: var(--pn); }
+  }
+  @media (max-width: 640px) {
+    main { padding-top: 12px; padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px)); }
+    header { align-items: stretch; flex-direction: column; gap: 16px; }
+    header form label { flex: 1; min-width: 0; }
+    .detail { padding: 16px; border-radius: var(--r-md); }
+    .detail-heading { align-items: flex-start; flex-direction: column; gap: 12px; }
+    .entries li { flex-wrap: wrap; }
+    .admin-policy { padding: 4px 16px 16px; border-radius: var(--r-md); }
+  }
 </style>

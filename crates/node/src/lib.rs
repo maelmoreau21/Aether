@@ -10,6 +10,7 @@ pub mod files;
 mod image_preview;
 pub mod images;
 pub use image_preview::width as image_preview_width;
+pub mod chapter_images;
 pub mod inventory;
 pub mod mp4_audio;
 pub mod music;
@@ -26,6 +27,43 @@ pub mod tasks;
 pub mod transport;
 pub mod trickplay;
 pub mod video_stream;
+
+/// Writable state directory shared with the rest of the deployment, used to resolve relative
+/// cache defaults instead of the process working directory (read-only in hardened containers):
+/// `MEDIA_NODE_DATA_DIR` (Media Node), else the directory of `MEDIA_DB_PATH` (Core, default
+/// `data/core.sqlite3`), made absolute once.
+pub fn default_data_dir() -> std::path::PathBuf {
+    static DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
+        let dir = std::env::var_os("MEDIA_NODE_DATA_DIR")
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let db = std::path::PathBuf::from(
+                    std::env::var_os("MEDIA_DB_PATH").unwrap_or_else(|| "data/core.sqlite3".into()),
+                );
+                db.parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+            });
+        if dir.is_absolute() {
+            dir
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(&dir))
+                .unwrap_or(dir)
+        }
+    });
+    DIR.clone()
+}
+
+/// The directory configured in `variable` (kept as given), or `default_data_dir()/<relative>`.
+pub fn data_subdir(variable: &str, relative: &str) -> std::path::PathBuf {
+    std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| default_data_dir().join(relative))
+}
 
 #[inline]
 pub fn trim_memory() {
@@ -53,37 +91,15 @@ use media_contracts::{
     errors::NodeErrorCode,
     ids::NodeId,
     inventory::{CachedFile, InventoryBatch, ReadGrant, ReadTarget, ScanReport},
-    media::{LocalImage, ValidatedImage},
+    media::LocalImage,
 };
-use std::{
-    collections::HashMap,
-    io,
-    path::{Path, PathBuf},
-    sync::atomic::AtomicBool,
-};
+use std::{collections::HashMap, io, path::Path, sync::atomic::AtomicBool};
 
 /// In-process local Media Node service implementing the Core ↔ Node boundary for Milestone J1/P2.
 #[derive(Debug, Clone, Default)]
 pub struct LocalNode;
 
 impl LocalNode {
-    /// Validate that `root` is a confined, existing directory inside `allowed_root`
-    /// without parent traversal or symlink/reparse-point escapes.
-    pub async fn validate_root(&self, root: &Path, allowed_root: &Path) -> io::Result<PathBuf> {
-        validate_library_root(root, allowed_root).await
-    }
-
-    /// Execute a read-only library scan with optional probe and poster caches.
-    pub async fn scan_library(
-        &self,
-        root: &Path,
-        cache: &HashMap<String, CachedFile>,
-        image_cache: &HashMap<String, LocalImage>,
-        cancel: &AtomicBool,
-    ) -> io::Result<ScanReport> {
-        scanner::scan_with_images(root, cache, image_cache, cancel).await
-    }
-
     /// Execute a bounded batch-streaming read-only library scan with optional probe and poster caches.
     #[allow(clippy::too_many_arguments)]
     pub async fn scan_library_streaming<F, Fut>(
@@ -122,18 +138,6 @@ impl LocalNode {
     /// Open a confined media file handle relative to `root`.
     pub async fn open_media(&self, root: &Path, relative: &Path) -> io::Result<OpenedFile> {
         OpenedFile::open_in_root(root, relative).await
-    }
-
-    /// Open and validate a confined poster image relative to `root`, returning both
-    /// the validated image metadata and the same `OpenedFile` handle for streaming.
-    pub async fn open_validated_image(
-        &self,
-        root: &Path,
-        relative: &Path,
-    ) -> io::Result<(ValidatedImage, OpenedFile)> {
-        let opened = OpenedFile::open_in_root(root, relative).await?;
-        let validated = images::validate_opened(&opened).await?;
-        Ok((validated, opened))
     }
 
     /// Execute an authorized `ReadGrant` issued by Core for the local standalone Node.
@@ -370,3 +374,5 @@ mod tests {
         );
     }
 }
+
+pub mod image_encoding;

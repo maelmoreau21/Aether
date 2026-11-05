@@ -16,15 +16,19 @@
 <style>
   .catalog-skeleton {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-    gap: 24px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(var(--poster-width, clamp(150px, 12vw, 190px)), 1fr));
+    gap: 28px 16px;
     margin-block: 24px;
+  }
+
+  .skeleton {
+    background: var(--pn-2);
+    animation: halo-skeleton-pulse 1.6s var(--ease) infinite;
   }
 
   .poster-skeleton {
     aspect-ratio: 2 / 3;
-    border-radius: var(--radius-md);
-    border: 1px solid var(--color-line);
+    border-radius: var(--r-md);
   }
 
   .title-skeleton {
@@ -32,7 +36,7 @@
     height: 14px;
     width: 78%;
     margin-top: 12px;
-    border-radius: 4px;
+    border-radius: var(--r-xs);
   }
 
   .meta-skeleton {
@@ -40,7 +44,7 @@
     height: 11px;
     width: 45%;
     margin-top: 6px;
-    border-radius: 4px;
+    border-radius: var(--r-xs);
   }
 
   .sr-only {
@@ -51,9 +55,19 @@
     clip-path: inset(50%);
   }
 
+  @keyframes halo-skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+  }
+
   @media (max-width: 640px) {
     .catalog-skeleton {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px 10px;
     }
   }
 </style>

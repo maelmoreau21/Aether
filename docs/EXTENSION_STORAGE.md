@@ -115,9 +115,8 @@ Core. L'admission existante des exécutions reste bornée.
   uploads incomplets supprimés ; compteurs recalculés transactionnellement.
 - Désinstallation `deleteData=true` : suppression explicite des valeurs, objets
   et références de namespace, en plus de l'historique concerné.
-- Mise à jour : une route en place préserve la donnée durable dans le test
-  actuel, mais ne garantit pas encore consentement, migration privée ni
-  rollback. Voir [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md).
+- Mise à jour : migrations signées, snapshot transactionnel privé et rollback
+  explicite : [Cycle de mise à jour](PLUGIN_UPDATE_LIFECYCLE.md).
   Réinstaller avec même ID/éditeur/clé retrouve les résultats
   conservés. Un éditeur ou une clé différente ne peut les lire ; une purge
   explicite est nécessaire avant réutilisation de ce namespace.
@@ -245,7 +244,7 @@ ciblé du décodage de manifeste, de la contention et des allocations.
 ### Refonte de base concurrente constatée le26octobre
 
 Après les tests, le schéma neuf a été consolidé dans
-`crates/core/schema.sql` pour les deux moteurs ; les tables privées et objets
+`crates/core/migrations/schema.sql` pour les deux moteurs ; les tables privées et objets
 y sont présentes. Les fichiers moteur KV/objets, runtime et contrat SDK ont les
 mêmes SHA-256 que les preuves, mais `extensions.rs` et d'autres composants ont
 changé. Les résultats attestent l'instantané enregistré, pas l'ensemble de

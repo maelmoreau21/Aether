@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import { session } from '../auth/session';
+  import { t } from '../i18n';
   let { visible = true }: { visible?: boolean } = $props();
   interface Archive { id: string; size: number; createdAt: number }
-  interface Schedule { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string }
-  interface Listing { available: boolean; reason: string | null; running: boolean; archives: Archive[]; schedule: Schedule }
+  // The automatic schedule is the "backup" scheduled task (Tâches planifiées), not edited here.
+  interface Listing { available: boolean; reason: string | null; running: boolean; archives: Archive[] }
   
   interface MemoryReport {
     core: {
@@ -31,14 +33,7 @@
       linuxSreclaimableBytes: number;
       linuxReclaimableCacheBytes: number;
     } | null;
-    summary: {
-      coreRssBytes: number;
-      childrenRssBytes: number;
-      totalAetherRssBytes: number;
-      linuxPageCacheBytes: number;
-      diagnosis: string;
-      reclaimableAdvice: string;
-    };
+
   }
 
   let listing = $state<Listing | null>(null);
@@ -49,10 +44,6 @@
   let creating = $state(false);
   let error = $state('');
   let success = $state('');
-  let scheduleEnabled = $state(false);
-  let intervalMinutes = $state(1440);
-  let saving = $state(false);
-  const outcomeLabels: Record<string, string> = { never: 'Aucune exécution', running: 'En cours', succeeded: 'Réussie', failed: 'Échec — vérifiez le dossier serveur et son espace libre', interrupted: 'Interrompue au redémarrage' };
   let active = true;
 
   async function refresh() {
@@ -62,7 +53,7 @@
       const response = await fetch('/api/v1/admin/backups', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error(`Chargement impossible (HTTP ${response.status}).`);
       const data: Listing = await response.json();
-      if (active) { listing = data; scheduleEnabled = data.schedule.enabled; intervalMinutes = data.schedule.intervalMinutes; }
+      if (active) listing = data;
     } catch (cause) {
       if (active) error = cause instanceof Error ? cause.message : 'Chargement impossible.';
     } finally { if (active) loading = false; }
@@ -96,10 +87,10 @@
       });
       if (response.ok && active) {
         memoryReport = await response.json();
-        success = 'Caches purgés et mémoire restituée au système d’exploitation.';
+        success = $t('memory_released');
       }
     } catch {
-      error = 'Impossible de libérer la mémoire.';
+      error = $t('memory_release_failed');
     } finally {
       if (active) memoryTrimming = false;
     }
@@ -112,26 +103,16 @@
     success = '';
     try {
       const response = await fetch('/api/v1/admin/backups', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'x-csrf-token': $session.csrfToken }, signal: AbortSignal.timeout(300000) });
-      if (!response.ok) throw new Error(response.status === 409 ? 'Une sauvegarde est déjà en cours ou le dossier serveur est refusé. Actualisez son état.' : `Sauvegarde impossible (HTTP ${response.status}).`);
-      if (active) { success = 'Sauvegarde complète créée. Archive non chiffrée à protéger.'; await refresh(); }
+      if (!response.ok) {
+        const detail = await response.json().catch(() => null);
+        throw new Error(typeof detail?.code === 'string' && detail.code.startsWith('backup_') && typeof detail.message === 'string'
+          ? detail.message
+          : response.status === 409 ? 'Une sauvegarde est déjà en cours ou le dossier serveur est refusé. Actualisez son état.' : `Sauvegarde impossible (HTTP ${response.status}).`);
+      }
+      if (active) { success = $t('backup_created'); await refresh(); }
     } catch (cause) {
-      if (active) error = cause instanceof Error && cause.name === 'TimeoutError' ? 'Délai dépassé. La sauvegarde peut continuer côté serveur : actualisez la liste avant de réessayer.' : cause instanceof Error ? cause.message : 'Sauvegarde impossible.';
+      if (active) error = cause instanceof Error && cause.name === 'TimeoutError' ? $t('timeout_backup') : cause instanceof Error ? cause.message : $t('backup_failed');
     } finally { if (active) creating = false; }
-  }
-
-  async function saveSchedule(event: SubmitEvent) {
-    event.preventDefault();
-    if (!$session || saving) return;
-    saving = true;
-    error = '';
-    success = '';
-    try {
-      const response = await fetch('/api/v1/admin/backups/schedule', { method: 'PUT', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken }, body: JSON.stringify({ enabled: scheduleEnabled, intervalMinutes }), signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error(`Planification impossible (HTTP ${response.status}).`);
-      if (active) { await refresh(); success = 'Planification enregistrée.'; }
-    } catch (cause) {
-      if (active) error = cause instanceof Error ? cause.message : 'Planification impossible.';
-    } finally { if (active) saving = false; }
   }
 
   const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
@@ -141,8 +122,8 @@
 </script>
 
 <section id="backups-section" class="maintenance" aria-labelledby="maintenance-heading">
-  <header><p class="eyebrow">MAINTENANCE</p><h2 id="maintenance-heading">Sauvegardes et base de données</h2><p>Sauvegardez la base complète et la configuration du serveur dans une archive non chiffrée. Réservez son accès à l'administrateur. Sur un serveur Windows, vérifiez les ACL du dossier de sauvegarde et de ses copies : Aether hérite des autorisations du dossier et ne les contrôle pas.</p></header>
-  <div class="actions"><button onclick={create} disabled={loading || creating || !listing?.available || listing?.running}>{creating || listing?.running ? 'Sauvegarde en cours…' : 'Créer une sauvegarde'}</button><button onclick={refresh} disabled={loading}>Actualiser</button></div>
+  <header><p class="eyebrow">{$t('maintenance')}</p><h2 id="maintenance-heading">{$t('backups_database')}</h2><p>{$t('backup_intro')}</p></header>
+  <div class="actions"><button class="primary" onclick={create} disabled={loading || creating || !listing?.available || listing?.running}>{creating || listing?.running ? $t('backup_in_progress') : $t('create_backup')}</button><button onclick={refresh} disabled={loading}>{$t('refresh')}</button></div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if success}<p role="status">{success}</p>{/if}
 
@@ -150,8 +131,8 @@
     <article class="memory-card">
       <div class="memory-header">
         <div>
-          <h3>Consommation mémoire réelle & cache Linux</h3>
-          <p>Distingue la RAM allouée par le Core, les processus enfants (Wasm) et le cache disque du noyau Linux.</p>
+          <h3>{$t('memory_cache')}</h3>
+          <p>{$t('memory_cache_note')}</p>
         </div>
         <button onclick={trimMemory} disabled={memoryTrimming || memoryLoading}>
           {memoryTrimming ? 'Libération en cours…' : 'Libérer la mémoire (Trim)'}
@@ -188,62 +169,78 @@
         {/if}
       </div>
 
-      <div class="notice">
-        <strong>Diagnostic :</strong>
-        <p>{memoryReport.summary.diagnosis}</p>
-        <p class="advice">{memoryReport.summary.reclaimableAdvice}</p>
-      </div>
     </article>
   {/if}
 
-  {#if loading}<p role="status">Chargement des archives…</p>{:else if listing}
-    {#if !listing.available}<div class="notice"><strong>Sauvegarde indisponible</strong><p>{listing.reason ?? "Le service de sauvegarde n'est pas disponible actuellement."}</p></div>{:else}
-      <article><h3>Planification automatique</h3>
-        <form onsubmit={saveSchedule}>
-          <label><input type="checkbox" bind:checked={scheduleEnabled} disabled={saving} /> Activer les sauvegardes automatiques</label>
-          <label>Intervalle en minutes <input type="number" min="60" max="10080" step="1" required bind:value={intervalMinutes} disabled={saving} /></label>
-          <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer la planification'}</button>
-        </form>
-        <p>De 1 heure à 7 jours. Le Core doit être démarré. Aucune suppression automatique des archives.</p>
-        {#if listing.schedule.enabled}<p>Prochaine tentative : {new Date(listing.schedule.nextDueAt * 1000).toLocaleString()}</p>{/if}
-        <p>Dernier résultat : {outcomeLabels[listing.schedule.lastOutcome] ?? listing.schedule.lastOutcome}</p>
-        {#if listing.schedule.lastCompletedAt}<p>Dernière fin : {new Date(listing.schedule.lastCompletedAt * 1000).toLocaleString()}</p>{/if}
+  {#if loading}<p role="status">{$t('loading_archives')}</p>{:else if listing}
+    {#if !listing.available}<div class="notice"><strong>{$t('backup_unavailable')}</strong><p>{listing.reason ?? $t('backup_service_unavailable')}</p></div>{:else}
+      <article><h3>{$t('automatic_schedule')}</h3>
+        <p>{$t('sched_backup_schedule_hint')}</p>
+        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied; the hash carries the task id. -->
+        <a class="link" href={resolve(`admin/libraries/#tasks-section?task=backup`)}>{$t('sched_backup_schedule_link')}</a>
       </article>
-      <article><h3>Archives</h3><p>Les archives sont conservées dans le dossier du serveur. Téléchargez une copie et conservez-la en lieu sûr.</p>
-      {#if listing.archives.length === 0}<p>Aucune sauvegarde disponible.</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
-<a href={`/api/v1/admin/backups/${archive.id}/download`} download>Télécharger</a></li>{/each}</ul>{/if}</article>
+      <article><h3>{$t('archives')}</h3><p>{$t('archives_note')}</p>
+      {#if listing.archives.length === 0}<p>{$t('no_backup_available')}</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
+    <a href={`/api/v1/admin/backups/${archive.id}/download`} download>{$t('download')}</a></li>{/each}</ul>{/if}</article>
     {/if}
   {/if}
 </section>
 
 <style>
-  .maintenance { display: grid; gap: 1.5rem; }
-  header p, article p { color: var(--text-secondary); line-height: 1.65; }
-  h2, h3 { color: var(--text-primary); margin: 0 0 .75rem; }
-  h2 { font-size: 1.5rem; }
-  .eyebrow { font-size: .7rem; letter-spacing: .15em; font-weight: 700; }
-  article, .notice { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 16px; padding: 1.5rem; min-width: 0; }
-  .notice { border-inline-start: 3px solid var(--accent-primary); }
-  .notice p { color: var(--text-secondary); }
-  .notice .advice { margin-top: .5rem; font-size: .85rem; color: var(--text-secondary); }
-  form { display: grid; gap: 1rem; }
-  form label { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; color: var(--text-primary); }
-  input[type="number"] { max-width: 10rem; padding: .6rem; background: var(--bg-main); color: var(--text-primary); border: 1px solid var(--border-subtle); border-radius:var(--radius-md); }
-  .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-  button, a { border: 1px solid var(--border-subtle); border-radius:var(--radius-md); padding: .7rem 1rem; background: var(--bg-elevated); color: var(--text-primary); font: inherit; }
-  button { cursor: pointer; } button:disabled { cursor: default; opacity: .5; }
-  .archives { padding: 0; margin: 0; list-style: none; }
-  li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--border-subtle); }
-  small { display: block; margin-top: .35rem; color: var(--text-secondary); overflow-wrap: anywhere; }
-  .error { color: var(--status-error); }
-  .memory-card { display: grid; gap: 1.25rem; }
-  .memory-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
-  .memory-header h3 { margin: 0 0 .25rem; }
-  .memory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; }
-  .metric { display: grid; gap: .35rem; padding: 1rem; background: var(--bg-main); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); }
-  .metric.highlight { border-color: var(--accent-primary); }
-  .metric small { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); margin: 0; }
-  .metric strong { font-size: 1.5rem; color: var(--text-primary); }
-  .metric span { font-size: .75rem; color: var(--text-secondary); }
-  @media (max-width: 650px) { li { align-items: start; flex-direction: column; } article, .notice { padding: 1.1rem; } }
+  .maintenance { display: grid; gap: 20px; min-width: 0; max-width: 860px; font-family: var(--font-sans); color: var(--color-text); }
+  header { display: grid; gap: 6px; min-width: 0; }
+  header p, article p { max-width: 80ch; margin: 0; font-size: 13px; line-height: 1.65; color: var(--color-muted); }
+  .eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent); }
+  h2, h3 { margin: 0; color: var(--color-text); }
+  h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
+  h3 { font-size: 16px; font-weight: 600; }
+
+  /* Actions : un primaire, le reste en ghost */
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+  button, a { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; box-sizing: border-box; padding: 8px 18px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: 14px; font-weight: 500; text-decoration: none; white-space: nowrap; cursor: pointer; transition: background-color var(--transition-fast); }
+  button:hover:not(:disabled), a:hover { background: var(--color-raised); }
+  button:focus-visible, a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .primary { border: 0; background: var(--color-play); color: var(--color-on-play); font-weight: 600; }
+  .primary:hover:not(:disabled) { background: var(--color-play-hover); }
+
+  /* Retours et avis */
+  [role='status'] { margin: 0; font-size: 14px; line-height: 1.5; color: var(--color-muted); }
+  .error { margin: 0; padding: 12px 16px; border-radius: var(--radius-sm); background: var(--color-danger-soft); color: var(--color-text); font-size: 14px; line-height: 1.5; }
+  .notice { min-width: 0; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--color-warning-soft); font-size: 14px; }
+  .notice strong { font-weight: 600; color: var(--color-text); }
+  .notice p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--color-muted); }
+
+  /* Panneaux plats */
+  article { display: grid; gap: 10px; min-width: 0; padding: 20px; border-radius: var(--radius-md); background: var(--color-surface); }
+
+  .link { width: fit-content; }
+
+  /* Archives : lignes fines */
+  .archives { margin: 4px 0 0; padding: 0; list-style: none; }
+  li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-top: 1px solid var(--color-line-subtle); }
+  li > div { min-width: 0; }
+  li strong { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--color-text); }
+  small { display: block; margin-top: 4px; font-size: 12px; color: var(--color-muted); overflow-wrap: anywhere; }
+
+  /* Mémoire */
+  .memory-card { gap: 16px; }
+  .memory-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+  .memory-header > div { flex: 1 1 320px; min-width: 0; }
+  .memory-header h3 { margin-bottom: 4px; }
+  .memory-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .metric { display: grid; gap: 6px; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--color-raised); }
+  .metric.highlight { background: var(--color-success-soft); }
+  .metric small { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
+  .metric strong { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; color: var(--color-text); }
+  .metric span { font-size: 12px; color: var(--color-muted); }
+
+  @media (max-width: 640px) {
+    article { padding: 16px; }
+    li { flex-direction: column; align-items: stretch; gap: 10px; }
+    li a, .memory-header button { width: 100%; }
+    .actions button { flex: 1 1 auto; }
+    .memory-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) { button, a { transition: none; } }
 </style>

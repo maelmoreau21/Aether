@@ -31,7 +31,7 @@ Prochains petits lots proposés, à valider après retour sur l’interface :
 
 Les prochains lots restent des manques de produit, pas des fonctionnalités livrées.
 Contrats actuels, quatre modes d’actualisation et préparation des fournisseurs : [SETTINGS_AND_REFRESH.md](SETTINGS_AND_REFRESH.md).
-Les résultats des contrôles réellement exécutés sont consignés dans MEMORY.md.
+Les résultats des contrôles réellement exécutés sont consignés dans .ai/MEMORY.md.
 
 ## Navigation du compte — 25 octobre 2026
 

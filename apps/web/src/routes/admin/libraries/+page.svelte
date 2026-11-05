@@ -9,26 +9,32 @@
 
   import { session, type AuthUser } from '../../../lib/auth/session';
   import AdminShell from '../../../lib/admin/AdminShell.svelte';
-  import { adminDestinations, adminDestinationLabel, adminSectionHashes } from '../../../lib/admin/navigation';
+  import { adminDestinations, adminDestinationLabel, parseAdminHash } from '../../../lib/admin/navigation';
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { Library, Scan, AdminNode, CoreHealth, EnrollmentToken, RefreshMode } from '../../../lib/admin/types';
   import AdminSettings from '../../../lib/admin/AdminSettings.svelte';
   import { DEFAULT_NAME } from '../../../lib/config/brand';
 
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
+  import Statistics from '../../../lib/statistics/Statistics.svelte';
   import { defaultLibraryOptions } from '../../../lib/admin/types';
   import AdminLibraries from '../../../lib/admin/AdminLibraries.svelte';
   import AdminNodes from '../../../lib/admin/AdminNodes.svelte';
   import AdminUsers from '../../../lib/admin/AdminUsers.svelte';
   import AdminTasks from '../../../lib/admin/AdminTasks.svelte';
   import AdminMaintenance from '../../../lib/admin/AdminMaintenance.svelte';
+  import DistributedTasks from '../../../lib/admin/DistributedTasks.svelte';
+  import AutomationTasks from '../../../lib/admin/AutomationTasks.svelte';
   import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
+  import Requests from '../../../lib/applications/Requests.svelte';
+  import Reports from '../../../lib/applications/Reports.svelte';
+  import AcquisitionAdmin from '../../../lib/applications/AcquisitionAdmin.svelte';
   import AdminGroups from '../../../lib/admin/AdminGroups.svelte';
   import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
   import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
   import AdminArtwork from '../../../lib/admin/AdminArtwork.svelte';
   import type { UserGroup } from '../../../lib/admin/request';
-  import { t, locale } from '../../../lib/i18n';
+  import { t } from '../../../lib/i18n';
 
   let scans = $state<Record<string, Scan>>({});
   let pending = $state<string[]>([]);
@@ -335,22 +341,21 @@
 
   let selectedTaskId = $state<string | null>(null);
   let currentHash = $state('#overview');
-  const sectionTitle = $derived(adminDestinationLabel(adminDestinations.find(link => link.hash === currentHash) ?? adminDestinations[0], $t, $locale === 'en'));
+  const sectionTitle = $derived(adminDestinationLabel(adminDestinations.find(link => link.hash === currentHash) ?? adminDestinations[0], $t));
   function chooseSection(hash: string) { currentHash = hash; selectedTaskId = null; }
-  function selectedSection() {
-    const section = window.location.hash.split('?')[0];
-    return adminSectionHashes.has(section) ? section : '#overview';
+  function syncSection() {
+    const selected = parseAdminHash(window.location.hash);
+    currentHash = selected.section;
+    selectedTaskId = selected.task;
   }
 
   onMount(() => {
     void load();
     if (typeof window !== 'undefined' && window.location.hash) {
-      currentHash = selectedSection();
-      selectedTaskId = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('task');
+      syncSection();
     }
     const hashHandler = () => {
-      currentHash = selectedSection();
-      selectedTaskId = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('task');
+      syncSection();
     };
     window.addEventListener('hashchange', hashHandler);
     const timer = setInterval(() => {
@@ -415,6 +420,7 @@
           <AdminSettings section={currentHash} />
 
           <!-- Section 1: Dashboard Overview -->
+          <div hidden={currentHash !== '#statistics-section'}><Statistics administrator active={currentHash === '#statistics-section'} /></div>
           <div hidden={currentHash !== "#overview"}>
           <AdminOverview active={currentHash === "#overview"}
             {coreHealth}
@@ -483,6 +489,12 @@
           <div hidden={currentHash !== '#tasks-section'}>
             <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} selectedId={selectedTaskId} active={currentHash === '#tasks-section'} />
           </div>
+          {#if currentHash === '#operations-section'}
+            <DistributedTasks active={true} {libraries} {nodes} />
+          {/if}
+          {#if currentHash === '#automation-section'}
+            <AutomationTasks active={true} {libraries} />
+          {/if}
           <div hidden={currentHash !== '#backups-section'}>
             <AdminMaintenance visible={currentHash === '#backups-section'} />
           </div>
@@ -501,10 +513,72 @@
             <AdminArtwork {libraries} />
           </div>
           <AdminCapabilities section={currentHash.slice(1)} />
+          {#if currentHash === '#requests-section'}<div class="extension-application"><Requests embedded /></div>{/if}
+          {#if currentHash === '#reports-section'}<div class="extension-application"><Reports embedded /></div>{/if}
+          {#if currentHash === '#acquisition-section'}<div class="extension-application"><AcquisitionAdmin embedded /></div>{/if}
     {/if}
   {/if}
 </AdminShell>
 
 <style>
-  .error-banner,.notice-banner{padding:12px 16px;border-radius:var(--radius-sm);margin-bottom:20px;font-size:13px;display:flex;align-items:center;justify-content:space-between;gap:12px;}.banner-content{display:flex;align-items:center;gap:10px;min-width:0;overflow-wrap:anywhere;}.banner-content p{margin:0;}.error-banner{background:var(--color-danger-soft);border:1px solid var(--color-danger);color:var(--color-danger);}.notice-banner{background:var(--color-success-soft);border:1px solid var(--color-success);color:var(--color-success);}.small-btn{border:1px solid currentColor;background:transparent;color:inherit;border-radius:var(--radius-sm);padding:6px 12px;font:inherit;cursor:pointer;}.loading-state{display:flex;flex-direction:column;align-items:center;gap:16px;padding:60px 0;color:var(--color-muted);}.logo-spinner{width:48px;height:48px;display:block;margin:0 auto;}
+  .extension-application :global(.application-page) { max-width: none; padding: 0; }
+.error-banner,
+  .notice-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 56px;
+    margin-bottom: 4px;
+    padding: 12px 16px;
+    border-radius: var(--r-md);
+    color: var(--tx);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .error-banner { background: var(--err-soft); }
+  .notice-banner { background: var(--ok-soft); }
+  .banner-content { display: flex; align-items: flex-start; gap: 12px; min-width: 0; overflow-wrap: anywhere; }
+  .banner-content :global(svg) { flex: none; margin-top: 2px; }
+  .error-banner .banner-content :global(svg) { color: var(--err); }
+  .notice-banner .banner-content :global(svg) { color: var(--ok); }
+  .banner-content p { margin: 0; }
+  .banner-content strong { display: block; margin-bottom: 2px; font-weight: 700; }
+  .banner-content code { font-family: var(--font-mono); font-size: 13px; }
+  .error-banner > p { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .small-btn {
+    flex: none;
+    height: 44px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--pn-2);
+    color: var(--tx);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background-color var(--t-fast) var(--ease);
+  }
+  .small-btn:hover:not(:disabled) { background: var(--pn-3); }
+  .small-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .small-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 64px 24px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--bg-2);
+    color: var(--mu);
+    font-size: 14px;
+    text-align: center;
+  }
+  .loading-state p { margin: 0; }
+  .logo-spinner { display: block; width: 48px; height: 48px; margin: 0 auto; }
+  @media (max-width: 640px) {
+    .error-banner, .notice-banner { flex-wrap: wrap; }
+    .loading-state { padding: 48px 16px; }
+  }
 </style>

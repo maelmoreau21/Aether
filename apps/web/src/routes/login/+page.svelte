@@ -1,10 +1,11 @@
 <script lang="ts">
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
-  import { asset, resolve } from '$app/paths';
+  import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login, bootstrapAdmin } from '../../lib/auth/session';
   import Icon from '../../lib/ui/Icon.svelte';
+  import QuickConnect from '../../lib/auth/QuickConnect.svelte';
 
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
@@ -189,18 +190,13 @@
 </svelte:head>
 
 <main class="login-viewport">
-  <div class="ambient-glow" aria-hidden="true"></div>
-
   <div class="login-wrapper">
     <header class="brand-header">
       <div class="brand-badge">
-        <img
-          src={asset('images/logo-animated.svg')}
-          alt=""
-          width="40"
-          height="48"
-          class="brand-icon"
-        />
+        <svg class="brand-icon" viewBox="0 0 256 256" width="44" height="44" aria-hidden="true">
+          <defs><linearGradient id="login-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="logo-stop-a" /><stop offset="1" class="logo-stop-b" /></linearGradient></defs>
+          <path d="M64 192 V48 L216 128 L116 180" fill="none" stroke="url(#login-brand)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
         <span class="brand-title">{name}</span>
       </div>
       <p class="brand-tagline">VOTRE CINÉMA, CHEZ VOUS</p>
@@ -429,10 +425,12 @@
           </form>
         {/if}
 
+        <QuickConnect />
+
         <footer class="card-footer">
           {#if !localLoginEnabled}
             <p class="help-text">
-              La connexion locale est désactivée sur ce serveur. L'authentification s'effectue exclusivement via votre fournisseur SSO ({ssoProvider}).
+              La connexion locale est désactivée. Utilisez votre fournisseur SSO ({ssoProvider}) ou autorisez la connexion depuis un appareil déjà connecté.
             </p>
           {:else if ssoEnabled}
             <p class="help-text">
@@ -455,143 +453,129 @@
 
 <style>
   .login-viewport {
-    position: relative;
     min-height: 100svh;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 32px 20px;
-    background-color: var(--color-canvas, #0B0C10);
-    overflow-x: hidden;
-  }
-
-  .ambient-glow {
-    position: absolute;
-    top: 15%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 680px;
-    height: 460px;
-    background: radial-gradient(
-      ellipse at center,
-      rgba(249, 115, 22, 0.16) 0%,
-      rgba(245, 158, 11, 0.06) 45%,
-      transparent 70%
-    );
-    filter: blur(80px);
-    pointer-events: none;
-    z-index: 0;
+    padding: 40px var(--gutter);
+    background: var(--bg);
+    color: var(--tx);
   }
 
   .login-wrapper {
-    position: relative;
-    z-index: 1;
-    width: 100%;
-    max-width: 440px;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 28px;
+    align-items: stretch;
+    gap: 24px;
+    width: 100%;
+    max-width: 440px;
+    min-width: 0;
   }
 
   .brand-header {
     display: flex;
     flex-direction: column;
     align-items: center;
-    text-align: center;
     gap: 8px;
+    text-align: center;
   }
 
   .brand-badge {
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
   }
 
-  .brand-icon {
-    filter: drop-shadow(0 4px 14px rgba(249, 115, 22, 0.35));
-  }
+  .brand-icon { flex: none; }
 
   .brand-title {
-    font-size: 32px;
+    min-width: 0;
+    font-size: 28px;
     font-weight: 800;
-    letter-spacing: -0.04em;
-    color: var(--color-text-bright, #ffffff);
+    letter-spacing: -0.03em;
+    color: var(--tx);
+    overflow-wrap: anywhere;
   }
 
   .brand-tagline {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    color: var(--color-muted, #A1A1AA);
-    text-transform: uppercase;
     margin: 0;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--mu);
   }
 
   .login-card {
-    width: 100%;
-    background: var(--color-glass-raised, rgba(20, 20, 26, 0.88));
-    border: 1px solid var(--color-line-strong, rgba(255, 255, 255, 0.14));
-    border-radius: var(--radius-lg, 14px);
-    box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    padding: 36px 32px;
     display: flex;
     flex-direction: column;
-    gap: 22px;
+    gap: 20px;
+    min-width: 0;
+    padding: 32px;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    overflow-wrap: anywhere;
   }
 
   .card-intro {
-    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
   }
 
   .badge-setup {
-    display: inline-block;
-    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: var(--r-xs);
+    background: var(--ac-soft);
+    color: var(--ac);
+    font-size: 12px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    padding: 4px 10px;
-    background: var(--color-accent-soft, rgba(249, 115, 22, 0.16));
-    border: 1px solid rgba(249, 115, 22, 0.35);
-    border-radius: var(--radius-full, 9999px);
-    color: var(--color-accent, #F97316);
-    margin-bottom: 12px;
   }
 
   h1 {
-    font-size: 24px;
-    font-weight: 700;
+    margin: 0;
+    font-size: clamp(28px, 4vw, 34px);
+    font-weight: 800;
     letter-spacing: -0.03em;
-    color: var(--color-text-bright, #ffffff);
-    margin: 0 0 6px 0;
+    line-height: 1.1;
+    color: var(--tx);
   }
 
   .card-desc {
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--color-muted, #A1A1AA);
     margin: 0;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--mu);
   }
 
   .error-banner {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
-    background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.35);
-    border-radius: var(--radius-sm, 6px);
+    gap: 10px;
     padding: 12px 14px;
-    color: var(--color-danger, #EF4444);
+    border-radius: var(--r-sm);
+    background: var(--err-soft);
+    color: var(--err);
   }
 
+  .error-banner > :global(svg) { flex: none; margin-top: 2px; }
+
   .error-text {
-    font-size: 12px;
-    line-height: 1.5;
     margin: 0;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .error-text code {
+    font-family: var(--font-mono);
+    font-size: 13px;
   }
 
   .sso-section {
@@ -601,106 +585,113 @@
 
   .btn-sso {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: space-between;
+    gap: 12px;
     width: 100%;
-    min-height: 52px;
-    padding: 12px 18px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid var(--color-line-strong, rgba(255, 255, 255, 0.18));
-    border-radius: var(--radius-sm, 6px);
-    color: var(--color-text-bright, #ffffff);
-    font-size: 14px;
-    font-weight: 650;
+    min-height: 48px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--pn-2);
+    color: var(--tx);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    text-align: left;
     cursor: pointer;
-    transition: all var(--transition-normal, 250ms ease);
-    backdrop-filter: blur(12px);
+    transition: background-color var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
 
   .btn-sso:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.14);
-    border-color: rgba(255, 255, 255, 0.32);
-    transform: translateY(-1px);
+    background: var(--pn-3);
   }
 
-  .btn-sso:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  .btn-sso:active:not(:disabled),
+  .btn-submit:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+
+  .btn-sso:disabled,
+  .btn-submit:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .btn-sso-left {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
+    min-width: 0;
   }
 
   .sso-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--color-accent, #E50914);
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--mu);
   }
 
   .btn-sso-right {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex: none;
   }
 
   .provider-pill {
-    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: var(--r-xs);
+    background: var(--pn-2);
+    color: var(--mu);
+    font-size: 12px;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    padding: 3px 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: var(--radius-full, 9999px);
-    color: var(--color-text, #F3F4F6);
   }
 
   .divider {
     display: flex;
     align-items: center;
     gap: 12px;
-    width: 100%;
   }
 
   .divider-line {
     flex: 1;
     height: 1px;
-    background: var(--color-line, rgba(255, 255, 255, 0.08));
+    background: var(--line);
   }
 
   .divider-text {
-    font-size: 11px;
-    color: var(--color-subtle, #71717A);
-    text-transform: lowercase;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
+    flex: none;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mu);
   }
 
   .login-form {
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 16px;
   }
 
   .field-group {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
   }
 
   .field-label {
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--color-text, #F3F4F6);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--tx);
   }
 
   .field-hint {
-    font-size: 11px;
-    color: var(--color-subtle, #71717A);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--mu);
   }
 
   .input-container {
@@ -712,75 +703,81 @@
   .input-icon {
     position: absolute;
     left: 14px;
-    color: var(--color-subtle, #71717A);
+    display: grid;
+    place-items: center;
+    color: var(--mu);
     pointer-events: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
   }
 
   input {
     width: 100%;
-    min-height: 48px;
-    padding: 12px 14px 12px 42px;
-    background: var(--color-raised, #18181B);
-    border: 1px solid var(--color-line-strong, rgba(255, 255, 255, 0.14));
-    border-radius: var(--radius-sm, 6px);
-    color: var(--color-text-bright, #ffffff);
-    font-size: 13px;
-    transition: all var(--transition-fast, 150ms ease);
+    height: 46px;
+    min-height: 46px;
+    padding: 0 14px 0 42px;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    background: var(--pn);
+    color: var(--tx);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
   }
 
   input::placeholder {
-    color: var(--color-subtle, #71717A);
+    color: var(--mu-2);
+  }
+
+  input:hover:not(:disabled) {
+    background: var(--pn-2);
   }
 
   input:focus {
     outline: none;
-    border-color: var(--color-accent, #F97316);
-    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.22);
-    background: var(--color-raised-hover, #222227);
+    border-color: var(--ac);
+    background: var(--bg-3);
   }
 
   input:disabled {
-    opacity: 0.6;
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
   .btn-submit {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    justify-content: center;
+    gap: 10px;
     width: 100%;
-    min-height: 50px;
-    padding: 12px 18px;
-    background: var(--color-play, #F97316);
-    color: var(--color-on-accent, #ffffff);
-    border: none;
-    border-radius: var(--radius-sm, 6px);
-    font-size: 14px;
+    height: 48px;
+    margin-top: 4px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--btn);
+    color: var(--btn-tx);
+    font: inherit;
+    font-size: 15px;
     font-weight: 700;
     cursor: pointer;
-    margin-top: 4px;
-    transition: all var(--transition-normal, 250ms ease);
-    box-shadow: var(--shadow-glow);
+    transition: opacity var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
 
   .btn-submit:hover:not(:disabled) {
-    background: var(--color-play-hover, #FB923C);
-    box-shadow: 0 12px 28px rgba(249, 115, 22, 0.45);
-    transform: translateY(-1px);
+    opacity: 0.9;
   }
 
-  .btn-submit:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+  .btn-sso:focus-visible,
+  .btn-submit:focus-visible,
+  input:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
   }
 
   .arrow-glyph {
-    font-size: 16px;
-    font-weight: 700;
-    transition: transform var(--transition-fast, 150ms ease);
+    display: inline-block;
+    transition: transform var(--t-fast) var(--ease);
   }
 
   .btn-sso:hover:not(:disabled) .arrow-glyph,
@@ -789,31 +786,44 @@
   }
 
   .card-footer {
-    border-top: 1px solid var(--color-line, rgba(255, 255, 255, 0.08));
     padding-top: 16px;
-    margin-top: 2px;
+    border-top: 1px solid var(--line);
   }
 
   .help-text {
-    font-size: 11px;
-    line-height: 1.6;
-    color: var(--color-subtle, #71717A);
     margin: 0;
-    text-align: center;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--mu);
   }
 
   .site-footer {
-    font-size: 11px;
-    color: var(--color-subtle, #71717A);
     text-align: center;
+    font-size: 13px;
+    color: var(--mu-2);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .btn-sso:hover:not(:disabled) .arrow-glyph,
+    .btn-submit:hover:not(:disabled) .arrow-glyph { transform: none; }
   }
 
   @media (max-width: 480px) {
+    .login-viewport {
+      align-items: flex-start;
+      padding-top: 32px;
+      padding-bottom: 32px;
+    }
+
     .login-card {
-      padding: 28px 22px;
+      padding: 20px;
+      border-radius: var(--r-lg);
     }
-    h1 {
-      font-size: 21px;
-    }
+
+    .brand-title { font-size: 24px; }
   }
+
+  /* La CSP interdit les attributs style : couleurs du dégradé du logo ici. */
+  .logo-stop-a { stop-color: var(--logo-a); }
+  .logo-stop-b { stop-color: var(--logo-b); }
 </style>

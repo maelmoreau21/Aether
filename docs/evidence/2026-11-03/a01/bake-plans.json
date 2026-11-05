@@ -1,0 +1,70 @@
+{
+  "scope": "Local Buildx plan evaluation only; does not execute bake-action, GitHub events, Docker builds, push, pull, or containers. Event variables are illustrative inputs, not event integration tests. Metadata overlays are synthetic.",
+  "buildx": "v0.38.1",
+  "cases": [
+    {
+      "event_environment": "pull_request",
+      "ref_environment": "refs/pull/35/merge",
+      "publication_overlays": false,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "pull_request",
+      "ref_environment": "refs/pull/35/merge",
+      "publication_overlays": true,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "push",
+      "ref_environment": "refs/heads/develop",
+      "publication_overlays": false,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "push",
+      "ref_environment": "refs/heads/develop",
+      "publication_overlays": true,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "workflow_dispatch",
+      "ref_environment": "refs/heads/develop",
+      "publication_overlays": false,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "workflow_dispatch",
+      "ref_environment": "refs/heads/develop",
+      "publication_overlays": true,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "push",
+      "ref_environment": "refs/tags/v0.2.0",
+      "publication_overlays": false,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    },
+    {
+      "event_environment": "push",
+      "ref_environment": "refs/tags/v0.2.0",
+      "publication_overlays": true,
+      "targets": 3,
+      "local_contexts": true,
+      "passed": true
+    }
+  ]
+}

@@ -35,4 +35,4 @@ Veuillez cocher pour attester de la conformité aux règles non négociables :
 - [ ] `cargo test --locked` : tous les tests passent.
 - [ ] `cargo audit` : validé sans faille sur les dépendances.
 - [ ] Si applicable, tests de lecture navigateur documentés.
-- [ ] Documentation associée et `MEMORY.md` mis à jour si un jalon réel est franchi.
+- [ ] Documentation associée et `.ai/MEMORY.md` mis à jour si un jalon réel est franchi.

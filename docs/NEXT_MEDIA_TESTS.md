@@ -1,10 +1,10 @@
 # Plan du jalon média 10 bits/5.1 — suivi
 
 Le jalon est maintenant exécuté sur AV1 10 bits SDR, FR Opus 5.1 et EN stéréo,
-avec trois sous-titres intégrés : voir `P0C_REPRESENTATIVE_MEDIA.md` et la
+avec trois sous-titres intégrés : voir `docs/archive/player-experiments/P0C_REPRESENTATIVE_MEDIA.md` et la
 matrice. Ce plan initial ne vaut pas preuve de tout son périmètre : EN 5.1,
 FR SDH, restitution physique et rendu des sous-titres restent non testés.
-La suite proposée, non exécutée, est `PLAYER_COMPARISON_EXPERIMENT.md`.
+La suite proposée, non exécutée, est `docs/archive/player-experiments/PLAYER_COMPARISON_EXPERIMENT.md`.
 
 ## Fixture synthétique proposée
 

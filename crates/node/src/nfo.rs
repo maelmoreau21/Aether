@@ -50,6 +50,23 @@ fn apply(
     match name {
         "title" => metadata.title = Some(text.into()),
         "originaltitle" => metadata.original_title = Some(text.into()),
+        "originallanguage" | "original_language" => {
+            // Explicit language metadata only; title/script/audio do not prove VO.
+            if text.len() <= 35
+                && text.split('-').enumerate().all(|(i, part)| {
+                    if i == 0 {
+                        (2..=8).contains(&part.len())
+                            && part.bytes().all(|b| b.is_ascii_alphabetic())
+                    } else {
+                        !part.is_empty()
+                            && part.len() <= 8
+                            && part.bytes().all(|b| b.is_ascii_alphanumeric())
+                    }
+                })
+            {
+                metadata.original_language = Some(text.to_ascii_lowercase());
+            }
+        }
         "plot" => metadata.plot = Some(text.into()),
         "outline" => metadata.outline = Some(text.into()),
         "mpaa" => metadata.mpaa = Some(text.into()),
@@ -251,6 +268,13 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
                     }
                     if name == "role" {
                         actor.role = text.to_owned();
+                    }
+                    if name == "thumb"
+                        && actor.thumb.is_none()
+                        && text.len() <= 2048
+                        && text.starts_with("https://")
+                    {
+                        actor.thumb = Some(text.to_owned());
                     }
                 }
                 if name == "actor"
@@ -478,6 +502,30 @@ async fn read_and_parse_nfo(root: &Path, relative: &Path, priority: u8) -> NfoOu
 #[cfg(test)]
 mod tests {
     #[test]
+    fn reads_only_explicit_original_language_and_never_infers_it_from_title_or_audio() {
+        assert_eq!(
+            parse(br#"<movie><original_language>ja</original_language></movie>"#)
+                .unwrap()
+                .original_language
+                .as_deref(),
+            Some("ja")
+        );
+        assert_eq!(
+            parse(br#"<movie><originallanguage>en-US</originallanguage></movie>"#)
+                .unwrap()
+                .original_language
+                .as_deref(),
+            Some("en-us")
+        );
+        assert!(parse(br#"<movie><originaltitle>English title</originaltitle><language>fr</language></movie>"#).unwrap().original_language.is_none());
+        assert!(
+            parse(br#"<movie><originallanguage>fr--CA</originallanguage></movie>"#)
+                .unwrap()
+                .original_language
+                .is_none()
+        );
+    }
+    #[test]
     fn parses_jellyfin_legacy_id_attributes_and_provider_aliases() {
         let m =
             parse(br#"<movie><id TMDB="27205" IMDB="tt1375666" TVDB="100" /></movie>"#).unwrap();
@@ -499,9 +547,20 @@ mod tests {
     }
     use super::*;
     #[test]
+    fn keeps_only_remote_https_actor_portraits() {
+        let meta = parse(br#"<movie><actor><name>A</name><thumb>https://image.example.org/a.jpg</thumb></actor><actor><name>B</name><thumb>/config/metadata/People/B/folder.jpg</thumb></actor><actor><name>C</name><thumb>http://image.example.org/c.jpg</thumb></actor></movie>"#).unwrap();
+        assert_eq!(
+            meta.actors[0].thumb.as_deref(),
+            Some("https://image.example.org/a.jpg")
+        );
+        assert_eq!(meta.actors[1].thumb, None);
+        assert_eq!(meta.actors[2].thumb, None);
+    }
+    #[test]
     fn preserves_credits_and_provider_scales() {
         let meta=parse(br#"<tvshow><actor><name>Actor</name><role>Role</role></actor><director>Director</director><credits>Writer</credits><ratings><rating name="tomatometer" max="100"><value>95</value></rating><rating name="imdb"><value>8.4</value></rating></ratings></tvshow>"#).unwrap();
         assert_eq!(meta.actors[0].role, "Role");
+        assert_eq!(meta.actors[0].thumb, None);
         assert_eq!(meta.writers, ["Writer"]);
         assert_eq!(meta.ratings[0].max, 100.0);
         assert_eq!(meta.ratings[1].max, 10.0);

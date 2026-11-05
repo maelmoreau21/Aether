@@ -115,7 +115,7 @@ Commande cible du futur launcher, après compilation sérialisée autorisée par
 l'agent principal (aucune compilation lancée pour ce protocole) :
 
 ```powershell
-node scripts/streaming-system-benchmark.cjs --core target/release/media-poc.exe --node target/release/aether-node.exe --fixture tests/fixtures/generated/dual-opus/dual-opus-long.mp4 --sessions 1,4 --rounds 20 --out target/streaming-system-baseline
+node scripts/streaming-system-benchmark.cjs --core target/release/aether-core.exe --node target/release/aether-node.exe --fixture tests/fixtures/generated/dual-opus/dual-opus-long.mp4 --sessions 1,4 --rounds 20 --out target/streaming-system-baseline
 ```
 
 Le launcher est `scripts/streaming-system-benchmark.cjs`, son observation DOM
@@ -196,7 +196,7 @@ Aucun déploiement ni push effectué. Les processus Rust/FFmpeg de test sont arr
 ## Suite Mission 3.2
 
 Le protocole Release4/8/16, l'oracle PCM brut distinct du PCM aligné et les
-scénarios de panne sont décrits dans [STREAMING_MISSION_3_2.md](STREAMING_MISSION_3_2.md).
+scénarios de panne sont décrits dans [STREAMING_MISSION_3_2.md](archive/missions/STREAMING_MISSION_3_2.md).
 Ces nouvelles vérifications ne remplacent ni les échecs ni les limites des lots
 historiques ci-dessus. Les exports audio exacts destinés au POC de concurrence
 sont des entrées de diagnostic, pas des mesures froides.

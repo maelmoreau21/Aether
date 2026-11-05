@@ -207,6 +207,83 @@ async fn variant_imports_preserve_other_images_and_deduplicate_by_language() {
             .len(),
         3
     );
+    let (_, body, _) = call(
+        &app,
+        "GET",
+        "/api/v1/works/work/images",
+        &cookie,
+        csrf,
+        Value::Null,
+    )
+    .await;
+    let images = body["images"].as_array().unwrap();
+    assert!(images.iter().all(|image| image["pinned"] == false));
+    let id = images[0]["id"].as_str().unwrap();
+    let pin_url = format!("/api/v1/works/work/images/{id}/pin");
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            &pin_url,
+            &cookie,
+            "wrong",
+            json!({"pinned":true})
+        )
+        .await
+        .0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        call(&app, "PUT", &pin_url, &cookie, csrf, json!({"pinned":true}))
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    let (_, pinned, _) = call(
+        &app,
+        "GET",
+        "/api/v1/works/work/images",
+        &cookie,
+        csrf,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(pinned["images"][0]["id"], id);
+    assert_eq!(pinned["images"][0]["pinned"], true);
+    let url = format!("/api/v1/works/work/images/{id}?width=320");
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(&url)
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "image/webp");
+    let etag = response.headers()[header::ETAG].clone();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(
+        image::guess_format(&bytes).unwrap(),
+        image::ImageFormat::WebP
+    );
+    assert_eq!(image::load_from_memory(&bytes).unwrap().width(), 12);
+    // Authorization is checked before conditional cache responses.
+    let anonymous = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(url)
+                .header(header::IF_NONE_MATCH, etag)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
     assert_eq!(
         call(
             &app,

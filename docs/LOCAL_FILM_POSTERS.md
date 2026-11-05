@@ -119,7 +119,7 @@ Le composant Poster existant couvre Accueil, Films, recherche et fiches : ratio
 2:3, object-fit cover, cartes lazy/decoding async, fiche eager, repli discret
 si absent ou erreur. Les originaux restent en lecture seule. Les tests utilisent
 des copies synthétiques jetables, avec mutations explicites des fixtures pour
-simuler les changements de l’opérateur. Résultats exécutés : MEMORY.md et TEST_PLAN.md.
+simuler les changements de l’opérateur. Résultats exécutés : .ai/MEMORY.md et TEST_PLAN.md.
 
 Fichiers principaux : `node/images.rs`, `node/scanner.rs`, `node.rs`,
 `inventory.rs`, `permissions.rs`, `lib.rs`, `scans.rs`, migration0006,

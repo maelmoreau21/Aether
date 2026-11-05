@@ -102,6 +102,24 @@ pub struct Manifest {
     pub release_date: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_schema: Option<Vec<ConfigField>>,
+    /// Signed, reversible migration from one exact installed version. Empty
+    /// renames explicitly declare that private data remains compatible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_migration: Option<StorageMigration>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StorageMigration {
+    pub from_version: String,
+    pub key_renames: Vec<StorageKeyRename>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StorageKeyRename {
+    pub from: String,
+    pub to: String,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -213,10 +231,20 @@ pub struct ProviderRating {
     pub votes: Option<u64>,
 }
 
+/// Provider-scoped franchise identity; titles alone must never merge unrelated sets.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataCollection {
+    pub id: String,
+    pub name: String,
+}
+
 /// Full structured metadata returned by a provider
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StructuredMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<MetadataCollection>,
     pub provider: String,
     pub provider_id: String,
     #[serde(default)]
@@ -225,6 +253,8 @@ pub struct StructuredMetadata {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tagline: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

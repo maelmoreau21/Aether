@@ -100,7 +100,7 @@ fn generic_abi_does_not_require_a_metadata_payload() {
     ))
     .unwrap();
     let response =
-        media_poc::extension_runtime::execute(media_poc::extension_runtime::Invocation::new(
+        media_poc::extensions::runtime::execute(media_poc::extensions::runtime::Invocation::new(
             STANDARD.encode(wasm),
             ExtensionRequest {
                 api_version: 1,
@@ -114,7 +114,7 @@ fn generic_abi_does_not_require_a_metadata_payload() {
 
 #[test]
 fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
     let wasm = |depth: u32| {
         wat::parse_str(format!(
             r#"(module
@@ -139,7 +139,7 @@ fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
 
 #[test]
 fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
     let run = |wasm: Vec<u8>| execute(Invocation::new(STANDARD.encode(wasm), input()));
     assert_eq!(
         run(good_module()).unwrap().result["title"],
@@ -1001,8 +1001,8 @@ fn real_rust_sdk_module_executes() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/wasm32-unknown-unknown/release/media_extension_sdk_fixture.wasm");
     let bytes = std::fs::read(path).unwrap();
-    let result = media_poc::extension_runtime::execute(
-        media_poc::extension_runtime::Invocation::new(STANDARD.encode(bytes), input()),
+    let result = media_poc::extensions::runtime::execute(
+        media_poc::extensions::runtime::Invocation::new(STANDARD.encode(bytes), input()),
     )
     .unwrap();
     assert_eq!(result.result["title"], "Original");
@@ -1084,7 +1084,7 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
 
 #[test]
 fn http_broker_security_enforces_allowed_imports_and_allowlist() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
 
     // 1. Module with unauthorized imports is rejected immediately
     let bad_import_module = wat::parse_str(
@@ -1131,7 +1131,7 @@ fn http_broker_security_enforces_allowed_imports_and_allowlist() {
 #[test]
 fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
     use media_extension_sdk::HostHttpRequest;
-    use media_poc::extension_runtime::{HostState, execute_host_http};
+    use media_poc::extensions::runtime::{HostState, execute_host_http};
     use wasmi::StoreLimitsBuilder;
 
     let limits = StoreLimitsBuilder::new().build();
@@ -1216,7 +1216,7 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
 #[test]
 #[ignore = "requires MEDIA_TEST_EXTENSION_WASM pointing to an explicitly built external extension"]
 fn external_extension_wasm_manifest_uses_generic_runtime() {
-    use media_poc::extension_runtime::{Invocation, execute};
+    use media_poc::extensions::runtime::{Invocation, execute};
     let path =
         std::env::var_os("MEDIA_TEST_EXTENSION_WASM").expect("external test artifact required");
     let bytes = std::fs::read(path).unwrap();
@@ -1796,7 +1796,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     let file = root.join("fixture.package.json");
     std::fs::write(&file, serde_json::to_vec(&package).unwrap()).unwrap();
     assert!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1809,7 +1809,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     )
     .unwrap();
     assert_eq!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .unwrap(),
         1
@@ -1833,7 +1833,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
         .await
         .unwrap();
     assert_eq!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .unwrap(),
         0
@@ -1850,7 +1850,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
         .await
         .unwrap();
     assert!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1862,7 +1862,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     tampered["sha256"] = json!("0".repeat(64));
     std::fs::write(file, serde_json::to_vec(&tampered).unwrap()).unwrap();
     assert!(
-        media_poc::extension_files::import(&store, &root)
+        media_poc::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1872,8 +1872,8 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
 async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database_reopen() {
     use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
     use media_poc::{
-        extension_data,
-        extension_runtime::{Invocation, read_frame, write_frame},
+        extensions::data as extension_data,
+        extensions::runtime::{Invocation, read_frame, write_frame},
     };
     use std::process::{Command, Stdio};
     let temp = tempfile::tempdir().unwrap();
@@ -2537,4 +2537,267 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     )
     .await;
     assert_eq!(key_status, StatusCode::FORBIDDEN, "{resp}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn private_extension_update_migrates_atomically_and_rollback_restores_snapshot() {
+    use media_poc::database::{query, query_scalar};
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("update.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "upgrade-admin",
+            Zeroizing::new("synthetic update password".into()),
+        )
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = extensions::router(auth.clone()).merge(auth::router(auth));
+    let (_, login, cookie) = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        "",
+        json!({"login":"upgrade-admin","password":"synthetic update password"}),
+    )
+    .await;
+    let csrf = login["csrfToken"].as_str().unwrap();
+    let signing = key();
+    let mut first = package(&signing, good_module());
+    first.manifest.permissions = vec!["metadata.read".into(), "storage.private".into()];
+    first.signature = STANDARD.encode(signing.sign(&first.signing_bytes().unwrap()).as_ref());
+    let mut input = serde_json::to_value(&first).unwrap();
+    input["publicKey"] = json!(STANDARD.encode(signing.public_key().as_ref()));
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions",
+        &cookie,
+        csrf,
+        input,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{response}");
+    query("UPDATE extensions SET enabled=1,all_libraries=1 WHERE id='test.metadata'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query(r#"INSERT INTO extension_settings(extension_id,settings_json) VALUES('test.metadata','{"api_key":"retained-secret"}')"#).execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_data_namespaces(extension_id,publisher_id,publisher_key,entries,bytes) SELECT e.id,e.publisher_id,p.public_key,1,5 FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id='test.metadata'").execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_data(extension_id,scope,scope_id,key,value,version,durability,value_bytes,sha256) VALUES('test.metadata','global','','old','value','initial-version','durable',5,'hash')").execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_objects(id,extension_id,scope_kind,scope_id,size,received,sha256,durability,upload_expires_at,complete) VALUES('object-1','test.metadata','global','',3,3,'hash','durable',9999999999,1)").execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_object_chunks(object_id,offset_bytes,payload,sha256) VALUES('object-1',0,?,'hash')").bind(vec![1u8,2,3]).execute(store.pool()).await.unwrap();
+    let initial_generation: String =
+        query_scalar("SELECT generation FROM extensions WHERE id='test.metadata'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    let mut next = first.clone();
+    let healthy = r#"{"apiVersion":1,"result":{"healthy":true}}"#;
+    let data = healthy
+        .bytes()
+        .map(|byte| format!("\\{byte:02x}"))
+        .collect::<String>();
+    let wasm = wat::parse_str(format!(r#"(module (memory (export "memory") 1 256) (data (i32.const 4096) "{data}") (func (export "media_alloc") (param i32) (result i32) i32.const 1024) (func (export "media_run") (param i32 i32) (result i64) i64.const {}))"#, (4096u64 << 32) | healthy.len() as u64)).unwrap();
+    next.wasm = STANDARD.encode(&wasm);
+    next.sha256 = format!("{:x}", Sha256::digest(&wasm));
+    next.manifest.version = "0.2.0".into();
+    next.manifest.storage_migration = Some(media_extension_sdk::StorageMigration {
+        from_version: "0.1.0".into(),
+        key_renames: vec![media_extension_sdk::StorageKeyRename {
+            from: "old".into(),
+            to: "new".into(),
+        }],
+    });
+    next.signature = STANDARD.encode(signing.sign(&next.signing_bytes().unwrap()).as_ref());
+    let mut unhealthy = next.clone();
+    unhealthy.wasm = first.wasm.clone();
+    unhealthy.sha256 = first.sha256.clone();
+    unhealthy.signature =
+        STANDARD.encode(signing.sign(&unhealthy.signing_bytes().unwrap()).as_ref());
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/test.metadata/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(unhealthy).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+    assert_eq!(response["error"], "extension_health_check_failed");
+    query("UPDATE extension_data_namespaces SET publisher_key='other-publisher-key' WHERE extension_id='test.metadata'")
+        .execute(store.pool()).await.unwrap();
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/test.metadata/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&next).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{response}");
+    assert_eq!(response["error"], "extension_namespace_identity_mismatch");
+    query("UPDATE extension_data_namespaces SET publisher_key=(SELECT p.public_key FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id='test.metadata') WHERE extension_id='test.metadata'")
+        .execute(store.pool()).await.unwrap();
+    // A destination conflict leaves package, generation and private data untouched.
+    query("INSERT INTO extension_data SELECT extension_id,scope,scope_id,'new',value,version,expires_at,durability,value_bytes,sha256 FROM extension_data WHERE key='old'").execute(store.pool()).await.unwrap();
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/test.metadata/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&next).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{response}");
+    assert_eq!(response["error"], "extension_migration_key_conflict");
+    let generation: String =
+        query_scalar("SELECT generation FROM extensions WHERE id='test.metadata'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(generation, initial_generation);
+    query("DELETE FROM extension_data WHERE key='new'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/test.metadata/upgrade",
+        &cookie,
+        csrf,
+        serde_json::to_value(&next).unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{response}");
+    let generation: String =
+        query_scalar("SELECT generation FROM extensions WHERE id='test.metadata'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_ne!(generation, initial_generation);
+    let saved: String = query_scalar("SELECT value FROM extension_data WHERE key='new'")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(saved, "value");
+    let settings: String = query_scalar(
+        "SELECT settings_json FROM extension_settings WHERE extension_id='test.metadata'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(settings.contains("retained-secret"));
+    query("UPDATE extension_settings SET settings_json='{}' WHERE extension_id='test.metadata'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("DELETE FROM extension_objects WHERE id='object-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE extension_data SET value='later' WHERE key='new'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let rollback =
+        json!({"expectedSha256":next.sha256,"expectedVersion":"0.2.0","confirmDataRestore":true});
+    let mut unconfirmed = rollback.clone();
+    unconfirmed["confirmDataRestore"] = json!(false);
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/test.metadata/rollback",
+            &cookie,
+            csrf,
+            unconfirmed
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let mut stale = rollback.clone();
+    stale["expectedVersion"] = json!("0.1.0");
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/test.metadata/rollback",
+            &cookie,
+            csrf,
+            stale
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
+    // Reopening the store proves the snapshot is database-backed rather than a cache.
+    let reopened = IdentityStore::open(&temp.path().join("update.sqlite"))
+        .await
+        .unwrap();
+    drop(reopened);
+    let (status, response, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/extensions/test.metadata/rollback",
+        &cookie,
+        csrf,
+        rollback.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["enabled"], false);
+    let value: String = query_scalar("SELECT value FROM extension_data WHERE key='old'")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(value, "value");
+    let payload: Vec<u8> =
+        query_scalar("SELECT payload FROM extension_object_chunks WHERE object_id='object-1'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(payload, vec![1, 2, 3]);
+    let settings: String = query_scalar(
+        "SELECT settings_json FROM extension_settings WHERE extension_id='test.metadata'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert!(settings.contains("retained-secret"));
+    let restored: String =
+        query_scalar("SELECT package_json FROM extensions WHERE id='test.metadata'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Package>(&restored)
+            .unwrap()
+            .manifest
+            .version,
+        "0.1.0"
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/test.metadata/rollback",
+            &cookie,
+            csrf,
+            rollback
+        )
+        .await
+        .0,
+        StatusCode::CONFLICT
+    );
 }

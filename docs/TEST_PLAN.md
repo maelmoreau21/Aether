@@ -24,7 +24,7 @@ de latence restent exploratoires ; décoder des extraits d'un conteneur de deux
 heures ne prouve pas une endurance de deux heures.
 
 Résultats réellement exécutés, commandes et limites :
-[rapport du 29 octobre](PLAYER_RELIABILITY_2026_10_29.md).
+[rapport du 29 octobre](archive/player-experiments/PLAYER_RELIABILITY_2026_10_29.md).
 
 ## Flux progressifs et Node Rust — 24 octobre 2026
 
@@ -102,7 +102,7 @@ conservation de piste ; la reprise audio/vidéo et les préférences restent vé
 ## Audio AV1/Opus — 22 octobre 2026
 
 Audit et corrections de fiabilité P0 du lecteur :
-[PLAYER_PERFORMANCE_P0.md](PLAYER_PERFORMANCE_P0.md). Comprend refus DTS selon
+[PLAYER_PERFORMANCE_P0.md](archive/player-experiments/PLAYER_PERFORMANCE_P0.md). Comprend refus DTS selon
 capacités réelles Chrome/Edge, restauration audio sans pause terminale de l'UI,
 races de seek MSE, diagnostics HTTP et rapports avant/après avec limites explicites.
 
@@ -112,7 +112,7 @@ MP4, décodage FR/EN, limites Docker, vrai Nginx, pause/seek/annulation, premiè
 image et audio prêt. Le job navigateur CI exécute aussi ce scénario sur la
 fixture dual-5.1, avec rapport obligatoire et artefact archivé.
 
-Voir [AV1_OPUS_AUDIO_FIX.md](AV1_OPUS_AUDIO_FIX.md) pour génération légale du vrai
+Voir [AV1_OPUS_AUDIO_FIX.md](archive/fixes/AV1_OPUS_AUDIO_FIX.md) pour génération légale du vrai
 MP4 1080p AV1 10 bits avec deux Opus 5.1, tests de copie sans perte, scripts
 Chrome/Edge et parcours Core avec préférences restaurées. Les tests unitaires
 de sélection sont inclus dans `npm test --prefix apps/web`.
@@ -159,7 +159,7 @@ le placement mobile des commandes et les refus d'accès/changements de compte.
 Les tests HTTP communs SQLite/PostgreSQL couvrent CSRF, conflit de révision,
 isolation utilisateur, seconde session, révocation et Range des sous-titres.
 Le test distribué vérifie aussi les vrais octets Ogg servis par un Node distant.
-Les limites navigateur et raw restent celles de [P3/P4](P3_P4_FEATURES.md).
+Les limites navigateur et raw restent celles de [P3/P4](archive/milestones/P3_P4_FEATURES.md).
 
 ## Vérifications historiques
 
@@ -203,8 +203,12 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-cargo run -p media-poc
+MEDIA_FIXTURE_DIR=tests/fixtures/generated cargo run -p media-poc
 ```
+
+Le binaire lancé est `aether-core` (`default-run`). Sans `MEDIA_LIBRARY_ROOT` ni
+`MEDIA_FIXTURE_DIR`, il démarre avec une bibliothèque vide, comme l'image Docker ;
+les fixtures synthétiques ne sont plus chargées implicitement.
 
 Le script de génération conserve les arguments détaillés réellement utilisés
 dans `generation.json` : encodage synthétique unique, trois remux `-c copy`,
@@ -336,7 +340,7 @@ foreach ($testChannel in @('chrome','msedge','firefox')) {
 
 Résultats : **36 changements pendant lecture et 12 en pause réussis**, position
 et signaux réels vérifiés ; reprise/fin et 404/code 4 réussis. [Matrice chiffrée](STREAMING_COMPATIBILITY.md)
-et [méthode/incertitudes](P0C_AUDIO_SWITCHING.md). Les mesures sont locales,
+et [méthode/incertitudes](archive/player-experiments/P0C_AUDIO_SWITCHING.md). Les mesures sont locales,
 headless, sur huit secondes, pas des preuves haut-parleurs/écran physique/NAS.
 Une tentative Chrome intermédiaire échouée est conservée avec son motif ;
 la correction attend le contrôle activé en plus de `readyState`.
@@ -399,7 +403,7 @@ aussi dans `summary.json`. **Sous-titres non validés** : trois pistes dans les
 fichiers, zéro piste texte native exposée partout. Sélection audio interne
 indisponible ; EN lu par fichier dérivé. Destination audio deux canaux maximum,
 pas de preuve physique 5.1/10 bits. Méthode et tolérances dans
-`P0C_REPRESENTATIVE_MEDIA.md`, valeurs observées dans la matrice.
+`docs/archive/player-experiments/P0C_REPRESENTATIVE_MEDIA.md`, valeurs observées dans la matrice.
 
 `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`,
 `cargo test --locked` : **7 tests réussis**. Nouveau test profil/pistes/langues/
@@ -421,7 +425,7 @@ générations fraîches. Ce n'est pas un succès de rendu de sous-titres navigat
 Préparation : python scripts/prepare-mse.py (dossier neuf uniquement), puis
 cargo run --locked -p media-poc. Test : node scripts/browser-mse.cjs, avec
 MEDIA_BROWSER_CHANNEL et MEDIA_BROWSER_EXECUTABLE/REPORT_DIR appropriés.
-[Commandes complètes et méthode](P0C_MSE_EXPERIMENT.md).
+[Commandes complètes et méthode](archive/player-experiments/P0C_MSE_EXPERIMENT.md).
 8 tests Rust, dont whitelist MSE, MIME, octets Range et416/Origin ; navigateurs
 18 commutations, FFT six/deux voies, pause, seek EN arrière/avant, source/blob
 et SourceBuffer vidéo invariants, pixels, cues externes/captures. Géométrie des
@@ -434,7 +438,7 @@ Préparer python scripts/prepare-dash.py et python scripts/prepare-shaka.py,
 puis cargo run --locked -p media-poc. Scénario commun
 node scripts/browser-player-comparison.cjs, MEDIA_PLAYER_ENGINE=mse ou shaka,
 MEDIA_BROWSER_CHANNEL=chrome/msedge/firefox. Dossier neuf via MEDIA_REPORT_DIR.
-[Commandes, tolérances et résultats](P0C_SHAKA_EXPERIMENT.md).
+[Commandes, tolérances et résultats](archive/player-experiments/P0C_SHAKA_EXPERIMENT.md).
 108 changements, 36 marqueurs±200ms, choix manuels conservés et WebVTT/off.
 9tests Rust et tests JS des statistiques réussis ; CI inclut packaging DASH et
 statistiques sans revendiquer une exécution distante ou des navigateurs Windows.
@@ -446,7 +450,7 @@ comparables directement. Mono/7.1, physique, réseau lent et films longs NT.
 
 ## Matrice safeMargin Shaka5.2.13
 
-Protocole fixé dans P0C_SAFE_MARGIN_EXPERIMENT.md : 0/.5/1/2/4,
+Protocole fixé dans docs/archive/player-experiments/P0C_SAFE_MARGIN_EXPERIMENT.md : 0/.5/1/2/4,
 20essais en lecture et4par catégorie pause/après-seek, par marge et navigateur.
 Un changement mesuré par présentation12s indépendante, aucun reload pendant
 la mesure ; réinitialisation entre essais explicitement distinguée.
@@ -461,11 +465,11 @@ Les anciennes suites restent présentes et doivent être rejouées séparément.
 ### Non-régression seek Shaka
 
 node --test scripts/audio-seek-policy.test.cjs : mocks état/pause/vitesse/position, purge unique, concurrence/récursion, timeout terminal, watchdog blocage/pause, distinction vraie nouvelle piste marge0 et resélection active. Ces mocks ne prouvent pas la lecture.
-node scripts/browser-seek-policy.cjs : contrôles appariés FR/EN, positions0,5/1,99/2,01, PCM représentatif, requêtes HTTP/IDs, pause/vitesse, marqueur A/V ; aucun seuil des anciennes suites modifié. Séries complètes actuellement en échec, Firefox bloqué au démarrage automatisé. Protocole et résultats : P0C_AUDIO_SEEK_RECOVERY.md.
+node scripts/browser-seek-policy.cjs : contrôles appariés FR/EN, positions0,5/1,99/2,01, PCM représentatif, requêtes HTTP/IDs, pause/vitesse, marqueur A/V ; aucun seuil des anciennes suites modifié. Séries complètes actuellement en échec, Firefox bloqué au démarrage automatisé. Protocole et résultats : docs/archive/player-experiments/P0C_AUDIO_SEEK_RECOVERY.md.
 
 ## P1 — intégration SvelteKit
 
-Voir P1_WEB_INTEGRATION.md pour préparation, commandes et résultats observés.
+Voir docs/archive/milestones/P1_WEB_INTEGRATION.md pour préparation, commandes et résultats observés.
 10 tests Rust (9 P0 conservés + contrat démo) ; npm check/lint/test/build/audit.
 Runner scripts/browser-p1.cjs : vrais contrôles UI + pixels/PCM représentatif,
 FR/EN pause/lecture, position/volume/vitesse, seeks, VTT, fin, erreurs.
@@ -509,7 +513,7 @@ Accueil/Films/Séries desktop/mobile inspectées. `browser-p1-layout.cjs` passe
 VTT404 et Core503 explicites. `browser-immersive.cjs` passe plein écran réel et
 refus simulé, menus/clavier et tactile simulé390×844/844×390.
 Preuves `evidence/2026-10-15/catalogue/` (report.json, regression, layout,
-immersive). Détails dans CATALOGUE_P1.md ; aucun nouveau résultat Edge/Firefox.
+immersive). Détails dans docs/archive/milestones/CATALOGUE_P1.md ; aucun nouveau résultat Edge/Firefox.
 
 Pas de relance des expériences codecs P0. Authentification/SQLite/scanner et
 bibliothèques personnelles restent absents ; aucun test de fixture ne prouve

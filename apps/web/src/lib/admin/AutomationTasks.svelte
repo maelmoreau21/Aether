@@ -89,25 +89,68 @@
   {#if history.length}
     <h4>Derniers traitements</h4>
     <div class="history-list" role="region" aria-label="Derniers traitements des métadonnées">
-      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? 'Traitement de métadonnées'}</strong><span>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{task.attempt} tentative(s) · Durée : {task.durationSeconds == null ? 'indisponible' : `${task.durationSeconds} s`}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>Détails du traitement</summary><p>Extension : {task.extensionId}</p><p>Identifiant : {task.id} · Opération : {task.operation} · Priorité : {task.priority}</p></details></article>{/each}
+      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? 'Traitement de métadonnées'}</strong><span class="history-status" data-status={task.status}>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{task.attempt} tentative(s) · Durée : {task.durationSeconds == null ? 'indisponible' : `${task.durationSeconds} s`}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>Détails du traitement</summary><p>Extension : {task.extensionId}</p><p>Identifiant : {task.id} · Opération : {task.operation} · Priorité : {task.priority}</p></details></article>{/each}
     </div>
   {/if}
   {#if quotas.length}<h4>Quotas fournisseurs</h4><ul>{#each quotas as quota (quota.provider)}<li>{quota.provider} : intervalle {quota.minIntervalSeconds} s, {quota.maxConcurrent} en parallèle ; prochain appel après {new Date(quota.nextAllowedAt * 1000).toLocaleString()}</li>{/each}</ul>{/if}
   {#if sources.length}<h4>Provenance récente</h4><ul>{#each sources.slice(0, 15) as source (`${source.workId}:${source.field}`)}<li>{source.workId} · {source.field} : {source.extensionId}{source.providerId ? ` (${source.providerId})` : ''}, priorité {source.priority}</li>{/each}</ul>{/if}
 </section>
 <style>
-  section { min-width:0; padding-bottom:16px; }
-  h3 { font-size:20px; font-weight:600; }
-  form { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; }
-  label { display: grid; gap: .5rem; flex:1 1 200px; min-width:0; font-size:14px; }
-  select, input, button { min-height:44px; min-width:0; max-width:100%; padding:10px 12px; font:inherit; color:var(--text-primary); background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); }
-  p,li { max-width:75ch; line-height:1.6; overflow-wrap:anywhere; color:var(--text-secondary); }
-  [role=alert] { padding:12px; border-left:3px solid var(--status-error); background:var(--color-danger-soft); }
-  .history-list { min-width:0; }
-  article { padding:20px 0; border-block-start:1px solid var(--border-subtle); overflow-wrap:anywhere; }
-  article header { display:flex; align-items:start; justify-content:space-between; gap:12px; flex-wrap:wrap; }
-  article p { margin:8px 0; } .history-meta,details { font-size:13px; color:var(--text-secondary); }
-  .history-error { padding:12px; border-left:3px solid var(--status-error); background:var(--color-danger-soft); color:var(--text-primary); }
-  summary { min-height:44px; padding-block:12px; cursor:pointer; }
-  @media(max-width:640px) { select,input { font-size:16px; } form > button { flex:1 1 200px; } }
+  section { display: grid; gap: 16px; min-width: 0; padding-bottom: 8px; color: var(--color-text); font-family: var(--font-sans); }
+  h3 { margin: 0; font-size: 18px; font-weight: 600; }
+  h4 { margin: 8px 0 0; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
+  section > p { margin: 0; max-width: 75ch; font-size: 14px; line-height: 1.5; color: var(--color-muted); }
+  p, li { max-width: 75ch; line-height: 1.5; overflow-wrap: anywhere; color: var(--color-muted); font-size: 14px; }
+
+  /* Formulaire */
+  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px 20px; background: var(--color-raised); border-radius: var(--radius-md); }
+  label { display: grid; gap: 6px; flex: 1 1 200px; min-width: 0; font-size: 13px; color: var(--color-muted); }
+  select, input { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: 14px; }
+  select:focus-visible, input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  select:disabled, input:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Boutons : ghost, un seul primaire */
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; max-width: 100%; padding: 8px 16px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: 13px; cursor: pointer; transition: background-color var(--transition-fast); }
+  button:hover:not(:disabled) { background: var(--color-surface-hover); }
+  button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button[type='submit'] { border-color: transparent; background: var(--color-accent-solid); color: var(--color-on-accent); font-weight: 600; }
+  button[type='submit']:hover:not(:disabled) { background: var(--color-accent-hover); opacity: 0.9; }
+
+  /* Retours */
+  [role='alert'], [role='status'] { max-width: none; margin: 0; padding: 10px 14px; border-radius: var(--radius-sm); color: var(--color-text); font-size: 14px; }
+  [role='alert'] { background: var(--color-danger-soft); }
+  [role='status'] { background: transparent; color: var(--color-muted); padding-inline: 0; }
+
+  /* Listes en lignes */
+  ul { margin: 0; padding: 0; list-style: none; background: var(--color-surface); border-radius: var(--radius-md); }
+  li { max-width: none; margin: 0; padding: 10px 20px; border-top: 1px solid var(--color-line-subtle); font-size: 13px; }
+  li:first-child { border-top: 0; }
+  .history-list { min-width: 0; padding: 4px 20px; background: var(--color-surface); border-radius: var(--radius-md); }
+  article { padding: 14px 0; border-top: 1px solid var(--color-line-subtle); overflow-wrap: anywhere; }
+  article:first-child { border-top: 0; }
+  article header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 14px; }
+  article header strong { font-size: 15px; font-weight: 600; color: var(--color-text); }
+  article p { margin: 4px 0 0; }
+  .history-status { flex-shrink: 0; color: var(--color-muted); font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .history-status[data-status='completed'], .history-status[data-status='succeeded'] { color: var(--color-success); }
+  .history-status[data-status='error'], .history-status[data-status='failed'] { color: var(--color-danger); }
+  .history-status[data-status='paused'], .history-status[data-status='interrupted'] { color: var(--color-warning); }
+  .history-status[data-status='running'], .history-status[data-status='queued'] { color: var(--color-accent); }
+  .history-meta, details { font-size: 13px; color: var(--color-muted); }
+  .history-error { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--color-danger-soft); color: var(--color-text); }
+  details p { font-family: var(--font-mono); font-size: 12px; }
+  summary { min-height: 36px; padding-block: 8px; box-sizing: border-box; cursor: pointer; color: var(--color-accent); }
+  summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+
+  @media (max-width: 640px) {
+    select, input { font-size: 16px; }
+    form > button { flex: 1 1 200px; }
+    li { padding-inline: 14px; }
+    .history-list { padding-inline: 14px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    button { transition: none; }
+  }
 </style>

@@ -111,189 +111,100 @@
 </section>
 
 <style>
-  .shelf-container {
-    margin: 0;
-    position: relative;
-  }
+  .shelf-container { display: flex; flex-direction: column; min-width: 0; }
 
   .shelf-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 16px;
     gap: 16px;
+    margin-bottom: 14px;
   }
 
-  .title-group {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    min-width: 0;
-  }
+  .title-group { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 
   h2 {
-    font-family: var(--font-display);
-    font-size: clamp(20px, 2.1vw, 25px);
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    color: var(--color-text-bright);
     margin: 0;
+    font-size: calc(24px * var(--ui-scale, 1));
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    color: var(--tx);
   }
 
-  .count-badge {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 2px 9px;
-    border-radius: var(--radius-full);
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    color: var(--color-muted);
-  }
+  .count-badge { font-size: calc(14px * var(--ui-scale, 1)); font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; }
 
-  .actions-group {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    flex-shrink: 0;
-  }
+  .actions-group { display: flex; align-items: center; gap: 8px; flex: none; }
 
   .shelf-action-btn {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-pill);
-    color: var(--color-accent);
-    font-size: 12px;
-    font-weight: 600;
-    padding: 6px 14px;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-  }
-
-  .shelf-action-btn:hover {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent);
-    color: var(--color-text-bright);
-    transform: translateY(-1px);
-  }
-
-  .view-all-link {
-    min-height: 44px;
+    height: 36px;
+    padding: 0 14px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: var(--pn);
+    color: var(--tx);
     font-size: 13px;
-    font-weight: 650;
-    color: var(--color-muted);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    transition: color var(--transition-fast), transform var(--transition-fast);
+    font-weight: 700;
   }
 
-  .view-all-link:hover {
-    color: var(--color-text-bright);
-    transform: translateX(3px);
-  }
+  .shelf-action-btn:hover { background: var(--pn-2); }
 
-  .carousel-nav {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
+  .view-all-link { font-size: 14px; font-weight: 600; color: var(--mu); transition: color var(--t-fast) ease; }
+  .view-all-link:hover { color: var(--tx); }
+
+  .carousel-nav { display: flex; gap: 6px; }
 
   .nav-arrow {
     display: grid;
     place-items: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
-    transition: all var(--transition-fast);
+    width: 36px;
+    height: 36px;
+    border: 0;
+    border-radius: 12px;
+    background: var(--pn);
+    color: var(--tx);
   }
 
-  .nav-arrow:hover:not(:disabled) {
-    background: var(--color-accent);
-    border-color: var(--color-accent);
-    color: var(--color-on-accent);
-    transform: scale(1.08);
-    box-shadow: 0 4px 16px rgba(229, 9, 20, 0.4);
-  }
+  .nav-arrow:hover:not(:disabled) { background: var(--pn-2); }
+  .nav-arrow:disabled { opacity: 0.35; cursor: default; }
 
-  .nav-arrow:disabled {
-    opacity: 0.25;
-    cursor: default;
-  }
-
-  /* Carousel Track — extra vertical padding prevents scale(1.06) hover clipping */
   .shelf-track.carousel {
     display: flex;
-    gap: 18px;
+    gap: var(--card-gap, 16px);
     overflow-x: auto;
     scroll-behavior: smooth;
-    padding: 12px 8px 18px;
-    margin: -6px -8px;
+    padding: 8px 4px 16px;
+    margin: -8px -4px 0;
     scrollbar-width: none;
-    -ms-overflow-style: none;
     scroll-snap-type: x mandatory;
   }
 
-  .shelf-track.carousel::-webkit-scrollbar {
-    display: none;
-  }
+  .shelf-track.carousel::-webkit-scrollbar { display: none; }
 
   .shelf-track.carousel :global(> *) {
-    flex: 0 0 clamp(160px, 13.5vw, 195px);
+    flex: 0 0 var(--poster-width, clamp(150px, 12.5vw, 190px));
     scroll-snap-align: start;
   }
 
-  /* Grid Track */
   .shelf-track.grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(clamp(160px, 13.5vw, 195px), 1fr));
-    gap: 24px 18px;
+    grid-template-columns: repeat(auto-fill, minmax(var(--poster-width, clamp(150px, 12.5vw, 190px)), 1fr));
+    gap: var(--card-row-gap, 28px) var(--card-gap, 16px);
     padding: 8px 0;
   }
 
-  @media (min-width: 1920px) {
-    .shelf-track.carousel :global(> *) {
-      flex: 0 0 clamp(190px, 12vw, 230px);
-    }
-    .shelf-track.grid {
-      grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-    }
+  @media (prefers-reduced-motion: reduce) {
+    .shelf-track.carousel { scroll-behavior: auto; }
   }
 
   @media (max-width: 640px) {
-    .shelf-header {
-      gap: 8px;
-      margin-bottom: 12px;
-      align-items: flex-start;
-    }
-    h2 {
-      font-size: 18px;
-      line-height: 1.3;
-    }
-    .view-all-link {
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .shelf-container {
-      margin: 0;
-    }
-    .carousel-nav {
-      display: none;
-    }
-    .shelf-track.carousel :global(> *) {
-      flex: 0 0 calc((100vw - 64px) / 2.15);
-    }
-    .shelf-track.carousel {
-      gap: 12px;
-      padding: 6px 4px 12px;
-      margin: 0 -4px;
-    }
+    .shelf-header { gap: 8px; margin-bottom: 10px; }
+    h2 { font-size: 21px; }
+    .carousel-nav { display: none; }
+    .shelf-track.carousel :global(> *) { flex: 0 0 calc((100vw - 48px) / var(--mobile-shelf-columns, 2.5)); }
+    .shelf-track.carousel { gap: var(--card-gap, 12px); }
   }
 </style>

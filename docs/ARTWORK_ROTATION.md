@@ -7,9 +7,21 @@ n'est pas encore une tâche durable ou planifiée. Voir les limites ci-dessous.
 
 ## Décision
 
+Mise à jour du 5 novembre : les réglages personnels proposent uniquement l’activation
+de la rotation et le choix entre langue de l’interface et langue originale. La rotation
+est active en l’absence de préférence enregistrée, sans écraser une désactivation.
+Les anciennes options restent lisibles pour compatibilité, mais les restrictions de
+bibliothèques héritées ne masquent plus la rotation. Les images manuelles restent
+prioritaires. La langue originale provient des métadonnées connues de l’œuvre ; sinon,
+ou si aucune affiche correspondante n’est disponible, la langue de l’interface sert
+de repli. Le fournisseur TMDb modifié transmet cette information lors des prochaines
+actualisations ; les œuvres déjà enregistrées doivent être réenrichies et le paquet
+TMDb reconstruit avant que cette information soit disponible. Aucun fournisseur réel
+ou paquet déployé n’est validé par ces changements locaux.
+
 La conservation des variantes, leurs représentations privées et la déduplication
 restent natives. La rotation des **affiches** est une préférence native par
-compte, désactivée par défaut ; le catalogue affiche alors une image fixe.
+compte ; lorsque désactivée, le catalogue affiche une image fixe.
 Les fournisseurs d'images
 restent des extensions Wasm distinctes. Le Core ne contient pas de clés de
 fournisseurs intégrées et les médias restent en lecture seule.
@@ -48,18 +60,10 @@ au rôle consomment l'image. Une image ajoutée manuellement, y compris l'ancien
 poster personnalisé, reste prioritaire. Les pools téléchargés sont conservés
 lors de l'ajout d'un remplacement manuel.
 
-La rotation se règle dans **Paramètres → Compte → Affichage des affiches**.
-Chaque compte enregistre ses paramètres : films/séries, ordre aléatoire ou séquentiel, intervalle
-minimal entre changements (heures), taille du pool, langue préférée, langue de
-secours et autorisation des images sans langue ou dans une autre langue. Les
-images manuelles restent prioritaires. Les choix sont stables pendant la
-navigation et les rechargements ; lorsque l'intervalle non nul est écoulé,
-l'affiche change même pendant la visite, avec une vérification chaque minute.
-Avec un intervalle nul, une nouvelle visite change l'affiche quand au moins deux candidates existent dans la langue
-retenue. L'historique est borné à
-512 couples œuvre/type par compte dans le navigateur ; aucun jeton brut n'est
-persisté par ce mécanisme. Cet historique est local au navigateur, sans garantie
-de synchronisation entre appareils. Une seule variante disponible reste stable.
+La rotation se règle dans **Paramètres → Apparence et accueil → Rotation des affiches**.
+Le choix linguistique reste personnel ; il ne modifie pas les images du catalogue
+ni celles des autres utilisateurs. Les affiches manuelles restent prioritaires.
+Les anciens paramètres techniques restent acceptés par l’API pour compatibilité.
 
 ## API et bornes
 

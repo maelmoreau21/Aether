@@ -132,3 +132,28 @@ bannière permanente ne prétend qu’une mutation a réussi.
 Voir [contrats et limites](SETTINGS_AND_REFRESH.md) pour les paramètres persistants du serveur,
 la configuration réseau effective, les avatars de compte et les quatre modes de scan.
 Les fournisseurs de métadonnées en ligne restent à développer.
+
+## Personnalisation de l’accueil (2 novembre 2026)
+
+`homeSections` est une liste ordonnée, sans doublon, parmi `hero`, `continue`,
+`tonight` (mosaïque « Pour ce soir », 4 novembre 2026), `films`, `series`, `rated`.
+L’absence conserve les six sections par défaut ; une liste enregistrée avant l’ajout
+de `tonight` ne l’affiche pas tant qu’elle n’est pas réactivée dans les paramètres ;
+une liste vide masque tout et affiche un lien vers les paramètres. Les flèches
+Monter/Descendre sont utilisables au clavier ; les sections masquées peuvent
+être réactivées et l’affichage par défaut restauré.
+
+`cardSize` (`small`, `medium`, `large`) règle les grilles et les étagères ;
+`cardDensity` (`comfortable`, `compact`) règle leur espacement. Les trois tailles
+restent utilisables sur mobile (trois, deux ou une carte par ligne).
+`accentColor` (`orange`, `blue`, `violet`, `green`) applique une palette CSS
+bornée, avec variantes claires/sombres. Aucun CSS utilisateur, paquet de thème
+ou dépendance supplémentaire n’est nécessaire.
+
+Ces réglages sont proposés dans Affichage & Affiches, enregistrés par compte,
+réappliqués au chargement et au retour sur la fenêtre. Les pages ouvertes sur
+un autre appareil se rafraîchissent à leur prochain focus ; il n’y a pas de
+notification poussée en temps réel. Les affiches manuelles sont déjà disponibles
+via Gérer les images de la fiche (administrateur), avec dépôt dans le stockage
+applicatif ; aucun fichier média n’est écrasé. Les choix de lecture, langues,
+sauts et décalages utilisent toujours les préférences du même compte.

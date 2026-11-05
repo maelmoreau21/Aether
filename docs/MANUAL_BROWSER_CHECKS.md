@@ -28,7 +28,7 @@ aucun sous-titre externe n'est injecté pour contourner cette mesure.
 ne prouve ni le fonctionnement des haut-parleurs, ni le ressenti audiovisuel.
 Les fixtures FR/EN sont deux tonalités synthétiques, pas des dialogues parlés.
 
-1. Depuis la racine : `cargo run --locked -p media-poc`. Ouvrir
+1. Depuis la racine : `MEDIA_FIXTURE_DIR=tests/fixtures/generated cargo run --locked -p media-poc` (sans `MEDIA_FIXTURE_DIR`, le Core démarre avec une bibliothèque vide). Ouvrir
    `http://127.0.0.1:3000` dans le navigateur à vérifier, avec un profil de test.
    Conserver les réglages médias par défaut. Noter version complète, OS,
    sortie audio choisie et éventuels réglages non standard.

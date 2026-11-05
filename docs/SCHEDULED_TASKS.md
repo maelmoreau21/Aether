@@ -2,6 +2,42 @@
 
 # Scans planifiés — 19 octobre 2026
 
+## Parcours du planificateur corrigé — 2 novembre 2026
+
+Les plans sont désormais visibles en premier et ouverts à l’arrivée. La file
+d’exécution reste accessible dans une rubrique distincte ; elle ne charge ni ne
+sonde ses opérations tant qu’elle est repliée. Les plans et résultats système,
+scans et sauvegardes sont relus toutes les dix secondes lorsque le planificateur
+est actif et le document visible. Les requêtes simultanées sont partagées et les
+mutations attendent la lecture précédente pour éviter de réafficher un ancien
+intervalle après enregistrement. Les erreurs de chaque source restent distinctes.
+
+La boîte de configuration expose l’activation et les bornes effectives du backend
+(5 minutes à 7 jours pour scans/système ; 60 minutes à 7 jours pour sauvegardes).
+Désactiver un intervalle de scan utilise désormais PUT `enabled:false`, comme les
+plans système et sauvegardes : intervalle, date du dernier lancement et résultat
+restent conservés. L’ancienne route DELETE reste disponible pour ses autres clients.
+Une planification désactivée peut être réactivée depuis le même formulaire.
+
+Un lancement système accepté est présenté comme mis en file, sans le confondre
+avec son démarrage ou son succès. Les détails montrent `lastMessage`, la classe
+d’erreur et sa portée transmises par l’API. Une ouverture directe attend le
+chargement avant d’annoncer une tâche introuvable. Le paramètre `?task` du fragment
+est pris en compte uniquement dans `#tasks-section`, sans contaminer les autres
+rubriques d’administration.
+
+Sources Jellyfin consultées : `features/tasks/hooks/useLiveTasks.ts` pour les
+changements d’état, `components/NewTriggerForm.tsx` pour les types de déclencheur.
+Aether continue ici d’exposer uniquement ses intervalles effectivement exécutés ;
+les horaires quotidiens/hebdomadaires, limites de durée et plusieurs déclencheurs
+de Jellyfin ne sont pas simulés dans l’interface.
+
+Validation ciblée : `navigation.test.ts` (2 cas), ESLint des fichiers touchés et
+`scripts/browser-scheduler-settings.cjs` avec API simulées aux largeurs 390/1440
+(enregistrement scan, désactivation/réactivation, file système, actualisation
+périodique, erreurs structurées, bornes sauvegardes). Aucun changement au worker
+ou preuve d’exécution réelle NAS n’est déduit de ces scénarios.
+
 ## Libellé des déclencheurs — 27 octobre 2026
 
 L'interface nomme les déclencheurs actuels « intervalles » et affiche « Toutes les 24 heures » pour 1440 minutes. Le moteur part de l'heure d'enregistrement ou du dernier lancement ; il ne garantit pas « chaque jour à 7 h ». Un horaire civil fixe requiert une règle persistée avec fuseau horaire et un calcul explicite des changements d'heure pour les scans, sauvegardes et tâches système.

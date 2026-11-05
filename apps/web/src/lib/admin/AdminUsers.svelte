@@ -6,6 +6,7 @@
   import Icon from '../ui/Icon.svelte';
   import { modalFocus } from './modal-focus';
   import { locale, t } from '../i18n';
+  import { activityLabel as formatActivity, filterAndSortUsers, groupMembershipUpdates, userMutationErrorMessage } from './user-list';
 
   interface Props {
     users: Account[];
@@ -56,11 +57,7 @@
   let sortAsc = $state(true);
 
   function activityLabel(timestamp: number | null | undefined) {
-    if (timestamp == null) return 'Jamais';
-    return new Date(timestamp * 1000).toLocaleString($locale === 'en' ? 'en-GB' : 'fr-FR', {
-      dateStyle: 'short',
-      timeStyle: 'short'
-    });
+    return formatActivity(timestamp, $locale);
   }
 
   async function refresh() {
@@ -98,46 +95,26 @@
     });
     if (!response.ok) {
       const code = (await response.json().catch(() => ({}))).error;
-      const errors: Record<string, string> = {
-        login_exists: 'Cet identifiant existe déjà.',
-        self_protection: 'Vous ne pouvez pas désactiver ou rétrograder votre propre compte.',
-        last_administrator: 'Le dernier administrateur actif doit être conservé.',
-        invalid_password: 'Le mot de passe doit contenir de 15 à 128 caractères sans caractère de contrôle.',
-        local_credentials_required: 'Ce compte est géré par le fournisseur SSO.',
-        invalid_login: 'Identifiant : 3 à 64 caractères minuscules, chiffres, points, tirets ou underscores.',
-        invalid_display_name: 'Nom : 128 caractères maximum, sans caractère de contrôle.'
-      };
-      throw new Error(errors[code] ?? 'Opération refusée ou serveur indisponible.');
+      throw new Error(userMutationErrorMessage(code));
     }
   }
 
   async function syncUserGroups(userId: string, targetGroupIds: string[]) {
     if (!$session) return;
-    const updatePromises: Promise<unknown>[] = [];
-    for (const group of groups) {
-      if (group.isDefault) continue;
-      const isMember = group.userIds.includes(userId);
-      const shouldBeMember = targetGroupIds.includes(group.id);
-      if (isMember !== shouldBeMember) {
-        const nextUserIds = shouldBeMember
-          ? [...group.userIds, userId]
-          : group.userIds.filter(id => id !== userId);
-        updatePromises.push(
-          fetch(`/api/v1/admin/groups/${encodeURIComponent(group.id)}`, {
-            method: 'PUT',
-            credentials: 'same-origin',
-            cache: 'no-store',
-            headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
-            body: JSON.stringify({
-              name: group.name,
-              isDefault: group.isDefault,
-              userIds: nextUserIds,
-              libraryIds: group.libraryIds
-            })
-          })
-        );
-      }
-    }
+    const updatePromises = groupMembershipUpdates(groups, userId, targetGroupIds).map(({ group, userIds }) =>
+      fetch(`/api/v1/admin/groups/${encodeURIComponent(group.id)}`, {
+        method: 'PUT',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
+        body: JSON.stringify({
+          name: group.name,
+          isDefault: group.isDefault,
+          userIds,
+          libraryIds: group.libraryIds
+        })
+      })
+    );
     await Promise.all(updatePromises);
   }
 
@@ -214,29 +191,9 @@
     }
   }
 
-  const filteredUsers = $derived.by(() => {
-    return allUsers.filter(user => {
-      const q = search.trim().toLowerCase();
-      const matchSearch = !q || [user.login, user.displayName ?? '', user.id].some(v => v.toLowerCase().includes(q));
-      const matchRole = roleFilter === 'all' || user.role === roleFilter;
-      const matchStatus = statusFilter === 'all' || (statusFilter === 'disabled' ? user.disabledAt != null : user.disabledAt == null);
-      return matchSearch && matchRole && matchStatus;
-    }).sort((a, b) => {
-      let cmp = 0;
-      if (sortField === 'name') {
-        cmp = (a.displayName || a.login).localeCompare(b.displayName || b.login);
-      } else if (sortField === 'role') {
-        cmp = a.role.localeCompare(b.role);
-      } else if (sortField === 'status') {
-        const sA = a.disabledAt != null ? 1 : 0;
-        const sB = b.disabledAt != null ? 1 : 0;
-        cmp = sA - sB;
-      } else if (sortField === 'lastSeen') {
-        cmp = (a.lastSeenAt ?? 0) - (b.lastSeenAt ?? 0);
-      }
-      return sortAsc ? cmp : -cmp;
-    });
-  });
+  const filteredUsers = $derived(
+    filterAndSortUsers(allUsers, { search, roleFilter, statusFilter, sortField, sortAsc })
+  );
 
   const allSelected = $derived(filteredUsers.length > 0 && filteredUsers.every(u => selectedUserIds.includes(u.id)));
 
@@ -266,19 +223,7 @@
   }
 </script>
 
-<section id="users-section" class="dsm-container" aria-labelledby="users-heading">
-  <!-- DSM Header -->
-  <div class="dsm-header">
-    <div class="dsm-title-group">
-      <div class="dsm-icon-badge">
-        <Icon name="users" size={22} />
-      </div>
-      <div>
-        <h2 id="users-heading">{$t('users_heading')}</h2>
-        <p class="dsm-subtitle">Gérez les comptes d'accès locaux et attribuez leurs privilèges de médiathèque.</p>
-      </div>
-    </div>
-  </div>
+<section id="users-section" class="dsm-container" aria-label={$t('users_heading')}>
 
   {#if message}
     <div class="dsm-alert" class:alert-error={failed} class:alert-success={!failed} role="status">
@@ -294,9 +239,9 @@
         <div class="dsm-modal-header">
           <div class="modal-title-wrap">
             <Icon name="profile" size={20} />
-            <h3 id="modal-user-title">{editing ? (editing.displayName || editing.login) : 'Créer un utilisateur'}</h3>
+            <h3 id="modal-user-title">{editing ? (editing.displayName || editing.login) : $t('create_user')}</h3>
           </div>
-          <button type="button" class="btn-close" aria-label="Fermer" onclick={() => { editorOpen = false; }}>
+          <button type="button" class="btn-close" aria-label={$t('close')} onclick={() => { editorOpen = false; }}>
             <Icon name="close" size={18} />
           </button>
         </div>
@@ -304,22 +249,22 @@
         {#if editing}
           <div class="dsm-tabs" role="tablist">
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'info'} onclick={() => activeTab = 'info'}>
-              <Icon name="info" size={15} /> Informations
+              <Icon name="info" size={15} /> {$t('information')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'groups'} onclick={() => activeTab = 'groups'}>
-              <Icon name="users" size={15} /> Groupes
+              <Icon name="users" size={15} /> {$t('groups')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'permissions'} onclick={() => activeTab = 'permissions'}>
-              <Icon name="film" size={15} /> Permissions
+              <Icon name="film" size={15} /> {$t('permissions')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'parental'} onclick={() => activeTab = 'parental'}>
-              <Icon name="shield" size={15} /> Contrôle parental
+              <Icon name="shield" size={15} /> {$t('parental_control')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'media'} onclick={() => activeTab = 'media'}>
-              <Icon name="settings" size={15} /> Téléchargement
+              <Icon name="settings" size={15} /> {$t('downloads')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'password'} onclick={() => activeTab = 'password'}>
-              <Icon name="settings" size={15} /> Sécurité
+              <Icon name="settings" size={15} /> {$t('security')}
             </button>
           </div>
         {/if}
@@ -327,30 +272,30 @@
         <div class="dsm-modal-body">
           {#if activeTab === 'info' || !editing}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Informations de base</h4>
+              <h4 class="form-section-title">{$t('basic_information')}</h4>
               <div class="dsm-grid-form">
                 {#if !editing}
                   <label class="form-row">
-                    <span class="row-label">Nom d'utilisateur <abbr title="requis" class="required">*</abbr></span>
+                    <span class="row-label">{$t('username')} <abbr title={$t('required')} class="required">*</abbr></span>
                     <div class="row-field">
                       <input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" bind:value={login} placeholder="ex: jean.dupont" autocomplete="off" />
-                      <span class="field-hint">3 à 64 lettres minuscules, chiffres, tirets ou points.</span>
+                      <span class="field-hint">{$t('username_hint')}</span>
                     </div>
                   </label>
                 {:else}
                   <div class="form-row">
-                    <span class="row-label">Nom d'utilisateur</span>
+                    <span class="row-label">{$t('username')}</span>
                     <div class="row-field">
                       <strong class="user-static-login">{editing.login}</strong>
                       <span class="dsm-badge" class:badge-sso={editing.sso} class:badge-local={!editing.sso}>
-                        {editing.sso ? 'Fournisseur SSO' : 'Compte local'}
+                        {editing.sso ? $t('sso_provider') : $t('local_account')}
                       </span>
                     </div>
                   </div>
                 {/if}
 
                 <label class="form-row">
-                  <span class="row-label">Description / Nom affiché</span>
+                  <span class="row-label">{$t('description_display_name')}</span>
                   <div class="row-field">
                     <input maxlength="128" bind:value={displayName} placeholder="ex: Jean Dupont" />
                   </div>
@@ -358,36 +303,36 @@
 
                 {#if !editing}
                   <label class="form-row">
-                    <span class="row-label">Mot de passe <abbr title="requis" class="required">*</abbr></span>
+                    <span class="row-label">{$t('password')} <abbr title={$t('required')} class="required">*</abbr></span>
                     <div class="row-field">
-                      <input type="password" required minlength="15" maxlength="128" bind:value={password} autocomplete="new-password" placeholder="Minimum 15 caractères" />
-                      <span class="field-hint">Algorithme robuste Argon2id (15 à 128 caractères).</span>
+                      <input type="password" required minlength="15" maxlength="128" bind:value={password} autocomplete="new-password" placeholder={$t('password_minimum')} />
+                      <span class="field-hint">{$t('password_hint')}</span>
                     </div>
                   </label>
                 {/if}
 
                 <label class="form-row">
-                  <span class="row-label">Privilège</span>
+                  <span class="row-label">{$t('privilege')}</span>
                   <div class="row-field">
                     <select bind:value={role} disabled={editing?.id === currentUserId}>
-                      <option value="user">Utilisateur standard</option>
-                      <option value="administrator">Administrateur</option>
+                      <option value="user">{$t('standard_user')}</option>
+                      <option value="administrator">{$t('administrator')}</option>
                     </select>
                     {#if editing?.id === currentUserId}
-                      <span class="field-hint">Vous ne pouvez pas modifier votre propre rôle.</span>
+                      <span class="field-hint">{$t('cannot_change_own_role')}</span>
                     {/if}
                   </div>
                 </label>
 
                 {#if editing}
                   <div class="form-row">
-                    <span class="row-label">Statut du compte</span>
+                      <span class="row-label">{$t('account_status')}</span>
                     <div class="row-field">
                       <label class="dsm-checkbox-label">
                         <input type="checkbox" bind:checked={disabled} disabled={editing.id === currentUserId} />
-                        <span>Désactiver ce compte</span>
+                        <span>{$t('disable_account')}</span>
                       </label>
-                      <span class="field-hint">Un compte désactivé conserve ses préférences mais ne peut plus se connecter.</span>
+                      <span class="field-hint">{$t('disabled_account_hint')}</span>
                     </div>
                   </div>
                 {/if}
@@ -395,17 +340,17 @@
             </div>
           {:else if editing && activeTab === 'groups'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Appartenance aux groupes</h4>
-              <p class="section-desc">Sélectionnez les groupes d'utilisateurs auxquels ce compte doit être affecté :</p>
+              <h4 class="form-section-title">{$t('group_membership')}</h4>
+              <p class="section-desc">{$t('group_membership_hint')}</p>
 
               <div class="dsm-table-container">
                 <table class="dsm-table">
                   <thead>
                     <tr>
                       <th class="col-check"></th>
-                      <th>Groupe</th>
-                      <th>Type</th>
-                      <th>Bibliothèques accessibles</th>
+                      <th>{$t('group')}</th>
+                      <th>{$t('type')}</th>
+                      <th>{$t('accessible_libraries')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -609,18 +554,18 @@
     <div class="toolbar-right">
       <div class="search-box">
         <Icon name="search" size={16} />
-        <input type="search" bind:value={search} placeholder="Rechercher…" />
+        <input type="search" bind:value={search} placeholder="Rechercher…" aria-label="Rechercher un utilisateur" />
       </div>
 
       <select bind:value={roleFilter} class="filter-select" aria-label="Filtrer par rôle">
         <option value="all">Tous les rôles</option>
         <option value="administrator">Administrateurs</option>
-        <option value="user">Utilisateurs standard</option>
+        <option value="user">Utilisateurs</option>
       </select>
 
       <select bind:value={statusFilter} class="filter-select" aria-label="Filtrer par statut">
         <option value="all">Tous les statuts</option>
-        <option value="active">Actifs uniquement</option>
+        <option value="active">Actifs</option>
         <option value="disabled">Désactivés</option>
       </select>
     </div>
@@ -736,572 +681,277 @@
 </section>
 
 <style>
-  .dsm-container {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    margin-bottom: 40px;
-  }
+.dsm-container { display: flex; flex-direction: column; gap: 16px; margin-bottom: 40px; font-family: var(--font-sans); color: var(--color-text); }
 
-  .dsm-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--color-line);
-  }
+  /* En-tête de section */
 
-  .dsm-title-group {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
+  /* Barre d'outils */
+  .dsm-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 
-  .dsm-icon-badge {
-    display: grid;
-    place-items: center;
-    width: 42px;
-    height: 42px;
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    border-radius: var(--radius-md);
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 20px;
-    font-weight: 700;
-  }
-
-  .dsm-subtitle {
-    margin: 2px 0 0;
-    font-size: 13px;
-    color: var(--color-muted);
-  }
-
-  /* Toolbar */
-  .dsm-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 8px 12px;
-  }
-
-  .toolbar-left, .toolbar-right {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
+  /* Boutons */
   .btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    font-weight: 500;
-    border: 1px solid transparent;
-    cursor: pointer;
+    justify-content: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--radius-md);
     background: transparent;
-    transition: all 0.15s ease;
-  }
-
-  .btn-primary {
-    background: var(--color-accent);
-    color: var(--color-on-accent);
-  }
-  .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.1);
-  }
-
-  .btn-default {
-    background: var(--color-raised);
-    border-color: var(--color-line);
     color: var(--color-text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), opacity var(--transition-fast), transform var(--transition-fast);
   }
-  .btn-default:hover:not(:disabled) {
-    background: var(--color-surface);
-    border-color: var(--color-accent);
-  }
+  .btn:active:not(:disabled) { transform: scale(0.98); }
+  .btn:focus-visible, .btn-close:focus-visible, .dsm-tab:focus-visible, .sortable:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+  .btn-primary { background: var(--color-accent); color: var(--color-on-accent); }
+  .btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+  .btn-default { background: transparent; border: 1px solid var(--color-line); color: var(--color-text); }
+  .btn-default:hover:not(:disabled) { background: var(--color-raised); }
+  .btn-warning { background: transparent; border: 1px solid var(--color-line); color: var(--color-danger); }
+  .btn-warning:hover:not(:disabled) { background: var(--color-danger-soft); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-group { display: inline-flex; gap: 8px; }
 
-  .btn-warning {
-    background: #d97706;
-    color: #fff;
-  }
-
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .btn-group {
-    display: inline-flex;
-  }
-  .btn-group .btn {
-    border-radius: 0;
-  }
-  .btn-group .btn:first-child {
-    border-top-left-radius: var(--radius-sm);
-    border-bottom-left-radius: var(--radius-sm);
-  }
-  .btn-group .btn:last-child {
-    border-top-right-radius: var(--radius-sm);
-    border-bottom-right-radius: var(--radius-sm);
-    border-left: 0;
-  }
-
+  /* Recherche et filtres */
   .search-box {
     display: flex;
     align-items: center;
-    gap: 6px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
+    gap: 8px;
+    height: 44px;
+    padding: 0 14px;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    padding: 0 8px;
-    height: 32px;
+    background: var(--color-raised);
     color: var(--color-muted);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
   }
-
-  .search-box input {
-    border: none;
-    background: transparent;
-    color: var(--color-text);
-    outline: none;
-    font-size: 13px;
-    width: 140px;
-  }
-
+  .search-box:focus-within { border-color: var(--color-accent); background: var(--color-surface-elevated); }
+  .search-box input { width: 180px; min-width: 0; height: 100%; min-height: 0; box-shadow: none; padding: 0; border: 0; background: transparent; color: var(--color-text); font: inherit; font-size: 14px; outline: none; }
+  .search-box input::placeholder { color: var(--color-subtle); }
   .filter-select {
-    height: 32px;
-    padding: 0 8px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
+    width: auto;
+    min-width: 0;
+    height: 44px;
+    padding: 0 36px 0 14px;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
+    background-color: var(--color-raised);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
+  }
+  .filter-select:hover { background-color: var(--color-raised-hover); }
+  .filter-select:focus { outline: none; border-color: var(--color-accent); background-color: var(--color-surface-elevated); }
+
+  /* Tableaux */
+  .dsm-table-panel { overflow-x: auto; padding: 4px 16px; border-radius: var(--radius-md); background: var(--color-surface); }
+  .dsm-table-container { overflow-x: auto; border-radius: var(--radius-md); background: var(--color-surface); }
+  .dsm-table { width: 100%; border-collapse: collapse; font-size: 14px; text-align: left; }
+  .main-table { min-width: 860px; }
+  .dsm-table th {
+    height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--color-line-subtle);
+    background: transparent;
+    color: var(--color-muted);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .dsm-table th.sortable { cursor: pointer; transition: color var(--transition-fast); }
+  .dsm-table th.sortable:hover { color: var(--color-text); }
+  .dsm-table td { height: 60px; padding: 8px 16px; border-bottom: 1px solid var(--color-line-subtle); vertical-align: middle; }
+  .dsm-table tbody tr:last-child td { border-bottom: 0; }
+  .dsm-table tbody tr { transition: background-color var(--transition-fast); }
+  .dsm-table tbody tr:hover { background: var(--color-surface-hover); }
+  .dsm-table tbody tr.selected { background: var(--color-accent-soft); }
+  .dsm-table tbody tr.row-disabled { color: var(--color-muted); }
+  .dsm-table input[type='checkbox'] { width: 20px; height: 20px; margin: 0; accent-color: var(--color-accent); cursor: pointer; vertical-align: middle; }
+  .dsm-table input[type='checkbox']:disabled { cursor: not-allowed; opacity: 0.45; }
+
+  .user-cell { display: flex; align-items: center; gap: 12px; }
+  .dsm-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; overflow: hidden; border-radius: 50%; background: var(--color-raised-hover); color: var(--color-text); font-size: 12px; font-weight: 700; }
+  .dsm-avatar img { width: 100%; height: 100%; object-fit: cover; }
+  .user-login-text { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+  .user-display-name { color: var(--color-muted); }
+
+  /* Badges */
+  .self-pill, .dsm-pill, .dsm-badge, .lib-kind-pill, .group-mini-tag {
+    display: inline-flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: var(--radius-xs);
+    background: var(--color-raised-hover);
     color: var(--color-text);
     font-size: 12px;
-  }
-
-  /* Table */
-  .dsm-table-panel {
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    overflow-x: auto;
-  }
-
-  .dsm-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    text-align: left;
-  }
-
-  .dsm-table th {
-    background: var(--color-raised);
-    border-bottom: 1px solid var(--color-line);
-    padding: 8px 12px;
-    font-weight: 600;
-    color: var(--color-muted);
-    user-select: none;
+    font-weight: 700;
     white-space: nowrap;
   }
+  .self-pill { background: var(--color-accent-soft); color: var(--color-accent); }
+  .pill-admin { background: var(--color-accent-soft); color: var(--color-accent); }
+  .pill-user { background: var(--color-raised-hover); color: var(--color-muted); }
+  .pill-default { background: var(--color-raised); color: var(--color-info); }
+  .dsm-badge { margin-left: 8px; }
+  .badge-local { background: var(--color-raised-hover); color: var(--color-muted); }
+  .badge-sso { background: var(--color-raised); color: var(--color-info); }
+  .lib-kind-pill { text-transform: capitalize; }
+  .groups-tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .group-mini-tag { font-weight: 600; }
+  .default-tag { background: var(--color-raised); color: var(--color-info); }
 
-  .dsm-table th.sortable {
-    cursor: pointer;
-  }
-  .dsm-table th.sortable:hover {
-    color: var(--color-text);
-  }
+  .status-indicator { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+  .status-indicator .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .status-on .dot { background: var(--color-success); }
+  .status-off .dot { background: var(--color-danger); }
 
-  .dsm-table td {
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--color-line);
-    vertical-align: middle;
-  }
+  .text-muted { color: var(--color-muted); font-size: 13px; }
+  .dsm-tag-muted { margin-left: 6px; color: var(--color-muted); font-size: 13px; }
+  .empty-cell { height: auto; padding: 40px 16px; color: var(--color-muted); text-align: center; }
+  .dsm-statusbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 0 4px; color: var(--color-muted); font-size: 13px; }
+  .dsm-statusbar strong { color: var(--color-text); }
 
-  .dsm-table tbody tr:hover {
-    background: var(--color-raised);
-  }
-
-  .dsm-table tbody tr.selected {
-    background: var(--color-accent-soft);
-  }
-
-  .dsm-table tbody tr.row-disabled {
-    opacity: 0.7;
-  }
-
-  .user-cell {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .dsm-avatar {
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: 26px;
-    border-radius: 50%;
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    font-size: 11px;
-    font-weight: 700;
-    overflow: hidden;
-    flex-shrink: 0;
-  }
-  .dsm-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .user-login-text {
-    font-weight: 600;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .self-pill {
-    font-size: 10px;
-    padding: 1px 6px;
-    border-radius: 99px;
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-  }
-
-  .dsm-pill {
-    font-size: 11px;
-    font-weight: 600;
-    padding: 2px 8px;
-    border-radius: 99px;
-  }
-
-  .pill-admin {
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-  }
-
-  .pill-user {
-    background: var(--color-raised);
-    color: var(--color-muted);
-  }
-
-  .pill-default {
-    background: #0284c726;
-    color: #38bdf8;
-  }
-
-  .status-indicator {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-  }
-  .status-indicator .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-  .status-on .dot {
-    background: #22c55e;
-  }
-  .status-off .dot {
-    background: #ef4444;
-  }
-
-  .groups-tag-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  .group-mini-tag {
-    font-size: 11px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    padding: 1px 6px;
-    border-radius: var(--radius-sm);
-  }
-
-  .default-tag {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-  }
-
-  .text-muted {
-    color: var(--color-muted);
-    font-size: 12px;
-  }
-
-  .empty-cell {
-    text-align: center;
-    padding: 30px;
-    color: var(--color-muted);
-  }
-
-  .dsm-statusbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 12px;
-    color: var(--color-muted);
-    padding: 0 4px;
-  }
-
-  /* Modal */
+  /* Dialogue d'édition */
   .dsm-modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
     display: grid;
     place-items: center;
-    z-index: 1000;
-    padding: 20px;
-    backdrop-filter: blur(2px);
+    padding: 24px;
+    background: color-mix(in srgb, var(--color-canvas) 70%, transparent);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
-
   .dsm-modal {
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-    width: 100%;
-    max-width: 680px;
-    max-height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    width: 100%;
+    max-width: 760px;
+    max-height: min(88vh, 900px);
     overflow: hidden;
-  }
-
-  .dsm-modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 20px;
-    background: var(--color-raised);
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .modal-title-wrap {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .modal-title-wrap h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  .btn-close {
-    background: transparent;
-    border: none;
-    color: var(--color-muted);
-    cursor: pointer;
-    display: grid;
-    place-items: center;
-    padding: 4px;
-    border-radius: var(--radius-sm);
-  }
-  .btn-close:hover {
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
     color: var(--color-text);
-    background: var(--color-line);
+    box-shadow: var(--shadow-sm);
   }
+  .dsm-modal-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 20px 12px 28px; }
+  .modal-title-wrap { display: flex; align-items: center; gap: 12px; min-width: 0; color: var(--color-muted); }
+  .modal-title-wrap h3 { margin: 0; color: var(--color-text); font-size: 20px; font-weight: 700; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+  .btn-close { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--color-text); cursor: pointer; transition: background-color var(--transition-fast); }
+  .btn-close:hover { background: var(--color-raised); }
 
-  .dsm-tabs {
-    display: flex;
-    gap: 2px;
-    padding: 0 16px;
-    background: var(--color-raised);
-    border-bottom: 1px solid var(--color-line);
-    overflow-x: auto;
-  }
-
+  .dsm-tabs { display: flex; gap: 20px; margin: 0 28px; border-bottom: 1px solid var(--color-line-subtle); overflow-x: auto; scrollbar-width: none; }
   .dsm-tab {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 10px 14px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--color-muted);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-  .dsm-tab:hover {
-    color: var(--color-text);
-  }
-  .dsm-tab.active {
-    color: var(--color-accent);
-    border-bottom-color: var(--color-accent);
-    font-weight: 600;
-  }
-
-  .dsm-modal-body {
-    padding: 20px;
-    overflow-y: auto;
-    flex: 1;
-  }
-
-  .form-section-title {
-    margin: 0 0 12px;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .section-desc {
-    font-size: 13px;
-    color: var(--color-muted);
-    margin: 0 0 14px;
-  }
-
-  .dsm-grid-form {
-    display: grid;
-    gap: 16px;
-  }
-
-  .form-row {
-    display: grid;
-    grid-template-columns: 180px 1fr;
-    align-items: start;
-    gap: 16px;
-    font-size: 13px;
-  }
-
-  .row-label {
-    padding-top: 8px;
-    color: var(--color-muted);
-    font-weight: 500;
-  }
-
-  .row-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .row-field input:not([type="checkbox"]), .row-field select {
-    width: 100%;
-    height: 34px;
-    padding: 0 10px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-    font-size: 13px;
-    box-sizing: border-box;
-  }
-
-  .field-hint {
-    font-size: 11px;
-    color: var(--color-muted);
-  }
-
-  .dsm-checkbox-label {
-    display: flex;
-    align-items: center;
     gap: 8px;
+    height: 46px;
+    margin-bottom: -1px;
+    padding: 0;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--color-muted);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
     cursor: pointer;
-    padding-top: 6px;
+    transition: color var(--transition-fast);
   }
+  .dsm-tab:hover { color: var(--color-text); }
+  .dsm-tab.active { color: var(--color-text); border-bottom-color: var(--color-accent); }
 
-  .dsm-badge {
-    display: inline-block;
-    padding: 2px 8px;
-    border-radius: 99px;
-    font-size: 11px;
-    margin-left: 8px;
-  }
-  .badge-local {
-    background: var(--color-raised);
-    color: var(--color-muted);
-  }
-  .badge-sso {
-    background: #0284c726;
-    color: #38bdf8;
-  }
+  .dsm-modal-body { flex: 1; min-height: 0; padding: 24px 28px; overflow-y: auto; }
+  .form-section-title { margin: 0 0 16px; font-size: 17px; font-weight: 700; }
+  .section-desc { margin: -8px 0 16px; color: var(--color-muted); font-size: 13px; line-height: 1.5; }
 
-  .dsm-info-box {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    padding: 12px 16px;
+  .dsm-grid-form { display: grid; }
+  .form-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: start; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--color-line-subtle); font-size: 14px; }
+  .form-row:first-child { padding-top: 0; }
+  .form-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .row-label { padding-top: 12px; color: var(--color-text); font-weight: 700; }
+  .required { color: var(--color-danger); text-decoration: none; }
+  .row-field { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+  .row-field input:not([type='checkbox']), .row-field select {
+    box-sizing: border-box;
+    width: 100%;
+    height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--color-line-subtle);
     border-radius: var(--radius-sm);
-    font-size: 13px;
+    background-color: var(--color-canvas);
     color: var(--color-text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
   }
+  .row-field select { padding-right: 40px; }
+  .row-field input:not([type='checkbox']):hover, .row-field select:hover { background-color: var(--color-raised-hover); }
+  .row-field input:not([type='checkbox']):focus, .row-field select:focus { outline: none; border-color: var(--color-accent); background-color: var(--color-surface-elevated); }
+  .row-field input:disabled, .row-field select:disabled { opacity: 0.45; cursor: not-allowed; }
+  .user-static-login { display: inline-flex; align-items: center; min-height: 46px; font-weight: 700; }
+  .row-field:has(.user-static-login) { flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .field-hint { color: var(--color-muted); font-size: 13px; line-height: 1.5; }
+  .dsm-checkbox-label { display: flex; align-items: center; gap: 12px; min-height: 46px; font-weight: 600; cursor: pointer; }
+  .dsm-checkbox-label input { width: 20px; height: 20px; margin: 0; accent-color: var(--color-accent); }
 
-  .inherited-badge {
-    font-size: 11px;
-    color: var(--color-accent);
-  }
-  .direct-badge {
-    font-size: 11px;
-    color: var(--color-muted);
-  }
-  .lib-kind-pill {
-    text-transform: capitalize;
-    font-size: 11px;
-    background: var(--color-raised);
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-  }
+  .dsm-info-box { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: var(--radius-md); background: var(--color-raised); color: var(--color-text); font-size: 14px; line-height: 1.5; }
+  .dsm-info-box :global(svg) { flex: none; margin-top: 1px; color: var(--color-info); }
 
-  .dsm-modal-footer {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    padding: 14px 20px;
-    background: var(--color-raised);
-    border-top: 1px solid var(--color-line);
-  }
+  .inherited-badge { color: var(--color-text); font-size: 13px; font-weight: 600; }
+  .direct-badge { color: var(--color-muted); font-size: 13px; }
 
-  .dsm-alert {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-  }
-  .alert-success {
-    background: var(--color-success-soft);
-    border: 1px solid var(--color-success);
-    color: var(--color-success);
-  }
-  .alert-error {
-    background: var(--color-danger-soft);
-    border: 1px solid var(--color-danger);
-    color: var(--color-danger);
-  }
+  .dsm-modal-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 16px 28px 24px; border-top: 1px solid var(--color-line-subtle); }
 
-  @media(max-width: 640px) {
-    .form-row {
-      grid-template-columns: 1fr;
-      gap: 6px;
-    }
-  }
+  /* Messages */
+  .dsm-alert { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 12px 16px; border-radius: var(--radius-md); color: var(--color-text); font-size: 14px; }
+  .alert-success { background: var(--color-success-soft); }
+  .alert-success :global(svg) { color: var(--color-success); }
+  .alert-error { background: var(--color-danger-soft); }
+  .alert-error :global(svg) { color: var(--color-danger); }
 
-  .col-check { width: 48px; }
-  .col-check-center { width: 40px; text-align: center; }
+  .col-check { width: 52px; }
+  .col-check-center { width: 52px; text-align: center; }
   .cell-center { text-align: center; }
-  .mt-10 { margin-top: 10px; }
+  .mt-10 { margin-top: 4px; }
 
+  @media (max-width: 820px) {
+    .dsm-toolbar { align-items: stretch; flex-direction: column; }
+    .toolbar-right { width: 100%; }
+    .search-box { flex: 1 1 100%; }
+    .search-box input { width: 100%; }
+    .filter-select { flex: 1 1 calc(50% - 4px); }
+  }
+  @media (max-width: 640px) {
+    .toolbar-left .btn { flex: 1 1 auto; }
+    .btn-group { flex: 1 1 100%; }
+    .btn-group .btn { flex: 1; }
+    .dsm-modal-backdrop { place-items: end stretch; padding: 0; }
+    .dsm-modal { max-width: none; max-height: 92dvh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+    .dsm-modal-header { padding: 16px 12px 8px 16px; }
+    .dsm-tabs { margin: 0 16px; }
+    .dsm-modal-body { padding: 20px 16px; }
+    .dsm-modal-footer { padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+    .dsm-modal-footer .btn { flex: 1; }
+    .form-row { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+    .row-label { padding-top: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn, .dsm-tab, .btn-close, .dsm-table tbody tr, .search-box, .filter-select { transition: none; }
+  }
 </style>

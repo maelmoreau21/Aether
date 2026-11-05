@@ -1,5 +1,21 @@
 > Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
 
+> Connexion d’appareils par QR code (5 novembre 2026) : voir [sessions](LOCAL_SESSIONS.md#connexion-par-qr-code--5-novembre-2026).
+> `POST /api/v1/auth/device/start` crée une demande de cinq minutes et renvoie
+> `{secret,code,expiresIn,url,qrWidth,qrModules}` (modules booléens du QR, sans bordure).
+> `POST .../poll` avec `{secret}` renvoie `{status:"pending"}` ou
+> `{status:"authenticated",user,csrfToken}` et un cookie de session HttpOnly.
+> `POST .../inspect` avec `{code}` renvoie `{device}` ; `POST .../approve` avec
+> `{code}` confirme explicitement et renvoie `204`. Ces deux routes exigent session
+> locale **ou SSO** et CSRF ; toutes exigent une origine autorisée. Erreurs : `400`
+> entrée invalide, `401/403` session/CSRF/origine/droits, `404` code invalide ou déjà
+> approuvé, `410` demande expirée ou consommée, `429` quota. Aucun secret dans l’URL.
+
+> Parcours du 3 novembre 2026 : [sous-titres manuels](OPENSUBTITLES.md),
+> [images de chapitres](CHAPTER_IMAGES.md), [recommandations personnelles](RECOMMENDATIONS.md)
+> et [notifications](NOTIFICATIONS.md). Chaque contrat précise ses routes,
+> droits, données persistantes et limites de validation.
+
 > Bibliothèques avec plusieurs dossiers/nœuds : [contrat du 22 octobre](LIBRARY_FOLDERS.md).
 > Navigation par bibliothèque et images multiples : [contrat du 21 octobre](RESPONSIVENESS_AND_ARTWORK.md).
 
@@ -19,6 +35,12 @@
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
 
 # API expérimentale du banc P0
+
+`GET /api/v1/catalog?person=<nom>` filtre les films et séries accessibles par
+nom exact d'acteur, réalisateur ou scénariste ; `offset`, `limit` et `count`
+suivent le contrat du catalogue. Les homonymes peuvent être confondus en l'absence
+d'identifiants personne dans les métadonnées historiques. Les portraits des
+crédits `crewCredits` utilisent le même proxy par œuvre que ceux des acteurs.
 
 Réglages locaux de bibliothèque, images admin, permissions de téléchargement et
 contrôle parental étendu (21 octobre 2026) : [contrat et limites](LIBRARY_OPTIONS.md).
@@ -83,7 +105,7 @@ une piste/ langue incompatible empêche le démarrage. Pas de scan à la demande
 La page garde les quatre sources initiales dans son menu et propose un choix
 FR/EN par remux pour MKV/MP4 préparés. L'URL change réellement ; elle restaure
 la position et l'état lecture/pause. Cela ne constitue pas une sélection
-interne dans le conteneur. Contrat expérimental détaillé dans `P0C_AUDIO_SWITCHING.md`.
+interne dans le conteneur. Contrat expérimental détaillé dans `docs/archive/player-experiments/P0C_AUDIO_SWITCHING.md`.
 
 `playback_status=unverified-on-client` signifie que le serveur ne conclut jamais
 à la compatibilité depuis le probe. Les résultats observés sont consignés dans
@@ -137,7 +159,7 @@ API indique une demande, pas la preuve du signal ; celle-ci dépend du testPCM.
 
 ### Expérience de récupération après seek
 
-GET /audio-seek-policy.js sert uniquement le contrôleur fixe du banc Shaka (JavaScript, même protection Host/Origin/CSP que le banc ; origine étrangère403). Aucun chemin fourni par le client. Option désactivée par défaut dans /shaka. État idle/recovering/error, erreur terminale sans boucle ; rechargement de la présentation après erreur. Le statut de récupération API ne prouve pas le signal audio. Voir P0C_AUDIO_SEEK_RECOVERY.md.
+GET /audio-seek-policy.js sert uniquement le contrôleur fixe du banc Shaka (JavaScript, même protection Host/Origin/CSP que le banc ; origine étrangère403). Aucun chemin fourni par le client. Option désactivée par défaut dans /shaka. État idle/recovering/error, erreur terminale sans boucle ; rechargement de la présentation après erreur. Le statut de récupération API ne prouve pas le signal audio. Voir docs/archive/player-experiments/P0C_AUDIO_SEEK_RECOVERY.md.
 
 ## P1 local — contrat ajouté
 
@@ -152,7 +174,7 @@ Les URLs de contenu démo réutilisent GET/HEAD /api/v1/assets/{id}/content, Ran
 GET/HEAD /api/v1/demo/subtitles/{name} : fr-full.vtt/fr-forced.vtt/en-full.vtt,
 text/vtt UTF8, autres noms404. Ressource préparée absente404. POST405, origine
 tierce403. Ce contrat localhost sans authentification ne permet aucune bibliothèque
-réelle. Voir P1_WEB_INTEGRATION.md pour tests et limites.
+réelle. Voir docs/archive/milestones/P1_WEB_INTEGRATION.md pour tests et limites.
 
 ## P1 — Catalogue de fixtures (15 octobre 2026)
 
@@ -185,7 +207,7 @@ autorisée, scan ou création de bibliothèque n'est ajouté.
 `fixture-film` associe explicitement MKV et MP4 ; `fixture-series` regroupe une
 saison et `fixture-episode-1` réutilisant la même mire. Ces IDs sont fixes,
 pas issus d'une base, d'une fusion de titres ou d'un fournisseur de métadonnées.
-Voir `CATALOGUE_P1.md` pour les parcours, tests et prérequis de sécurité.
+Voir `docs/archive/milestones/CATALOGUE_P1.md` pour les parcours, tests et prérequis de sécurité.
 
 Validation locale : suite Rust 15 tests réussis ; parcours du catalogue sous
 Chrome 155.0.8059.40 Windows headless, états vides injectés, 503/réessai, fiche
@@ -232,6 +254,39 @@ Media contient aussi `synthetic` (true pour les démos, false pour l'inventaire)
 Configuration publique mode standalone-local avec MEDIA_LIBRARY_ROOT ; mode
 localhost-fixtures conservé pour le banc expérimental isolé.
 
+### Fiche technique d'un fichier — 4 novembre 2026
+
+`GET /api/v1/assets/{assetId}/details` alimente le panneau « Informations
+média ». Mêmes contrôles que les autres routes `/api/v1/assets/{id}/…` :
+session (`401`), bibliothèque autorisée et non révoquée, Node non révoqué,
+restriction parentale (`403 permission_denied` / `parental_restriction`, aussi
+pour un identifiant inconnu). `404 unknown_media` si la ligne disparaît entre le
+contrôle et la lecture. `Cache-Control: private, no-store`. Aucun paramètre :
+l'asset est résolu par son identifiant opaque dans l'inventaire.
+
+Réponse : `assetId`, `workId`, `available`, `pathsVisible`, `node`
+(`id`, `name`, `kind` local/remote, `status` effectif connected/disconnected,
+`connectionMode`), `library` (`id`, `name`, `kind` ; bibliothèque logique parente
+pour un dossier multi-emplacements), `file` (`size`, `mime`, `modifiedAt` en
+secondes), `container` (`formatName`, `formatLongName`, `durationSeconds`,
+`bitRate`, `startTime`), `tracks` (index, `codecType`, `codecName`,
+`codecLongName`, profil, dimensions, `pixFmt`, couleurs, `frameRate`, `bitRate`,
+canaux, `sampleRate`, `language`, `title`, `disposition` booléenne),
+`externalAudio` (langue, taille, décalage, piste), `externalSubtitles`
+(`origin` sidecar/downloaded, langue, libellé, forcés, SDH, format) et
+`chapterCount`. Les champs du probe sont copiés par liste blanche :
+`format.filename`, extradata, données annexes et étiquettes arbitraires ne sont
+jamais renvoyés.
+
+Chemins : **administrator uniquement** (`pathsVisible: true`). `file.name`,
+`file.relativePath` (relatif à la racine de la bibliothèque), `file.libraryRoot`,
+`file.absolutePath` (racine telle que connue par le Node + chemin relatif, avec
+le séparateur du Node) ainsi que `node.version` et les chemins des pistes audio
+externes. Un compte `user` reçoit le Node, la bibliothèque et la description
+technique sans aucun nom de fichier ni chemin. Ces chemins sont informatifs :
+aucune route n'accepte de chemin en entrée. Test :
+`cargo test -p media-poc --test asset_details`.
+
 ## P2 — contrôle interne de chaque requête directe (17 octobre 2026)
 
 POST `/internal/v1/core/playback/authorize` reçoit des `PlaybackTokenClaims`
@@ -249,7 +304,7 @@ Les réponses d'appairage, rotation et autres réponses de contrôle incluent
 n'est pas acceptée. Les clients internes ne suivent pas les redirections.
 Les capacités de lecture publique exigent HTTPS, sauf pour les origines loopback
 des tests locaux. Les URL historiques non conformes retombent sur le relais.
-Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
+Voir [le contrat détaillé et les commandes](archive/ci/P2_DOCKER_VALIDATION.md).
 # Extension pistes externes et progression — 18 octobre 2026
 
 - `GET /api/v1/media/{asset}` ajoute `workId`, les `subtitles` externes
@@ -273,7 +328,7 @@ Voir [le contrat détaillé et les commandes](P2_DOCKER_VALIDATION.md).
   Succès `200` avec nouvel état/révision ; conflit `409`, entrée invalide `422`,
   ressource interdite `403`. L'utilisateur est issu de la session, jamais du JSON.
 
-Contrat et limites : [P3/P4](P3_P4_FEATURES.md).
+Contrat et limites : [P3/P4](archive/milestones/P3_P4_FEATURES.md).
 
 
 ## Flux progressifs — 24 octobre 2026
@@ -416,6 +471,29 @@ validée avant publication. Les fenêtres audio évitent une copie audio complè
 sur le parcours MKV quand MSE Opus est disponible.
 
 
+### Portraits de la distribution (4 novembre 2026)
+
+Chaque élément de `actors` du catalogue dont le fournisseur a donné un portrait
+`https://` (`thumbUrl`, ou `thumb` d'un NFO) reçoit `imageUrl` :
+`/api/v1/works/{work}/people/{key}/image`, où `key` vaut les 32 premiers
+caractères hexadécimaux du SHA-256 de l'URL du fournisseur. `GET` exige une
+session autorisée à lire l'œuvre (mêmes règles que les images de l'œuvre) et une
+clé correspondant à un crédit de cette œuvre ; sinon `401`, `403` ou `404`
+`unknown_person_image`. Au premier appel, le Core télécharge le portrait
+seulement via un hôte HTTPS déclaré (`httpHosts`) par une extension activée,
+autorisée pour la bibliothèque et disposant de `metadata.read` ou `images`
+(mêmes contrôles DNS/IP, sans redirection, 10 Mio et 12 s au plus que les aperçus).
+L'image décodée est réencodée en JPEG d'au plus 400×600 et conservée dans le
+magasin d'assets (`person_images`). Réponses : `200 image/jpeg` avec `ETag`,
+`Cache-Control: private, max-age=31536000, immutable`, `304` si l'`ETag`
+correspond ; `404 person_image_host_denied` si aucun fournisseur autorisé ne
+déclare l'hôte (non mémorisé) ; `404 person_image_unavailable` après un échec de
+téléchargement ou de décodage, mémorisé six heures ; `503 person_image_busy` ou
+`person_image_timeout` (quatre téléchargements simultanés au plus). L'URL du
+fournisseur n'est jamais transmise au navigateur par cette route ; `thumbUrl`
+reste présent dans le catalogue pour compatibilité mais l'interface ne le charge
+pas (la CSP `img-src 'self'` le bloquerait).
+
 ## Détail de série paginé — 23 octobre 2026
 
 `GET /api/v1/catalog/{id}?episodeLimit=24&episodeOffset=0&season=1`
@@ -514,3 +592,16 @@ L'envoi multipart `POST /api/v1/admin/avatar-packs/upload` accepte soit `name`
 pour créer une collection, soit `packId` pour ajouter à une collection native
 existante, avec les champs `images`. Les deux champs sont exclusifs ; une
 collection est limitée à 500 images. Session administrateur et CSRF requis.
+
+## Statistiques de lecture facultatives
+
+Le contrat natif `/api/v1/playback/sessions`, les vues administrateur et
+personnelles `/api/v1/{admin,account}/statistics`, la conservation et les règles
+de calcul sont documentés dans [Statistiques](STATISTICS.md). La collecte est
+désactivée par défaut ; elle n'altère pas les API de progression ou de feedback.
+# Applications facultatives : demandes et signalements
+
+Les routes `/api/v1/requests`, `/api/v1/reports`,
+`/api/v1/admin/acquisition/*` et `/api/v1/admin/imports/*` sont conditionnées aux
+extensions officielles activées, avec session, CSRF pour les mutations et droits
+vivants. [Contrat détaillé](REQUESTS_AND_REPORTS.md#connexions-et-api).

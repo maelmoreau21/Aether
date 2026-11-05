@@ -600,7 +600,7 @@ async fn signed_marker_wasm_result_survives_restart() {
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extension_storage::persist(&store, &package)
+    media_poc::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.markers','fixture-publisher',?,1,'marker-generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
@@ -1397,7 +1397,7 @@ async fn real_av1_opus_scan_runs_signed_wasm_automatically_and_persists_after_re
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extension_storage::persist(&store, &package)
+    media_poc::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.metadata','fixture-publisher',?,1,'real-generation')")
@@ -1703,7 +1703,7 @@ async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extension_storage::persist(&store, &package)
+    media_poc::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.lyrics','fixture-publisher',?,1,'generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
@@ -2144,4 +2144,141 @@ async fn extreme_scale_100k_and_naive_vs_optimized_comparison() {
     assert!(opt_duration < naive_duration);
 
     store.close().await;
+}
+
+#[tokio::test]
+async fn library_provider_allowlist_controls_admission_and_provenance_priority() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("priorities.sqlite"))
+        .await
+        .unwrap();
+    setup(&store).await;
+    query("UPDATE libraries SET options_json=? WHERE id='library-1'")
+        .bind(json!({"metadataProviders":[{"id":"fixture.metadata","enabled":false}]}).to_string())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    emit(&store, "disabled", "media.added", 1, "one", 100).await;
+    automation::drain(&store, 100, 64).await.unwrap();
+    assert_eq!(
+        query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    query("UPDATE libraries SET options_json=? WHERE id='library-1'")
+        .bind(json!({"metadataProviders":[{"id":"unused","enabled":true},{"id":"fixture.metadata","enabled":true}]}).to_string())
+        .execute(store.pool()).await.unwrap();
+    emit(&store, "enabled", "media.added", 1, "one", 101).await;
+    automation::drain(&store, 101, 64).await.unwrap();
+    assert_eq!(
+        query_scalar::<_, i64>("SELECT priority FROM durable_tasks")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        999
+    );
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::apply_missing_metadata(
+        &mut tx,
+        "asset-1",
+        "fixture.metadata",
+        "one",
+        &json!({"plot":"Provider plot"}),
+        102,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(query_scalar::<_,i64>("SELECT priority FROM automatic_metadata_provenance WHERE work_id='work-1' AND field_name='plot'").fetch_one(store.pool()).await.unwrap(),999);
+    query("UPDATE automatic_metadata_provenance SET priority=1000 WHERE work_id='work-1' AND field_name='plot'").execute(store.pool()).await.unwrap();
+    // Reordering must compare the old provider's current rank, not its historical rank.
+    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) SELECT 'unused',publisher_id,package_json,enabled,generation FROM extensions WHERE id='fixture.metadata'").execute(store.pool()).await.unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::apply_missing_metadata(
+        &mut tx,
+        "asset-1",
+        "unused",
+        "two",
+        &json!({"plot":"New first provider"}),
+        103,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(query_scalar::<_,String>("SELECT extension_id FROM automatic_metadata_provenance WHERE work_id='work-1' AND field_name='plot'").fetch_one(store.pool()).await.unwrap(),"unused");
+}
+
+#[tokio::test]
+async fn library_provider_allowlist_controls_admission_and_provenance_priority_music_sweep() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("music-refresh.sqlite"))
+        .await
+        .unwrap();
+    setup(&store).await;
+    query("UPDATE libraries SET kind='music' WHERE id='library-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,codec,mime,scan_id,lyrics) VALUES('music','library-1','/read-only','legal.opus',100,'1','Song','Artist','Album','Artist','opus','audio/ogg','scan','Local lyrics')").execute(store.pool()).await.unwrap();
+    query("INSERT INTO automation_policies(extension_id,library_id,operation) VALUES('fixture.metadata','library-1','lyrics.get')").execute(store.pool()).await.unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::emit_music_snapshot(&mut tx, "library-1", 100)
+        .await
+        .unwrap();
+    query("UPDATE automation_events SET dispatched_at=100")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    automation::schedule_library(
+        &mut tx,
+        "library-1",
+        "scheduled",
+        "music-period-one",
+        None,
+        101,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    automation::drain(&store, 101, 64).await.unwrap();
+    assert_eq!(
+        query_scalar::<_, String>("SELECT target_id FROM durable_tasks")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        "music"
+    );
+    query("UPDATE durable_tasks SET status='completed'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::schedule_library(
+        &mut tx,
+        "library-1",
+        "scheduled",
+        "music-period-two",
+        None,
+        102,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    automation::drain(&store, 102, 64).await.unwrap();
+    assert_eq!(
+        query_scalar::<_, String>("SELECT status FROM durable_tasks")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        "queued"
+    );
+    assert_eq!(
+        query_scalar::<_, String>("SELECT lyrics FROM music_tracks WHERE id='music'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        "Local lyrics"
+    );
 }

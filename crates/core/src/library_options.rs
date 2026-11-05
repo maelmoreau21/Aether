@@ -114,6 +114,21 @@ impl Default for LibraryOptions {
     }
 }
 impl LibraryOptions {
+    /// Empty lists preserve global provider policies; an explicit list is an allowlist.
+    /// Larger values run first and win over lower-priority automatic provenance.
+    pub fn provider_priority(
+        providers: &[ProviderPreference],
+        id: &str,
+        fallback: i64,
+    ) -> Option<i64> {
+        if providers.is_empty() {
+            return Some(fallback);
+        }
+        providers
+            .iter()
+            .position(|p| p.id == id && p.enabled)
+            .map(|index| 1000 - index as i64)
+    }
     pub fn filter_file(&self, file: &mut media_contracts::inventory::ScannedFile) {
         if !self.read_local_nfo {
             file.editorial = media_contracts::media::NfoOutcome::Missing;

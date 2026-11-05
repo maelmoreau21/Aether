@@ -14,6 +14,8 @@ const film = {id:'film-0',kind:'film',title:'Les horizons',originalTitle:'Horizo
 const episode = (season,number) => ({...film,id:`episode-${season}-${number}`,kind:'episode',number,title:`La lumière — épisode ${number}`,description:'Un résumé complet pour cet épisode. '.repeat(12),artwork:{thumb:'/ux-art/backdrop'},editions:edition([`episode-v-${season}-${number}`,`episode-alt-${season}-${number}`])});
 const series = {...film,id:'series-0',kind:'series',title:'Les saisons',seasonCount:2,episodeCount:32,seasons:[{id:'season-1',number:1,title:'Saison 1',episodeCount:30,episodes:Array.from({length:30},(_,i)=>episode(1,i+1))},{id:'season-2',number:2,title:'Saison 2',episodeCount:2,episodes:[episode(2,1),episode(2,2)]}]};
 const descriptor = id => ({id,workId:id.startsWith('episode')?'episode-1-1':'film-0',title:'Version de test',synthetic:true,available:true,sources:[{id:'source-'+id,audioTrackId:'internal-default',language:'fr',url:'/ux-stream/synthetic.mp4',mime:id==='version-mkv'?'video/x-matroska':'video/mp4',durationSeconds:34,tracks:[{index:0,codec_type:'video',codec_name:'av1',width:320,height:180,pix_fmt:'yuv420p10le'},{index:1,codec_type:'audio',codec_name:'opus',channels:1,tags:{language:'fra'}}]}],subtitles:[]});
+// Synthetic technical sheet (GET /api/v1/assets/{id}/details) as an administrator sees it.
+const assetDetails = id => ({assetId:id,workId:'film-0',available:true,pathsVisible:true,node:{id:'local',name:'NAS du salon',kind:'local',status:'connected',connectionMode:'local',version:'0.1.0'},library:{id:'film',name:'Films',kind:'films'},file:{size:1610612736,mime:id==='version-mkv'?'video/x-matroska':'video/mp4',modifiedAt:1767225600,name:`Les horizons (2026) - ${id}.mkv`,relativePath:`Les horizons (2026)/Les horizons (2026) - ${id}.mkv`,libraryRoot:'/volume1/media/films',absolutePath:`/volume1/media/films/Les horizons (2026)/Les horizons (2026) - ${id}.mkv`},container:{formatName:'matroska,webm',formatLongName:'Matroska / WebM',durationSeconds:34,bitRate:4500000},tracks:[{index:0,codecType:'video',codecName:'av1',width:3840,height:2160,pixFmt:'yuv420p10le',frameRate:23.976},{index:1,codecType:'audio',codecName:'opus',channels:6,channelLayout:'5.1',sampleRate:'48000',language:'fra',title:'Français 5.1',disposition:{default:true}},{index:2,codecType:'subtitle',codecName:'subrip',language:'fra',disposition:{forced:true}}],externalAudio:[],externalSubtitles:[{origin:'sidecar',language:'en',label:'English',forced:false,sdh:true,sourceFormat:'srt'}],chapterCount:0});
 async function setup(browser,width,theme,mode='normal',height=900) {
   const state = await fixturePage(browser,width,theme,mode==='broken'?'broken':'normal',height);
   const {page}=state;
@@ -22,6 +24,7 @@ async function setup(browser,width,theme,mode='normal',height=900) {
   await page.route('**/api/v1/feedback/**',route=>route.fulfill({json:{favorite:false,rating:null}}));
   await page.route('**/api/v1/progress/**',route=>route.fulfill({json:{workId:'film-0',position:0,duration:34,watched:false,revision:1}}));
   await page.route('**/api/v1/media/**',route=>route.fulfill({json:descriptor(new URL(route.request().url()).pathname.split('/').pop())}));
+  await page.route('**/api/v1/assets/*/details',route=>route.fulfill({json:assetDetails(new URL(route.request().url()).pathname.split('/').at(-2))}));
   await page.route('**/api/v1/catalog/**',async route=>{
     const url=new URL(route.request().url());
     let work=structuredClone(url.pathname.endsWith('series-0')?series:film);
@@ -53,19 +56,26 @@ async function run(){
   try{
     for(const theme of ['light','dark'])for(const width of [320,360,390,430,768,1024,1440,1920]){
       const {page,context,errors}=await setup(browser,width,theme);
-      await page.goto(base+'films/?work=film-0');await page.locator('.versions-panel').waitFor();
+      await page.goto(base+'films/?work=film-0');await page.locator('.versions-selector').waitFor();
       await page.locator('.title-logo').evaluate(img=>img.decode());
       assert.equal(await page.locator('h1').count(),1);
       assert.equal(await page.locator('h1').innerText(),'');
-      assert.equal(await page.locator('.versions-panel').getAttribute('open'),null);
+      assert.equal(await page.locator('.versions-panel').count(),0);
       await visibleBounds(page,'film '+width);
       const primary=page.locator('.hero-cta');await primary.focus();
       assert.equal(await primary.evaluate(el=>getComputedStyle(el).outlineStyle),'solid');
       await shot(page,`${theme}-${width}-film`);
-      await page.locator('.versions-panel summary').focus();await page.keyboard.press('Enter');
       await page.getByRole('button',{name:'Sélectionner la version MKV',exact:true}).click();
       assert.equal(await page.getByRole('button',{name:'Sélectionner la version MKV',exact:true}).getAttribute('aria-pressed'),'true');
-      assert.ok((await page.locator('.specs-grid').innerText()).includes('OPUS'));
+      await page.getByRole('button',{name:"Plus d'actions et informations"}).click();
+      await page.getByRole('menuitem',{name:'Informations média'}).click();
+      const info=page.getByRole('dialog',{name:'Informations média'});
+      await info.locator('details[open] .version-body').first().waitFor();
+      const infoText=await info.innerText();
+      for(const expected of ['OPUS','NAS du salon','Films','/volume1/media/films/Les horizons (2026)/'])assert.ok(infoText.includes(expected),`media info ${width}: ${expected}`);
+      assert.equal(await info.locator('.modal-card').evaluate(el=>el.scrollWidth>el.clientWidth+1),false,`media info ${theme} ${width} overflow`);
+      await shot(page,`${theme}-${width}-media-info`);
+      await page.keyboard.press('Escape');await info.waitFor({state:'detached'});
       await shot(page,`${theme}-${width}-versions`,true);
       await page.goto(base+'series/?work=series-0');await page.locator('.episode').first().waitFor();
       assert.equal(await page.locator('.season-shortcuts').count(),0);

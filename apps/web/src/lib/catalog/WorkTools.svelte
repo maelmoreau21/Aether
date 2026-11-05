@@ -1,18 +1,32 @@
 <script lang="ts">
   import ImageManager from './ImageManager.svelte';
+  import ReportButton from '../applications/ReportButton.svelte';
   import IdentifyModal from './IdentifyModal.svelte';
+  import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { session } from '../auth/session';
-  import type { Work } from './api';
+  import { playbackIds, type Work } from './api';
   import type { Media } from '../player/types';
   import Icon from '../ui/Icon.svelte';
-  import {
-    videoResolutionBadge,
-    containerLabel,
-    colorProfileLabel,
-    inspectedAudioTracks
-  } from '../player/track-labels';
+  import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
+  import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
+  import { t } from '../i18n';
+  import {
+    audioSummary,
+    codecLabel,
+    fetchAssetDetails,
+    formatBitrate,
+    formatBytes,
+    formatDuration,
+    groupTracks,
+    nodeKindLabel,
+    nodeStatusLabel,
+    trackRoles,
+    versionLabel,
+    videoSummary,
+    type AssetDetails
+  } from './media-details';
 
   let {
     work,
@@ -26,6 +40,7 @@
   let imagesChanged = $state(false);
   let metadataOpen = $state(false);
   let identifyOpen = $state(false);
+  let subtitlesOpen = $state(false);
   let infoOpen = $state(false);
   let listOpen = $state(false);
   let menuOpen = $state(false);
@@ -36,7 +51,9 @@
   let error = $state('');
   let message = $state('');
   let busy = $state(false);
-  let copiedId = $state(false);
+  let copiedKey = $state('');
+  let detailsById = $state<Record<string, { status: 'loading' | 'ready' | 'error'; data?: AssetDetails; error?: string }>>({});
+  let detailsController: AbortController | null = null;
 
   // Form metadata states
   let title = $state('');
@@ -61,21 +78,50 @@
   let merges = $state<{ id: string; groupId: string; origin: string }[]>([]);
 
   $effect(() => {
-    title = work.title;
-    plot = (work.plot ?? work.description ?? '').replace(/^Média local indexé$/i, '');
-    year = work.year ?? undefined;
-    genres = (work.genres ?? []).join(', ');
-    tags = (work.tags ?? []).join(', ');
-    ids = JSON.stringify(work.externalIds ?? {}, null, 2);
-    age = work.minimumAge ?? undefined;
+    const form = metadataFormFromWork(work);
+    title = form.title;
+    plot = form.plot;
+    year = form.year;
+    genres = form.genres;
+    tags = form.tags;
+    ids = form.ids;
+    age = form.age;
   });
 
   const isAdmin = $derived($session?.user.role === 'administrator');
 
-  const currentVideoTrack = $derived(
-    selectedMedia?.sources[0]?.tracks?.find(t => t.codec_type === 'video')
-  );
-  const currentAudioTracks = $derived(selectedMedia ? inspectedAudioTracks(selectedMedia) : []);
+  // Every indexed file of this work (versions and multi-Node copies), selected one included.
+  const assetIds = $derived.by(() => {
+    const ids = playbackIds(work);
+    return selectedMedia && !ids.includes(selectedMedia.id) ? [selectedMedia.id, ...ids] : ids;
+  });
+
+  function openInfo() {
+    infoOpen = true;
+    void loadDetails();
+  }
+
+  function closeInfo() {
+    infoOpen = false;
+    detailsController?.abort();
+    detailsController = null;
+  }
+
+  async function loadDetails(only?: string) {
+    if (!only) detailsController?.abort();
+    const controller = only && detailsController ? detailsController : new AbortController();
+    detailsController = controller;
+    const ids = only ? [only] : assetIds.filter(id => detailsById[id]?.status !== 'ready');
+    for (const id of ids) detailsById[id] = { status: 'loading' };
+    await Promise.all(ids.map(async id => {
+      try {
+        const data = await fetchAssetDetails(id, controller.signal);
+        if (!controller.signal.aborted) detailsById[id] = { status: 'ready', data };
+      } catch (cause) {
+        if (!controller.signal.aborted) detailsById[id] = { status: 'error', error: cause instanceof Error ? cause.message : 'Informations indisponibles.' };
+      }
+    }));
+  }
 
   async function loadLists() {
     try {
@@ -127,22 +173,12 @@
 
   async function saveMetadata(event: SubmitEvent) {
     event.preventDefault();
-    let externalIds;
-    try {
-      externalIds = JSON.parse(ids);
-    } catch {
+    const payload = metadataPayloadFromForm({ title, plot, year, genres, tags, ids, age });
+    if (!payload) {
       error = 'Les identifiants doivent être un objet JSON valide.';
       return;
     }
-    const success = await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'PUT', {
-      title,
-      plot,
-      year: year ?? null,
-      genres: genres.split(',').map(s => s.trim()).filter(Boolean),
-      tags: tags.split(',').map(s => s.trim()).filter(Boolean),
-      externalIds,
-      minimumAge: age ?? null
-    });
+    const success = await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'PUT', payload);
     if (success) {
       window.location.reload();
     }
@@ -160,19 +196,18 @@
     }
   }
 
-  function copyWorkId() {
-    if (navigator?.clipboard) {
-      void navigator.clipboard.writeText(work.id).then(() => {
-        copiedId = true;
-        setTimeout(() => { copiedId = false; }, 2000);
-      });
-    }
+  function copyText(key: string, text: string) {
+    if (!navigator?.clipboard) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      copiedKey = key;
+      setTimeout(() => { if (copiedKey === key) copiedKey = ''; }, 2000);
+    }).catch(() => {});
   }
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape') {
       menuOpen = false;
-      if (infoOpen) infoOpen = false;
+      if (infoOpen) closeInfo();
       if (metadataOpen) metadataOpen = false;
       if (listOpen) listOpen = false;
     }
@@ -219,8 +254,13 @@
   />
 {/if}
 
+{#if subtitlesOpen && isAdmin}
+  <SubtitleDownloads {work} {selectedMedia} onclose={() => (subtitlesOpen = false)} />
+{/if}
+
 <!-- Actions bar (Add to playlist + Three dots menu) -->
 <div class="work-tools-container">
+  <ReportButton workId={work.id} title={work.title} />
   <!-- Quick Playlist Dropdown -->
   <details
     class="list-picker"
@@ -233,8 +273,8 @@
   >
     <summary
       class="tool-btn icon-btn"
-      aria-label="Ajouter à une playlist"
-      title="Ajouter à une playlist"
+      aria-label={$t('add_to_playlist')}
+      title={$t('add_to_playlist')}
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <path d="M12 4v16M4 12h16" />
@@ -244,7 +284,7 @@
     <div class="list-dropdown-menu">
       <div class="list-dropdown-header">
         <Icon name="sparkles" size={16} />
-        <strong>Ajouter à une playlist</strong>
+        <strong>{$t('add_to_playlist')}</strong>
       </div>
 
       <div class="playlists-grid">
@@ -262,7 +302,7 @@
             <Icon name="check" size={16} />
           </button>
         {:else}
-          <p class="empty-list-notice">Aucune playlist existante.</p>
+          <p class="empty-list-notice">{$t('no_playlists')}</p>
         {/each}
       </div>
 
@@ -273,7 +313,7 @@
           void createList();
         }}
       >
-        <label>Nouvelle liste<input required bind:value={listName} maxlength="100" placeholder="Nom de la liste" /></label>
+        <label>{$t('new_playlist')}<input required bind:value={listName} maxlength="100" placeholder={$t('new_playlist')} /></label>
         <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
           Créer et ajouter
         </button>
@@ -287,8 +327,8 @@
       type="button"
       class="tool-btn icon-btn more-btn"
       class:active={menuOpen}
-      aria-label="Plus d'actions et informations"
-      title="Options et informations du média"
+      aria-label={$t('more_actions')}
+      title={$t('media_options')}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
       onclick={() => (menuOpen = !menuOpen)}
@@ -316,7 +356,7 @@
           }}
         >
           <Icon name="users" size={16} />
-          <span>Séance Watch Party</span>
+          <span>{$t('watch_party')}</span>
         </button>
 
         <button
@@ -325,11 +365,11 @@
           role="menuitem"
           onclick={() => {
             menuOpen = false;
-            infoOpen = true;
+            openInfo();
           }}
         >
           <Icon name="info" size={16} />
-          <span>Informations média</span>
+          <span>{$t('media_information')}</span>
         </button>
 
         <button
@@ -348,7 +388,22 @@
 
         {#if isAdmin}
           <div class="menu-divider" role="separator"></div>
-          <div class="menu-section-header">Administration</div>
+          <div class="menu-section-header">{$t('media_management')}</div>
+
+          {#if work.kind !== 'series' && !work.synthetic}
+            <button
+              type="button"
+              class="menu-item"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                subtitlesOpen = true;
+              }}
+            >
+              <Icon name="search" size={16} />
+              <span>{$t('search_subtitles')}</span>
+            </button>
+          {/if}
 
           <button
             type="button"
@@ -360,7 +415,7 @@
             }}
           >
             <Icon name="image" size={16} />
-            <span>Modifier les images</span>
+            <span>{$t('edit_artwork')}</span>
           </button>
 
           <button
@@ -373,7 +428,7 @@
             }}
           >
             <Icon name="search" size={16} />
-            <span>Identifier</span>
+            <span>{$t('identify_media')}</span>
           </button>
 
           <button
@@ -387,7 +442,7 @@
             }}
           >
             <Icon name="edit" size={16} />
-            <span>Modifier les métadonnées</span>
+            <span>{$t('edit_metadata')}</span>
           </button>
         {/if}
       </div>
@@ -398,7 +453,7 @@
   {#if message}<p class="status-msg success" role="status">{message}</p>{/if}
 </div>
 
-<!-- Modal: Informations média -->
+<!-- Modal: Informations média (fichiers par version : Media Node, chemin, pistes, conteneur) -->
 {#if infoOpen}
   <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="media-info-title">
     <button
@@ -406,156 +461,330 @@
       class="modal-backdrop-click"
       aria-label="Fermer la fenêtre"
       tabindex="-1"
-      onclick={() => (infoOpen = false)}
+      onclick={closeInfo}
     ></button>
-    <div class="modal-card">
+    <div class="modal-card wide info-card">
       <div class="modal-header">
         <div class="modal-title-group">
           <Icon name="info" size={20} />
-          <h3 id="media-info-title">Informations média</h3>
+          <h3 id="media-info-title">{$t('media_information')}</h3>
         </div>
         <button
           type="button"
           class="close-modal-btn"
           aria-label="Fermer"
-          onclick={() => (infoOpen = false)}
+          onclick={closeInfo}
         >
           <Icon name="close" size={18} />
         </button>
       </div>
 
       <div class="modal-body info-body">
-        <div class="info-section">
-          <h4>Emplacement et Media Node</h4>
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-label">Nœud source :</span>
-              <span class="info-value">
-                <code>{work.nodeId ?? 'local'}</code>
-                {#if work.available === false}
-                  <span class="tag-status offline">Hors ligne</span>
-                {:else}
-                  <span class="tag-status online">Connecté</span>
+        {#if assetIds.length === 0}
+          <p class="info-note">
+            {work.kind === 'series'
+              ? 'Les fichiers sont décrits épisode par épisode : ouvrez « Informations média » depuis un épisode.'
+              : 'Aucun fichier indexé n’est disponible pour ce média.'}
+          </p>
+        {:else if assetIds.length > 1}
+          <p class="info-note">{assetIds.length} fichiers disponibles pour ce média (versions ou copies sur plusieurs Media Nodes).</p>
+        {/if}
+
+        {#each assetIds as id, position (id)}
+          {@const entry = detailsById[id]}
+          {@const info = entry?.data}
+          <details class="version-card" open={id === (assetIds.includes(selectedMedia?.id ?? '') ? selectedMedia?.id : assetIds[0])}>
+            <summary>
+              <span class="version-title">{versionLabel(info, position)}</span>
+              {#if id === selectedMedia?.id && assetIds.length > 1}<span class="tag-status online">{$t('selected')}</span>{/if}
+              {#if info}
+                {@const status = nodeStatusLabel(info.node.status)}
+                <span class="version-node"><Icon name="server" size={14} />{info.node.name}<span class="status-dot {status.tone}" role="img" aria-label={status.label}></span></span>
+              {/if}
+            </summary>
+
+            {#if !entry || entry.status === 'loading'}
+              <p class="info-note" role="status">{$t('loading_file_information')}</p>
+            {:else if entry.status === 'error'}
+              <div class="info-error-row" role="alert">
+                <span>{entry.error}</span>
+                <button type="button" class="btn small outline-btn" onclick={() => void loadDetails(id)}>Réessayer</button>
+              </div>
+            {:else if info}
+              {@const status = nodeStatusLabel(info.node.status)}
+              {@const groups = groupTracks(info.tracks)}
+              <div class="version-body">
+                <section class="info-section" aria-label={$t('file_location')}>
+                  <h4>{$t('file_location')}</h4>
+                  <dl class="info-grid">
+                    <div class="info-item">
+                      <dt class="info-label">Media Node</dt>
+                      <dd class="info-value">
+                        {info.node.name}
+                        <span class="tag-status {status.tone}">{status.label}</span>
+                        <span class="info-sub">{nodeKindLabel(info.node.kind)} · <code>{info.node.id}</code>{info.node.version ? ` · v${info.node.version}` : ''}</span>
+                      </dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Bibliothèque</dt>
+                      <dd class="info-value">{info.library.name}</dd>
+                    </div>
+                    {#if info.pathsVisible && info.file.absolutePath}
+                      <div class="info-item full">
+                        <dt class="info-label">Chemin sur le Media Node</dt>
+                        <dd class="info-value path-row">
+                          <code class="path">{info.file.absolutePath}</code>
+                          <button type="button" class="copy-btn" aria-label={$t('copy_full_path')} onclick={() => copyText(`abs-${id}`, info.file.absolutePath ?? '')}>
+                            <Icon name={copiedKey === `abs-${id}` ? 'check' : 'copy'} size={14} />
+                            <span>{copiedKey === `abs-${id}` ? 'Copié' : 'Copier'}</span>
+                          </button>
+                        </dd>
+                      </div>
+                      <div class="info-item full">
+                        <dt class="info-label">Chemin dans la bibliothèque</dt>
+                        <dd class="info-value path-row">
+                          <code class="path">{info.file.relativePath}</code>
+                          <button type="button" class="copy-btn" aria-label={$t('copy_relative_path')} onclick={() => copyText(`rel-${id}`, info.file.relativePath ?? '')}>
+                            <Icon name={copiedKey === `rel-${id}` ? 'check' : 'copy'} size={14} />
+                            <span>{copiedKey === `rel-${id}` ? 'Copié' : 'Copier'}</span>
+                          </button>
+                        </dd>
+                        <span class="info-sub">Racine de la bibliothèque : <code>{info.file.libraryRoot}</code></span>
+                      </div>
+                    {:else}
+                      <div class="info-item full">
+                        <dt class="info-label">Chemin</dt>
+                        <dd class="info-value muted">{$t('admin_only_path')}</dd>
+                      </div>
+                    {/if}
+                    {#if !info.available}
+                      <div class="info-item full"><dd class="info-value info-error">{$t('missing_file')}</dd></div>
+                    {/if}
+                  </dl>
+                </section>
+
+                <section class="info-section" aria-label={$t('video_tracks')}>
+                  <h4>Vidéo ({groups.video.length})</h4>
+                  <ul class="track-list">
+                    {#each groups.video as track (track.index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">#{track.index}</span>
+                          <strong>{codecLabel(track)}</strong>
+                          {#if track.title}<span class="track-title">{track.title}</span>{/if}
+                        </div>
+                        <div class="track-chips">
+                          {#each videoSummary(track) as part (part)}<span class="track-chip">{part}</span>{/each}
+                          {#each trackRoles(track.disposition) as role (role)}<span class="track-chip role">{role}</span>{/each}
+                        </div>
+                      </li>
+                    {:else}
+                      <li class="track-row muted">Aucune piste vidéo analysée.</li>
+                    {/each}
+                  </ul>
+                </section>
+
+                <section class="info-section" aria-label={$t('audio_tracks')}>
+                  <h4>Audio ({groups.audio.length + info.externalAudio.length})</h4>
+                  <ul class="track-list">
+                    {#each groups.audio as track (track.index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">#{track.index}</span>
+                          <LanguageLabel language={track.language ?? 'und'} />
+                          <strong>{codecLabel(track)}</strong>
+                          {#if track.title}<span class="track-title">{track.title}</span>{/if}
+                        </div>
+                        <div class="track-chips">
+                          {#each audioSummary(track) as part (part)}<span class="track-chip">{part}</span>{/each}
+                          {#each trackRoles(track.disposition) as role (role)}<span class="track-chip role">{role}</span>{/each}
+                        </div>
+                      </li>
+                    {/each}
+                    {#each info.externalAudio as audio, index (index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">Externe</span>
+                          <LanguageLabel language={audio.language} />
+                          {#if audio.track}<strong>{codecLabel(audio.track)}</strong>{/if}
+                        </div>
+                        <div class="track-chips">
+                          {#if audio.track}{#each audioSummary(audio.track) as part (part)}<span class="track-chip">{part}</span>{/each}{/if}
+                          <span class="track-chip">{formatBytes(audio.size)}</span>
+                          {#if audio.offsetSeconds}<span class="track-chip">Décalage {audio.offsetSeconds.toLocaleString('fr-FR')} s</span>{/if}
+                        </div>
+                        {#if audio.absolutePath}<code class="path small">{audio.absolutePath}</code>{/if}
+                      </li>
+                    {/each}
+                    {#if groups.audio.length + info.externalAudio.length === 0}
+                      <li class="track-row muted">Aucune piste audio analysée.</li>
+                    {/if}
+                  </ul>
+                </section>
+
+                <section class="info-section" aria-label={$t('subtitle_tracks_info')}>
+                  <h4>Sous-titres ({groups.subtitle.length + info.externalSubtitles.length})</h4>
+                  <ul class="track-list">
+                    {#each groups.subtitle as track (track.index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">#{track.index}</span>
+                          <LanguageLabel language={track.language ?? 'und'} />
+                          <strong>{codecLabel(track)}</strong>
+                          {#if track.title}<span class="track-title">{track.title}</span>{/if}
+                        </div>
+                        {#if trackRoles(track.disposition).length}
+                          <div class="track-chips">
+                            {#each trackRoles(track.disposition) as role (role)}<span class="track-chip role">{role}</span>{/each}
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                    {#each info.externalSubtitles as subtitle, index (index)}
+                      <li class="track-row">
+                        <div class="track-head">
+                          <span class="track-index">{subtitle.origin === 'downloaded' ? 'Téléchargé' : 'Externe'}</span>
+                          <LanguageLabel language={subtitle.language} />
+                          {#if subtitle.sourceFormat}<strong>{subtitle.sourceFormat.toUpperCase()}</strong>{/if}
+                          {#if subtitle.label}<span class="track-title">{subtitle.label}</span>{/if}
+                        </div>
+                        {#if subtitle.forced || subtitle.sdh}
+                          <div class="track-chips">
+                            {#if subtitle.forced}<span class="track-chip role">Forcés</span>{/if}
+                            {#if subtitle.sdh}<span class="track-chip role">Malentendants (SDH)</span>{/if}
+                          </div>
+                        {/if}
+                      </li>
+                    {/each}
+                    {#if groups.subtitle.length + info.externalSubtitles.length === 0}
+                      <li class="track-row muted">Aucun sous-titre.</li>
+                    {/if}
+                  </ul>
+                </section>
+
+                {#if groups.other.length}
+                  <section class="info-section" aria-label={$t('other_streams')}>
+                    <h4>Autres flux ({groups.other.length})</h4>
+                    <ul class="track-list">
+                      {#each groups.other as track (track.index)}
+                        <li class="track-row">
+                          <div class="track-head">
+                            <span class="track-index">#{track.index}</span>
+                            <strong>{codecLabel(track)}</strong>
+                            <span class="track-title">{track.codecType ?? 'flux'}{track.title ? ` · ${track.title}` : ''}</span>
+                          </div>
+                        </li>
+                      {/each}
+                    </ul>
+                  </section>
                 {/if}
-              </span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">Bibliothèque :</span>
-              <span class="info-value">{work.libraryId}</span>
-            </div>
-            <div class="info-item full">
-              <span class="info-label">Identifiant copie :</span>
-              <span class="info-value id-row">
-                <code>{work.id}</code>
-                <button
-                  type="button"
-                  class="copy-btn"
-                  title="Copier l'identifiant"
-                  aria-label="Copier l'identifiant"
-                  onclick={copyWorkId}
-                >
-                  <Icon name="copy" size={14} />
-                  <span>{copiedId ? 'Copié !' : 'Copier'}</span>
-                </button>
-              </span>
-            </div>
-            {#if work.globalMediaId}
-              <div class="info-item full">
-                <span class="info-label">Identité globale :</span>
-                <span class="info-value"><code>{work.globalMediaId}</code></span>
+
+                <section class="info-section" aria-label="Conteneur et détails techniques">
+                  <h4>Conteneur et détails techniques</h4>
+                  <dl class="info-grid">
+                    <div class="info-item">
+                      <dt class="info-label">Conteneur</dt>
+                      <dd class="info-value">
+                        {containerLabel(info.file.mime)}
+                        {#if info.container.formatLongName}<span class="info-sub">{info.container.formatLongName}{info.container.formatName ? ` (${info.container.formatName})` : ''}</span>{/if}
+                      </dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Taille</dt>
+                      <dd class="info-value">{formatBytes(info.file.size)}</dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Durée</dt>
+                      <dd class="info-value">{formatDuration(info.container.durationSeconds) ?? '—'}</dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Débit global</dt>
+                      <dd class="info-value">{formatBitrate(info.container.bitRate) ?? '—'}</dd>
+                    </div>
+                    <div class="info-item">
+                      <dt class="info-label">Chapitres</dt>
+                      <dd class="info-value">{info.chapterCount || 'Aucun'}</dd>
+                    </div>
+                    {#if info.file.modifiedAt}
+                      <div class="info-item">
+                        <dt class="info-label">Modifié le</dt>
+                        <dd class="info-value">{new Date(info.file.modifiedAt * 1000).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })}</dd>
+                      </div>
+                    {/if}
+                    <div class="info-item">
+                      <dt class="info-label">Type MIME</dt>
+                      <dd class="info-value"><code>{info.file.mime}</code></dd>
+                    </div>
+                    <div class="info-item full">
+                      <dt class="info-label">Identifiant du fichier</dt>
+                      <dd class="info-value path-row">
+                        <code class="path">{info.assetId}</code>
+                        <button type="button" class="copy-btn" aria-label="Copier l'identifiant du fichier" onclick={() => copyText(`asset-${id}`, info.assetId)}>
+                          <Icon name={copiedKey === `asset-${id}` ? 'check' : 'copy'} size={14} />
+                          <span>{copiedKey === `asset-${id}` ? 'Copié' : 'Copier'}</span>
+                        </button>
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
               </div>
             {/if}
-          </div>
-        </div>
+          </details>
+        {/each}
 
-        <div class="info-section">
-          <h4>Catalogue et Provenance</h4>
-          <div class="info-grid">
+        <section class="info-section" aria-label="Catalogue et provenance">
+          <h4>Catalogue et provenance</h4>
+          <dl class="info-grid">
             <div class="info-item">
-              <span class="info-label">Provenance métadonnées :</span>
-              <span class="info-value">{work.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}</span>
+              <dt class="info-label">Provenance des métadonnées</dt>
+              <dd class="info-value">{work.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}</dd>
             </div>
             {#if work.addedAt}
               <div class="info-item">
-                <span class="info-label">Ajouté le :</span>
-                <span class="info-value">{new Date(work.addedAt * 1000).toLocaleDateString('fr-FR')}</span>
+                <dt class="info-label">Ajouté le</dt>
+                <dd class="info-value">{new Date(work.addedAt * 1000).toLocaleDateString('fr-FR')}</dd>
               </div>
             {/if}
             {#if work.premiered}
               <div class="info-item">
-                <span class="info-label">Première diffusion :</span>
-                <span class="info-value">{work.premiered}</span>
+                <dt class="info-label">Première diffusion</dt>
+                <dd class="info-value">{work.premiered}</dd>
               </div>
             {/if}
             {#if work.rating}
               <div class="info-item">
-                <span class="info-label">Note :</span>
-                <span class="info-value">{work.rating.toFixed(1)} / 10</span>
+                <dt class="info-label">Note</dt>
+                <dd class="info-value">{work.rating.toFixed(1)} / 10</dd>
               </div>
             {/if}
             {#if work.mpaa}
               <div class="info-item">
-                <span class="info-label">Classification :</span>
-                <span class="info-value">{work.mpaa}</span>
+                <dt class="info-label">Classification</dt>
+                <dd class="info-value">{work.mpaa}</dd>
               </div>
             {/if}
-          </div>
-        </div>
-
-        {#if selectedMedia}
-          <div class="info-section">
-            <h4>Pistes et spécifications techniques</h4>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="info-label">Conteneur :</span>
-                <span class="info-value">{containerLabel(selectedMedia.sources[0]?.mime)}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Vidéo :</span>
-                <span class="info-value">
-                  {currentVideoTrack?.codec_name?.toUpperCase() ?? 'Inconnu'}
-                  {#if currentVideoTrack?.width && currentVideoTrack?.height}
-                    · {currentVideoTrack.width} × {currentVideoTrack.height}
-                  {/if}
-                  {#if videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height)}
-                    ({videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height)})
-                  {/if}
-                  {#if colorProfileLabel(currentVideoTrack?.pix_fmt)}
-                    · {colorProfileLabel(currentVideoTrack?.pix_fmt)}
-                  {/if}
-                </span>
-              </div>
-              <div class="info-item full">
-                <span class="info-label">Pistes audio ({currentAudioTracks.length}) :</span>
-                <div class="audio-list">
-                  {#each currentAudioTracks as at, idx (idx)}
-                    <span class="track-chip">
-                      <LanguageLabel language={at.language} /> · {at.codec_name?.toUpperCase() ?? 'Inconnu'}{at.channel_layout || at.channels ? ` · ${at.channel_layout ?? `${at.channels} canaux`}` : ''}{at.tags?.title ? ` (${at.tags.title})` : ''}
-                    </span>
-                  {:else}
-                    <span class="info-value">Aucune piste audio analysée</span>
-                  {/each}
-                </div>
-              </div>
-              {#if selectedMedia.subtitles.length > 0}
-                <div class="info-item full">
-                  <span class="info-label">Sous-titres ({selectedMedia.subtitles.length}) :</span>
-                  <div class="sub-list">
-                    {#each selectedMedia.subtitles as sub (sub.id)}
-                      <span class="track-chip">
-                        <LanguageLabel language={sub.language} />{sub.sourceFormat ? ` · ${sub.sourceFormat.toUpperCase()}` : ''}{sub.forced ? ' (Forcés)' : ''}{sub.sdh ? ' (SDH)' : ''}
-                      </span>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
+            <div class="info-item full">
+              <dt class="info-label">Identifiant de l’œuvre</dt>
+              <dd class="info-value path-row">
+                <code class="path">{work.id}</code>
+                <button type="button" class="copy-btn" aria-label="Copier l'identifiant de l'œuvre" onclick={() => copyText('work', work.id)}>
+                  <Icon name={copiedKey === 'work' ? 'check' : 'copy'} size={14} />
+                  <span>{copiedKey === 'work' ? 'Copié' : 'Copier'}</span>
+                </button>
+              </dd>
             </div>
-          </div>
-        {/if}
+            {#if work.globalMediaId}
+              <div class="info-item full">
+                <dt class="info-label">Identité globale</dt>
+                <dd class="info-value"><code class="path">{work.globalMediaId}</code></dd>
+              </div>
+            {/if}
+          </dl>
+        </section>
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn primary-btn" onclick={() => (infoOpen = false)}>Fermer</button>
+        <button type="button" class="btn primary-btn" onclick={closeInfo}>Fermer</button>
       </div>
     </div>
   </div>
@@ -770,88 +999,39 @@
     display: none;
   }
 
-  .list-dropdown-menu {
-    position: absolute;
-    top: calc(100% + 10px);
-    left: 0;
-    min-width: 280px;
-    background: var(--color-surface-elevated);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--color-line-strong);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg);
-    padding: 14px;
-    z-index: 300;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .list-dropdown-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--color-text-bright);
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .new-list-form {
-    border-top: 1px solid var(--color-line);
-    padding-top: 10px;
-    margin-top: 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .new-list-form label {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--color-muted);
-  }
-
-  .new-list-form label input {
-    width: 100%;
-  }
-
+  /* Trigger buttons: same icon button as the hero action row */
   .tool-btn {
     display: inline-grid;
     place-items: center;
     width: 44px;
     height: 44px;
+    min-height: 44px;
     box-sizing: border-box;
-    border: 1px solid var(--color-line-strong);
-    border-radius: 50%;
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    color: var(--color-text-bright);
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 14px;
+    background: var(--pn);
+    color: var(--tx);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
   }
 
   .tool-btn:hover {
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-    background: var(--color-raised-hover);
-    transform: translateY(-1px);
+    background: var(--pn-2);
+  }
+
+  .tool-btn:active {
+    transform: scale(0.98);
   }
 
   .tool-btn:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
   }
 
-  .tool-btn.active {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+  .tool-btn.active,
+  details.list-picker[open] > .tool-btn {
+    background: var(--pn-3);
   }
 
   .menu-dropdown-wrapper {
@@ -867,23 +1047,31 @@
     cursor: default;
   }
 
-  .dropdown-menu {
+  /* Menus */
+  .dropdown-menu,
+  .list-dropdown-menu {
     position: absolute;
-    top: calc(100% + 10px);
+    top: calc(100% + 8px);
     left: 0;
-    min-width: 250px;
-    background: #18181c;
-    background: var(--color-surface-elevated, #18181c);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--color-line-strong);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255, 255, 255, 0.05);
-    padding: 6px;
     z-index: 300;
     display: flex;
     flex-direction: column;
     gap: 2px;
+    padding: 6px;
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow);
+    color: var(--tx);
+  }
+
+  .dropdown-menu {
+    min-width: 260px;
+  }
+
+  .list-dropdown-menu {
+    min-width: 290px;
+    max-width: min(340px, calc(100vw - 32px));
   }
 
   @media (max-width: 720px) {
@@ -894,53 +1082,119 @@
     }
   }
 
+  .list-dropdown-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 10px;
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--tx);
+  }
+
+  .list-dropdown-header :global(svg) {
+    color: var(--mu);
+  }
+
   .menu-divider {
     height: 1px;
-    background: var(--color-line);
+    background: var(--line);
     margin: 6px 4px;
   }
 
   .menu-section-header {
-    font-size: 11px;
-    font-weight: 600;
+    padding: 8px 12px 4px;
+    font-size: 12px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--color-muted);
-    padding: 6px 12px 2px;
+    letter-spacing: 0.07em;
+    color: var(--mu);
   }
 
-  .menu-item {
+  .menu-item,
+  .playlist-item-btn {
     display: flex;
     align-items: center;
     gap: 12px;
     width: 100%;
-    padding: 10px 14px;
+    min-height: 42px;
+    padding: 0 12px;
     border: none;
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
     background: transparent;
-    color: var(--color-text-bright);
-    font-size: 13.5px;
-    font-weight: 500;
+    color: var(--tx);
+    font-size: 14px;
+    font-weight: 600;
     text-align: left;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--t-fast) var(--ease);
   }
 
-  .menu-item :global(svg) {
-    color: var(--color-muted);
-    transition: color var(--transition-fast), transform var(--transition-fast);
+  .menu-item :global(svg),
+  .playlist-item-btn :global(svg) {
+    color: var(--mu);
     flex-shrink: 0;
   }
 
-  .menu-item:hover, .menu-item:focus-visible {
-    background: var(--color-surface-hover);
-    color: var(--color-text-bright);
-    outline: none;
+  .menu-item:hover,
+  .playlist-item-btn:hover:not(:disabled) {
+    background: var(--pn);
   }
 
-  .menu-item:hover :global(svg), .menu-item:focus-visible :global(svg) {
-    color: var(--color-accent);
-    transform: scale(1.1);
+  .menu-item:focus-visible,
+  .playlist-item-btn:focus-visible {
+    background: var(--pn);
+    outline: 2px solid var(--ac);
+    outline-offset: -2px;
+  }
+
+  /* Playlists */
+  .playlists-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+
+  .playlist-item-btn {
+    justify-content: space-between;
+  }
+
+  .playlist-item-btn span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .empty-list-notice {
+    margin: 4px 0;
+    padding: 8px 12px;
+    color: var(--mu);
+    font-size: 13px;
+  }
+
+  .new-list-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 6px;
+    padding: 12px 6px 6px;
+    border-top: 1px solid var(--line);
+  }
+
+  .new-list-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--tx);
+  }
+
+  .new-list-form label input {
+    width: 100%;
   }
 
   /* Modals */
@@ -956,8 +1210,9 @@
   .modal-backdrop-click {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(8px);
+    background: rgb(6 8 14 / 0.55);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     border: none;
     cursor: default;
   }
@@ -966,186 +1221,424 @@
     position: relative;
     z-index: 1;
     width: 100%;
-    max-width: 580px;
-    max-height: 90vh;
+    max-width: 600px;
+    max-height: calc(100dvh - 48px);
     overflow-y: auto;
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid var(--color-line-strong);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-lg);
+    overscroll-behavior: contain;
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    border-radius: var(--r-xl);
+    box-shadow: var(--shadow);
+    color: var(--tx);
     display: flex;
     flex-direction: column;
   }
 
   .modal-card.wide {
-    max-width: 780px;
+    max-width: 800px;
   }
 
   .modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px 24px;
-    border-bottom: 1px solid var(--color-line);
+    gap: 16px;
+    padding: 24px 28px 4px;
   }
 
   .modal-title-group {
     display: flex;
     align-items: center;
-    gap: 10px;
-    color: var(--color-accent);
+    gap: 12px;
+    min-width: 0;
+    color: var(--mu);
   }
 
   .modal-title-group h3 {
     margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--color-text-bright);
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--tx);
   }
 
   .close-modal-btn {
     display: grid;
     place-items: center;
-    width: 34px;
-    height: 34px;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    padding: 0;
     border: none;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-muted);
+    border-radius: 14px;
+    background: var(--pn);
+    color: var(--tx);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: background-color var(--t-fast) var(--ease);
   }
 
   .close-modal-btn:hover {
-    color: var(--color-text-bright);
-    background: var(--color-surface);
+    background: var(--pn-2);
   }
 
   .modal-body {
-    padding: 24px;
+    padding: 20px 28px;
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 24px;
   }
 
   .modal-footer {
     display: flex;
     align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 8px 28px 24px;
+  }
+
+  .form-body .modal-footer {
+    padding: 8px 0 4px;
     justify-content: space-between;
-    padding: 16px 24px;
-    border-top: 1px solid var(--color-line);
-    background: rgba(0, 0, 0, 0.2);
   }
 
   .modal-footer-right {
     display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: 10px;
     margin-left: auto;
   }
 
   /* Info modal styles */
+  .modal-card.info-card {
+    max-width: 860px;
+  }
+
+  .info-note {
+    margin: 0;
+    color: var(--mu);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .version-card {
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--pn);
+    overflow: hidden;
+  }
+
+  .version-card > summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    min-height: 52px;
+    padding: 12px 16px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .version-card > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .version-card > summary::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-right: 2px solid var(--mu);
+    border-bottom: 2px solid var(--mu);
+    transform: rotate(-45deg);
+    transition: transform var(--t-fast) var(--ease);
+  }
+
+  .version-card[open] > summary::before {
+    transform: rotate(45deg);
+  }
+
+  .version-card > summary:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: -2px;
+  }
+
+  .version-title {
+    font-size: 15px;
+    font-weight: 750;
+    color: var(--tx);
+    overflow-wrap: anywhere;
+  }
+
+  .version-node {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mu);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--err);
+  }
+
+  .status-dot.online { background: var(--ok); }
+  .status-dot.revoked { background: var(--warn); }
+
+  .version-body {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 6px 16px 18px;
+    border-top: 1px solid var(--line);
+    background: var(--bg-3);
+  }
+
+  .version-card > .info-note,
+  .info-error-row {
+    padding: 4px 16px 16px;
+  }
+
+  .info-error-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: var(--err);
+    font-size: 14px;
+  }
+
   .info-section {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-width: 0;
   }
 
   .info-section h4 {
     margin: 0;
-    font-size: 13.5px;
-    font-weight: 600;
+    padding: 12px 0 8px;
+    font-size: 12px;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--color-accent);
-    border-bottom: 1px solid var(--color-line);
-    padding-bottom: 6px;
+    letter-spacing: 0.07em;
+    color: var(--mu);
+    border-bottom: 1px solid var(--line);
   }
 
   .info-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 20px;
+    margin: 0;
   }
 
   .info-item {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-size: 13.5px;
+    min-width: 0;
+    font-size: 14px;
   }
 
   .info-item.full {
-    grid-column: span 2;
+    grid-column: 1 / -1;
   }
 
   .info-label {
-    font-size: 12px;
-    color: var(--color-muted);
+    font-size: 13px;
+    color: var(--mu);
   }
 
   .info-value {
-    color: var(--color-text-bright);
-    word-break: break-all;
+    margin: 0;
+    color: var(--tx);
+    font-weight: 600;
+    overflow-wrap: anywhere;
   }
 
-  .id-row {
+  .info-value.muted,
+  .track-row.muted {
+    color: var(--mu);
+    font-weight: 500;
+  }
+
+  .info-error {
+    color: var(--err);
+  }
+
+  .info-sub {
+    display: block;
+    margin-top: 2px;
+    color: var(--mu);
+    font-size: 12.5px;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+
+  .info-value code,
+  .info-sub code,
+  code.path {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    font-weight: 500;
+  }
+
+  .path-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
+  }
+
+  code.path {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 8px 10px;
+    border-radius: var(--r-sm);
+    background: var(--pn);
+    color: var(--tx);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    word-break: break-all;
+    user-select: all;
+  }
+
+  code.path.small {
+    display: block;
+    margin-top: 8px;
+    font-size: 12px;
   }
 
   .copy-btn {
     display: inline-flex;
+    flex: none;
     align-items: center;
-    gap: 4px;
-    padding: 4px 8px;
-    font-size: 11.5px;
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    color: var(--color-text-bright);
+    gap: 6px;
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: var(--r-sm);
+    background: var(--pn);
+    border: 1px solid transparent;
+    color: var(--tx);
     cursor: pointer;
+    transition: background-color var(--t-fast) var(--ease);
   }
 
   .copy-btn:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
+    background: var(--pn-2);
+  }
+
+  .copy-btn:focus-visible {
+    outline: 2px solid var(--ac);
+    outline-offset: 2px;
   }
 
   .tag-status {
     display: inline-block;
-    padding: 2px 6px;
-    border-radius: var(--radius-sm);
-    font-size: 11px;
-    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: var(--r-pill);
+    font-size: 12px;
+    font-weight: 700;
     margin-left: 6px;
   }
 
   .tag-status.online {
-    background: rgba(34, 197, 94, 0.2);
-    color: #4ade80;
+    background: var(--ok-soft);
+    color: var(--ok);
   }
 
   .tag-status.offline {
-    background: rgba(239, 68, 68, 0.2);
-    color: #f87171;
+    background: var(--err-soft);
+    color: var(--err);
   }
 
-  .audio-list, .sub-list {
+  .tag-status.revoked {
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+
+  .version-card > summary .tag-status {
+    margin-left: 0;
+  }
+
+  .track-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .track-row {
+    padding: 10px 12px;
+    border-radius: var(--r-md);
+    background: var(--pn);
+    font-size: 14px;
+    min-width: 0;
+  }
+
+  .track-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    color: var(--tx);
+    overflow-wrap: anywhere;
+  }
+
+  .track-index {
+    padding: 1px 7px;
+    border-radius: var(--r-pill);
+    background: var(--pn-2);
+    color: var(--mu);
+    font-size: 11.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .track-title {
+    color: var(--mu);
+    font-weight: 500;
+  }
+
+  .track-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-top: 4px;
+    margin-top: 8px;
   }
 
   .track-chip {
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: var(--r-pill);
+    background: var(--bg-3);
+    border: 1px solid var(--line);
+    color: var(--tx);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .track-chip.role {
+    background: var(--ac-soft);
+    border-color: transparent;
+    color: var(--ac);
+  }
+
+  /* TV and very large screens: readable from a distance. */
+  @media (min-width: 1600px) {
+    .modal-card.info-card { max-width: 1040px; }
+    .info-item, .track-row, .info-note { font-size: 16px; }
+    .info-label, .info-section h4 { font-size: 14px; }
+    .track-chip, .info-value code, code.path { font-size: 14px; }
+    .version-title { font-size: 18px; }
   }
 
   /* Form styles */
@@ -1153,15 +1646,16 @@
     border: none;
     margin: 0;
     padding: 0;
+    min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 18px;
   }
 
   .form-grid {
     display: grid;
-    grid-template-columns: repeat(12, 1fr);
-    gap: 14px;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 16px;
   }
 
   .col-12 { grid-column: span 12; }
@@ -1172,46 +1666,59 @@
   .form-field {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
+    min-width: 0;
   }
 
   .field-label {
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--color-muted);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--tx);
   }
 
   input, textarea {
-    padding: 10px 12px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    color: var(--color-text-bright);
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    background: var(--pn);
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: var(--tx);
     font: inherit;
-    font-size: 13.5px;
-    transition: border-color var(--transition-fast);
+    font-size: 14px;
+    box-shadow: none;
+    transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+  }
+
+  textarea {
+    padding: 12px 14px;
+    line-height: 1.5;
+    resize: vertical;
   }
 
   input:focus, textarea:focus {
     outline: none;
-    border-color: var(--color-accent);
+    border-color: var(--ac);
+    background: var(--bg-3);
+    box-shadow: none;
   }
 
   .code-area {
-    font-family: monospace;
-    font-size: 12px;
+    font-family: var(--font-mono);
+    font-size: 13px;
   }
 
   .form-divider {
     border: none;
-    border-top: 1px solid var(--color-line);
-    margin: 12px 0;
+    border-top: 1px solid var(--line);
+    margin: 8px 0;
   }
 
   .subhead {
     margin: 0;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 17px;
+    font-weight: 700;
   }
 
   .copy-group-row {
@@ -1230,137 +1737,107 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 9px 16px;
-    border-radius: var(--radius-sm);
-    font-size: 13.5px;
-    font-weight: 500;
+    min-height: 44px;
+    padding: 0 18px;
+    border-radius: var(--r-md);
+    font-size: 14px;
+    font-weight: 700;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: all var(--transition-fast);
+    transition: background-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+  }
+
+  .btn:active:not(:disabled) {
+    transform: scale(0.98);
   }
 
   .primary-btn {
-    background: var(--color-accent);
-    color: #fff;
+    background: var(--btn);
+    color: var(--btn-tx);
   }
 
   .primary-btn:hover:not(:disabled) {
-    filter: brightness(1.1);
-    transform: translateY(-1px);
+    opacity: 0.9;
   }
 
   .secondary-btn {
-    background: var(--color-surface);
-    border-color: var(--color-line);
-    color: var(--color-text-bright);
+    background: var(--pn);
+    color: var(--tx);
   }
 
   .secondary-btn:hover:not(:disabled) {
-    background: var(--color-surface-hover);
+    background: var(--pn-2);
   }
 
   .outline-btn {
     background: transparent;
-    border-color: var(--color-line);
-    color: var(--color-muted);
+    border-color: var(--line-2);
+    color: var(--tx);
   }
 
   .outline-btn:hover:not(:disabled) {
-    color: var(--color-text-bright);
-    border-color: var(--color-line-strong);
+    background: var(--pn);
   }
 
   .danger-btn {
-    background: rgba(239, 68, 68, 0.15);
-    border-color: rgba(239, 68, 68, 0.3);
-    color: #fca5a5;
+    background: var(--err-soft);
+    color: var(--err);
   }
 
   .danger-btn:hover:not(:disabled) {
-    background: rgba(239, 68, 68, 0.3);
+    background: var(--pn-2);
   }
 
   .btn:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
-  /* Playlists */
-  .playlists-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 200px;
-    overflow-y: auto;
-  }
-
-  .playlist-item-btn {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 10px 14px;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    color: var(--color-text-bright);
-    font-size: 13.5px;
-    cursor: pointer;
-    text-align: left;
-    transition: all var(--transition-fast);
-  }
-
-  .playlist-item-btn:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
-    background: var(--color-surface-hover);
-  }
-
-
-
-  .empty-list-notice {
-    color: var(--color-muted);
-    font-size: 13.5px;
-    margin: 8px 0;
+  .btn.small {
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
   }
 
   .status-msg {
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    font-size: 12px;
+    font-size: 13px;
+    font-weight: 600;
     white-space: nowrap;
     margin: 0;
   }
 
-  .status-msg.error { color: var(--status-error); }
-  .status-msg.success { color: var(--status-success, #4ade80); }
+  .status-msg.error { color: var(--err); }
+  .status-msg.success { color: var(--ok); }
 
   .candidates-box {
-    padding: 12px;
-    border-radius: var(--radius-sm);
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
+    padding: 14px 16px;
+    border-radius: var(--r-md);
+    background: var(--pn);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 10px;
+    font-size: 14px;
   }
 
   .candidate-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 12px;
-    font-size: 12.5px;
+    font-size: 13px;
+  }
+
+  .candidate-row code {
+    font-family: var(--font-mono);
   }
 
   .candidate-actions {
     display: flex;
     gap: 6px;
-  }
-
-  .btn.small {
-    padding: 4px 10px;
-    font-size: 12px;
   }
 
   .merges-list {
@@ -1378,5 +1855,35 @@
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
     border: 0;
+  }
+
+  @media (max-width: 639px) {
+    .modal-overlay {
+      padding: 0;
+      place-items: stretch;
+    }
+
+    .modal-card,
+    .modal-card.wide {
+      max-width: none;
+      max-height: 100dvh;
+      height: 100dvh;
+      border: 0;
+      border-radius: 0;
+    }
+
+    .modal-header { padding: 20px 16px 4px; }
+    .modal-body { padding: 16px; }
+    .modal-footer { padding: 8px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
+    .form-body .modal-footer { padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); }
+
+    .info-grid { grid-template-columns: minmax(0, 1fr); }
+    .info-item.full { grid-column: auto; }
+    .path-row { flex-wrap: wrap; }
+    .path-row code.path { flex-basis: 100%; }
+    .version-node { margin-left: 0; flex-basis: 100%; }
+    .version-body { padding: 4px 12px 14px; }
+
+    .col-8, .col-6, .col-4 { grid-column: span 12; }
   }
 </style>

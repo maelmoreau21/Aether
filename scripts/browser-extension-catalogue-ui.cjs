@@ -1,7 +1,12 @@
 // Production Svelte UI with the real signed manifests; APIs are simulated here.
 const {chromium}=require('../apps/web/node_modules/playwright');
 const fs=require('node:fs'),assert=require('node:assert/strict');
-const catalog=JSON.parse(fs.readFileSync('../Aether-Plugins/repository/manifest.json','utf8'));
+const repository=JSON.parse(fs.readFileSync('../Aether-Plugins/repository/manifest.json','utf8'));
+// A versioned catalogue (apiVersion 2) lists every version; this UI check uses the newest
+// version of each plugin with its signed manifest from the plugins checkout.
+const signedManifest=(plugin,version)=>{const file=`../Aether-Plugins/repository/packages/${decodeURIComponent(new URL(version.sourceUrl).pathname.split('/').pop())}`;
+  return fs.existsSync(file)?JSON.parse(fs.readFileSync(file,'utf8')).manifest:{apiVersion:1,id:plugin.id,name:plugin.name,version:version.version,description:plugin.description,author:plugin.owner||'',license:'',repository:'',permissions:version.permissions||[],httpHosts:version.httpHosts||[],category:plugin.category};};
+const catalog=repository.apiVersion===2?{extensions:repository.plugins.map(plugin=>({manifest:signedManifest(plugin,plugin.versions[0]),publisherId:plugin.versions[0].publisherId||plugin.publisherId,publicKey:plugin.versions[0].publicKey||plugin.publicKey,packageSha256:plugin.versions[0].checksum}))}:repository;
 const origin=process.env.MEDIA_TEST_ORIGIN||'http://127.0.0.1:5179';
 const output='target/extension-catalogue-ui';fs.mkdirSync(output,{recursive:true});
 (async()=>{

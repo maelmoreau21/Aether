@@ -1,4 +1,5 @@
 //! Private artwork kept in application storage. Media folders remain read-only.
+mod migration;
 use crate::{
     auth::AuthState,
     database::{query, query_as, query_scalar},
@@ -12,10 +13,13 @@ use axum::{
     response::Response,
     routing::get,
 };
-use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
+#[cfg(test)]
+use image::ImageFormat;
+pub(crate) use migration::migrate_one;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Execute;
+#[cfg(test)]
 use std::io::Cursor;
 pub(crate) const ROLES: &[&str] = &[
     "poster",
@@ -64,56 +68,15 @@ pub async fn legacy(
     .await
     .map_err(db)?;
 
-    let target_sha = if let Some(cached_sha) = cached {
-        cached_sha
-    } else {
-        let permit = tokio::time::timeout(std::time::Duration::from_secs(8), DECODERS.acquire())
-            .await
-            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
-            .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-        let (_, original) = store
-            .assets
-            .read_all(&sha256)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let encoded = tokio::task::spawn_blocking(move || {
-            let _permit = permit;
-            normalize(Bytes::from(original), "image/webp")
-        })
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-        let mut target = None;
-        for (size, mime, data) in encoded.variants {
-            if size == 0 {
-                continue;
-            }
-            let meta = store
-                .assets
-                .put_bytes(&data, mime)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            if size == i64::from(width) {
-                target = Some(meta.sha256.clone());
-            }
-            query("INSERT INTO poster_previews(work_id,width,revision,mime,sha256) VALUES(?,?,?,?,?) ON CONFLICT(work_id,width) DO UPDATE SET revision=excluded.revision,mime=excluded.mime,sha256=excluded.sha256")
-                .bind(work)
-                .bind(size)
-                .bind(&revision)
-                .bind(mime)
-                .bind(&meta.sha256)
-                .execute(&store.pool)
-                .await
-                .map_err(db)?;
-        }
-        target.ok_or(StatusCode::NOT_FOUND)?
-    };
+    // Missing previews are prepared by import/migration, never by a GET.
+    let target_sha = cached.unwrap_or(sha256);
     store
         .assets
         .response_after_authorization(&target_sha, headers)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
-static DECODERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+use crate::image_import::DECODERS;
 #[derive(Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
@@ -127,6 +90,23 @@ pub struct Entry {
     pub origin: String,
     pub language: Option<String>,
     pub provider: Option<String>,
+    #[sqlx(default)]
+    #[serde(serialize_with = "serialize_flag")]
+    pub pinned: i64,
+    #[sqlx(default)]
+    pub region: Option<String>,
+    #[sqlx(default)]
+    pub content_hash: Option<String>,
+    #[sqlx(default)]
+    pub representation_count: i64,
+    #[sqlx(default)]
+    pub release_evidence: Option<String>,
+    #[sqlx(default)]
+    #[serde(serialize_with = "serialize_flag")]
+    pub original_release_verified: i64,
+}
+fn serialize_flag<S: serde::Serializer>(value: &i64, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bool(*value != 0)
 }
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -136,6 +116,10 @@ pub fn router(auth: AuthState) -> Router {
             axum::routing::put(order),
         )
         .route("/api/v1/works/{work}/images/similar", get(similar_images))
+        .route(
+            "/api/v1/works/{work}/images/{id}/pin",
+            axum::routing::put(pin),
+        )
         .route(
             "/api/v1/works/{work}/images/{id}",
             get(read).post(upload).delete(remove),
@@ -169,7 +153,7 @@ pub async fn entries(store: &IdentityStore, ids: &[String]) -> Result<Vec<Entry>
     }
     let mut result = vec![];
     for sql in [
-        "SELECT e.id,e.work_id,e.kind,COALESCE(o.position,e.position) AS position,e.width,e.height,'/api/v1/works/'||e.work_id||'/images/'||e.id AS url,CASE WHEN e.provider IS NULL THEN 'manual' ELSE 'provider' END AS origin,e.language,e.provider FROM work_image_entries e LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id WHERE e.work_id IN (",
+        "SELECT e.id,e.work_id,e.kind,COALESCE(o.position,e.position) AS position,e.width,e.height,'/api/v1/works/'||e.work_id||'/images/'||e.id AS url,CASE WHEN e.provider IS NULL THEN 'manual' ELSE 'provider' END AS origin,e.language,e.provider,(SELECT sha256 FROM work_image_data WHERE image_id=e.id AND width=0) AS content_hash,(SELECT COUNT(*) FROM work_image_data WHERE image_id=e.id) AS representation_count FROM work_image_entries e LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id WHERE e.work_id IN (",
         "SELECT i.id,i.work_id,i.role AS kind,COALESCE(o.position,10000+i.priority) AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/assets/'||i.id||'/image?v='||i.modified_ns||'-'||i.size AS url,'local' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id LEFT JOIN work_image_order o ON o.work_id=i.work_id AND o.image_id=i.id WHERE i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND h.image_id IS NULL AND i.role IN ('poster','thumb','logo','illustration','backdrop','banner','disc','landscape') AND i.work_id IN (",
         "SELECT 'legacy-poster' AS id,p.work_id,'poster' AS kind,5000 AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/works/'||p.work_id||'/poster' AS url,'legacy' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider FROM work_posters p WHERE p.work_id IN (",
     ] {
@@ -191,10 +175,98 @@ pub async fn entries(store: &IdentityStore, ids: &[String]) -> Result<Vec<Entry>
                 .await?,
         );
     }
+    let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT work_id,image_id,pinned,release_evidence FROM artwork_annotations WHERE work_id IN (",
+    );
+    let mut values = builder.separated(",");
+    for id in ids {
+        values.push_bind(id);
+    }
+    values.push_unseparated(")");
+    let sql = crate::database::normalize_sql(builder.sql().as_str());
+    let args = builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let annotations: Vec<(String, String, i64, Option<String>)> =
+        sqlx::query_as_with(sqlx::AssertSqlSafe(sql), args)
+            .fetch_all(&store.pool)
+            .await?;
+    for entry in &mut result {
+        if let Some((_, _, pinned, evidence)) = annotations
+            .iter()
+            .find(|(work, id, _, _)| work == &entry.work_id && id == &entry.id)
+        {
+            entry.pinned = *pinned;
+            entry.release_evidence = evidence.clone();
+            entry.original_release_verified = i64::from(evidence.is_some());
+        }
+        entry.region = entry
+            .language
+            .as_deref()
+            .and_then(|language| {
+                language.split('-').skip(1).find(|part| {
+                    (part.len() == 2 && part.bytes().all(|b| b.is_ascii_alphabetic()))
+                        || (part.len() == 3 && part.bytes().all(|b| b.is_ascii_digit()))
+                })
+            })
+            .map(str::to_ascii_uppercase);
+    }
     result.sort_by(|a, b| {
-        (&a.work_id, &a.kind, a.position, &a.id).cmp(&(&b.work_id, &b.kind, b.position, &b.id))
+        (
+            &a.work_id,
+            &a.kind,
+            std::cmp::Reverse(a.pinned),
+            a.position,
+            &a.id,
+        )
+            .cmp(&(
+                &b.work_id,
+                &b.kind,
+                std::cmp::Reverse(b.pinned),
+                b.position,
+                &b.id,
+            ))
     });
     Ok(result)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pin {
+    pinned: bool,
+}
+async fn pin(
+    State(auth): State<AuthState>,
+    Path((work, id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(input): Json<Pin>,
+) -> Result<StatusCode, StatusCode> {
+    allowed(&auth, &headers, &work, true).await?;
+    let images = entries(&auth.store, std::slice::from_ref(&work))
+        .await
+        .map_err(db)?;
+    let image = images
+        .iter()
+        .find(|image| image.id == id)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let mut connection = auth.store.pool.acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write_serialized(&mut connection, 0x41525450494e)
+        .await
+        .map_err(db)?;
+    if input.pinned {
+        query("UPDATE artwork_annotations SET pinned=0 WHERE work_id=? AND kind=?")
+            .bind(&work)
+            .bind(&image.kind)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
+    }
+    query("INSERT INTO artwork_annotations(work_id,image_id,kind,pinned) VALUES(?,?,?,?) ON CONFLICT(work_id,image_id) DO UPDATE SET pinned=excluded.pinned")
+        .bind(&work).bind(&id).bind(&image.kind).bind(i64::from(input.pinned)).execute(&mut *tx).await.map_err(db)?;
+    tx.commit().await.map_err(db)?;
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(StatusCode::NO_CONTENT)
 }
 async fn list(
     State(auth): State<AuthState>,
@@ -202,12 +274,38 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     allowed(&auth, &headers, &work, false).await?;
+    let original = original_language(&auth.store, &work).await.map_err(db)?;
     let images: Vec<_> = entries(&auth.store, &[work])
         .await
         .map_err(db)?
         .into_iter()
         .collect();
-    Ok(Json(json!({"images":images})))
+    Ok(Json(json!({"images":images,"originalLanguage":original})))
+}
+pub(crate) async fn original_language(
+    store: &IdentityStore,
+    work: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let row: Option<(String, Option<String>)> =
+        query_as("SELECT editorial_json,manual_json FROM inventory_works WHERE id=?")
+            .bind(work)
+            .fetch_optional(store.pool())
+            .await?;
+    let Some((editorial, manual)) = row else {
+        return Ok(None);
+    };
+    let editorial: Value = serde_json::from_str(&editorial).unwrap_or(Value::Null);
+    let manual: Value = manual
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or(Value::Null);
+    let language = manual
+        .get("original_language")
+        .unwrap_or(&editorial["original_language"]);
+    Ok(language
+        .as_str()
+        .map(str::trim)
+        .filter(|v| valid_language(v) && !["und", "xx", "zxx"].contains(v))
+        .map(str::to_ascii_lowercase))
 }
 #[derive(Default, Deserialize)]
 pub(crate) struct ImageQuery {
@@ -305,8 +403,13 @@ impl Fingerprint {
         }
         let colors = sample(4, 4);
         Self(format!(
-            "{hash:016x}:{}",
+            "{hash:016x}:{}:{}",
             colors
+                .as_raw()
+                .iter()
+                .map(|v| format!("{v:02x}"))
+                .collect::<String>(),
+            sample(16, 16)
                 .as_raw()
                 .iter()
                 .map(|v| format!("{v:02x}"))
@@ -331,24 +434,54 @@ impl Fingerprint {
         {
             return false;
         }
-        let parse = |value: &str| -> Option<(u64, Vec<u8>)> {
-            let (hash, colors) = value.split_once(':')?;
-            if colors.len() != 96 {
+        type Parsed = (u64, Vec<u8>, Option<Vec<u8>>);
+        let parse = |value: &str| -> Option<Parsed> {
+            let mut parts = value.split(':');
+            let hash = parts.next()?;
+            let colors = parts.next()?;
+            let detail = parts.next();
+            if parts.next().is_some()
+                || colors.len() != 96
+                || !colors.bytes().all(|b| b.is_ascii_hexdigit())
+            {
                 return None;
             }
-            Some((
-                u64::from_str_radix(hash, 16).ok()?,
-                (0..48)
-                    .map(|i| u8::from_str_radix(&colors[i * 2..i * 2 + 2], 16))
+            let bytes = |hex: &str| {
+                (0..hex.len() / 2)
+                    .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16))
                     .collect::<Result<Vec<_>, _>>()
-                    .ok()?,
-            ))
+                    .ok()
+            };
+            let detail = match detail {
+                None => None,
+                Some(detail)
+                    if detail.len() == 1536 && detail.bytes().all(|b| b.is_ascii_hexdigit()) =>
+                {
+                    Some(bytes(detail)?)
+                }
+                _ => return None,
+            };
+            Some((u64::from_str_radix(hash, 16).ok()?, bytes(colors)?, detail))
         };
-        let (Some((hash, colors)), Some((other_hash, other_colors))) =
+        let (Some((hash, colors, detail)), Some((other_hash, other_colors, other_detail))) =
             (parse(&self.0), parse(other))
         else {
             return false;
         };
+        if let (Some(detail), Some(other)) = (detail, other_detail) {
+            let differences: Vec<u32> = detail
+                .iter()
+                .zip(other)
+                .map(|(a, b)| u32::from(a.abs_diff(b)))
+                .collect();
+            // The finer grid catches changed art/layout that 4x4 colours miss.
+            // Older signatures remain readable until the progressive migration.
+            if differences.iter().sum::<u32>() > 768 * 8
+                || differences.iter().filter(|v| **v > 24).count() > 76
+            {
+                return false;
+            }
+        }
         (hash ^ other_hash).count_ones() <= tolerance
             && colors
                 .iter()
@@ -404,7 +537,6 @@ async fn similar_images(
             rows.iter().skip(index + 1)
         {
             if kind == other_kind
-                && language.as_deref().unwrap_or("") == other_language.as_deref().unwrap_or("")
                 && other_fingerprint.as_ref().is_some_and(|other| {
                     signature.similar(
                         other,
@@ -420,7 +552,7 @@ async fn similar_images(
                     truncated = true;
                     break 'outer;
                 }
-                pairs.push(json!({"first":id,"second":other_id}));
+                pairs.push(json!({"first":id,"second":other_id,"differentLanguages":language != other_language}));
             }
         }
     }
@@ -452,66 +584,41 @@ async fn similar_images(
     ))
 }
 
-struct Encoded {
-    width: i64,
-    height: i64,
-    variants: Vec<(i64, &'static str, Vec<u8>)>,
+pub(crate) struct Encoded {
+    pub(crate) width: i64,
+    pub(crate) height: i64,
+    pub(crate) variants: Vec<(i64, &'static str, Vec<u8>)>,
     fingerprint: Fingerprint,
 }
+#[cfg(test)]
 fn normalize(bytes: Bytes, content: &str) -> Result<Encoded, StatusCode> {
-    let mut reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    let expected = match reader.format() {
-        Some(ImageFormat::Png) => "image/png",
-        Some(ImageFormat::Jpeg) => "image/jpeg",
-        Some(ImageFormat::WebP) => "image/webp",
-        _ => return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE),
-    };
-    if content != expected {
-        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    }
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(4096);
-    limits.max_image_height = Some(4096);
-    limits.max_alloc = Some(32 * 1024 * 1024);
-    reader.limits(limits);
-    let decoder = reader
-        .into_decoder()
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-    if decoder.total_bytes() > 32 * 1024 * 1024 {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
-    }
-    let image =
-        image::DynamicImage::from_decoder(decoder).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+    normalize_kind(bytes, content, "poster")
+}
+fn normalize_kind(bytes: Bytes, content: &str, kind: &str) -> Result<Encoded, StatusCode> {
+    let image = crate::image_import::decode(&bytes, content)?;
     let fingerprint = Fingerprint::of(&image);
     let mut variants = vec![];
+    let lossless = kind == "logo" || image.color().has_alpha();
+    let mut source = None;
     for width in [0, 320, 640, 1280] {
-        let resized = if width == 0 {
-            None
+        // Keep the historical width keys even for a smaller original. Those keys
+        // reference the same content-addressed object; no upscaling or re-encoding.
+        let bytes = if width == 0 {
+            let bytes = if content == "image/webp"
+                && media_node::image_encoding::reusable_webp(&bytes, lossless)
+            {
+                bytes.to_vec()
+            } else {
+                crate::image_import::encode(&image, lossless)?
+            };
+            source = Some(bytes.clone());
+            bytes
+        } else if image.width() <= width {
+            source.clone().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         } else {
-            Some(image.thumbnail(width, 4096))
+            crate::image_import::encode(&image.thumbnail(width, 4096), lossless)?
         };
-        let image = resized.as_ref().unwrap_or(&image);
-        let mut bytes = vec![];
-        let mime = if image.color().has_alpha() {
-            image
-                .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
-                .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-            "image/png"
-        } else {
-            image::codecs::jpeg::JpegEncoder::new_with_quality(
-                &mut bytes,
-                if width == 0 { 90 } else { 78 },
-            )
-            .encode_image(image)
-            .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-            "image/jpeg"
-        };
-        if bytes.len() > 8 * 1024 * 1024 {
-            return Err(StatusCode::UNPROCESSABLE_ENTITY);
-        }
-        variants.push((i64::from(width), mime, bytes));
+        variants.push((i64::from(width), "image/webp", bytes));
     }
     Ok(Encoded {
         width: i64::from(image.width()),
@@ -519,6 +626,57 @@ fn normalize(bytes: Bytes, content: &str) -> Result<Encoded, StatusCode> {
         variants,
         fingerprint,
     })
+}
+pub(crate) async fn prepare(
+    bytes: Bytes,
+    content: String,
+    kind: String,
+) -> Result<Encoded, StatusCode> {
+    let permit = tokio::time::timeout(std::time::Duration::from_secs(8), DECODERS.acquire())
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        normalize_kind(bytes, &content, &kind)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+}
+async fn reusable(
+    store: &IdentityStore,
+    digest: &str,
+    kind: &str,
+) -> Result<Option<Encoded>, StatusCode> {
+    let entry: Option<(String,i64,i64,String)> = query_as("SELECT e.id,e.width,e.height,e.fingerprint FROM artwork_annotations a JOIN work_image_entries e ON e.work_id=a.work_id AND e.id=a.image_id JOIN work_image_data d ON d.image_id=e.id AND d.width=0 WHERE a.encoding=? AND a.kind=? AND (a.source_sha256=? OR d.sha256=?) AND e.fingerprint IS NOT NULL LIMIT 1")
+        .bind(crate::image_import::ENCODING).bind(kind).bind(digest).bind(digest).fetch_optional(store.pool()).await.map_err(db)?;
+    let Some((id, width, height, fingerprint)) = entry else {
+        return Ok(None);
+    };
+    let data: Vec<(i64, String)> =
+        query_as("SELECT width,sha256 FROM work_image_data WHERE image_id=? ORDER BY width")
+            .bind(id)
+            .fetch_all(store.pool())
+            .await
+            .map_err(db)?;
+    if data.iter().map(|r| r.0).collect::<Vec<_>>() != [0, 320, 640, 1280] {
+        return Ok(None);
+    }
+    let mut variants = Vec::new();
+    for (width, sha) in data {
+        let (_, bytes) = store
+            .assets
+            .read_all(&sha)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        variants.push((width, "image/webp", bytes));
+    }
+    Ok(Some(Encoded {
+        width,
+        height,
+        variants,
+        fingerprint: Fingerprint(fingerprint),
+    }))
 }
 pub(crate) async fn upload(
     State(auth): State<AuthState>,
@@ -562,16 +720,16 @@ pub(crate) async fn upload_internal(
     {
         return Err(StatusCode::NOT_FOUND);
     }
-    let permit = tokio::time::timeout(std::time::Duration::from_secs(8), DECODERS.acquire())
-        .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
-    let encoded = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        normalize(bytes, &content)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    use sha2::{Digest, Sha256};
+    let source_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let guessed = image::guess_format(&bytes).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+    if guessed.to_mime_type() != content {
+        return Err(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+    let encoded = match reusable(store, &source_sha256, &kind).await? {
+        Some(reused) => reused,
+        None => prepare(bytes, content, kind.clone()).await?,
+    };
     // Provider additions use the owning library's policy; uploads and explicit
     // replacements keep their existing behaviour. Child folders inherit the
     // options of the parent library.
@@ -597,12 +755,19 @@ pub(crate) async fn upload_internal(
         None
     };
     let mut stored_variants = Vec::with_capacity(encoded.variants.len());
+    let mut leases = Vec::new();
     for (width, mime, data) in &encoded.variants {
         let meta = store
             .assets
             .put_bytes(data, mime)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        leases.push(
+            store
+                .assets
+                .lease(&meta.sha256)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        );
         stored_variants.push((*width, *mime, meta.sha256));
     }
     let mut connection = store.pool.acquire().await.map_err(db)?;
@@ -651,6 +816,12 @@ pub(crate) async fn upload_internal(
         .await
         .map_err(db)?;
     if let Some(replace) = &options.replace {
+        query("DELETE FROM artwork_annotations WHERE work_id=? AND image_id=?")
+            .bind(&work)
+            .bind(replace)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
         query("DELETE FROM work_image_entries WHERE work_id=? AND id=?")
             .bind(&work)
             .bind(replace)
@@ -683,6 +854,8 @@ pub(crate) async fn upload_internal(
             .map_err(db)?;
     }
     if kind != "backdrop" && !options.append && options.provider.is_none() {
+        query("DELETE FROM artwork_annotations WHERE work_id=? AND image_id IN (SELECT id FROM work_image_entries WHERE work_id=? AND kind=? AND provider IS NULL)")
+            .bind(&work).bind(&work).bind(&kind).execute(&mut *tx).await.map_err(db)?;
         query("DELETE FROM work_image_entries WHERE work_id=? AND kind=? AND provider IS NULL")
             .bind(&work)
             .bind(&kind)
@@ -704,7 +877,7 @@ pub(crate) async fn upload_internal(
     )
     .bind(&id)
     .bind(&work)
-    .bind(kind)
+    .bind(&kind)
     .bind(if options.provider.is_none() { -1 } else { count })
     .bind(encoded.width)
     .bind(encoded.height)
@@ -729,7 +902,11 @@ pub(crate) async fn upload_internal(
             .await
             .map_err(db)?;
     }
+    query("INSERT INTO artwork_annotations(work_id,image_id,kind,source_sha256,encoding) VALUES(?,?,?,?,?)")
+        .bind(&work).bind(&id).bind(&kind).bind(&source_sha256).bind(crate::image_import::ENCODING)
+        .execute(&mut *tx).await.map_err(db)?;
     tx.commit().await.map_err(db)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok((
         StatusCode::CREATED,
         Json(json!({"id":id,"duplicate":false})),
@@ -748,6 +925,12 @@ async fn remove(
         return Err(StatusCode::NOT_FOUND);
     }
     let mut tx = auth.store.pool.begin().await.map_err(db)?;
+    query("DELETE FROM artwork_annotations WHERE work_id=? AND image_id=?")
+        .bind(&work)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
     query("DELETE FROM work_image_entries WHERE work_id=? AND id=?")
         .bind(&work)
         .bind(&id)
@@ -776,6 +959,7 @@ async fn remove(
         .await
         .map_err(db)?;
     tx.commit().await.map_err(db)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]

@@ -1,0 +1,60 @@
+name: Rust build profile experiment (no publication)
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        type: choice
+        options: [ubuntu-latest, ubuntu-24.04-arm]
+        default: ubuntu-latest
+        description: Native architecture to measure (six isolated builds)
+
+permissions:
+  contents: read
+
+jobs:
+  profile:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        codegen-units: [1, 4, 8]
+        cargo-jobs: [2, 4]
+    env:
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: ${{ matrix.codegen-units }}
+      CARGO_BUILD_JOBS: ${{ matrix.cargo-jobs }}
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # Deliberately no target cache: all cohorts build identical locked sources.
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libssl-dev time
+      - name: Record host and compiler
+        run: |
+          mkdir -p measurements
+          { uname -a; nproc; free -m; rustc -Vv; cargo -V; } > measurements/host.txt
+      - name: Compile the seven shipped binaries with the production ThinLTO profile
+        run: |
+          /usr/bin/time -v -o measurements/build-time.txt cargo build --release --locked --timings \
+            --bin aether-core --bin aether-node --bin media-bootstrap --bin media-backup \
+            --bin media-restore --bin media-recover --bin media-extension-worker
+          for binary in aether-core aether-node media-bootstrap media-backup media-restore media-recover media-extension-worker; do
+            stat --format='%n %s' "target/release/$binary" >> measurements/binary-bytes.txt
+            sha256sum "target/release/$binary" >> measurements/binary-sha256.txt
+          done
+      - name: Measure the warm unchanged-source build separately
+        run: |
+          /usr/bin/time -v -o measurements/warm-build-time.txt cargo build --release --locked \
+            --bin aether-core --bin aether-node --bin media-bootstrap --bin media-backup \
+            --bin media-restore --bin media-recover --bin media-extension-worker
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-profile-${{ inputs.runner }}-cgu${{ matrix.codegen-units }}-jobs${{ matrix.cargo-jobs }}
+          path: |
+            measurements/
+            target/cargo-timings/
+          retention-days: 7

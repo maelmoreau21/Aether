@@ -1,4 +1,38 @@
-# Cinema Design System — 23 octobre 2026
+# Cinema Design System — règles durables
+
+> Ce document est la source de référence pour les règles UX/UI partagées :
+> tokens, thèmes, responsive, images, navigation et accessibilité. Les sections
+> datées ci-dessous résument des décisions intégrées ; leurs rapports détaillés
+> sont historiques et ne constituent pas une feuille de route.
+
+## Administration et paramètres personnels — 5 novembre 2026
+
+Le tableau de bord utilise toute la largeur disponible, avec des marges adaptatives,
+sans plafond à 1 440 px. Les Clés API sont dans Système. La rubrique Extensions
+regroupe la gestion des extensions et les raccourcis épinglés de Demandes et
+Signalements. L’épinglage se fait depuis la fiche de l’extension, sous son bouton Paramètres ;
+il est conservé par compte dans ce navigateur, sans synchronisation serveur.
+Les raccourcis des extensions désactivées sont masqués. Acquisition et imports
+reste un onglet de Demandes dans l’administration.
+
+Le menu du profil donne accès aux paramètres personnels et au tableau de bord.
+Demandes, Signalements et Mes statistiques sont dans le groupe Moi des paramètres ;
+les deux premiers liens dépendent des extensions actives. Le lien « Demandes et
+imports » est retiré du menu du profil. Le raccourci Demandes est également retiré
+de la barre de navigation principale, à droite de Mes listes ; son accès personnel
+reste disponible dans les paramètres, groupe Moi.
+
+Dans Apparence et accueil, le sélecteur de couleur d’accent est retiré. Les thèmes,
+la taille des affiches, leur espacement et l’ordre des sections restent réglables.
+Les recommandations sont activées en l’absence de préférence enregistrée et se
+placent immédiatement sous Pour ce soir. Une désactivation explicite est conservée ;
+si Pour ce soir est masqué, les recommandations suivent les autres sections visibles.
+
+Vérifications locales : Svelte, lint, tests ciblés navigation/épinglage, build Web,
+Chrome avec APIs synthétiques à 2 560 px et 390 px, accès paramètres personnels et
+persistance d’une épingle après rechargement. Les changements UI ne sont pas déployés.
+La réparation du stockage des sauvegardes sur le NAS et ses limites sont décrites
+dans [ADMIN_BACKUPS.md](ADMIN_BACKUPS.md).
 
 ## Direction et périmètre
 
@@ -99,7 +133,7 @@ titre, année/note disponible, progression et états utiles. Replis d’images n
 Les règles de langue, variantes manuelles et rotation restent dans selectArtwork.
 
 Audit, décisions, protocole navigateur, limites et prochains jalons :
-[Refonte UX 2026-10-28](UX_REDESIGN_2026_10_28.md).
+[Refonte UX 2026-10-28](archive/ux/UX_REDESIGN_2026_10_28.md).
 Ce jalon ne constitue pas la refonte complète des fiches ou de l’administration.
 
 ## Jalon fiches du 29 octobre 2026
@@ -113,7 +147,7 @@ reviennent au texte ou à une surface neutre.
 Un seul select de saison pilote les épisodes. Les lignes desktop et cartes
 mobile gardent les vignettes 16:9, une lecture visible et les commandes avancées
 repliables. Pagination et callbacks existants conservés. Méthode, preuves et
-limites : [Fiches UX 2026-10-29](UX_DETAILS_2026_10_29.md).
+limites : [Fiches UX 2026-10-29](archive/ux/UX_DETAILS_2026_10_29.md).
 
 ## Jalon administration du 29 octobre 2026
 
@@ -125,7 +159,7 @@ navigation est rendue à la fois ; focus et défilement sont rétablis après s�
 La vue d’ensemble affiche d’abord serveur, Nodes, lecteurs et indexations, sur
 deux colonnes sur téléphone. Les erreurs de diagnostic restent visibles et les
 informations techniques secondaires restent disponibles. Méthode et limites :
-[Administration UX 2026-10-29](UX_ADMIN_2026_10_29.md).
+[Administration UX 2026-10-29](archive/ux/UX_ADMIN_2026_10_29.md).
 
 ## Jalon bibliothèques du 29 octobre 2026
 
@@ -134,7 +168,7 @@ images, Indexation, Accès et Avancé. Rail desktop, sélecteur mobile/tablette 
 paysage bas, contenu défilant et actions fixes. Les groupes techniques sont
 repliables ; la validation révèle le champ invalide avant de lui donner le focus.
 Un dossier doit être explicitement ajouté avant enregistrement. Réglages et
-contrats conservés ; détails et limites : [Bibliothèques UX](UX_LIBRARIES_2026_10_29.md).
+contrats conservés ; détails et limites : [Bibliothèques UX](archive/ux/UX_LIBRARIES_2026_10_29.md).
 
 ## Jalon tâches du 29 octobre 2026
 
@@ -143,7 +177,7 @@ repliables. Filtres par état limités explicitement à la page chargée ; type,
 bibliothèque, état et actions avant les détails techniques. Les erreurs d’action
 survivent aux actualisations automatiques. Aucun état d’arrêt ou de reprise
 n’est inventé ; garde du lease et contrats conservés. Preuves et limites :
-[Tâches UX](UX_TASKS_2026_10_29.md).
+[Tâches UX](archive/ux/UX_TASKS_2026_10_29.md).
 
 ## Jalon musique du 29 octobre 2026
 
@@ -152,4 +186,30 @@ Pochettes carrées, initiales d’artistes faute de portrait, replis d’images 
 La portée des regroupements par page est explicite. Lecture principale visible,
 file/playlist/format en actions secondaires. Barre mobile compacte au-dessus de
 la navigation, file et paroles dans un dialogue natif avec transport fixe et
-options de lecture. État/contrats conservés ; [preuves et limites musique](UX_MUSIC_2026_10_29.md).
+options de lecture. État/contrats conservés ; [preuves et limites musique](archive/ux/UX_MUSIC_2026_10_29.md).
+
+
+## Profil et composition des fiches — 5 novembre 2026
+
+Dans Demandes, le bouton Rechercher reste cliquable avant saisie : la validation
+native du champ explique les recherches vides ou trop courtes (2 caractères).
+Le curseur d'attente apparaît seulement pendant une recherche effective ; un
+survol ne lance aucune requête. Le Core reste responsable de la recherche ARR.
+
+Les fiches film/série conservent l'image entière sur un fond flouté dès que le
+cadrage couperait plus de 8 % de sa surface. Les logos gardent leurs proportions
+et la largeur du titre suit l'espace disponible. L'illustration transparente
+supplémentaire n'est affichée qu'en l'absence de fond de scène, pour éviter de
+superposer deux compositions. Les logos ont une ombre de contraste.
+
+Les variantes de fonds sans langue sont préférées lorsqu'elles existent. Pour
+les logos, la langue de l'interface puis une variante neutre sont retenues ; si
+les seules variantes connues sont dans une autre langue, le titre texte localisé
+remplace le logo. Les choix manuels restent prioritaires. Sans métadonnées de
+langue ou sans autre image disponible, aucun texte incrusté dans les pixels
+n'est détecté ou traduit automatiquement.
+
+Validation : `scripts/browser-profile-artwork-fixes.cjs` teste le parcours de
+recherche, l'absence d'import GitHub et des images larges, carrées et verticales
+à 390/1920 px dans Chrome avec APIs synthétiques. Ce contrôle local ne valide
+pas les fournisseurs ARR ou les images d'un serveur déployé.

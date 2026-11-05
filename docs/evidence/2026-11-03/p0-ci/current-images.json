@@ -1,0 +1,68 @@
+{
+  "scope": "Actual local linux/amd64 builds and isolated version/runtime-tool smoke checks. No server API, media playback, registry publication or NAS validation.",
+  "images": [
+    {
+      "target": "runtime",
+      "tag": "media-ci:runtime",
+      "image_id": "sha256:46d3f364ac2ac4f32b0a7123f7eec792a6c0b033467d499b7f9e86cd046c8477",
+      "size_bytes": 343370975,
+      "user": "aether:aether",
+      "version": "aether-core 0.1.0-beta.0-dev",
+      "platform": "linux/amd64"
+    },
+    {
+      "target": "runtime-core",
+      "tag": "media-ci:runtime-core",
+      "image_id": "sha256:e72cc0e9b2cc320564ef094d800a70b5567a12223658e6835c23b629831a4c39",
+      "size_bytes": 300796170,
+      "user": "aether:aether",
+      "version": "aether-core 0.1.0-beta.0-dev",
+      "platform": "linux/amd64"
+    },
+    {
+      "target": "runtime-node",
+      "tag": "media-ci:runtime-node",
+      "image_id": "sha256:32dedffe36862e646f173b7cdcf194474a0d87cb97c13939288a955d6f8b5f6d",
+      "size_bytes": 177356775,
+      "user": "aether:aether",
+      "version": "aether-node 0.1.0-beta.0-dev",
+      "platform": "linux/amd64",
+      "ffmpeg": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+      "ffprobe": "ffprobe version 9.0.2 Copyright (c) 2007-2026 the FFmpeg developers",
+      "no_shared_libav": true,
+      "below_200000000_bytes": true
+    }
+  ],
+  "build_history": [
+    {
+      "cached_steps": 27,
+      "completed_at": "2026-11-03T13:44:29.812871965Z",
+      "completed_steps": 41,
+      "created_at": "2026-11-03T13:44:13.188431041Z",
+      "name": "Aether (runtime-core)",
+      "ref": "desktop-linux/desktop-linux/xn1y2r1e8pe5x24a0qz96fxkk",
+      "status": "Completed",
+      "total_steps": 41
+    },
+    {
+      "cached_steps": 24,
+      "completed_at": "2026-11-03T13:44:16.243319073Z",
+      "completed_steps": 32,
+      "created_at": "2026-11-03T13:44:13.187795063Z",
+      "name": "Aether (runtime-node)",
+      "ref": "desktop-linux/desktop-linux/qetzox9xn9dye7kt6gs432b62",
+      "status": "Completed",
+      "total_steps": 32
+    },
+    {
+      "cached_steps": 33,
+      "completed_at": "2026-11-03T13:44:29.86753716Z",
+      "completed_steps": 47,
+      "created_at": "2026-11-03T13:44:13.187510828Z",
+      "name": "Aether (runtime)",
+      "ref": "desktop-linux/desktop-linux/edzszcgf0xi5uudbwfe02xrdd",
+      "status": "Completed",
+      "total_steps": 47
+    }
+  ]
+}

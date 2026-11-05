@@ -29,6 +29,10 @@ pub struct Probe {
 pub struct Credit {
     pub name: String,
     pub role: String,
+    /// Remote portrait (`<thumb>` in Kodi-style NFO). Only `https://` URLs are kept; Core fetches
+    /// them through an allowed provider host and never exposes them to browsers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumb: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProviderRating {
@@ -42,6 +46,8 @@ pub struct ProviderRating {
 pub struct FilmMetadata {
     pub title: Option<String>,
     pub original_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_language: Option<String>,
     pub plot: Option<String>,
     pub outline: Option<String>,
     pub year: Option<u16>,

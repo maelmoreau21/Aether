@@ -486,10 +486,6 @@ impl OpenedFile {
         self.file
     }
 
-    pub fn into_tokio(self) -> tokio::fs::File {
-        tokio::fs::File::from_std(self.file)
-    }
-
     pub fn into_tokio_file(self) -> tokio::fs::File {
         tokio::fs::File::from_std(self.file)
     }

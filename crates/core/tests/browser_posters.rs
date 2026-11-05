@@ -4,7 +4,7 @@ use std::{path::Path, process::Stdio, time::Duration};
 use zeroize::Zeroizing;
 
 async fn start(root: &Path, db: &Path, library: &Path, port: u16) -> tokio::process::Child {
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-poc"))
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_aether-core"))
         .current_dir(root)
         .env("MEDIA_DB_PATH", db)
         .env("MEDIA_LIBRARY_ROOT", library)

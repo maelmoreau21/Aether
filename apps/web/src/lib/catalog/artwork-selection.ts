@@ -58,7 +58,7 @@ function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVar
   }
   const key = `${work.id}:${kind}`;
   const previous = choices[key];
-  if (previous?.session === session && (policy.minHoursBetweenSwitches === 0 || !previous.switchedAt || Date.now() - previous.switchedAt < policy.minHoursBetweenSwitches * 3_600_000) && candidates.some(image => image.id === previous.image)) return candidates.find(image => image.id === previous.image)!.url;
+  if (previous?.session === session && candidates.some(image => image.id === previous.image)) return candidates.find(image => image.id === previous.image)!.url;
   if (previous?.switchedAt && Date.now() - previous.switchedAt < policy.minHoursBetweenSwitches * 3_600_000) {
     const retained = candidates.find(image => image.id === previous.image);
     if (retained) return retained.url;
@@ -92,41 +92,59 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
   const variants = work.imageVariants ?? [];
   for (const kind of new Set(variants.map(image => image.kind))) {
     let candidates = variants.filter(image => image.kind === kind && image.url);
-    const manual = candidates.filter(image => image.origin === 'manual' || image.origin === 'legacy').sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
-    if (manual.length) {
-      selected[kind] = manual[0].url;
+    const pinned = candidates.filter(image => image.pinned).sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
+    if (pinned.length) {
+      selected[kind] = pinned[0].url;
       continue;
     }
-    const isLibraryAllowed = policy.enabledLibraries !== undefined
+    const isLibraryAllowed = policy.languageMode ? (work.kind === 'film' || work.kind === 'series') : policy.enabledLibraries !== undefined
       ? policy.enabledLibraries.includes(work.libraryId)
       : ((work.kind === 'film' && (policy.enableMovies ?? true)) || (work.kind === 'series' && (policy.enableSeries ?? true)));
     const rotation = kind === 'poster' && policy.enabled && isLibraryAllowed;
-    if (kind === 'poster' && !rotation) {
+    if (kind === 'poster' && !rotation && !policy.languageMode) {
       const serverChoice = candidates.find(image => image.origin === 'provider' && image.position < 0);
       if (serverChoice) {
         selected[kind] = serverChoice.url;
         continue;
       }
     }
-    const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
+    const interfaceLanguage = languages[0] || 'fr';
+    const original = work.originalLanguage?.trim();
+    const selectionLanguages = kind === 'poster' && policy.languageMode
+      ? policy.languageMode === 'original' && original && /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(original)
+        ? [original] : [interfaceLanguage]
+      : rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {
       candidates = candidates.filter(image => {
         const language = image.language?.toLowerCase();
-        if (!language || language === 'und' || language === 'xx') return policy.includeUnknownLanguage;
+        if (policy.languageMode) return true;
+        if (!language || ['und', 'xx', '00', 'zxx'].includes(language)) return policy.includeUnknownLanguage;
         return policy.allowAnyLanguageFallback || selectionLanguages.some(choice => language === choice || language.split('-')[0] === choice.split('-')[0]);
       });
       if (!candidates.length) continue;
     }
     const languageRank = (language?: string | null) => {
-      if (!language || language === 'und' || language === 'xx') return selectionLanguages.length * 2;
+      if (!language || ['und', 'xx', '00', 'zxx'].includes(language)) return selectionLanguages.length * 2;
       const normalized = language.toLowerCase();
       for (let i = 0; i < selectionLanguages.length; i++) {
         const preferred = selectionLanguages[i].toLowerCase();
         if (normalized === preferred) return i * 2;
         if (normalized.split('-')[0] === preferred.split('-')[0]) return i * 2 + 1;
       }
-      return selectionLanguages.length * 2 + 1;
+      const fallback = [interfaceLanguage, 'en'].findIndex(choice => normalized.split('-')[0] === choice.toLowerCase().split('-')[0]);
+      return selectionLanguages.length * 2 + 1 + (fallback < 0 ? 2 : fallback);
     };
+    // Text-free scene images avoid mixing an embedded foreign title with the local logo.
+    const neutral = (language?: string | null) => !language || ['und', 'xx', '00', 'zxx'].includes(language.toLowerCase());
+    if (kind === 'backdrop' || kind === 'landscape') {
+      const textFree = candidates.filter(image => neutral(image.language));
+      if (textFree.length) candidates = textFree;
+    }
+    if (kind === 'logo') {
+      candidates = candidates.filter(image => neutral(image.language) || image.language?.toLowerCase().split('-')[0] === interfaceLanguage.toLowerCase().split('-')[0]);
+      // A translated text title is preferable to a known foreign-language logo.
+      if (!candidates.length) { selected[kind] = null; continue; }
+    }
     const bestLanguage = Math.min(...candidates.map(image => languageRank(image.language)));
     candidates = candidates.filter(image => languageRank(image.language) === bestLanguage);
     // Stable identity ordering makes API ordering and shelf/detail navigation irrelevant.

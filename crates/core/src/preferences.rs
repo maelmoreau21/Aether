@@ -16,6 +16,14 @@ struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     locale: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    home_sections: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_size: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card_density: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    accent_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     audio_language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     remember_audio_selections: Option<bool>,
@@ -56,6 +64,8 @@ fn default_true() -> bool {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ArtworkRotation {
     enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language_mode: Option<String>,
     #[serde(default = "default_true")]
     enable_movies: bool,
     #[serde(default = "default_true")]
@@ -123,13 +133,37 @@ fn hex_color(value: &str) -> bool {
 }
 impl Preferences {
     fn valid(&self) -> bool {
-        self.skip_back_seconds
-            .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
+        self.home_sections.as_ref().is_none_or(|sections| {
+            sections.len() <= 6
+                && sections.iter().enumerate().all(|(index, section)| {
+                    matches!(
+                        section.as_str(),
+                        "hero" | "continue" | "tonight" | "films" | "series" | "rated"
+                    ) && !sections[..index].contains(section)
+                })
+        }) && self
+            .card_size
+            .as_deref()
+            .is_none_or(|v| matches!(v, "small" | "medium" | "large"))
+            && self
+                .card_density
+                .as_deref()
+                .is_none_or(|v| matches!(v, "comfortable" | "compact"))
+            && self
+                .accent_color
+                .as_deref()
+                .is_none_or(|v| matches!(v, "orange" | "blue" | "violet" | "green"))
+            && self
+                .skip_back_seconds
+                .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
             && self
                 .skip_forward_seconds
                 .is_none_or(|v| matches!(v, 5 | 10 | 15 | 30 | 60))
             && self.artwork_rotation.as_ref().is_none_or(|v| {
-                matches!(v.rotation_mode.as_str(), "random" | "sequential")
+                v.language_mode
+                    .as_deref()
+                    .is_none_or(|mode| matches!(mode, "interface" | "original"))
+                    && matches!(v.rotation_mode.as_str(), "random" | "sequential")
                     && v.min_hours_between_switches <= 720
                     && (1..=24).contains(&v.pool_size)
                     && language(&v.preferred_language)

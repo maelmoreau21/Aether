@@ -3,12 +3,17 @@ import { session, getSessionGeneration, onSessionGenerationChange } from './auth
 import type { SubtitlePreference } from './player/subtitle-preference';
 import { sanitizeSubtitleStyle, type SubtitleStyle } from './player/subtitle-style';
 import type { ArtworkRotationPolicy } from './catalog/artwork-rotation-policy.svelte';
+import type { SupportedLocale } from './i18n';
 
+export type HomeSection = 'hero' | 'continue' | 'tonight' | 'films' | 'series' | 'rated';
+export const DEFAULT_HOME_SECTIONS: HomeSection[] = ['hero', 'continue', 'tonight', 'films', 'series', 'rated'];
 export type Preferences = {
-  theme?: 'light' | 'dark' | 'system'; locale?: 'fr' | 'en'; audioLanguage?: string;
+  theme?: 'light' | 'dark' | 'system'; locale?: SupportedLocale; audioLanguage?: string;
   subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };
   rememberAudioSelections?: boolean; rememberSubtitleSelections?: boolean; playDefaultAudioTrack?: boolean;
   hidePlayedInLatest?: boolean;
+  homeSections?: HomeSection[]; cardSize?: 'small' | 'medium' | 'large';
+  cardDensity?: 'comfortable' | 'compact'; accentColor?: 'orange' | 'blue' | 'violet' | 'green';
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
   subtitleStyle?: SubtitleStyle;
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
@@ -16,6 +21,7 @@ export type Preferences = {
   autoplayNextEpisode?: boolean; skipBackSeconds?: number; skipForwardSeconds?: number;
   artworkRotation?: ArtworkRotationPolicy;
 };
+export const preferenceState = writable<Preferences>({});
 let current: Preferences = {};
 let owner: string | null = null;
 let queue: Promise<void> = Promise.resolve();
@@ -24,7 +30,7 @@ let pendingSaves=0;
 export const preferenceSyncError = writable('');
 
 onSessionGenerationChange(() => {
-  current = {}; owner = null; preferenceSyncError.set('');
+  current = {}; preferenceState.set({}); owner = null; preferenceSyncError.set('');
   // Global browser keys are compatibility mirrors, never a source for a new account.
   if (typeof localStorage !== 'undefined') {
     try { for (const key of ['media_theme', 'media_locale', 'media_pref_audio', 'media_pref_subtitles']) localStorage.removeItem(key); } catch { /* Optional browser cache. */ }
@@ -136,6 +142,7 @@ async function fetchPreferences(): Promise<Preferences | null> {
   }
   current = { ...loaded, ...migrated }; owner = authenticated.user.id;
   mirror(current, owner);
+  preferenceState.set(current);
   return current;
 }
 
@@ -144,7 +151,7 @@ export function savePreferences(patch: Preferences): Promise<boolean> {
   const generation = getSessionGeneration();
   if (!authenticated || owner !== authenticated.user.id) return Promise.resolve(false);
   revision++;
-  current = { ...current, ...patch }; mirror(current, owner);
+  current = { ...current, ...patch }; mirror(current, owner); preferenceState.set(current);
   const save = async () => {
     if (generation !== getSessionGeneration()) return false;
     try {

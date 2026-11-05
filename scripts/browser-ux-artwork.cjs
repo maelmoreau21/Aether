@@ -2,15 +2,15 @@ const { chromium } = require('../apps/web/node_modules/playwright');
 const { setup } = require('./browser-ux-admin.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const out = 'target/ux-artwork'; fs.mkdirSync(out, {recursive:true});
+const out = process.env.MEDIA_REPORT_DIR || 'output/playwright/ux-artwork'; fs.mkdirSync(out, {recursive:true});
 (async () => {
  const browser=await chromium.launch({channel:'chrome',headless:true});
  try {
   for (const width of [390,1440]) {
    const { page,context,errors }=await setup(browser,width,'dark');
-   let calls=0, failList=false, lastQuery=null;
+   let calls=0, failList=false, lastQuery=null, job=null;
    let images=[{id:'one',kind:'poster',origin:'provider',url:'/ux-art/one',language:'fr'},{id:'two',kind:'poster',origin:'provider',url:'/ux-art/two',language:'fr'}];
-   await page.route('**/api/v1/works/a/images', route=>route.fulfill({json:{images}}));
+   await page.route('**/api/v1/works/a/images', route=>route.fulfill({json:{images,originalLanguage:'ja'}}));
    await page.route('**/api/v1/works/a/images/similar?*', route=>route.fulfill({json:{pairs:[{first:'one',second:'two'}],uncompared:1,truncated:false}}));
    await page.route('**/api/v1/works/a/images/two', route=>{images=images.filter(item=>item.id!=='two');return route.fulfill({status:204});});
    await page.route('**/api/v1/admin/artwork/**', async route=>{
@@ -18,10 +18,14 @@ const out = 'target/ux-artwork'; fs.mkdirSync(out, {recursive:true});
     if(url.pathname.endsWith('/works')) lastQuery=url.searchParams;
     if(url.pathname.endsWith('/works') && failList) return route.fulfill({status:503,json:{error:'synthetic_unavailable'}});
     if(url.pathname.endsWith('/works')) return route.fulfill({json:url.searchParams.has('after') ? {items:[{workId:'b',title:'Deuxième film',posterCount:0}],nextCursor:null} : {items:[{workId:'a',title:'Premier film',posterCount:2}],nextCursor:'a'}});
-    calls++; await new Promise(resolve=>setTimeout(resolve,500));
-    return route.fulfill({json:calls===1 ? {items:[{workId:'a',title:'Premier film',result:{downloaded:2,errors:[],partial:false}}],nextCursor:'a'} : {items:[{workId:'b',title:'Deuxième film',error:{status:422,code:'external_ids_required'}}],nextCursor:null}});
+    if(url.pathname.endsWith('/jobs') && route.request().method()==='POST') {
+     calls++; assert(route.request().headers()['x-csrf-token']); job={id:'durable',status:'queued',processed:0,downloaded:0,duplicates:0,skipped:0,errors:0,lastError:'',cursorWork:''}; return route.fulfill({status:202,json:{id:job.id}});
+    }
+    if(url.pathname.endsWith('/jobs')) return route.fulfill({json:job?[job]:[]});
+    if(url.pathname.endsWith('/jobs/durable')) { job.status=route.request().postDataJSON().action==='pause'?'paused':route.request().postDataJSON().action==='resume'?'queued':'cancelled'; return route.fulfill({status:204}); }
+    return route.fulfill({status:404,json:{error:'unexpected_fixture_request'}});
    });
-   await page.goto('http://127.0.0.1:5183/app/admin/libraries/#artwork-section');
+   await page.goto((process.env.MEDIA_UI_URL || 'http://127.0.0.1:5192/app/')+'admin/libraries/#artwork-section');
    await page.getByRole('heading',{name:'Images des médiathèques'}).waitFor();
    await page.locator('.artwork-admin select').first().selectOption('lib-film');
    await page.getByText('2 variantes enregistrées').waitFor();
@@ -31,14 +35,15 @@ const out = 'target/ux-artwork'; fs.mkdirSync(out, {recursive:true});
    await page.getByRole('button',{name:'Page suivante'}).click(); await page.getByText('Deuxième film',{exact:true}).waitFor();
    await page.getByRole('button',{name:'Page précédente'}).click(); await page.getByText('Premier film',{exact:true}).waitFor();
    await page.getByRole('button',{name:'Lancer la collecte'}).click();
-   await page.getByRole('button',{name:'Arrêter après cette œuvre'}).click();
+   await page.getByRole('button',{name:'Mettre en pause'}).click();
    await page.getByRole('button',{name:'Reprendre la collecte'}).waitFor(); assert.equal(calls,1);
-   await page.getByRole('button',{name:'Reprendre la collecte'}).click(); await page.getByText('Parcours terminé').waitFor();
-   assert.equal(calls,2); await page.getByText('Œuvres à vérifier (1)').click(); await page.locator('details[open]').getByText('Identifiants externes manquants').waitFor();
-   failList=true; await page.getByRole('button',{name:'Nouvelle collecte'}).click(); await page.locator('.artwork-admin select').first().selectOption(''); await page.locator('.artwork-admin select').first().selectOption('lib-film'); await page.getByText('Liste des médias indisponible (HTTP 503).').waitFor(); failList=false; await page.getByRole('button',{name:'Réessayer'}).click(); await page.getByText('2 variantes enregistrées').waitFor();
+   await page.reload(); await page.getByRole('heading',{name:'Images des médiathèques'}).waitFor(); await page.locator('.artwork-admin select').first().selectOption('lib-film');
+   await page.getByRole('button',{name:'Reprendre la collecte'}).click(); await page.getByRole('button',{name:'Mettre en pause'}).waitFor(); assert.equal(calls,1);
+   await page.getByRole('button',{name:'Annuler la collecte'}).click(); await page.getByRole('button',{name:'Lancer la collecte'}).waitFor();
+   failList=true; await page.locator('.artwork-admin select').first().selectOption(''); await page.locator('.artwork-admin select').first().selectOption('lib-film'); await page.getByText('Liste des médias indisponible (HTTP 503).').waitFor(); failList=false; await page.getByRole('button',{name:'Réessayer'}).click(); await page.getByText('2 variantes enregistrées').waitFor();
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
    assert.deepEqual(errors,[]); await page.screenshot({path:`${out}/artwork-${width}.png`,fullPage:true});
-   console.log(`PASS ${width}: pagination, arrêt, reprise, erreur, affichage`); await context.close();
+   console.log(`PASS ${width}: pagination, collecte durable après reload, pause/reprise, erreur, affichage`); await context.close();
   }
  } finally { await browser.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});

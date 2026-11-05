@@ -31,4 +31,7 @@
   {/if}
   {label}
 </span>
-<style>.language-label {display:inline-flex;align-items:center;gap:6px;} svg {width:18px;height:12px;flex-shrink:0;box-shadow:0 0 0 1px var(--border-subtle);border-radius:1px;overflow:hidden;}</style>
+<style>
+  .language-label { display: inline-flex; align-items: center; gap: 6px; }
+  svg { width: 18px; height: 12px; flex-shrink: 0; box-shadow: 0 0 0 1px var(--line-2); border-radius: 2px; overflow: hidden; }
+</style>

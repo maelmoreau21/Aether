@@ -2,6 +2,7 @@
   import type { AdminNode, EnrollmentToken } from './types';
   import { nodeStatusLabels, connectionModeLabels } from './types';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   interface Props {
     nodes: AdminNode[];
@@ -112,7 +113,7 @@
         <Icon name="server" size={18} />
       </div>
       <div>
-        <h2 id="nodes-heading" class="section-title">Gestion des Media Nodes</h2>
+        <h2 id="nodes-heading" class="section-title">{$t('manage_nodes')}</h2>
         <p class="section-subtitle">
           Supervisez vos nœuds multimédias distants (connexions sortantes NAT-proof) et locaux.
         </p>
@@ -121,7 +122,7 @@
     {#if ongeneratetoken}
       <button class="primary add-node-btn" onclick={handleOpenAddNode}>
         <Icon name="server" size={14} />
-        <span>Ajouter un Node</span>
+        <span>{$t('add_node')}</span>
       </button>
     {/if}
   </div>
@@ -135,8 +136,8 @@
               <Icon name="shield" size={16} />
             </div>
             <div>
-              <h3 id="enroll-title" class="modal-title">Ajouter un Media Node</h3>
-              <p class="modal-desc">Appairage automatique par connexion sortante initiée par le Node (compatible NAT / sans port ouvert)</p>
+              <h3 id="enroll-title" class="modal-title">{$t('add_media_node')}</h3>
+              <p class="modal-desc">{$t('automatic_pairing')}</p>
             </div>
           </div>
           <button class="icon-close-btn" onclick={() => (showEnrollModal = false)} aria-label="Fermer">✕</button>
@@ -146,7 +147,7 @@
           <div class="info-callout">
             <Icon name="info" size={16} />
             <span>
-              Le Media Node contacte lui-même le Core en HTTPS. Aucun port entrant n'a besoin d'être ouvert sur la machine distante. Le jeton d'invitation est <strong>unique, temporaire et à usage unique</strong>.
+              {$t('node_https_note')} Le jeton d'invitation est <strong>unique, temporaire et à usage unique</strong>.
             </span>
           </div>
 
@@ -155,7 +156,7 @@
           {/if}
 
           {#if generatingToken}
-            <div class="token-loading">Génération du jeton sécurisé…</div>
+            <div class="token-loading">{$t('secure_token_generating')}</div>
           {:else if activeToken}
             <div class="token-section">
               <label for="enroll-token-display">Jeton d'invitation (valide jusqu'à {formatTimestamp(activeToken.expiresAt)}) :</label>
@@ -211,10 +212,10 @@
         <div class="modal-footer">
           <button class="action-btn" onclick={generateNewToken} disabled={generatingToken}>
             <Icon name="refresh" size={12} />
-            <span>Générer un autre jeton</span>
+                <span>{$t('generate_another_token')}</span>
           </button>
           <button class="primary" onclick={() => (showEnrollModal = false)}>
-            <span>Terminé</span>
+                <span>{$t('done')}</span>
           </button>
         </div>
       </div>
@@ -232,7 +233,7 @@
       </div>
 
       {#if nodes.length === 0}
-        <p class="muted">Aucun Media Node enregistré.</p>
+        <p class="muted">{$t('no_nodes')}</p>
       {/if}
 
       <div class="items-list">
@@ -296,7 +297,7 @@
                     aria-label={`Reconnecter ${node.name}`}
                   >
                     <Icon name="refresh" size={12} />
-                    <span>Reconnecter</span>
+                    <span>{$t('reconnect')}</span>
                   </button>
                   <button
                     class="action-btn"
@@ -305,7 +306,7 @@
                     aria-label={`Renouveler le secret de ${node.name}`}
                   >
                     <Icon name="shield" size={12} />
-                    <span>Renouveler secret</span>
+                    <span>{$t('renew_secret')}</span>
                   </button>
                   <button
                     class="action-btn danger-btn"
@@ -313,7 +314,7 @@
                     onclick={() => onnodeaction(node, 'revoke')}
                     aria-label={`Révoquer ${node.name}`}
                   >
-                    <span>Révoquer</span>
+                    <span>{$t('revoke')}</span>
                   </button>
                 {/if}
               </div>
@@ -326,7 +327,7 @@
     <!-- Legacy Inbound Pairing (Collapsible / Backward-Compatible) -->
     <section class="card" aria-labelledby="node-legacy-form">
       <div class="card-header">
-        <h3 id="node-legacy-form">Appairage direct entrant (Legacy)</h3>
+        <h3 id="node-legacy-form">{$t('direct_pairing_legacy')}</h3>
         <Icon name="shield" size={16} />
       </div>
 
@@ -336,7 +337,7 @@
 
       <form onsubmit={onpair}>
         <fieldset disabled={pairing}>
-          <label for="pair-node-name">Nom du Media Node</label>
+          <label for="pair-node-name">{$t('node_name')}</label>
           <input
             id="pair-node-name"
             bind:value={pairName}
@@ -346,7 +347,7 @@
             autocomplete="off"
           />
 
-          <label for="pair-node-base-url">URL interne du Node (Core → Node)</label>
+          <label for="pair-node-base-url">{$t('internal_node_url')}</label>
           <input
             id="pair-node-base-url"
             bind:value={pairBaseUrl}
@@ -355,7 +356,7 @@
             autocomplete="off"
           />
 
-          <label for="pair-node-public-url">URL publique de streaming direct (Optionnel)</label>
+          <label for="pair-node-public-url">{$t('public_stream_url')}</label>
           <input
             id="pair-node-public-url"
             bind:value={pairPublicUrl}
@@ -363,7 +364,7 @@
             autocomplete="off"
           />
 
-          <label for="pair-node-token">Jeton d’amorçage statique (MEDIA_NODE_BOOTSTRAP_TOKEN)</label>
+          <label for="pair-node-token">{$t('bootstrap_token')}</label>
           <input
             id="pair-node-token"
             type="password"
@@ -384,519 +385,179 @@
 </section>
 
 <style>
-  .dashboard-section {
-    margin-bottom: 48px;
-    scroll-margin-top: 24px;
-  }
+  .dashboard-section { margin-bottom: 48px; scroll-margin-top: 24px; color: var(--tx); font-family: var(--font); }
 
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 24px;
-    padding-bottom: 14px;
-    border-bottom: 1px solid var(--color-line);
-    flex-wrap: wrap;
-  }
+  /* En-tête de section : titre + phrase d'explication, action principale à droite */
+  .section-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+  .header-left-part { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .header-icon-wrap { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--color-surface); color: var(--tx); }
+  .section-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
+  .section-subtitle { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--mu); }
 
-  .header-left-part {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-  }
+  .columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 20px; align-items: start; }
 
-  .add-node-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
-    font-size: 13px;
-  }
+  /* Panneaux */
+  .card { min-width: 0; padding: 24px; background: var(--color-surface); border-radius: var(--r-md); }
+  .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; color: var(--mu); }
+  .card-header h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
 
-  .header-icon-wrap {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
+  /* Badges */
+  .badge { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; white-space: nowrap; vertical-align: middle; }
+  .count-badge { color: var(--mu); font-variant-numeric: tabular-nums; }
+  .badge[data-status='connected'] { background: var(--ok-soft); color: var(--ok); }
+  .badge[data-status='disconnected'] { background: var(--warn-soft); color: var(--warn); }
+  .badge[data-status='revoked'] { background: var(--err-soft); color: var(--err); }
+  .kind-badge { color: var(--mu); }
+  .mode-badge[data-mode='outbound'] { background: var(--info-soft); color: var(--info); }
+  .mode-badge[data-mode='direct'] { background: var(--ok-soft); color: var(--ok); }
+  .mode-badge[data-mode='inbound'] { color: var(--mu); }
+  .version-badge { font-family: var(--font-mono); font-weight: 600; }
+  .version-badge.version-unknown { color: var(--mu); }
 
-  .section-title {
-    font-size: 20px;
-    font-weight: 650;
-    letter-spacing: -0.02em;
-    margin: 0;
-    color: var(--color-text);
-  }
+  /* Liste des nœuds : lignes séparées, pas de carte dans la carte */
+  .items-list { display: grid; }
+  .item-card { display: flex; justify-content: space-between; gap: 20px; min-width: 0; padding: 18px 0; border-top: 1px solid var(--color-line-subtle); }
+  .item-card:first-child { border-top: 0; padding-top: 4px; }
+  .item-content { flex: 1; min-width: 0; }
+  .item-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  .item-title-row h4 { margin: 0 4px 0 0; font-size: 17px; font-weight: 700; color: var(--tx); }
+  .item-content p { margin: 4px 0; font-size: 13px; line-height: 1.55; color: var(--mu); }
+  .item-content strong { font-weight: 600; color: var(--tx); }
+  .item-content code { font-family: var(--font-mono); font-size: 12px; color: var(--tx); }
+  .path, .node-meta { overflow-wrap: anywhere; }
 
-  .section-subtitle {
-    margin: 4px 0 0;
-    font-size: 13px;
-    color: var(--color-muted);
-  }
+  .item-actions-vertical { display: flex; flex-direction: column; gap: 8px; flex: none; }
 
-  .columns {
-    display: grid;
-    grid-template-columns: 1.15fr 0.85fr;
-    gap: 28px;
-  }
-
-  .card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-    padding: 24px;
-  }
-
-  .card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 20px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .card-header h3 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-  }
-
-  .count-badge {
-    background: var(--color-raised);
-    color: var(--color-muted);
-  }
-
-  .items-list {
-    display: grid;
-    gap: 16px;
-  }
-
-  .item-card {
-    background: var(--color-raised);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 18px;
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    transition: border-color 0.2s ease;
-  }
-
-  .item-card:hover {
-    border-color: var(--color-border-glow);
-  }
-
-  .item-content {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .item-title-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-bottom: 8px;
-  }
-
-  .item-title-row h4 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 650;
-  }
-
-  .item-content p {
-    margin: 4px 0;
-    font-size: 12px;
-    color: var(--color-muted);
-  }
-
-  .path {
-    overflow-wrap: anywhere;
-  }
-
-  .node-meta {
-    font-size: 12px;
-    color: var(--color-subtle);
-  }
-
-  .item-actions-vertical {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 6px 12px;
-    font-size: 12px;
-    color: var(--color-text);
-    background: var(--color-surface);
-    cursor: pointer;
-    transition: background 0.15s ease, border-color 0.15s ease;
-  }
-
-  .action-btn:hover:not(:disabled) {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent);
-  }
-
-  .danger-btn {
-    color: var(--color-danger);
-    border-color: var(--color-danger);
-  }
-
-  .danger-btn:hover:not(:disabled) {
-    background: var(--color-danger-soft);
-  }
-
-  .info-callout {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    background: var(--color-accent-soft);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 14px;
-    margin-bottom: 20px;
-    font-size: 13px;
-    line-height: 1.6;
-    color: var(--color-text);
-  }
-
-  .primary {
-    background: var(--color-accent);
-    color: var(--color-on-accent);
-    font-weight: 650;
-    border: none;
-    border-radius: var(--radius-sm);
-    padding: 10px 18px;
-    min-height: 40px;
-    cursor: pointer;
-    transition: background 0.15s ease;
-  }
-
-  .primary:hover:not(:disabled) {
-    background: var(--color-accent-hover);
-  }
-
-  fieldset {
-    border: 0;
-    padding: 0;
-    margin: 0;
-    min-width: 0;
-  }
-
-  label {
-    display: block;
-    font-size: 13px;
-    font-weight: 500;
-    margin: 16px 0 6px;
-    color: var(--color-text);
-  }
-
-  input {
-    width: 100%;
-    min-height: 44px;
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 10px 14px;
-    color: var(--color-text);
-    background: var(--color-raised);
-    font-size: 13px;
-  }
-
-  input:focus {
-    border-color: var(--color-accent);
-    outline: none;
-  }
-
-  .actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 24px;
-  }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 2px 8px;
-    border-radius: 99px;
-    border: 1px solid var(--color-line);
-    vertical-align: middle;
-  }
-
-  .badge[data-status='connected'] {
-    color: var(--color-success);
-    border-color: var(--color-success);
-    background: var(--color-success-soft);
-  }
-
-  .badge[data-status='disconnected'] {
-    color: var(--color-warning);
-    border-color: var(--color-warning);
-    background: var(--color-warning-soft);
-  }
-
-  .badge[data-status='revoked'] {
-    color: var(--color-danger);
-    border-color: var(--color-danger);
-    background: var(--color-danger-soft);
-  }
-
-  .kind-badge {
-    background: var(--color-raised);
-    color: var(--color-muted);
-  }
-
-  .mode-badge {
-    font-weight: 600;
-    font-size: 11px;
-  }
-
-  .mode-badge[data-mode='outbound'] {
-    background: var(--color-accent-soft);
-    color: var(--color-accent);
-    border-color: var(--color-accent);
-  }
-
-  .mode-badge[data-mode='direct'] {
-    background: var(--color-success-soft);
-    color: var(--color-success);
-    border-color: var(--color-success);
-  }
-
-  .mode-badge[data-mode='inbound'] {
-    background: var(--color-raised);
-    color: var(--color-muted);
-    border-color: var(--color-line);
-  }
-
-  .version-badge {
-    background: var(--color-raised);
-    color: var(--color-accent);
-    border-color: var(--color-line);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .version-badge.version-unknown {
-    color: var(--color-muted);
-    border-color: var(--color-line);
-    background: var(--color-raised);
-  }
-
-  .muted {
-    color: var(--color-muted);
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  /* Modal styling */
-  .modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.75);
-    backdrop-filter: blur(8px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
-
-  .modal-card {
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-    width: 100%;
-    max-width: 680px;
-    max-height: 90vh;
-    display: flex;
-    flex-direction: column;
-    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 24px;
-    border-bottom: 1px solid var(--color-line);
-  }
-
-  .modal-title-wrap {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .modal-title {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 650;
-  }
-
-  .modal-desc {
-    margin: 2px 0 0;
-    font-size: 12px;
-    color: var(--color-muted);
-  }
-
-  .icon-close-btn {
-    background: transparent;
-    border: none;
-    color: var(--color-muted);
-    font-size: 18px;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: var(--radius-sm);
-  }
-
-  .icon-close-btn:hover {
-    color: var(--color-text);
-    background: var(--color-raised);
-  }
-
-  .modal-body {
-    padding: 24px;
-    overflow-y: auto;
-    flex: 1;
-  }
-
-  .token-section {
-    margin-bottom: 20px;
-  }
-
-  .token-input-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  .token-field {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 13px;
-    letter-spacing: 0.04em;
-    background: var(--color-raised);
-    color: var(--color-accent);
-    border: 1px solid var(--color-line);
-  }
-
+  /* Boutons */
+  .action-btn,
   .copy-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    background: var(--color-raised);
+    justify-content: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 16px;
     border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    color: var(--color-text);
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--tx);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 600;
     white-space: nowrap;
-    transition: all 0.15s ease;
+    cursor: pointer;
+    transition: background-color var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
+  .action-btn:hover:not(:disabled),
+  .copy-btn:hover:not(:disabled) { background: var(--color-surface-hover); }
+  .danger-btn { border-color: var(--color-danger); background: transparent; color: var(--err); }
+  .danger-btn:hover:not(:disabled) { background: var(--err-soft); }
 
-  .copy-btn:hover {
-    background: var(--color-accent-soft);
-    border-color: var(--color-accent);
-  }
-
-  .compose-section {
-    margin-bottom: 20px;
-  }
-
-  .compose-header {
-    display: flex;
+  .primary {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 6px;
+    justify-content: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 22px;
+    border: 0;
+    border-radius: var(--r-md);
+    background: var(--btn);
+    color: var(--btn-tx);
+    font-family: var(--font);
+    font-size: 14px;
+    font-weight: 700;
+    box-shadow: none;
+    cursor: pointer;
+    transition: opacity var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
+  .primary:hover:not(:disabled) { opacity: 0.9; }
+  .add-node-btn { flex: none; }
 
-  .compose-header label {
-    margin: 0;
-  }
+  .action-btn:active:not(:disabled),
+  .copy-btn:active:not(:disabled),
+  .primary:active:not(:disabled) { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
 
-  .compose-textarea {
+  /* Formulaire */
+  fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+  label { display: block; margin: 18px 0 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  input {
     width: 100%;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    background: var(--color-raised);
-    color: var(--color-text);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-sm);
-    padding: 12px;
-    resize: vertical;
-  }
-
-  .modal-steps {
-    font-size: 12px;
-    color: var(--color-muted);
-    background: var(--color-raised);
-    border-radius: var(--radius-sm);
-    padding: 12px 16px;
-  }
-
-  .modal-steps p {
-    margin: 0 0 6px;
-    color: var(--color-text);
-  }
-
-  .modal-steps ol {
-    margin: 0;
-    padding-left: 20px;
-    line-height: 1.6;
-  }
-
-  .modal-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 24px;
-    border-top: 1px solid var(--color-line);
+    height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--color-line-subtle);
+    border-radius: var(--r-sm);
     background: var(--color-surface);
+    color: var(--tx);
+    font-family: var(--font);
+    font-size: 14px;
+    box-shadow: none;
+    transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
+  }
+  input:hover { background: var(--color-surface-hover); }
+  input:focus { outline: none; border-color: var(--ac); background: var(--color-surface); }
+  .actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
+
+  .muted { margin: 0 0 4px; color: var(--mu); font-size: 14px; line-height: 1.55; }
+  .muted strong { color: var(--tx); font-weight: 700; }
+
+  /* Dialogue d'ajout */
+  .modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--color-overlay); }
+  .modal-card { display: flex; flex-direction: column; width: 100%; max-width: 680px; max-height: 90vh; overflow: hidden; background: var(--color-surface-elevated); color: var(--tx); border: 1px solid var(--color-line-subtle); border-radius: var(--r-lg); box-shadow: var(--shadow-md); }
+  .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 28px 16px; }
+  .modal-title-wrap { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .modal-title { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+  .modal-desc { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--mu); }
+  .icon-close-btn { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid var(--color-line); border-radius: var(--r-sm); background: transparent; color: var(--mu); font-size: 16px; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease; }
+  .icon-close-btn:hover { background: var(--color-surface-hover); color: var(--tx); }
+  .modal-body { flex: 1; overflow-y: auto; padding: 8px 28px 24px; }
+
+  .info-callout { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; padding: 14px 16px; border-radius: var(--r-md); background: var(--info-soft); color: var(--tx); font-size: 14px; line-height: 1.55; }
+  .info-callout :global(svg) { flex: none; margin-top: 2px; color: var(--info); }
+  .token-error { margin-bottom: 16px; padding: 12px 16px; border-radius: var(--r-md); background: var(--err-soft); color: var(--err); font-size: 14px; line-height: 1.5; }
+  .token-loading { padding: 32px; text-align: center; color: var(--mu); font-size: 14px; }
+
+  .token-section, .compose-section { margin-bottom: 20px; }
+  .token-section label { margin-top: 0; }
+  .token-input-row { display: flex; gap: 8px; }
+  .token-field { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.02em; }
+  .compose-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .compose-header label { margin: 0; }
+  .compose-textarea { display: block; width: 100%; padding: 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background: var(--color-surface); color: var(--tx); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: vertical; }
+  .compose-textarea:focus { outline: none; border-color: var(--ac); background: var(--color-surface); }
+
+  .modal-steps { padding: 14px 16px; border-radius: var(--r-md); background: var(--color-surface); font-size: 13px; line-height: 1.6; color: var(--mu); }
+  .modal-steps p { margin: 0 0 6px; color: var(--tx); }
+  .modal-steps ol { margin: 0; padding-left: 20px; }
+
+  .modal-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 28px 24px; border-top: 1px solid var(--color-line-subtle); }
+
+  @media (max-width: 1023px) {
+    .columns { grid-template-columns: minmax(0, 1fr); }
   }
 
-  .token-error {
-    background: var(--color-danger-soft);
-    color: var(--color-danger);
-    border: 1px solid var(--color-danger);
-    padding: 10px 14px;
-    border-radius: var(--radius-sm);
-    margin-bottom: 16px;
-    font-size: 13px;
+  @media (max-width: 640px) {
+    .card { padding: 16px; }
+    .item-card { flex-direction: column; gap: 12px; }
+    .item-actions-vertical { flex-direction: row; flex-wrap: wrap; }
+    .item-actions-vertical .action-btn { flex: 1 1 140px; }
+    .add-node-btn { width: 100%; }
+    .modal-backdrop { align-items: flex-end; padding: 0; }
+    .modal-card { max-height: 92dvh; border-radius: var(--r-xl) var(--r-xl) 0 0; }
+    .modal-header { padding: 20px 16px 12px; }
+    .modal-body { padding: 8px 16px 16px; }
+    .modal-footer { padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+    .modal-footer button { flex: 1 1 auto; }
+    .token-input-row { flex-wrap: wrap; }
+    .token-input-row .copy-btn { flex: 1 1 auto; }
+    input { font-size: 16px; }
   }
 
-  .token-loading {
-    padding: 30px;
-    text-align: center;
-    color: var(--color-muted);
-    font-size: 13px;
-  }
-
-  @media(max-width: 950px) {
-    .columns {
-      grid-template-columns: 1fr;
-    }
+  @media (prefers-reduced-motion: reduce) {
+    .action-btn, .copy-btn, .primary, .icon-close-btn, input { transition: none; }
   }
 </style>

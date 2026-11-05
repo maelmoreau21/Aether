@@ -1,5 +1,10 @@
 # Préparation multi-Core (audit, sans déploiement)
 
+> 3 novembre : le mode reste **expérimental**. Le nouveau propriétaire et
+> heartbeat des lignes manuelles `extension_runs` protège leur publication
+> terminale, sans garantir les effets des tâches ou leur routage entre Core.
+> [Contrat, portée et limites](MULTI_CORE_READINESS.md#lot-du-3-novembre--propriété-de-lhistorique-des-extensions).
+
 Statut : **audit par inspection du code (grep + lecture ciblée), aucun test multi-Core exécuté.** Le multi-Core reste hors MVP. SQLite = un seul Core. Les Media Nodes ne parlent jamais à PostgreSQL.
 
 ## Déjà compatible (constaté)

@@ -1,5 +1,5 @@
 {
-  "browser": "156.0.8078.48",
+  "browser": "156.0.8078.80",
   "os": "10.0.26300",
   "headless": true,
   "results": {
@@ -12,11 +12,12 @@
       "seasonSelection": true,
       "responsiveThemes": true
     },
-    "decodedVideoFrames": 7,
+    "decodedVideoFrames": 8,
     "episode1Playback": true,
-    "episodeLaunchMs": 948,
+    "episodeLaunchMs": 1313,
     "realChapters": true,
     "seekAndPause": true,
+    "upNextCard": true,
     "simplePlaybackControls": {
       "monoVersionSelectorHidden": true,
       "monoAudioHidden": true,

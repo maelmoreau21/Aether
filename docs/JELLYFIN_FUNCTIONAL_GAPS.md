@@ -17,7 +17,7 @@ Aether sont écrits pour son architecture Rust/Core/Media Node/Svelte.
 | Journal serveur | `ServerConfiguration.ActivityLogRetentionDays` | Purge bornée du journal durable existant des extensions ; séparation corrigée entre rétention du journal et expiration des sessions. | [Réglages](SETTINGS_AND_REFRESH.md) |
 | Réglages Intro Skipper | `intro-skipper-12.0/IntroSkipper/Configuration/PluginConfiguration.cs` | Début de fenêtre acoustique et durée maximale des crédits effectivement consommés ; validation avant analyse et respect de la désactivation des chapitres. Nécessite un paquet plugin reconstruit et installé. | [Intro Skipper](INTRO_SKIPPER.md) |
 
-Les tests exécutés et leurs résultats sont consignés dans `MEMORY.md`.
+Les tests exécutés et leurs résultats sont consignés dans `.ai/MEMORY.md`.
 Un test d'interface avec API simulées ne démontre ni la persistance réelle du
 Core ni le décodage d'un média. Les tests HTTP SQLite ne démontrent pas PostgreSQL
 ou le fonctionnement sur NAS.

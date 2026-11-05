@@ -1,0 +1,207 @@
+{
+  "scope": "Read-only GitHub API snapshot during audit; no run started by this mission.",
+  "repositories": [
+    {
+      "repo": "Aether",
+      "head": "699345fc17fff56b8528b3d836fdab67359f019b",
+      "runs": [
+        {
+          "id": 41622840802,
+          "event": "push",
+          "sha": "699345fc17fff56b8528b3d836fdab67359f019b",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/maelmoreau21/Aether/actions/runs/41622840802"
+        },
+        {
+          "id": 41540495148,
+          "event": "push",
+          "sha": "133896830c609a177e4c4c611084154d7e4aab5d",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/maelmoreau21/Aether/actions/runs/41540495148"
+        },
+        {
+          "id": 41536588159,
+          "event": "push",
+          "sha": "53c8dfecd1b5dc457a1c2e4cef36adada89937e3",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/maelmoreau21/Aether/actions/runs/41536588159"
+        },
+        {
+          "id": 41511991820,
+          "event": "pull_request",
+          "sha": "2d6a1ed3fe0472721f8f4e87269beca7d5a42610",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/maelmoreau21/Aether/actions/runs/41511991820"
+        },
+        {
+          "id": 41506078604,
+          "event": "push",
+          "sha": "2d6a1ed3fe0472721f8f4e87269beca7d5a42610",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/maelmoreau21/Aether/actions/runs/41506078604"
+        }
+      ],
+      "jobs": [
+        {
+          "id": 125872641089,
+          "name": "Validation des workflows",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872641472,
+          "name": "Images Docker (compilation partagée)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872641488,
+          "name": "Frontend SvelteKit",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872641630,
+          "name": "Navigateur Chrome (Films & Séries)",
+          "conclusion": "failure",
+          "failedSteps": [
+            "Exécuter les parcours Films et Séries (scan, lecture, redémarrage, permissions et sessions)"
+          ]
+        },
+        {
+          "id": 125872641636,
+          "name": "Rust (contrôles et contrats)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872641648,
+          "name": "Rust (partition 1)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872641710,
+          "name": "Rust (partition 2)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872641889,
+          "name": "Audit de sécurité (cargo audit)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872642033,
+          "name": "Rust (partition 0)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125877655951,
+          "name": "Rust (Format, Clippy, Tests)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125877719762,
+          "name": "Calcul du numéro bêta",
+          "conclusion": "skipped",
+          "failedSteps": []
+        },
+        {
+          "id": 125877719992,
+          "name": "Création du tag bêta Git",
+          "conclusion": "skipped",
+          "failedSteps": []
+        },
+        {
+          "id": 125877720717,
+          "name": "Publication Docker GHCR (develop)",
+          "conclusion": "skipped",
+          "failedSteps": []
+        }
+      ]
+    },
+    {
+      "repo": "Aether-Plugins",
+      "head": "0943099a6f0586a92c2f1d348f83e13c33df769f",
+      "runs": [
+        {
+          "id": 41622841072,
+          "event": "push",
+          "sha": "0943099a6f0586a92c2f1d348f83e13c33df769f",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/maelmoreau21/Aether-Plugins/actions/runs/41622841072"
+        },
+        {
+          "id": 41540495284,
+          "event": "push",
+          "sha": "e4cc7aee580f5e3e19804712673210414cfc07c0",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/maelmoreau21/Aether-Plugins/actions/runs/41540495284"
+        },
+        {
+          "id": 41514239693,
+          "event": "pull_request",
+          "sha": "a0bf8697c233a850954a29cebb9bef9992c0ab8f",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/maelmoreau21/Aether-Plugins/actions/runs/41514239693"
+        },
+        {
+          "id": 41514194415,
+          "event": "push",
+          "sha": "a0bf8697c233a850954a29cebb9bef9992c0ab8f",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/maelmoreau21/Aether-Plugins/actions/runs/41514194415"
+        },
+        {
+          "id": 41512674155,
+          "event": "pull_request",
+          "sha": "6cb9b663997cfb692a4a0054fd98adf7c274c426",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/maelmoreau21/Aether-Plugins/actions/runs/41512674155"
+        }
+      ],
+      "jobs": [
+        {
+          "id": 125872641689,
+          "name": "Audit de sécurité (cargo audit)",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872642103,
+          "name": "Lint, Test and Wasm Build",
+          "conclusion": "failure",
+          "failedSteps": [
+            "Run Clippy"
+          ]
+        },
+        {
+          "id": 125872642187,
+          "name": "Validation des workflows",
+          "conclusion": "success",
+          "failedSteps": []
+        },
+        {
+          "id": 125872772820,
+          "name": "Paquets installables et versions develop",
+          "conclusion": "skipped",
+          "failedSteps": []
+        }
+      ]
+    }
+  ]
+}

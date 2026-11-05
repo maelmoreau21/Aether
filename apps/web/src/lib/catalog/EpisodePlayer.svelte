@@ -131,12 +131,21 @@
 {/if}
 
 <style>
-  .episode-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; max-width:100%; }
-  .episode-play { min-height:44px; max-width:100%; padding:11px 20px; border:0; border-radius:var(--radius-sm); background:var(--color-play); color:var(--color-on-play); font-size:14px; font-weight:600; }
-  .episode-actions span { font-size:12px; color:var(--color-muted); }
-  .episode-versions { max-width:100%; width:100%; font-size:13px; }
-  summary { min-height:44px; padding-block:10px; color:var(--color-muted); cursor:pointer; }
-  label { display:grid; gap:8px; color:var(--color-muted); font-size:12px; }
-  select { max-width:100%; min-height:44px; font-size:16px; }
-  [role='alert'] { color:var(--color-danger); font-size:13px; line-height:1.6; }
+  .episode-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; max-width: 100%; }
+  .episode-play { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; max-width: 100%; padding: 0 20px; border: 0; border-radius: var(--r-md); background: var(--btn); color: var(--btn-tx); font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+  .episode-play:hover:not(:disabled) { opacity: 0.9; }
+  .episode-play:active:not(:disabled) { transform: scale(0.98); }
+  .episode-play:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .episode-actions span { font-size: 13px; color: var(--mu); }
+  .episode-versions { max-width: 100%; width: 100%; font-size: 14px; }
+  summary { display: flex; align-items: center; min-height: 44px; color: var(--mu); font-weight: 600; cursor: pointer; }
+  summary:hover { color: var(--tx); }
+  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: var(--r-xs); }
+  .episode-versions[open] summary { color: var(--tx); }
+  .episode-versions[open] { display: grid; gap: 12px; justify-items: start; }
+  label { display: grid; gap: 8px; width: min(420px, 100%); color: var(--tx); font-size: 14px; font-weight: 700; }
+  select { box-sizing: border-box; width: 100%; max-width: 100%; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font: inherit; font-size: 16px; font-weight: 500; transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease); }
+  select:focus { outline: none; border-color: var(--ac); background: var(--bg-3); }
+  select option { background: var(--bg-3); color: var(--tx); }
+  [role='alert'] { color: var(--err); font-size: 13px; line-height: 1.6; }
 </style>

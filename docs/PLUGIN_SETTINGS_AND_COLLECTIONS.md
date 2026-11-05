@@ -1,5 +1,12 @@
 # Plugins : installation libre, paramètres et collections d’avatars
 
+> 5 novembre 2026 : l'import de collections depuis GitHub est retiré de
+> l'interface et du Core, pour les collections natives comme celles d'extensions.
+> `POST .../avatar-packs` et `POST .../avatar-packs/source` renvoient 405.
+> L'ajout multipart via `POST .../avatar-packs/upload`, la gestion des collections
+> existantes et leur transfert depuis l'ancienne extension restent disponibles.
+> Les descriptions d'import GitHub ci-dessous constituent l'historique.
+
 > Mise à jour du 29 octobre : les avatars sont gérés dans la galerie native.
 > L'administrateur peut consulter `GET /api/v1/admin/avatars/migrate-legacy`
 > puis lancer `POST` à la même adresse avec CSRF : `{packs, images}` indique le

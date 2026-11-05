@@ -48,8 +48,79 @@
   <button disabled={busy}>Enregistrer les restrictions</button>
 </fieldset>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</form>
 <style>
-  fieldset { display:grid;gap:12px;border:1px solid var(--color-line);border-radius:var(--radius-md);margin:20px 0;padding:16px;min-width:0; }
-  label { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
-  button,input,select { background:var(--color-surface);color:var(--color-text);padding:10px;border:1px solid var(--color-line);border-radius: var(--radius-md);max-width:100%; }
-  .window { display:flex;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--color-line); } p { font-size:13px;line-height:1.5; }
+form { display: grid; gap: 16px; font-family: var(--font-sans); color: var(--color-text); }
+  fieldset { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
+  fieldset:disabled { opacity: 0.7; }
+  legend { margin: 0 0 16px; padding: 0; font-size: 17px; font-weight: 600; }
+  h3 { margin: 8px 0 0; padding-top: 20px; border-top: 1px solid var(--color-line-subtle); font-size: 17px; font-weight: 700; }
+  p { max-width: 720px; margin: 0; color: var(--color-muted); font-size: 13px; line-height: 1.5; }
+  label { display: grid; gap: 8px; min-width: 0; font-size: 14px; font-weight: 700; }
+  label:has(> input[type='checkbox']) { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; cursor: pointer; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--color-accent); }
+  input:not([type='checkbox']), select {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 360px;
+    height: 46px;
+    padding: 0 14px;
+    border: 1px solid var(--color-line-subtle);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-canvas);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: none;
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
+  }
+  input:not([type='checkbox']):hover, select:hover { border-color: var(--color-line); }
+  input:not([type='checkbox']):focus, select:focus { outline: none; border-color: var(--color-accent); background-color: var(--color-canvas); }
+  input:not([type='number']):not([type='checkbox']):not([type='time']) { max-width: 520px; }
+  .window {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+    align-items: start;
+    gap: 12px;
+    padding: 0 0 16px;
+    border-bottom: 1px solid var(--color-line-subtle);
+  }
+  .window input, .window select { max-width: none; }
+  .window > button { align-self: start; margin-top: 30px; }
+  button {
+    justify-self: start;
+    height: 44px;
+    padding: 0 18px;
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), opacity var(--transition-fast), transform var(--transition-fast);
+  }
+  button:hover:not(:disabled) { background: var(--color-raised); }
+  button:active:not(:disabled) { transform: scale(0.98); }
+  button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .window > button { color: var(--color-danger); }
+  .window > button:hover:not(:disabled) { background: var(--color-danger-soft); }
+  button:not([type]) { height: 44px; padding: 0 22px; border-color: transparent; background: var(--color-accent); color: var(--color-on-accent); }
+  button:not([type]):hover:not(:disabled) { background: var(--color-accent-hover); }
+  p[role='alert'], p[role='status'] { max-width: none; padding: 12px 16px; border-radius: var(--radius-md); color: var(--color-text); font-size: 14px; }
+  p[role='alert'] { background: var(--color-danger-soft); }
+  p[role='status'] { background: var(--color-success-soft); }
+  @media (max-width: 820px) {
+    .window { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .window > button { margin-top: 0; }
+  }
+  @media (max-width: 640px) {
+    .window { grid-template-columns: minmax(0, 1fr); }
+    input:not([type='checkbox']), select { max-width: none; }
+    button { width: 100%; justify-self: stretch; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    button, input, select { transition: none; }
+  }
 </style>

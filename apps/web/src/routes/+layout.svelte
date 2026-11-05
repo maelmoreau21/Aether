@@ -1,11 +1,13 @@
 <script lang="ts">
+  import '@fontsource-variable/manrope';
   import '../app.css';
+  import '../lib/styles/halo.css';
   import '../lib/styles/tokens.css';
   import { onMount } from 'svelte';
   import { loadServerPresentation } from '../lib/config/presentation';
   import { initTheme, setTheme } from '../lib/theme';
-  import { setLocale } from '../lib/i18n';
-  import { hydratePreferences, preferenceSyncError } from '../lib/preferences';
+  import { detectLocale, setLocale } from '../lib/i18n';
+  import { hydratePreferences, preferenceSyncError, preferenceState } from '../lib/preferences';
   import { getSessionGeneration } from '../lib/auth/session';
   import { page } from '$app/state';
   import { goto } from '$app/navigation';
@@ -13,6 +15,8 @@
   import { readSession } from '../lib/auth/session';
   import { preloadCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
+  import StatisticsNotice from '../lib/statistics/StatisticsNotice.svelte';
+  import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
 
   onMount(() => {
     initTheme();
@@ -20,19 +24,37 @@
     window.addEventListener('focus',refresh);
     return()=>window.removeEventListener('focus',refresh);
   });
+  $effect(() => {
+    const appearance = $preferenceState;
+    if (typeof document === 'undefined') return;
+    document.documentElement.dataset.cardSize = appearance.cardSize ?? 'medium';
+    document.documentElement.dataset.cardDensity = appearance.cardDensity ?? 'comfortable';
+    document.documentElement.dataset.accent = appearance.accentColor ?? 'orange';
+  });
   let { children } = $props();
   let verified = $state(false);
   let error = $state('');
   const isLogin = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/login'));
   const isDownloads = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/downloads'));
+  const isConnect = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/connect'));
   $effect(() => {
     const loginPage = isLogin;
+    const connectPage = isConnect;
     let cancelled = false;
     verified = false; error = '';
     if (isDownloads) { verified=true; return; }
     readSession().then(async current => {
       if (cancelled) return;
-      if (!current && !loginPage) { void goto(resolve('login/'), { replaceState: true }); return; }
+      if (!current && !loginPage) {
+        if (connectPage) {
+          const code = normalizeDeviceCode(window.location.hash.slice(1));
+          if (code) sessionStorage.setItem(PENDING_DEVICE_CODE, code);
+        }
+        void goto(resolve('login/'), { replaceState: true }); return;
+      }
+      if (current && !connectPage && normalizeDeviceCode(sessionStorage.getItem(PENDING_DEVICE_CODE) ?? '')) {
+        void goto(resolve('connect/'), { replaceState: true }); return;
+      }
       if (current && loginPage) { void goto(resolve('/'), { replaceState: true }); return; }
       if (current) {
         const generation = getSessionGeneration();
@@ -44,7 +66,7 @@
         void loadingPreferences.then(saved => {
           if (cancelled || generation !== getSessionGeneration() || !saved) return;
           setTheme(saved.theme ?? 'system', false);
-          setLocale(saved.locale ?? (navigator.language.toLowerCase().startsWith('en') ? 'en' : 'fr'), false);
+          setLocale(saved.locale ?? detectLocale(navigator.language), false);
         }).catch(() => {
           if (!cancelled && generation === getSessionGeneration()) preferenceSyncError.set('Vos préférences sont temporairement indisponibles.');
         });
@@ -55,6 +77,7 @@
   });
 </script>
 {#if verified}
+  {#if !isLogin && !isDownloads}<StatisticsNotice />{/if}
   {#if $preferenceSyncError}<p class="preference-error" role="alert">{$preferenceSyncError}</p>{/if}
   {@render children()}
   {#if !isLogin && !isDownloads}<MusicPlayer />{/if}

@@ -23,7 +23,26 @@ L'API catalogue expose `artwork` : rôles `backdrop`, `logo`, `landscape`, `illu
 
 ## Métadonnées NFO et pistes
 
-Les NFO locaux fournissent maintenant `actors` (nom/rôle, maximum 100), `directors` et `writers` (maximum 40 chacun), ainsi que `ratings` (maximum 20 : fournisseur, valeur et échelle native). Les anciennes limites XML restent applicables. Les notes de fournisseurs restent sur leur propre échelle ; le nom provient du NFO. Les portraits externes ne sont pas téléchargés : la distribution utilise des initiales quand aucun portrait local n'est géré. Un scan incrémental ou complet relit les NFO ; les modes conservant les métadonnées connues peuvent conserver les anciens champs.
+Les NFO locaux fournissent maintenant `actors` (nom/rôle, maximum 100), `directors` et `writers` (maximum 40 chacun), ainsi que `ratings` (maximum 20 : fournisseur, valeur et échelle native). Les anciennes limites XML restent applicables. Les notes de fournisseurs restent sur leur propre échelle ; le nom provient du NFO. Un `<thumb>` d'acteur en `https://` est conservé (les chemins locaux, notamment ceux de Jellyfin, sont ignorés). Un scan incrémental ou complet relit les NFO ; les modes conservant les métadonnées connues peuvent conserver les anciens champs.
+
+### Portraits « Distribution & équipe »
+
+Le catalogue accepte `GET /api/v1/catalog?person=<nom>&limit=24&offset=0`,
+avec les mêmes permissions de bibliothèques, restrictions parentales, tri et
+pagination que l'accueil. Le nom exact est comparé aux acteurs, réalisateurs et
+scénaristes de chaque œuvre, avant pagination. Les données historiques ne donnant
+pas toujours d'identifiant de personne, des homonymes peuvent être regroupés ;
+ce n'est pas une filmographie extérieure au serveur.
+
+TMDb peut transmettre les portraits et identifiants des membres d'équipe dans
+`crewCredits`, en conservant les anciennes listes `directors` et `writers`. Le
+Core expose ces portraits via le même proxy authentifié et borné que les acteurs,
+en vérifiant que le portrait appartient bien aux crédits de l'œuvre consultée.
+Ces nouveaux champs nécessitent le plugin TMDb mis à jour puis une actualisation
+des métadonnées des œuvres concernées. Si les données ou l'hôte autorisé sont
+absents, aucun portrait n'est attribué sur la seule base d'un nom homonyme.
+
+Les portraits viennent des crédits fournis par une extension de métadonnées (TMDb : `profile_path`, taille `w185`) ou d'un `<thumb>` NFO en `https://`. Le navigateur ne charge jamais l'URL du fournisseur : le catalogue expose pour chaque crédit concerné un `imageUrl` servi par le Core ([contrat](API.md#portraits-de-la-distribution-4-novembre-2026)). Le premier affichage télécharge le portrait via un hôte déclaré par une extension autorisée pour la bibliothèque, le réencode en WebP borné (400×600) et le met en cache dans le magasin d'assets, partagé entre les œuvres. Les cartes chargent les portraits en différé, avec dimensions fixées ; des initiales restent affichées pendant le chargement, sans portrait ou en cas d'échec. Les portraits des réalisateurs et scénaristes sont disponibles lorsque les crédits d'équipe les contiennent ; sans identifiant fiable, aucun portrait n'est attribué à partir du seul nom. Les œuvres déjà identifiées avec TMDb peuvent déjà contenir les URL des portraits d'acteurs ; les nouveaux portraits d'équipe nécessitent une actualisation après mise à jour de TMDb. Les œuvres dont la distribution provient seulement d'un NFO doivent être rescannées (et leur NFO contenir des `<thumb>` en `https://`) ; une distribution importée sans portrait nécessite une nouvelle identification ou une actualisation des métadonnées. Les dossiers `.actors/` locaux de Kodi ne sont pas encore lus. Sans extension déclarant l'hôte du portrait (par exemple `image.tmdb.org`), les initiales sont conservées.
 
 Les pistes audio affichent individuellement langue, codec, canaux et titre lorsqu'ils sont connus. Les sources préparées représentant une même piste interne ne la dupliquent plus. Les sources audio externes restent distinctes. Les sous-titres affichent la langue en français, un drapeau indicatif pour les langues prises en charge, le format et les marqueurs forcé/malentendants. Une langue absente est explicitement inconnue. La profondeur 10/12 bits n'est plus assimilée à du HDR.
 
@@ -35,7 +54,7 @@ La migration 0029 ajoute `work_feedback`, les rôles d'images et le stockage tem
 
 ## Vérification
 
-Voir les tests `series_flow`, `nfo_flow`, `media-node nfo::` et le scénario navigateur `browser_series` / `scripts/browser-series.cjs`. Les fixtures sont synthétiques ; ces résultats ne constituent pas un scan du NAS ou un déploiement sur aether.dfmag.fr. Les preuves exécutées pour ce jalon sont consignées dans MEMORY.md.
+Voir les tests `series_flow`, `nfo_flow`, `media-node nfo::` et le scénario navigateur `browser_series` / `scripts/browser-series.cjs`. Les fixtures sont synthétiques ; ces résultats ne constituent pas un scan du NAS ou un déploiement sur aether.dfmag.fr. Les preuves exécutées pour ce jalon sont consignées dans .ai/MEMORY.md.
 
 ## Réactivité des fiches et du lecteur — 20 octobre 2026
 

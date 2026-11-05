@@ -1050,20 +1050,6 @@ pub async fn ungroup_work_tx(tx: &mut AnyConnection, work_id: &str) -> Result<()
     Ok(())
 }
 
-/// Backfill summary columns for any work where `has_available_asset = 0` or `display_title_sort = ''`
-/// (e.g. after migrations or synthetic test inserts).
-pub async fn backfill_summaries(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
-    query(
-        "UPDATE inventory_works \
-         SET display_title_sort = CASE WHEN display_title_sort = '' THEN lower(COALESCE(json_extract(manual_json, '$.title'), title_sort)) ELSE display_title_sort END, \
-             effective_year = COALESCE(effective_year, CAST(json_extract(manual_json, '$.year') AS INTEGER), year) \
-         WHERE display_title_sort = '' OR (effective_year IS NULL AND year IS NOT NULL)",
-    )
-    .execute(&mut *conn)
-    .await?;
-    Ok(())
-}
-
 /// List probable match candidates (optionally filtered by status: 'pending', 'confirmed', 'rejected', 'undone').
 pub async fn list_match_candidates(
     store: &IdentityStore,

@@ -9,7 +9,7 @@ use http::{HeaderMap, Method, Response, StatusCode, header};
 use http_body_util::{BodyExt, Full};
 use std::{
     collections::{HashMap, VecDeque},
-    io::{self, Cursor, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom},
     path::PathBuf,
     sync::{LazyLock, Mutex},
 };
@@ -73,19 +73,9 @@ fn remember(key: Key, value: Preview) {
     cache.entries.insert(key, value);
 }
 fn encode(image: &image::DynamicImage) -> io::Result<(Vec<u8>, &'static str)> {
-    let mut encoded = Vec::new();
-    let mime = if image.color().has_alpha() {
-        image
-            .write_to(&mut Cursor::new(&mut encoded), image::ImageFormat::Png)
-            .map_err(|_| invalid())?;
-        "image/png"
-    } else {
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut encoded, 78)
-            .encode_image(image)
-            .map_err(|_| invalid())?;
-        "image/jpeg"
-    };
-    Ok((encoded, mime))
+    let encoded =
+        crate::image_encoding::encode(image, image.color().has_alpha()).map_err(|_| invalid())?;
+    Ok((encoded, "image/webp"))
 }
 
 fn disk_cache_dir() -> PathBuf {
@@ -97,7 +87,13 @@ fn disk_cache_dir() -> PathBuf {
 }
 
 fn disk_cache_path(key: &Key) -> PathBuf {
-    let payload = format!("{}:{}:{}:{}", key.0.to_string_lossy(), key.1, key.2, key.3);
+    let payload = format!(
+        "webp-v1:{}:{}:{}:{}",
+        key.0.to_string_lossy(),
+        key.1,
+        key.2,
+        key.3
+    );
     let hash = media_contracts::protocol::sha256_hex(payload.as_bytes());
     disk_cache_dir().join(format!("{hash}.img"))
 }
@@ -122,6 +118,7 @@ fn read_disk_cache(key: &Key) -> Option<Preview> {
     let mime = match bytes[0] {
         1 => "image/jpeg",
         2 => "image/png",
+        3 => "image/webp",
         _ => return None,
     };
     let source_mime = match bytes[1] {
@@ -144,6 +141,7 @@ fn write_disk_cache(key: &Key, preview: &Preview) {
     let temp = dir.join(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
     let mime_byte = match preview.mime {
         "image/png" => 2u8,
+        "image/webp" => 3u8,
         _ => 1u8,
     };
     let source_mime_byte = match preview.source_mime {
@@ -192,7 +190,10 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     }
     // Share the decoder budget with scans and original-image validation. The
     // permit is held by the blocking job even if its HTTP caller is cancelled.
-    let permit = images::VALIDATION.acquire().await.map_err(|_| invalid())?;
+    let permit = crate::image_encoding::DECODERS
+        .acquire()
+        .await
+        .map_err(|_| invalid())?;
     opened.verify_unchanged_sync()?;
     if let Some(value) = cached(&key) {
         return Ok(value);
@@ -228,12 +229,13 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
         } else {
             image
         };
-        let (encoded, mime) = encode(&image)?;
-        // Small originals can be smaller than a JPEG header; never inflate them.
-        let (mut encoded, mut mime) = if !resized && original.len() <= encoded.len() {
-            (original, source_mime)
+        let (mut encoded, mut mime) = if !resized
+            && source_mime == "image/webp"
+            && crate::image_encoding::reusable_webp(&original, image.color().has_alpha())
+        {
+            (original, "image/webp")
         } else {
-            (encoded, mime)
+            encode(&image)?
         };
         while encoded.len() > MAX_ENCODED && image.width() > 320 {
             let smaller = (image.width() / 2).max(320);
@@ -342,7 +344,7 @@ mod tests {
         let start = std::time::Instant::now();
         let preview = generate(&opened, 320).await.unwrap();
         let cold = start.elapsed();
-        assert_eq!(preview.mime, "image/jpeg");
+        assert_eq!(preview.mime, "image/webp");
         assert!(preview.bytes.len() < opened.size() as usize / 5);
         let decoded = image::load_from_memory(&preview.bytes).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (320, 480));
@@ -375,7 +377,7 @@ mod tests {
             .await
             .unwrap();
         let preview = generate(&opened, 320).await.unwrap();
-        assert_eq!(preview.mime, "image/png");
+        assert_eq!(preview.mime, "image/webp");
         assert_eq!(
             image::load_from_memory(&preview.bytes)
                 .unwrap()

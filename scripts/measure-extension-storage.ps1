@@ -23,7 +23,7 @@ try {
     if (-not $executablePath) { throw 'Benchmark executable not found in Cargo artifacts' }
     $binarySha256 = (Get-FileHash -LiteralPath $executablePath -Algorithm SHA256).Hash.ToLowerInvariant()
     $sourceHashes = [ordered]@{}
-    foreach ($relativePath in @('crates/core/src/extension_data.rs','crates/core/src/extension_objects.rs','crates/core/src/extensions.rs','crates/core/src/extension_runtime.rs','crates/extension-sdk/src/storage.rs')) {
+    foreach ($relativePath in @('crates/core/src/extensions/data.rs','crates/core/src/extensions/objects.rs','crates/core/src/extensions/mod.rs','crates/core/src/extensions/runtime.rs','crates/extension-sdk/src/storage.rs')) {
         $sourceHashes[$relativePath] = (Get-FileHash -LiteralPath (Join-Path $workspacePath $relativePath) -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $tests = @('sqlite_storage_benchmark')

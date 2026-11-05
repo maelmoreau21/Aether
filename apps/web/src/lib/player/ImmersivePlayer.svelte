@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ReportButton from '../applications/ReportButton.svelte';
   import { onMount } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { asset } from '$app/paths';
@@ -8,6 +9,7 @@
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { ProgressTracker } from './progress';
+  import { PlaybackCollector, type EventKind, type Origin } from '../statistics/collector';
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
@@ -19,7 +21,14 @@
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
   import { applyPartyPlayback } from '../syncplay/player-sync';
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
-  let { catalogue, createPlayer, nextTitle, onNext }: { catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string; onNext?: () => void } = $props();
+  let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
+    catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
+    /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
+    nextLabel?: string;
+    /** Vignette de l'épisode suivant (ou image de la série en repli). */
+    nextImage?: string;
+    onNext?: () => void;
+  } = $props();
   let autoplayNext = $state(false);
   let skipBackSeconds = $state(10);
   let skipForwardSeconds = $state(10);
@@ -30,6 +39,25 @@
   let controls = $state<PlayerControls>();
   let engine: Player | undefined;
   let progressTracker: ProgressTracker | undefined;
+  let collector: PlaybackCollector | undefined;
+  let collectorWork = '';
+  function collect(media: Media) {
+    const identity = media.workId ?? media.id;
+    if (collector && collectorWork === identity) { collector.suspend(); return; }
+    collector?.stop(); collector = undefined; collectorWork = identity;
+    if (!media.synthetic) collector = new PlaybackCollector(video, { mediaId: media.id, music: false,
+      state: () => engine?.state(), origin: () => syncClient ? 'sync' : 'manual', info: () => engine?.playbackInfo?.() });
+  }
+  function trackSubtitle(id: string | null, origin: Origin) {
+    const track = active?.subtitles.find(item => item.id === id);
+    collector?.track('subtitle', { id: track?.id ?? 'off', language: track?.language ?? 'off', codec: track?.sourceFormat ?? '' }, origin);
+  }
+  function measuredSeek(position: number, kind: EventKind = 'seek', origin: Origin = 'manual') {
+    if (!engine) return;
+    const before = engine.state().position;
+    engine.seek(position);
+    collector?.seek(position, before, kind, origin);
+  }
   let presence: PlaybackPresence | undefined;
   let opened = $state(false);
   let active = $state<Media | undefined>();
@@ -67,6 +95,11 @@
   let keyboardPinned = $state(false);
   let paused = $state(true);
   let playback = $state<PlaybackState>({ position: 0, duration: 0, paused: true, volume: 1, speed: 1 });
+  // Fin de la plage déjà chargée, exprimée dans le temps du lecteur (pas de la balise vidéo).
+  let bufferedUntil = $state(0);
+  let nextDismissed = $state(false);
+  let nextImageFailed = $state('');
+  let lastPointer = { x: -1, y: -1 };
   let aspectRatio = $state<'contain' | 'cover' | 'fill'>('contain');
   let repeat = $state(false);
   let idle: ReturnType<typeof setTimeout> | undefined;
@@ -81,20 +114,54 @@
     const snapshot = engine.state();
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
+    bufferedUntil = bufferedEnd(playback.position);
     if (!busy) progressTracker?.save(playback);
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
       const correction = syncClient.evaluateDrift(playback.position);
       if (correction.action === 'rate') {
+        const changed = Math.abs(snapshot.speed - correction.playbackRate) > .001;
         engine.setSpeed(correction.playbackRate);
+        if (changed) collector?.event('speed_change', { origin: 'sync' });
       } else if (correction.action === 'seek') {
-        engine.seek(correction.targetPosition);
+        measuredSeek(correction.targetPosition, 'seek', 'sync');
         engine.setSpeed(1.0);
       } else if (video.playbackRate !== 1.0) {
         engine.setSpeed(1.0);
+        collector?.event('speed_change', { origin: 'sync' });
       }
     }
   }
+  function bufferedEnd(position: number): number {
+    if (!video) return position;
+    const now = video.currentTime;
+    let ahead = 0;
+    for (let index = 0; index < video.buffered.length; index++) {
+      if (now >= video.buffered.start(index) - 0.25 && now <= video.buffered.end(index)) ahead = Math.max(ahead, video.buffered.end(index) - now);
+    }
+    return position + ahead;
+  }
+  // Les micro-déplacements (souris posée, capteur) ne réveillent plus les commandes,
+  // sinon le pointeur ne disparaît jamais.
+  function pointerMoved(event: PointerEvent) {
+    if (event.pointerType === 'touch') return;
+    // L'ancre reste fixe pendant que les commandes sont cachées : un geste lent s'additionne.
+    const distance = Math.hypot(event.clientX - lastPointer.x, event.clientY - lastPointer.y);
+    if (!visible && distance < 4) return;
+    lastPointer = { x: event.clientX, y: event.clientY };
+    wake();
+  }
+  // Carte « À suivre » : au début du générique, sinon 30 s avant la fin d'un épisode long.
+  const nextCardStart = $derived.by(() => {
+    const duration = playback.duration;
+    if (!active || duration <= 0) return Infinity;
+    if (active.credits && active.credits.start > 0 && active.credits.start < duration) return active.credits.start;
+    return duration > 300 ? duration - 30 : Infinity;
+  });
+  const showNextCard = $derived(Boolean(nextTitle && onNext && !syncClient && opened && !busy && !error && !nextDismissed
+    && playback.position >= nextCardStart && playback.position < playback.duration - 0.25));
+  const postCreditsScene = $derived(Boolean(active?.credits && active.credits.end < playback.duration - 10 && playback.position < active.credits.end));
+  $effect(() => { void active?.id; nextDismissed = false; });
   function armIdle() {
     clearTimeout(idle);
     if (!opened || statistics || paused || menu || busy || error || keyboardPinned) { visible = true; return; }
@@ -111,7 +178,7 @@
     if (prefs.autoSkipIntro && active?.intro && !hasAutoSkippedIntro) {
       if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
         hasAutoSkippedIntro = true;
-        engine?.seek(active.intro.end);
+        measuredSeek(active.intro.end, 'skip_intro', 'automatic');
         notice = "Introduction sautée automatiquement";
       }
     }
@@ -119,7 +186,7 @@
       if (pos >= active.credits.start && pos < active.credits.end - 1.0) {
         hasAutoSkippedCredits = true;
         if (active.credits.end < dur - 10) {
-          engine?.seek(active.credits.end);
+          measuredSeek(active.credits.end, 'skip_credits', 'automatic');
           notice = "Générique sauté automatiquement";
         }
       }
@@ -169,6 +236,7 @@
   }
   function fail(message: string) {
     if (!opened) return;
+    collector?.event('error', { errorCode: 'playback' });
     engine?.pause();
     void tryAutomaticFailover().then(recovered => {
       if (!recovered && opened) {
@@ -191,6 +259,7 @@
   async function prepare(media: Media, restore?: PlaybackState, failoverNotice?: string) {
     const current = generation;
     if (!engine) return;
+    collect(media);
     triedMediaIds.add(media.id);
     if (media.requestedId) triedMediaIds.add(media.requestedId);
     if (media.failoverFrom) triedMediaIds.add(media.failoverFrom);
@@ -222,11 +291,13 @@
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
       notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
+      collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
       const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
+      void subtitleLoading.then(() => { if (current === generation) trackSubtitle(usableSubtitle, 'automatic'); }).catch(() => {});
       subtitle = usableSubtitle;
       void subtitleLoading.catch(error => {
         if (current === generation && subtitle === usableSubtitle) {
@@ -346,6 +417,7 @@
   }
   export function close() {
     if (!opened) return;
+    collector?.stop(); collector = undefined; collectorWork = '';
     if (syncClient) {
       syncClient.leave();
       syncClient = null;
@@ -372,6 +444,7 @@
   export function changeMedia(media: Media, requireOpen = false) {
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
+    collector?.stop(); collector = undefined; collectorWork = '';
     manualAudio = undefined; manualSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
@@ -404,8 +477,12 @@
       // Received commands apply locally even in host_only mode. Never send a
       // command back through the user-control path (which caused seek loops).
       if (!engine || busy) return;
+      if (state === 'playing' && video.ended && active && !collector) collect(active);
+      const before = engine.state().position;
       client.setReady(true);
-      void applyPartyPlayback(engine, state, position).catch(cause => {
+      void applyPartyPlayback(engine, state, position).then(() => {
+        if (engine && Math.abs(engine.state().position - before) > 1) collector?.seek(engine.state().position, before, 'seek', 'sync');
+      }).catch(cause => {
         notice = cause instanceof Error ? cause.message : 'Lecture collective indisponible.';
       });
     };
@@ -440,6 +517,7 @@
       wake();
       return;
     }
+    if (video.ended && active && !collector) collect(active);
     if (syncClient) {
       if (paused) syncClient.play(playback.position);
       else syncClient.pause(playback.position);
@@ -449,7 +527,7 @@
   }
   function volume(value: number) { engine?.setVolume(value); if (value > 0) previousVolume = value; sync(); wake(); }
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
-  function seek(value: number) {
+  function seek(value: number, kind: EventKind = 'seek') {
     if (syncClient && !syncClient.canControl) {
       notice = 'Contrôles réservés à l’organisateur';
       wake();
@@ -459,7 +537,7 @@
       syncClient.seek(value);
       return;
     }
-    if (!busy) { engine?.seek(value); sync(); wake(); }
+    if (!busy) { measuredSeek(value, kind); sync(); wake(); }
   }
   function selectAudio(id: string) {
     const current = generation;
@@ -467,6 +545,8 @@
     void action(async player => { await player.selectAudio(id);
       if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
       audio = id; notice = '';
+      const info = player.playbackInfo?.();
+      if (info?.audio) collector?.track('audio', info.audio, 'manual');
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
       manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
@@ -481,6 +561,7 @@
     await player.selectSubtitle(id);
     if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
     subtitle = id;
+    trackSubtitle(id, 'manual');
     const track = active?.subtitles.find(track => track.id === id);
     subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
     manualSubtitle = subtitlePreference;
@@ -528,7 +609,12 @@
     keyboard(event);
   }
   function cancel(event: Event) { event.preventDefault(); if (menu) controls?.closeMenu(); else close(); }
-  function ended() { sync(); if (engine) progressTracker?.save(engine.state(), true, true); if (!syncClient && autoplayNext && onNext) onNext(); }
+  function ended() {
+    collector?.stop(true); collector = undefined; collectorWork = '';
+    sync(); if (engine) progressTracker?.save(engine.state(), true, true);
+    if (repeat && active && engine && !syncClient) { collect(active); engine.seek(0); void engine.play().catch(cause => fail(String(cause))); return; }
+    if (!syncClient && autoplayNext && onNext) onNext();
+  }
   $effect(() => {
     if (!opened || !statistics) return;
     const update = () => {
@@ -557,12 +643,12 @@
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
-    onpointermove={event => { if (event.pointerType !== 'touch') wake(); }} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
+    onpointermove={pointerMoved} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
     <video
       bind:this={video}
       playsinline
       preload="auto"
-      loop={repeat}
+      loop={false}
       style:object-fit={aspectRatio}
       style:--sub-color={activeSubtitleCss.color}
       style:--sub-size={activeSubtitleCss.fontSize}
@@ -575,14 +661,15 @@
       oncanplay={() => reportBuffering(false)}
       onplaying={() => reportBuffering(false)}
       onplay={sync}
+      onprogress={sync}
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}
     ><track kind="captions" /></video>
-    {#if active?.chapters?.length && visible}<label class="chapters">Chapitres<select aria-label="Chapitres vidéo" disabled={busy} onchange={event => seek(Number(event.currentTarget.value))}><option value="" disabled selected>Choisir un chapitre</option>{#each active.chapters as chapter,i (`${chapter.start}-${i}`)}<option value={chapter.start}>{i+1}. {chapter.title}</option>{/each}</select></label>{/if}
     <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
+      {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
       {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> Enchaîner automatiquement</label></div>{/if}
       {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>Corriger les marqueurs</button>{/if}
     </div>
@@ -634,7 +721,32 @@
       {skipBackSeconds} {skipForwardSeconds}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
-      onSpeed={speed => action(player => player.setSpeed(speed))} onFullscreen={toggleFullscreen} onWake={wake} />{/if}
+      onSpeed={speed => action(player => { player.setSpeed(speed); collector?.event('speed_change'); })} onFullscreen={toggleFullscreen} onWake={wake}
+      buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
+    {#if showNextCard}
+      <aside class="next-card" class:raised={visible} aria-label="Épisode suivant">
+        <div class="next-thumb">
+          {#if nextImage && nextImageFailed !== nextImage}
+            <img src={nextImage} alt="" width="640" height="360" decoding="async" onerror={() => nextImageFailed = nextImage} />
+          {:else}
+            <Icon name="tv" size={28} />
+          {/if}
+        </div>
+        <div class="next-info">
+          <span class="next-kicker">À suivre{nextLabel ? ` · ${nextLabel}` : ''}</span>
+          <strong title={nextTitle}>{nextTitle}</strong>
+          {#if autoplayNext}<small>Lecture automatique à la fin</small>{/if}
+          <div class="next-actions">
+            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>Lire maintenant</span></button>
+            {#if postCreditsScene && active?.credits}
+              {@const creditsEnd = active.credits.end}
+              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>Passer le générique</button>
+            {/if}
+          </div>
+        </div>
+        <button type="button" class="next-dismiss" aria-label="Masquer l’épisode suivant" title="Masquer" onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
+      </aside>
+    {/if}
   </div>
 </dialog>
 
@@ -647,7 +759,6 @@
   .stream-statistics dl { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; }
   .stream-statistics dd { margin:0; } .stream-statistics dt, .stream-statistics p { color:#bbb8ca; }
 
-  .chapters { position:absolute;top:90px;right:24px;z-index:4;display:grid;gap:6px;max-width:70%; } .chapters select { padding:10px;max-width:100%;color:var(--color-text);background:var(--color-surface);border:1px solid var(--color-line);border-radius:6px; }
   video::cue {
     color: var(--sub-color, #ffffff);
     background: var(--sub-bg, transparent);
@@ -723,7 +834,7 @@
     width: 40px;
     height: 40px;
     display: block;
-    filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.35));
+    filter: drop-shadow(0 0 16px var(--warn));
   }
   .player-error {
     position: absolute;
@@ -800,4 +911,138 @@
       max-width: calc(100% - 36px);
     }
   }
+
+  /* ---------- Halo : barre supérieure, erreurs et épisode suivant ---------- */
+  .top-bar {
+    background: linear-gradient(180deg, rgb(0 0 0 / 0.6) 0%, rgb(0 0 0 / 0) 100%);
+    font-family: var(--font);
+    transition: opacity var(--t-slow) ease;
+  }
+  .return {
+    border: 0;
+    border-radius: 16px;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .return:hover { background: rgb(255 255 255 / 0.14); border-color: transparent; transform: none; box-shadow: none; }
+  .title > span { font-weight: 800; }
+  .next-episode label { font-size: 13px; font-weight: 700; }
+  .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
+  .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
+  .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }
+  .loading button:hover { background: rgb(255 255 255 / 0.26); }
+  .player-spinner { filter: none; }
+  .player-error {
+    padding: 28px;
+    border: 0;
+    border-radius: 24px;
+    background: rgb(17 21 31 / 0.94);
+    color: var(--err);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    font-family: var(--font);
+  }
+  .player-error strong { font-size: 18px; font-weight: 800; color: #fff; }
+  .player-error p { font-size: 14px; color: #a2a9ba; }
+  .player-error button { height: 48px; padding: 0 22px; border-radius: 16px; background: #eef1f8; color: #0b0e18; font-size: 14px; font-weight: 800; }
+  .player-error button:hover { background: #fff; box-shadow: none; transform: none; }
+  .marker-editor, .stream-statistics {
+    padding: 20px;
+    border: 0;
+    border-radius: 24px;
+    background: rgb(17 21 31 / 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    color: #eef1f8;
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    font-family: var(--font);
+  }
+  .stream-statistics { font-size: 13px; }
+  .stream-statistics dt, .stream-statistics p { color: #a2a9ba; }
+  .stream-statistics dd { font-family: var(--font-mono); font-size: 12px; }
+  .marker-editor label { font-size: 14px; font-weight: 700; }
+  .stream-statistics button { min-height: 40px; border: 0; border-radius: 12px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
+  .stream-statistics button:hover { background: rgb(255 255 255 / 0.24); }
+  .fullscreen-notice { color: #a2a9ba; font-size: 12px; font-weight: 600; }
+  .marker-editor h2 { margin: 0 0 4px; font-size: 17px; font-weight: 800; }
+  .marker-editor select, .marker-editor input[type='number'] { height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 12px; background-color: rgb(255 255 255 / 0.07); color: #fff; box-shadow: none; }
+  .marker-editor select:focus, .marker-editor input[type='number']:focus { outline: none; border-color: var(--ac); }
+  .marker-editor input[type='checkbox'] { accent-color: var(--ac); width: 18px; height: 18px; }
+  .marker-editor button { min-height: 44px; border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
+  .marker-editor button:first-of-type { background: #eef1f8; color: #0b0e18; }
+  .marker-editor [role='alert'] { margin: 0; color: var(--err); font-weight: 600; }
+
+  /* Carte « À suivre » : panneau sombre du lecteur, en bas à droite, au-dessus des commandes quand elles sont visibles */
+  .next-card {
+    position: absolute;
+    z-index: 6;
+    right: max(var(--gutter, 40px), env(safe-area-inset-right));
+    bottom: max(28px, env(safe-area-inset-bottom));
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+    width: min(440px, calc(100% - 32px));
+    padding: 12px;
+    border-radius: 24px;
+    background: rgb(17 21 31 / 0.92);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    color: #f4f6fb;
+    font-family: var(--font);
+    animation: next-in var(--t-slow) var(--ease);
+    transition: bottom var(--t-slow) var(--ease);
+  }
+  /* Hauteur des commandes (PlayerControls) : barre 28 px + rangée 60 px + marges. */
+  .next-card.raised { bottom: calc(max(20px, env(safe-area-inset-bottom)) + 108px); }
+  @media (min-width: 1920px) { .next-card.raised { bottom: calc(max(32px, env(safe-area-inset-bottom)) + 124px); } }
+  @keyframes next-in { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
+  .next-thumb {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 160px;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.08);
+    color: #a2a9ba;
+  }
+  .next-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .next-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 2px 28px 2px 0; }
+  .next-kicker { font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: rgb(244 246 251 / 0.65); }
+  .next-info strong { font-size: 16px; font-weight: 800; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  .next-info small { font-size: 12px; color: rgb(244 246 251 / 0.6); }
+  .next-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px; }
+  .next-play, .next-secondary {
+    display: inline-flex; align-items: center; gap: 8px;
+    min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px;
+    font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer;
+  }
+  .next-play { background: rgb(248 249 252 / 0.95); color: #0b0e18; }
+  .next-play:hover { background: #fff; }
+  .next-play :global(svg) { fill: currentColor; }
+  .next-secondary { background: rgb(255 255 255 / 0.12); color: #f4f6fb; }
+  .next-secondary:hover { background: rgb(255 255 255 / 0.2); }
+  .next-dismiss {
+    position: absolute; top: 8px; right: 8px;
+    display: grid; place-items: center;
+    width: 32px; height: 32px; min-height: 32px; padding: 0;
+    border: 0; border-radius: 50%;
+    background: transparent; color: rgb(244 246 251 / 0.7); cursor: pointer;
+  }
+  .next-dismiss:hover { background: rgb(255 255 255 / 0.12); color: #fff; }
+  .next-card button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  @media (max-width: 768px) {
+    .next-card { right: 12px; left: 12px; width: auto; padding: 10px; gap: 10px; border-radius: 20px; }
+    .next-card.raised { bottom: calc(max(20px, env(safe-area-inset-bottom)) + 96px); }
+    .next-thumb { width: 112px; }
+    .next-info strong { font-size: 14px; }
+  }
+  /* Téléphone : commandes sur trois rangées (barre, temps + options, transport). */
+  @media (max-width: 720px) {
+    .next-card.raised { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 156px); }
+  }
+  @media (prefers-reduced-motion: reduce) { .next-card { animation: none; transition: none; } }
+  .inactive :global(*) { cursor: none !important; }
 </style>

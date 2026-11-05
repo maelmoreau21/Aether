@@ -2,7 +2,7 @@
 
 Suivi demandé par l’utilisateur. Une ligne ouverte ne constitue pas une fonction livrée.
 L’utilisateur a confirmé l’exécution de l’ensemble sans arrêt entre les lots.
-Conserver les rôles `administrator` et `user`. État de travail : `../DEV_STATE.md`.
+Conserver les rôles `administrator` et `user`. État de travail : `../.ai/DEV_STATE.md`.
 
 1. **PWA** : manifeste, icônes, lancement autonome, service worker réseau uniquement
    et message de perte de connexion. Vérifier l’installation sur appareil réel.

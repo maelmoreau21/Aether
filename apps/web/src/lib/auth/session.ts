@@ -1,4 +1,5 @@
 import { writable } from 'svelte/store';
+import { deviceRequest } from './quick-connect';
 
 export interface AuthUser { id: string; login: string; role: 'administrator' | 'user'; displayName?: string | null; sso?: boolean | null; disabledAt?: number | null; }
 export interface Session { user: AuthUser; csrfToken: string }
@@ -194,5 +195,17 @@ export async function logout(current: Session): Promise<void> {
     if (overrideSeq === manualOverrideSeq && (sessionGeneration === requestGeneration || isSameSession(currentSession, current))) {
       applySession(null, true);
     }
+  });
+}
+
+export async function pollDeviceConnection(secret: string, signal: AbortSignal): Promise<boolean> {
+  return enqueueAuthMutation(async () => {
+    const overrideSeq = manualOverrideSeq;
+    if (signal.aborted || currentSession) return false;
+    const response = await deviceRequest<Session & { status: 'pending' | 'authenticated' }>('poll', { secret }, undefined, signal);
+    if (signal.aborted || overrideSeq !== manualOverrideSeq) return false;
+    if (response.status !== 'authenticated') return false;
+    applySession({ user: response.user, csrfToken: response.csrfToken }, true);
+    return true;
   });
 }

@@ -1,5 +1,31 @@
 # CI et publication GHCR
 
+## Optimisation du 4 novembre 2026
+
+Le nouveau parcours construit et vérifie les images une seule fois par architecture,
+puis les promeut depuis des archives liées au commit et aux IDs natifs vérifiés.
+La CI complète est aussi requise par les releases main. Audit, mesures, règles de
+reprise et limites : [CI_PERFORMANCE_2026_11_04.md](CI_PERFORMANCE_2026_11_04.md).
+Les sections datées ci-dessous décrivent les parcours historiques.
+
+## A01 — Définition Bake locale et SHA explicite — 3 novembre 2026
+
+Les jobs Images et Publication utilisent désormais `source: .` avec
+`docker/bake-action@v6`, après checkout de `github.sha`. Depuis v6, l'action
+charge par défaut une définition Git distante : le `context = "."` du HCL
+ne suffit pas à empêcher cette récupération préalable. Le run PR
+[41511991820](https://github.com/maelmoreau21/Aether/actions/runs/41511991820)
+avait réussi le checkout puis échoué sur `refs/pull/35/merge` dans Bake.
+Le choix local suit le [contrat officiel de Bake v6](https://github.com/docker/bake-action/tree/v6#path-context).
+
+Les trois cibles, leurs caches, les overlays `cwd://` de metadata-action et
+l'interdiction de publication depuis une PR sont conservés. Le test de
+politique de release vérifie la définition locale et le checkout du SHA dans
+les deux workflows ; il échoue sur les sources antérieures au correctif.
+La validation d'un plan local ne remplace pas les événements GitHub ou une
+construction d'image. Résultats et limites du lot :
+[CI_DOCKER_A01_2026_11_03.md](archive/ci/CI_DOCKER_A01_2026_11_03.md).
+
 ## Préférences mémorisées du scénario scanner — 2 novembre 2026
 
 Le [run 41504190433](https://github.com/maelmoreau21/Aether/actions/runs/41504190433)
@@ -451,7 +477,7 @@ Actionlint 1.7.12 passe via binaire Windows et via le conteneur Linux utilisé
 par la CI. Les deux `docker compose config --quiet` passent avec secret
 d'appairage jetable ; aucun fichier de configuration contenant un secret réel
 n'a été affiché. Trois images reconstruites ; matrice ffprobe finale 8/8.
-Les commandes Docker/TLS détaillées restent dans [P2 Docker](P2_DOCKER_VALIDATION.md),
+Les commandes Docker/TLS détaillées restent dans [P2 Docker](archive/ci/P2_DOCKER_VALIDATION.md),
 avec les variables `MEDIA_TEST_NODE_IMAGE`, `MEDIA_TEST_CORE_IMAGE` et
 `MEDIA_TEST_STANDALONE_IMAGE` permettant de cibler les tags locaux
 `aether-node:p2-final-qa`, `aether-core:p2-final-qa`, `aether:p2-final-qa`

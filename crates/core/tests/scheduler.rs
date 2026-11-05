@@ -296,10 +296,12 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     scheduler::run_due(&auth, &root, &jobs, due - 1)
         .await
         .unwrap();
-    let count: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM durable_tasks")
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
+    let count: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM durable_tasks WHERE category='scan'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
     assert_eq!(count, 0);
     media_poc::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES('films','running',0,0)").execute(store.pool()).await.unwrap();
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
@@ -317,7 +319,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
     assert_eq!(
         media_poc::database::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM durable_tasks WHERE status IN ('queued','running','completed','error')"
+            "SELECT COUNT(*) FROM durable_tasks WHERE category='scan' AND status IN ('queued','running','completed','error')"
         )
         .fetch_one(store.pool())
         .await
@@ -513,4 +515,586 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
     .await
     .unwrap();
     assert_eq!(outcome, "completed");
+}
+
+#[tokio::test]
+async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_work() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+    let store = IdentityStore::open(&root.join("automation.sqlite"))
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('auto','Films','films','local',?,1,?)")
+        .bind(root.to_string_lossy().as_ref())
+        .bind(json!({"realtimeMonitoring":true,"onlineRefreshIntervalDays":30}).to_string())
+        .execute(store.pool()).await.unwrap();
+    let jobs = Arc::new(ScanJobs::default());
+    scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1100).await.unwrap();
+    let monitored: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM durable_tasks WHERE owner='library-monitor'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        monitored, 1,
+        "pending monitoring work coalesces even in the next minute"
+    );
+    let sweeps: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_sweeps")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(sweeps, 1);
+    media_poc::database::query("UPDATE durable_tasks SET status='completed';")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    media_poc::database::query("UPDATE automation_sweeps SET completed_at=1001")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1101).await.unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM durable_tasks WHERE owner='library-monitor'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        2
+    );
+    scheduler::run_due(&auth, &root, &jobs, 1000 + 30 * 86400)
+        .await
+        .unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        2
+    );
+    media_poc::database::query("UPDATE libraries SET enabled=0")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    scheduler::run_due(&auth, &root, &jobs, 1000 + 60 * 86400)
+        .await
+        .unwrap();
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+        2
+    );
+}
+
+// --- Jellyfin-style triggers -----------------------------------------------------------------
+
+use media_poc::task_triggers::{TriggerSpec, next_fire};
+
+fn utc(text: &str) -> i64 {
+    text.parse::<jiff::Timestamp>().unwrap().as_second()
+}
+
+#[test]
+fn daily_trigger_fires_at_the_next_local_time_of_day() {
+    let zone = jiff::tz::TimeZone::UTC;
+    let five = TriggerSpec::daily(5 * 60);
+    // Before 05:00 today: today. At or after 05:00: tomorrow.
+    assert_eq!(
+        next_fire(&five, utc("2026-11-05T04:59:59Z"), &zone),
+        Some(utc("2026-11-05T05:00:00Z"))
+    );
+    assert_eq!(
+        next_fire(&five, utc("2026-11-05T05:00:00Z"), &zone),
+        Some(utc("2026-11-06T05:00:00Z"))
+    );
+    // Month and year boundaries.
+    assert_eq!(
+        next_fire(&TriggerSpec::daily(30), utc("2026-12-31T23:00:00Z"), &zone),
+        Some(utc("2027-01-01T00:30:00Z"))
+    );
+}
+
+#[test]
+fn daily_trigger_uses_the_server_time_zone_across_dst() {
+    let paris = jiff::tz::TimeZone::get("Europe/Paris").unwrap();
+    // Winter (UTC+1): 03:00 local is 02:00 UTC.
+    assert_eq!(
+        next_fire(
+            &TriggerSpec::daily(180),
+            utc("2026-01-10T12:00:00Z"),
+            &paris
+        ),
+        Some(utc("2026-01-11T02:00:00Z"))
+    );
+    // Summer (UTC+2): 03:00 local is 01:00 UTC.
+    assert_eq!(
+        next_fire(
+            &TriggerSpec::daily(180),
+            utc("2026-07-10T12:00:00Z"),
+            &paris
+        ),
+        Some(utc("2026-07-11T01:00:00Z"))
+    );
+    // 02:30 does not exist on 2026-03-29 in Paris: it resolves forward, never skipped.
+    let gap = next_fire(
+        &TriggerSpec::daily(150),
+        utc("2026-03-28T12:00:00Z"),
+        &paris,
+    )
+    .unwrap();
+    assert!(
+        gap > utc("2026-03-28T12:00:00Z") && gap <= utc("2026-03-29T01:30:00Z"),
+        "{gap}"
+    );
+}
+
+#[test]
+fn weekly_trigger_selects_the_weekday_and_wraps_the_week() {
+    let zone = jiff::tz::TimeZone::UTC;
+    // 2026-11-05 is a Thursday (4). Monday (1) 03:00 is next week's Monday.
+    let monday = TriggerSpec::weekly(1, 3 * 60);
+    assert_eq!(
+        next_fire(&monday, utc("2026-11-05T10:00:00Z"), &zone),
+        Some(utc("2026-11-09T03:00:00Z"))
+    );
+    // Same weekday, later time: today.
+    let thursday_late = TriggerSpec::weekly(4, 22 * 60);
+    assert_eq!(
+        next_fire(&thursday_late, utc("2026-11-05T10:00:00Z"), &zone),
+        Some(utc("2026-11-05T22:00:00Z"))
+    );
+    // Same weekday, time already passed: a full week later.
+    let thursday_early = TriggerSpec::weekly(4, 9 * 60);
+    assert_eq!(
+        next_fire(&thursday_early, utc("2026-11-05T10:00:00Z"), &zone),
+        Some(utc("2026-11-12T09:00:00Z"))
+    );
+    // Saturday -> Sunday (0) wraps across the week boundary.
+    assert_eq!(
+        next_fire(
+            &TriggerSpec::weekly(0, 60),
+            utc("2026-11-07T23:59:00Z"),
+            &zone
+        ),
+        Some(utc("2026-11-08T01:00:00Z"))
+    );
+}
+
+#[test]
+fn interval_and_startup_triggers() {
+    let zone = jiff::tz::TimeZone::UTC;
+    let now = utc("2026-11-05T10:00:00Z");
+    assert_eq!(
+        next_fire(&TriggerSpec::interval(12 * 60), now, &zone),
+        Some(now + 12 * 3600)
+    );
+    assert_eq!(
+        next_fire(&TriggerSpec::interval(15), now, &zone),
+        Some(now + 900)
+    );
+    assert_eq!(next_fire(&TriggerSpec::startup(), now, &zone), None);
+}
+
+async fn admin_app(temp: &std::path::Path) -> (IdentityStore, AuthState, Router, String, String) {
+    let store = IdentityStore::open(&temp.join("triggers.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap(
+            "trigger-admin",
+            Zeroizing::new("synthetic trigger password".into()),
+        )
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = media_poc::task_triggers::router(auth.clone())
+        .merge(scheduler::router(auth.clone()).await.unwrap())
+        .merge(auth::router(auth.clone()));
+    let response = call(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        None,
+        json!({"login":"trigger-admin","password":"synthetic trigger password"}),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let cookie = response.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let body: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let csrf = body["csrfToken"].as_str().unwrap().to_owned();
+    (store, auth, app, cookie, csrf)
+}
+
+async fn json_body(response: axum::response::Response) -> Value {
+    serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+}
+
+#[tokio::test]
+async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, _auth, app, cookie, csrf) = admin_app(temp.path()).await;
+    let pool = store.pool();
+    // Migration: every enabled legacy interval is an interval trigger, the statistics cleanup too.
+    let migrated: Vec<(String, i64)> = media_poc::database::query_as(
+        "SELECT task_id,interval_minutes FROM task_triggers WHERE task_kind='system' AND trigger_type='interval' ORDER BY task_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        migrated.contains(&("clean-statistics".to_owned(), 5)),
+        "{migrated:?}"
+    );
+    assert!(
+        migrated.contains(&("clean-cache".to_owned(), 1440)),
+        "{migrated:?}"
+    );
+    // The migration is idempotent and never re-creates a trigger an administrator removed.
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    drop(conn);
+    let count =
+        |sql: &'static str| media_poc::database::query_scalar::<_, i64>(sql).fetch_one(pool);
+    let before = count("SELECT COUNT(*) FROM task_triggers").await.unwrap();
+    assert_eq!(
+        before as usize,
+        migrated.len(),
+        "backup is disabled by default"
+    );
+
+    // Unified list.
+    let list = json_body(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/tasks",
+            Some(&cookie),
+            None,
+            json!(null),
+        )
+        .await,
+    )
+    .await;
+    let tasks = list.as_array().unwrap();
+    let cache = tasks.iter().find(|t| t["id"] == "clean-cache").unwrap();
+    assert_eq!(cache["kind"], "system");
+    assert_eq!(cache["state"], "idle");
+    assert_eq!(cache["triggers"].as_array().unwrap().len(), 1);
+    assert!(tasks.iter().any(|t| t["id"] == "backup"));
+    assert_eq!(
+        call(&app, "GET", "/api/v1/admin/tasks", None, None, json!(null))
+            .await
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Replace the interval with a daily and a weekly trigger.
+    let legacy_id = cache["triggers"][0]["id"].as_str().unwrap().to_owned();
+    let triggers = "/api/v1/admin/tasks/clean-cache/triggers";
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            triggers,
+            Some(&cookie),
+            None,
+            json!({"type":"daily","timeOfDayMinutes":300})
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN,
+        "mutations require CSRF"
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            triggers,
+            Some(&cookie),
+            Some(&csrf),
+            json!({"type":"daily","timeOfDayMinutes":1440})
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let daily = call(
+        &app,
+        "POST",
+        triggers,
+        Some(&cookie),
+        Some(&csrf),
+        json!({"type":"daily","timeOfDayMinutes":300,"maxRuntimeSeconds":7200}),
+    )
+    .await;
+    assert_eq!(daily.status(), StatusCode::CREATED);
+    let daily = json_body(daily).await;
+    assert_eq!(daily["type"], "daily");
+    assert_eq!(daily["maxRuntimeSeconds"], 7200);
+    assert!(daily["nextFireAt"].as_i64().unwrap() > media_contracts::protocol::unix_now());
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            triggers,
+            Some(&cookie),
+            Some(&csrf),
+            json!({"type":"daily","timeOfDayMinutes":300,"maxRuntimeSeconds":7200})
+        )
+        .await
+        .status(),
+        StatusCode::CONFLICT,
+        "identical triggers are refused"
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            triggers,
+            Some(&cookie),
+            Some(&csrf),
+            json!({"type":"weekly","dayOfWeek":1,"timeOfDayMinutes":180})
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            triggers,
+            Some(&cookie),
+            Some(&csrf),
+            json!({"type":"startup"})
+        )
+        .await
+        .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        call(
+            &app,
+            "DELETE",
+            &format!("{triggers}/{legacy_id}"),
+            Some(&cookie),
+            Some(&csrf),
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let detail = json_body(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/tasks/clean-cache",
+            Some(&cookie),
+            None,
+            json!(null),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(detail["triggers"].as_array().unwrap().len(), 3);
+    // The dispatch cache follows the earliest trigger.
+    let (enabled, next): (i64, i64) = media_poc::database::query_as(
+        "SELECT enabled,next_due_at FROM system_task_schedules WHERE id='clean-cache'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(enabled, 1);
+    assert_eq!(Some(next), detail["nextRunAt"].as_i64());
+
+    // Removing every timed trigger disables periodic runs; the startup trigger remains.
+    for trigger in detail["triggers"].as_array().unwrap() {
+        if trigger["type"] != "startup" {
+            let path = format!("{triggers}/{}", trigger["id"].as_str().unwrap());
+            assert_eq!(
+                call(
+                    &app,
+                    "DELETE",
+                    &path,
+                    Some(&cookie),
+                    Some(&csrf),
+                    json!(null)
+                )
+                .await
+                .status(),
+                StatusCode::NO_CONTENT
+            );
+        }
+    }
+    let enabled: i64 = media_poc::database::query_scalar(
+        "SELECT enabled FROM system_task_schedules WHERE id='clean-cache'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(enabled, 0);
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    drop(conn);
+    let remaining: i64 = media_poc::database::query_scalar(
+        "SELECT COUNT(*) FROM task_triggers WHERE task_id='clean-cache'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        remaining, 1,
+        "the migration does not resurrect removed legacy intervals"
+    );
+
+    // Run now, then cancel the queued run.
+    let run = call(
+        &app,
+        "POST",
+        "/api/v1/admin/tasks/clean-cache/run",
+        Some(&cookie),
+        Some(&csrf),
+        json!(null),
+    )
+    .await;
+    assert_eq!(run.status(), StatusCode::ACCEPTED);
+    let detail = json_body(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/tasks/clean-cache",
+            Some(&cookie),
+            None,
+            json!(null),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(detail["state"], "queued");
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/tasks/clean-cache/run",
+            Some(&cookie),
+            Some(&csrf),
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        call(
+            &app,
+            "POST",
+            "/api/v1/admin/tasks/clean-cache/cancel",
+            Some(&cookie),
+            Some(&csrf),
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        call(
+            &app,
+            "GET",
+            "/api/v1/admin/tasks/does-not-exist",
+            Some(&cookie),
+            None,
+            json!(null)
+        )
+        .await
+        .status(),
+        StatusCode::NOT_FOUND
+    );
+    store.close().await;
+}
+
+#[tokio::test]
+async fn startup_triggers_queue_once_and_time_limits_reach_the_queue() {
+    let temp = tempfile::tempdir().unwrap();
+    let (store, auth, _app, _cookie, _csrf) = admin_app(temp.path()).await;
+    let pool = store.pool();
+    media_poc::database::query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,max_runtime_seconds,enabled,created_at) VALUES('boot','system','optimize-database','startup',900,1,0)")
+        .execute(pool).await.unwrap();
+    let fired = media_poc::task_triggers::fire_startup(&auth, 1_000)
+        .await
+        .unwrap();
+    assert_eq!(fired, 1);
+    // A second start in the same instant (or an already active run) does not duplicate work.
+    media_poc::task_triggers::fire_startup(&auth, 1_000)
+        .await
+        .unwrap();
+    let queued: Vec<String> = media_poc::database::query_scalar("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='optimize-database' AND status='queued'")
+        .fetch_all(pool).await.unwrap();
+    assert_eq!(queued.len(), 1);
+    assert!(
+        queued[0].contains("\"maxRuntimeSeconds\":900"),
+        "{}",
+        queued[0]
+    );
+
+    // A due periodic trigger carries its own limit into the queued run.
+    media_poc::database::query("DELETE FROM durable_tasks")
+        .execute(pool)
+        .await
+        .unwrap();
+    media_poc::database::query("UPDATE task_triggers SET max_runtime_seconds=3600,next_fire_at=0 WHERE task_kind='system' AND task_id='clean-sessions'")
+        .execute(pool).await.unwrap();
+    media_poc::database::query(
+        "UPDATE system_task_schedules SET next_due_at=0 WHERE id='clean-sessions'",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let jobs = Arc::new(ScanJobs::default());
+    let now = media_contracts::protocol::unix_now();
+    // The worker pass pumps due system schedules into the durable queue.
+    scheduler::dispatch_once(&auth, temp.path(), &jobs, now)
+        .await
+        .unwrap();
+    let (options,): (String,) = media_poc::database::query_as("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='clean-sessions' ORDER BY created_at DESC LIMIT 1")
+        .fetch_one(pool).await.unwrap();
+    assert!(options.contains("\"maxRuntimeSeconds\":3600"), "{options}");
+    let next: i64 = media_poc::database::query_scalar(
+        "SELECT next_due_at FROM system_task_schedules WHERE id='clean-sessions'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        next,
+        now + 360 * 60,
+        "the interval restarts from the firing"
+    );
+    jobs.shutdown().await;
+    store.close().await;
 }

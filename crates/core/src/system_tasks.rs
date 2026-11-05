@@ -52,6 +52,9 @@ pub struct TaskFailure {
     pub kind: &'static str,
     pub scope: String,
     pub message: String,
+    /// False for deterministic failures (configuration, permissions): retrying cannot succeed,
+    /// so the durable task is terminated instead of being replayed with backoff.
+    pub retryable: bool,
 }
 
 impl TaskFailure {
@@ -60,14 +63,49 @@ impl TaskFailure {
             kind,
             scope: scope.into(),
             message: message.into(),
+            retryable: matches!(kind, "database" | "network" | "disk"),
         }
     }
     fn database(scope: &str, error: sqlx::Error) -> Self {
         Self::new("database", scope, truncate(&error.to_string(), 200))
     }
     fn disk(scope: &str, error: &std::io::Error) -> Self {
-        Self::new("disk", scope, format!("I/O error: {:?}", error.kind()))
+        let mut failure = Self::new(
+            "disk",
+            scope,
+            truncate(&format!("I/O error ({:?}): {error}", error.kind()), 200),
+        );
+        failure.retryable = !io_error_is_deterministic(error);
+        failure
     }
+}
+
+/// A file that is locked, read-only, denied or already gone is skipped by cleanup, never fatal:
+/// Windows reports open/antivirus-held files as access denied (5) or sharing/lock violations
+/// (32/33); Unix reports EACCES/EPERM/EBUSY/EROFS.
+pub fn io_error_is_skippable(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied
+            | ErrorKind::NotFound
+            | ErrorKind::ResourceBusy
+            | ErrorKind::ReadOnlyFilesystem
+    ) || (cfg!(windows) && matches!(error.raw_os_error(), Some(32 | 33)))
+}
+
+/// Errors that a retry a few seconds later cannot fix.
+pub fn io_error_is_deterministic(error: &std::io::Error) -> bool {
+    use std::io::ErrorKind;
+    matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied
+            | ErrorKind::ReadOnlyFilesystem
+            | ErrorKind::NotADirectory
+            | ErrorKind::IsADirectory
+            | ErrorKind::InvalidInput
+            | ErrorKind::InvalidFilename
+    )
 }
 
 fn truncate(value: &str, max: usize) -> String {
@@ -108,16 +146,76 @@ impl TempPattern {
     }
 }
 
+/// Published image-cache entries (`<32 or 64 hex digits>.img`) eligible for eviction.
+fn is_cached_image(name: &str) -> bool {
+    name.strip_suffix(".img").is_some_and(|stem| {
+        matches!(stem.len(), 32 | 64) && stem.bytes().all(|b| b.is_ascii_hexdigit())
+    })
+}
+
+/// Eviction of published entries in a cache directory: oldest first, by age then by total size.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CacheEviction {
+    /// Entries older than this are removed (`None`: no age limit).
+    pub max_age: Option<Duration>,
+    /// Oldest entries are removed until the directory is at most this large (`None`: no cap).
+    pub max_bytes: Option<u64>,
+}
+
+impl CacheEviction {
+    /// `MEDIA_IMAGE_CACHE_MAX_AGE_DAYS` (default 30) and `MEDIA_IMAGE_CACHE_MAX_MB` (default 2048);
+    /// `0` disables the corresponding limit.
+    pub fn image_cache_from_env() -> Self {
+        let read = |name: &str, default: u64| {
+            std::env::var(name)
+                .ok()
+                .and_then(|value| value.trim().parse::<u64>().ok())
+                .unwrap_or(default)
+        };
+        let days = read("MEDIA_IMAGE_CACHE_MAX_AGE_DAYS", 30);
+        let megabytes = read("MEDIA_IMAGE_CACHE_MAX_MB", 2048);
+        Self {
+            max_age: (days > 0).then(|| Duration::from_secs(days.saturating_mul(86_400))),
+            max_bytes: (megabytes > 0).then(|| megabytes.saturating_mul(1024 * 1024)),
+        }
+    }
+}
+
 /// A directory explicitly owned by Aether where stale temporary files may be removed.
 #[derive(Debug, Clone)]
 pub struct OwnedDir {
     pub label: &'static str,
     pub path: PathBuf,
     pub pattern: TempPattern,
+    /// Only the image cache evicts its published `.img` entries.
+    pub eviction: Option<CacheEviction>,
 }
 
 /// A temporary file must be at least this old: an active writer is never interrupted.
 const TEMP_MIN_AGE: Duration = Duration::from_secs(3600);
+
+/// At most this many cache entries are considered for size eviction in one pass (bounded memory).
+const MAX_EVICTION_CANDIDATES: usize = 200_000;
+
+/// Counts of one owned-directory sweep. Locked, denied or vanished files are `skipped`, never failures.
+#[derive(Debug, Default)]
+pub struct SweepOutcome {
+    pub removed: usize,
+    pub evicted: usize,
+    pub skipped: usize,
+    /// The directory itself could not be listed (permission denied); logged, not a failure.
+    pub unreadable: bool,
+    pub failures: Vec<TaskFailure>,
+}
+
+/// Remove one file; `Ok(false)` when it is locked/denied/gone and must simply be skipped.
+async fn remove_tolerant(path: &std::path::Path) -> Result<bool, std::io::Error> {
+    match tokio::fs::remove_file(path).await {
+        Ok(()) => Ok(true),
+        Err(error) if io_error_is_skippable(&error) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
 
 /// Remove stale Aether temporary files, non-recursively, from one owned directory.
 /// Refuses any directory that is, contains, or lies inside the media root, so an original
@@ -126,15 +224,23 @@ async fn sweep_owned_dir(
     owned: &OwnedDir,
     media_root: &std::path::Path,
     min_age: Duration,
-) -> (usize, Vec<TaskFailure>) {
-    let mut failures = Vec::new();
+) -> SweepOutcome {
+    let mut outcome = SweepOutcome::default();
     let canonical = match tokio::fs::canonicalize(&owned.path).await {
         Ok(path) => path,
         // An absent cache directory has nothing to clean and is not an error.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (0, failures),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return outcome,
+        Err(e) if io_error_is_skippable(&e) => {
+            eprintln!(
+                "clean-cache: {} skipped, directory not accessible: {e}",
+                owned.label
+            );
+            outcome.unreadable = true;
+            return outcome;
+        }
         Err(e) => {
-            failures.push(TaskFailure::disk(owned.label, &e));
-            return (0, failures);
+            outcome.failures.push(TaskFailure::disk(owned.label, &e));
+            return outcome;
         }
     };
     let protected = tokio::fs::canonicalize(media_root)
@@ -144,59 +250,110 @@ async fn sweep_owned_dir(
         || canonical.starts_with(&protected)
         || protected.starts_with(&canonical)
     {
-        failures.push(TaskFailure::new(
+        outcome.failures.push(TaskFailure::new(
             "config",
             owned.label,
             "owned directory overlaps the media root or is a filesystem root; cleanup refused",
         ));
-        return (0, failures);
+        return outcome;
     }
     let mut entries = match tokio::fs::read_dir(&canonical).await {
         Ok(entries) => entries,
+        Err(e) if io_error_is_skippable(&e) => {
+            eprintln!(
+                "clean-cache: {} skipped, directory not readable: {e}",
+                owned.label
+            );
+            outcome.unreadable = true;
+            return outcome;
+        }
         Err(e) => {
-            failures.push(TaskFailure::disk(owned.label, &e));
-            return (0, failures);
+            outcome.failures.push(TaskFailure::disk(owned.label, &e));
+            return outcome;
         }
     };
-    let mut removed = 0;
+    // (modified, size, path) of published cache entries kept after age eviction.
+    let mut cached: Vec<(std::time::SystemTime, u64, PathBuf)> = Vec::new();
     loop {
         let entry = match entries.next_entry().await {
             Ok(Some(entry)) => entry,
             Ok(None) => break,
+            Err(e) if io_error_is_skippable(&e) => {
+                outcome.skipped += 1;
+                break;
+            }
             Err(e) => {
-                failures.push(TaskFailure::disk(owned.label, &e));
+                outcome.failures.push(TaskFailure::disk(owned.label, &e));
                 break;
             }
         };
         let name = entry.file_name().to_string_lossy().into_owned();
-        if !owned.pattern.matches(&name) {
+        let temporary = owned.pattern.matches(&name);
+        let evictable = owned.eviction.is_some() && is_cached_image(&name);
+        if !temporary && !evictable {
             continue;
         }
         let metadata = match tokio::fs::symlink_metadata(entry.path()).await {
             Ok(metadata) => metadata,
+            Err(e) if io_error_is_skippable(&e) => {
+                outcome.skipped += 1;
+                continue;
+            }
             Err(e) => {
-                failures.push(TaskFailure::disk(owned.label, &e));
+                outcome.failures.push(TaskFailure::disk(owned.label, &e));
                 continue;
             }
         };
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             continue;
         }
-        let old_enough = metadata
-            .modified()
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .is_some_and(|age| age >= min_age);
-        if !old_enough {
+        let modified = metadata.modified().ok();
+        let age = modified.and_then(|modified| modified.elapsed().ok());
+        let expired = if temporary {
+            age.is_some_and(|age| age >= min_age)
+        } else {
+            owned
+                .eviction
+                .and_then(|eviction| eviction.max_age)
+                .is_some_and(|max_age| age.is_some_and(|age| age >= max_age))
+        };
+        if !expired {
+            if evictable && cached.len() < MAX_EVICTION_CANDIDATES {
+                cached.push((
+                    modified.unwrap_or(std::time::UNIX_EPOCH),
+                    metadata.len(),
+                    entry.path(),
+                ));
+            }
             continue;
         }
-        match tokio::fs::remove_file(entry.path()).await {
-            Ok(()) => removed += 1,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => failures.push(TaskFailure::disk(owned.label, &e)),
+        match remove_tolerant(&entry.path()).await {
+            Ok(true) if temporary => outcome.removed += 1,
+            Ok(true) => outcome.evicted += 1,
+            Ok(false) => outcome.skipped += 1,
+            Err(e) => outcome.failures.push(TaskFailure::disk(owned.label, &e)),
         }
     }
-    (removed, failures)
+    if let Some(max_bytes) = owned.eviction.and_then(|eviction| eviction.max_bytes) {
+        let mut total: u64 = cached.iter().map(|(_, size, _)| *size).sum();
+        if total > max_bytes {
+            cached.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.2.cmp(&b.2)));
+            for (_, size, path) in cached {
+                if total <= max_bytes {
+                    break;
+                }
+                match remove_tolerant(&path).await {
+                    Ok(true) => {
+                        outcome.evicted += 1;
+                        total = total.saturating_sub(size);
+                    }
+                    Ok(false) => outcome.skipped += 1,
+                    Err(e) => outcome.failures.push(TaskFailure::disk(owned.label, &e)),
+                }
+            }
+        }
+    }
+    outcome
 }
 
 pub struct SystemTasksState {
@@ -223,12 +380,14 @@ fn default_owned_dirs(media_root: &std::path::Path) -> Vec<OwnedDir> {
         label: "image-cache",
         path: images,
         pattern: TempPattern::ImageCache,
+        eviction: Some(CacheEviction::image_cache_from_env()),
     }];
     if let Some(path) = backups {
         dirs.push(OwnedDir {
             label: "backup-staging",
             path,
             pattern: TempPattern::BackupStaging,
+            eviction: None,
         });
     }
     dirs
@@ -315,7 +474,19 @@ async fn update_schedule(
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
 
-    let next_due = now() + (input.interval_minutes * 60);
+    let timestamp = now();
+    let next_due = timestamp + (input.interval_minutes * 60);
+    let _writer = state.auth.store.task_writes.lock().await;
+    let mut conn = state
+        .auth
+        .store
+        .pool()
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let changed = crate::database::query(
         "UPDATE system_task_schedules SET interval_minutes=?, enabled=?, next_due_at=? WHERE id=?",
     )
@@ -323,13 +494,27 @@ async fn update_schedule(
     .bind(if input.enabled { 1 } else { 0 })
     .bind(next_due)
     .bind(&id)
-    .execute(&state.auth.store.pool)
+    .execute(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if changed.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+    // Compatibility endpoint: the task keeps exactly one interval trigger.
+    crate::task_triggers::replace_with_interval(
+        &mut tx,
+        "system",
+        &id,
+        input.interval_minutes,
+        input.enabled,
+        timestamp,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::database::commit(tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -422,6 +607,13 @@ async fn execute_inner(
         "update-extensions" => task_update_extensions(state).await,
         "optimize-database" => task_optimize_database(state).await,
         "clean-sessions" => task_clean_sessions(state).await,
+        "clean-statistics" => crate::statistics::maintain(&state.auth.store)
+            .await
+            .map(|count| TaskReport {
+                summary: format!("{count} expired statistics event(s) removed"),
+                failures: Vec::new(),
+            })
+            .map_err(|e| TaskFailure::database("statistics", e)),
         "clean-activity-log" => task_clean_activity_log(state, job).await,
         "clean-cache" => task_clean_cache(state).await,
         "clean-playlists" => task_clean_playlists(state).await,
@@ -435,6 +627,7 @@ async fn execute_inner(
         },
     };
     let failed = !report.failures.is_empty();
+    let permanent = failed && report.failures.iter().all(|failure| !failure.retryable);
     let (kind, scope, message) = match report.failures.first() {
         Some(first) => {
             let extra = report.failures.len() - 1;
@@ -469,7 +662,10 @@ async fn execute_inner(
         eprintln!("system task {id}: result could not be persisted: {error}");
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
-    if failed {
+    if permanent {
+        // Deterministic failure: the queue terminates this run instead of retrying it.
+        Err(StatusCode::UNPROCESSABLE_ENTITY)
+    } else if failed {
         Err(StatusCode::INTERNAL_SERVER_ERROR)
     } else {
         Ok(())
@@ -642,14 +838,31 @@ async fn task_clean_cache(state: &SystemTasksState) -> Result<TaskReport, TaskFa
             .failures
             .push(TaskFailure::database("poster_previews", e)),
     }
-    let mut files = 0;
+    let (mut files, mut evicted, mut skipped) = (0, 0, 0);
+    let mut unreadable = Vec::new();
     for owned in &state.owned_dirs {
-        let (removed, failures) = sweep_owned_dir(owned, &state.media_root, TEMP_MIN_AGE).await;
-        files += removed;
-        report.failures.extend(failures);
+        let outcome = sweep_owned_dir(owned, &state.media_root, TEMP_MIN_AGE).await;
+        files += outcome.removed;
+        evicted += outcome.evicted;
+        skipped += outcome.skipped;
+        if outcome.unreadable {
+            unreadable.push(owned.label);
+        }
+        report.failures.extend(outcome.failures);
     }
-    report.summary =
-        format!("{previews} orphan preview(s) and {files} stale temporary file(s) removed");
+    let mut summary = format!(
+        "{previews} orphan preview(s), {files} stale temporary file(s) and {evicted} expired cached image(s) removed"
+    );
+    if skipped > 0 {
+        summary.push_str(&format!("; {skipped} locked or protected file(s) skipped"));
+    }
+    if !unreadable.is_empty() {
+        summary.push_str(&format!(
+            "; not readable, skipped: {}",
+            unreadable.join(", ")
+        ));
+    }
+    report.summary = summary;
     Ok(report)
 }
 
@@ -795,11 +1008,12 @@ mod tests {
                 .fetch_all(&state.auth.store.pool)
                 .await
                 .unwrap();
-        assert_eq!(tasks.len(), 6);
+        assert_eq!(tasks.len(), 7);
         for id in [
             "update-extensions",
             "optimize-database",
             "clean-sessions",
+            "clean-statistics",
             "clean-activity-log",
             "clean-cache",
             "clean-playlists",
@@ -935,6 +1149,10 @@ mod tests {
             label: "image-cache",
             path,
             pattern: TempPattern::ImageCache,
+            eviction: Some(CacheEviction {
+                max_age: Some(Duration::from_secs(30 * 86_400)),
+                max_bytes: None,
+            }),
         };
         let state = state_in(temp.path(), vec![owned(cache.clone())]).await;
         execute_task(&state, "clean-cache").await.unwrap();
@@ -962,11 +1180,16 @@ mod tests {
                 label: "image-cache",
                 path,
                 pattern: TempPattern::ImageCache,
+                eviction: Some(CacheEviction {
+                    max_age: Some(Duration::ZERO),
+                    max_bytes: Some(0),
+                }),
             };
-            let (removed, failures) = sweep_owned_dir(&owned, &media, Duration::ZERO).await;
-            assert_eq!(removed, 0);
-            assert_eq!(failures.len(), 1);
-            assert_eq!(failures[0].kind, "config");
+            let outcome = sweep_owned_dir(&owned, &media, Duration::ZERO).await;
+            assert_eq!(outcome.removed + outcome.evicted, 0);
+            assert_eq!(outcome.failures.len(), 1);
+            assert_eq!(outcome.failures[0].kind, "config");
+            assert!(!outcome.failures[0].retryable);
             assert!(victim.exists());
         }
         // A missing directory is not an error and removes nothing.
@@ -974,9 +1197,157 @@ mod tests {
             label: "image-cache",
             path: temp.path().join("absent"),
             pattern: TempPattern::ImageCache,
+            eviction: None,
         };
-        let (removed, failures) = sweep_owned_dir(&missing, &media, Duration::ZERO).await;
-        assert_eq!((removed, failures.len()), (0, 0));
+        let outcome = sweep_owned_dir(&missing, &media, Duration::ZERO).await;
+        assert_eq!((outcome.removed, outcome.failures.len()), (0, 0));
+        assert!(!outcome.unreadable);
+    }
+
+    fn aged(path: &std::path::Path, seconds: u64) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
+        file.set_modified(SystemTime::now() - Duration::from_secs(seconds))
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn image_cache_evicts_expired_then_oldest_entries_over_the_size_cap() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir(&media).unwrap();
+        let cache = temp.path().join("cache");
+        std::fs::create_dir(&cache).unwrap();
+        let entry = |c: &str| cache.join(format!("{}.img", c.repeat(64)));
+        let (expired, oldest, middle, newest) = (entry("a"), entry("b"), entry("c"), entry("d"));
+        let foreign = cache.join("keep.img");
+        for path in [&expired, &oldest, &middle, &newest, &foreign] {
+            std::fs::write(path, vec![0u8; 100]).unwrap();
+        }
+        aged(&expired, 40 * 86_400);
+        aged(&foreign, 40 * 86_400);
+        aged(&oldest, 3 * 86_400);
+        aged(&middle, 2 * 86_400);
+        aged(&newest, 86_400);
+        let owned = OwnedDir {
+            label: "image-cache",
+            path: cache.clone(),
+            pattern: TempPattern::ImageCache,
+            eviction: Some(CacheEviction {
+                max_age: Some(Duration::from_secs(30 * 86_400)),
+                max_bytes: Some(200),
+            }),
+        };
+        let outcome = sweep_owned_dir(&owned, &media, TEMP_MIN_AGE).await;
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        assert_eq!(outcome.evicted, 2);
+        assert!(!expired.exists(), "entries past the age limit are evicted");
+        assert!(!oldest.exists(), "the oldest entry goes first over the cap");
+        assert!(middle.exists() && newest.exists());
+        assert!(
+            foreign.exists(),
+            "names Aether does not own are never removed"
+        );
+    }
+
+    /// A file held open without delete sharing (Windows: antivirus, indexer, viewer) or inside a
+    /// read-only directory (Unix) is skipped and the task still succeeds.
+    #[tokio::test]
+    async fn clean_cache_skips_locked_or_denied_files_without_failing() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir(&media).unwrap();
+        let cache = temp.path().join("cache");
+        std::fs::create_dir(&cache).unwrap();
+        let locked = cache.join(format!("{}.tmp", "ab".repeat(16)));
+        std::fs::write(&locked, b"x").unwrap();
+        old(&locked);
+        #[cfg(windows)]
+        let _guard = {
+            use std::os::windows::fs::OpenOptionsExt;
+            std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&locked)
+                .unwrap()
+        };
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o500)).unwrap();
+        }
+        let owned = OwnedDir {
+            label: "image-cache",
+            path: cache.clone(),
+            pattern: TempPattern::ImageCache,
+            eviction: None,
+        };
+        let state = state_in(temp.path(), vec![owned.clone()]).await;
+        let outcome = sweep_owned_dir(&owned, &media, TEMP_MIN_AGE).await;
+        // Root bypasses Unix permissions: the file is then simply removed.
+        if locked.exists() {
+            assert_eq!(outcome.skipped, 1);
+        }
+        assert!(outcome.failures.is_empty(), "{:?}", outcome.failures);
+        execute_task(&state, "clean-cache").await.unwrap();
+        let row = schedule(&state, "clean-cache").await;
+        assert_eq!(row.last_outcome, "succeeded", "{:?}", row.last_message);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+    }
+
+    #[test]
+    fn io_errors_are_classified_for_skipping_and_retrying() {
+        use std::io::{Error, ErrorKind};
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::NotFound,
+            ErrorKind::ResourceBusy,
+            ErrorKind::ReadOnlyFilesystem,
+        ] {
+            assert!(io_error_is_skippable(&Error::from(kind)), "{kind:?}");
+        }
+        assert!(!io_error_is_skippable(&Error::from(ErrorKind::StorageFull)));
+        assert!(!io_error_is_skippable(&Error::other("unexpected")));
+        #[cfg(windows)]
+        {
+            assert!(
+                io_error_is_skippable(&Error::from_raw_os_error(32)),
+                "sharing violation"
+            );
+            assert!(
+                io_error_is_skippable(&Error::from_raw_os_error(33)),
+                "lock violation"
+            );
+            assert!(
+                io_error_is_skippable(&Error::from_raw_os_error(5)),
+                "access denied"
+            );
+        }
+        let denied = TaskFailure::disk("image-cache", &Error::from(ErrorKind::PermissionDenied));
+        assert!(!denied.retryable, "permission errors must not be retried");
+        assert!(denied.message.contains("PermissionDenied"));
+        assert!(TaskFailure::disk("x", &Error::from(ErrorKind::TimedOut)).retryable);
+        assert!(!TaskFailure::new("config", "x", "y").retryable);
+        assert!(TaskFailure::new("network", "x", "y").retryable);
+    }
+
+    #[tokio::test]
+    async fn deterministic_failures_are_reported_as_permanent() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = state_in(temp.path(), Vec::new()).await;
+        crate::database::query(
+            "INSERT INTO system_task_schedules(id,name,description,category,interval_minutes,enabled,next_due_at) VALUES('bogus','b','b','b',5,0,0)",
+        )
+        .execute(&state.auth.store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            execute_task(&state, "bogus").await,
+            Err(StatusCode::UNPROCESSABLE_ENTITY)
+        );
     }
 
     #[test]

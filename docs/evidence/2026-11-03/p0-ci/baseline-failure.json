@@ -1,0 +1,180 @@
+{
+  "browser": "156.0.8078.80",
+  "os": "10.0.26300",
+  "headless": true,
+  "restart": false,
+  "results": {
+    "scan": true,
+    "incremental": true,
+    "startupMs": 620.9574000000011,
+    "defaultFrench": true,
+    "internalSwitches": [
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57534790039062,
+        "url": "http://127.0.0.1:34018/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/content",
+        "time": 1.165166,
+        "fullscreen": true,
+        "decodedColors": 573,
+        "decodedFrames": 32
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.050537109375,
+        "url": "http://127.0.0.1:34018/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/content",
+        "time": 2.562689,
+        "fullscreen": true,
+        "decodedColors": 861,
+        "decodedFrames": 66
+      },
+      {
+        "id": "internal-1",
+        "frequency": 662.109375,
+        "db": -64.57625579833984,
+        "url": "http://127.0.0.1:34018/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/content",
+        "time": 3.40136,
+        "fullscreen": true,
+        "decodedColors": 798,
+        "decodedFrames": 86
+      },
+      {
+        "id": "internal-2",
+        "frequency": 990.234375,
+        "db": -70.02983093261719,
+        "url": "http://127.0.0.1:34018/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/content",
+        "time": 4.184369,
+        "fullscreen": true,
+        "decodedColors": 585,
+        "decodedFrames": 105
+      }
+    ],
+    "failedLanguageRetainedWithoutPause": true,
+    "reopenedAudio": [
+      {
+        "id": "internal-2",
+        "language": "en",
+        "passed": true
+      },
+      {
+        "id": "internal-1",
+        "language": "fr",
+        "passed": true
+      }
+    ],
+    "finalAudioWindowAndBackwardSeek": true
+  },
+  "failure": "page.waitForFunction: Timeout 30000ms exceeded.\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\Aether\\scripts\\browser-scanner.cjs:255:16",
+  "preparations": [
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-2-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-2-chunk-0",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-2-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-1",
+      "method": "GET",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/assets/d1d43067-bd81-439b-aef9-fc108c44b03e/prepared/opus-3-chunk-0",
+      "method": "GET",
+      "status": 200
+    }
+  ],
+  "diagnostic": {
+    "url": "http://127.0.0.1:34018/app/films/?work=aaf60c3c-0b4f-472c-9ad2-4d4b940ffcc4",
+    "buttons": [
+      "",
+      "Créer et ajouter",
+      "",
+      "Meilleure version disponible",
+      "MKV",
+      "MP4",
+      " Marquer non vu",
+      "♡ Favoris",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      ""
+    ],
+    "notice": "",
+    "video": {
+      "time": 2,
+      "paused": true
+    },
+    "audio": {
+      "time": 2,
+      "paused": true
+    }
+  }
+}

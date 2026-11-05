@@ -1,5 +1,5 @@
 //! Read-only local film posters. Paths never form part of the public contract.
-use image::{ImageDecoder, ImageFormat, ImageReader, Limits};
+use image::{ImageFormat, ImageReader};
 pub use media_contracts::media::{LocalImage, ValidatedImage};
 use std::{
     collections::HashMap,
@@ -50,7 +50,7 @@ pub(crate) fn decode_image(
     bytes: &[u8],
     extension: &str,
 ) -> io::Result<(&'static str, image::DynamicImage)> {
-    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     let mime = match reader.format() {
         Some(ImageFormat::Jpeg) => "image/jpeg",
         Some(ImageFormat::Png) => "image/png",
@@ -66,19 +66,8 @@ pub(crate) fn decode_image(
     if expected != mime {
         return Err(invalid("poster extension does not match image content"));
     }
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(4096);
-    limits.max_image_height = Some(4096);
-    limits.max_alloc = Some(32 * 1024 * 1024);
-    reader.limits(limits);
-    let decoder = reader
-        .into_decoder()
-        .map_err(|_| invalid("invalid image header"))?;
-    if decoder.total_bytes() > 32 * 1024 * 1024 {
-        return Err(invalid("image decoded pixels exceed 32 MiB"));
-    }
-    let image = image::DynamicImage::from_decoder(decoder)
-        .map_err(|_| invalid("corrupt image or image decoding limit exceeded"))?;
+    let image = crate::image_encoding::decode(bytes, mime)
+        .map_err(|_| invalid("invalid image or colour profile"))?;
     Ok((mime, image))
 }
 

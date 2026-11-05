@@ -15,7 +15,6 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 type Error = StatusCode;
-static POSTER_WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route("/api/v1/lists", get(lists).post(create_list))
@@ -95,6 +94,48 @@ async fn owner(
     }
     Ok(actor.user.id)
 }
+/// Derived collections share the existing list UI but never grant access or mutate personal lists.
+async fn automatic_collections(
+    auth: &AuthState,
+    actor: &Authenticated,
+) -> Result<std::collections::BTreeMap<String, (String, Vec<Value>)>, Error> {
+    let rows: Vec<(String, String, String, Option<String>)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.kind='film' AND w.has_available_asset=1 AND l.enabled=1 AND n.status!='revoked' AND CAST(COALESCE(json_extract(l.options_json,'$.automaticCollections'),'0') AS TEXT) IN ('1','true') AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (json_extract(w.editorial_json,'$.collection') IS NOT NULL OR json_extract(COALESCE(w.manual_json,'{}'),'$.collection') IS NOT NULL) ORDER BY w.effective_year,w.title_sort,w.id LIMIT 10000")
+        .bind(actor.user.role.as_str()).bind(&actor.user.id)
+        .fetch_all(auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut collections = std::collections::BTreeMap::<String, (String, Vec<Value>)>::new();
+    for (work, title, editorial, manual) in rows {
+        if !parental_allowed(&auth.store, &actor.user.id, &work).await? {
+            continue;
+        }
+        let mut metadata: Value = serde_json::from_str(&editorial).unwrap_or(Value::Null);
+        if let Some(manual) = manual.and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+            && let Some(fields) = manual.as_object()
+            && let Some(target) = metadata.as_object_mut()
+        {
+            target.extend(fields.clone());
+        }
+        let collection = &metadata["collection"];
+        let (Some(identity), Some(name)) = (collection["id"].as_str(), collection["name"].as_str())
+        else {
+            continue;
+        };
+        if identity.is_empty() || name.is_empty() {
+            continue;
+        }
+        let id = format!(
+            "auto-collection-{}",
+            crate::automation::hash(&identity).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        );
+        collections
+            .entry(id)
+            .or_insert_with(|| (name.to_owned(), Vec::new()))
+            .1
+            .push(json!({"id":work,"title":metadata["title"].as_str().unwrap_or(&title),"kind":"film"}));
+    }
+    collections.retain(|_, (_, works)| works.len() >= 2);
+    Ok(collections)
+}
+
 async fn lists(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     let actor = auth.authenticate(&headers).await?;
     let rows: Vec<(String, String,String,String)> =
@@ -103,9 +144,11 @@ async fn lists(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json
             .fetch_all(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(
-        json!({"lists":rows.into_iter().map(|(id,name,visibility,user)|json!({"id":id,"name":name,"visibility":visibility,"owned":user==actor.user.id})).collect::<Vec<_>>()}),
-    ))
+    let mut lists:Vec<Value> = rows.into_iter().map(|(id,name,visibility,user)|json!({"id":id,"name":name,"visibility":visibility,"owned":user==actor.user.id})).collect();
+    for (id, (name, works)) in automatic_collections(&auth, &actor).await? {
+        lists.push(json!({"id":id,"name":name,"visibility":"collection","owned":false,"automatic":true,"itemCount":works.len()}));
+    }
+    Ok(Json(json!({"lists":lists})))
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -152,6 +195,34 @@ async fn list(
     Path(id): Path<String>,
     Query(view): Query<ListView>,
 ) -> Result<Json<Value>, Error> {
+    if id.starts_with("auto-collection-") {
+        let actor = auth.authenticate(&headers).await?;
+        let Some((name, works)) = automatic_collections(&auth, &actor).await?.remove(&id) else {
+            return Err(StatusCode::NOT_FOUND);
+        };
+        let mut items = Vec::new();
+        for work in works {
+            if view.compact {
+                items.push(work);
+                continue;
+            }
+            if let Some(media) = crate::inventory::detail(
+                &auth.store,
+                work["id"]
+                    .as_str()
+                    .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?,
+            )
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            {
+                items.push(media);
+            }
+        }
+        let entries:Vec<Value>=items.iter().enumerate().map(|(position,media)|json!({"kind":"work","id":media["id"],"position":position,"media":media})).collect();
+        return Ok(Json(
+            json!({"id":id,"name":name,"visibility":"collection","owned":false,"automatic":true,"items":items,"entries":entries,"shares":[]}),
+        ));
+    }
     let actor = crate::playlists::access(&auth, &headers, &id, false).await?;
     let (name, visibility, user): (String, String, String) =
         query_as("SELECT name,visibility,user_id FROM personal_lists WHERE id=?")
@@ -422,26 +493,40 @@ async fn upload_poster(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let permit = POSTER_WORKERS
-        .try_acquire()
-        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
-    let image = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        crate::avatars::normalize_image(bytes, &content, true)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    let meta = auth
+    let encoded = crate::artwork::prepare(bytes, content, "poster".into()).await?;
+    let mut stored = Vec::new();
+    let mut leases = Vec::new();
+    for (width, mime, data) in encoded.variants {
+        let meta = auth
+            .store
+            .assets
+            .put_bytes(&data, mime)
+            .await
+            .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+        leases.push(
+            auth.store
+                .assets
+                .lease(&meta.sha256)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        );
+        stored.push((width, meta.sha256));
+    }
+    let revision = uuid::Uuid::new_v4().to_string();
+    let mut tx = auth
         .store
-        .assets
-        .put_bytes(&image, "image/webp")
+        .pool
+        .begin()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     query("INSERT INTO work_posters(work_id,sha256,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
-        .bind(work)
-        .bind(&meta.sha256)
-        .bind(uuid::Uuid::new_v4().to_string())
-        .execute(&auth.store.pool)
+        .bind(&work).bind(&stored[0].1).bind(&revision).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    for (width, sha) in stored.iter().filter(|v| v.0 != 0) {
+        query("INSERT INTO poster_previews(work_id,width,revision,mime,sha256) VALUES(?,?,?,'image/webp',?) ON CONFLICT(work_id,width) DO UPDATE SET revision=excluded.revision,mime=excluded.mime,sha256=excluded.sha256")
+            .bind(&work).bind(width).bind(&revision).bind(sha).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    query("INSERT INTO image_migration_attempts(sha256,outcome) VALUES(?,'completed') ON CONFLICT(sha256) DO UPDATE SET outcome='completed'")
+        .bind(&stored[0].1).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     crate::inventory::invalidate_catalogue_cache();
@@ -1189,3 +1274,123 @@ pub async fn canonical_work(store: &IdentityStore, work: &str) -> Result<String,
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(group.unwrap_or_else(|| work.to_owned()))
 }
+
+#[cfg(test)]
+mod automatic_collection_tests {
+    use super::*;
+    #[tokio::test]
+    async fn collections_follow_opt_in_membership_and_live_permissions() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("collections.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO users(id,role) VALUES('reader','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let token = "c".repeat(64);
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'reader',unixepoch(),unixepoch(),unixepoch()+3600)").bind(crate::auth::hash(&token)).execute(store.pool()).await.unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('films','Films','films','local','/synthetic-read-only',1,'{\"automaticCollections\":true}')").execute(store.pool()).await.unwrap();
+        query("INSERT INTO library_permissions(library_id,user_id) VALUES('films','reader')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        for id in ["one", "two"] {
+            query("INSERT INTO inventory_works(id,library_id,identity_key,title,kind,external_ids_json,editorial_json,has_available_asset) VALUES(?,'films',?,?,'film','{}',?,1)")
+                .bind(id).bind(id).bind(id).bind(json!({"collection":{"id":"tmdb:42","name":"Legal synthetic saga"}}).to_string()).execute(store.pool()).await.unwrap();
+        }
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            format!("media_session={token}").parse().unwrap(),
+        );
+        let actor = auth.authenticate(&headers).await.unwrap();
+        let collections = automatic_collections(&auth, &actor).await.unwrap();
+        assert_eq!(collections.len(), 1);
+        let collection_id = collections.keys().next().unwrap().clone();
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let request = |path: &str| {
+            axum::http::Request::builder()
+                .uri(path)
+                .header(header::COOKIE, format!("media_session={token}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        let response = router(auth.clone())
+            .oneshot(request("/api/v1/lists"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let payload: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(payload["lists"][0]["automatic"], true);
+        assert_eq!(payload["lists"][0]["owned"], false);
+        let response = router(auth.clone())
+            .oneshot(request(&format!(
+                "/api/v1/lists/{collection_id}?compact=true"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let detail: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(detail["entries"].as_array().unwrap().len(), 2);
+
+        assert_eq!(collections.values().next().unwrap().1.len(), 2);
+        query("UPDATE inventory_works SET minimum_age=18 WHERE id='two'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated) VALUES('reader',12,1)").execute(store.pool()).await.unwrap();
+        assert!(
+            automatic_collections(&auth, &actor)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a hidden film cannot expose a saga"
+        );
+        query("DELETE FROM parental_policies")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("DELETE FROM library_permissions")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let response = router(auth.clone())
+            .oneshot(request(&format!("/api/v1/lists/{collection_id}")))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        assert!(
+            automatic_collections(&auth, &actor)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        query("INSERT INTO library_permissions(library_id,user_id) VALUES('films','reader')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("UPDATE libraries SET options_json='{}'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(
+            automatic_collections(&auth, &actor)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests;

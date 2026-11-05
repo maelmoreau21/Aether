@@ -1,7 +1,7 @@
 # ==============================================================================
 # Stage 1: SvelteKit Frontend Web Builder
 # ==============================================================================
-FROM node:22-bookworm-slim AS web-builder
+FROM node:24-bookworm-slim AS web-builder
 
 WORKDIR /app/apps/web
 
@@ -43,7 +43,6 @@ RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/s
     echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
     echo 'fn main() {}' > crates/node/src/bin/aether-node.rs && \
     echo 'pub fn dummy() {}' > crates/core/src/lib.rs && \
-    echo 'fn main() {}' > crates/core/src/main.rs && \
     echo 'fn main() {}' > crates/core/src/bin/aether-core.rs && \
     echo 'fn main() {}' > crates/core/src/bootstrap.rs && \
     echo 'fn main() {}' > crates/core/src/bin/backup.rs && \
@@ -57,18 +56,24 @@ RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/s
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release --locked \
-        --bin media-poc \
         --bin aether-core \
         --bin aether-node \
         --bin media-bootstrap \
         --bin media-backup \
         --bin media-restore \
         --bin media-recover \
-        --bin media-extension-worker \
-        --bin media-extension-pack
+        --bin media-extension-worker
 
-# Copy actual workspace crates (shared contracts, node, and core with migrations)
-COPY crates/ ./crates/
+# Production inputs only: changing integration tests must not recompile releases.
+# Include all embedded SQL, plugins and the served player experiments.
+COPY crates/shared/src/ ./crates/shared/src/
+COPY crates/shared/build.rs ./crates/shared/build.rs
+COPY crates/node/src/ ./crates/node/src/
+COPY crates/core/src/ ./crates/core/src/
+COPY crates/core/build.rs ./crates/core/build.rs
+COPY crates/core/migrations/ ./crates/core/migrations/
+COPY crates/core/embedded_plugins/ ./crates/core/embedded_plugins/
+COPY crates/core/experiments/ ./crates/core/experiments/
 
 # Version changes must not invalidate the dependency compilation layer above.
 ARG GIT_BRANCH=develop
@@ -84,7 +89,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
           crates/node/src/lib.rs \
           crates/node/src/bin/aether-node.rs \
           crates/core/src/lib.rs \
-          crates/core/src/main.rs \
           crates/core/src/bin/aether-core.rs \
           crates/core/src/bootstrap.rs \
           crates/core/src/bin/backup.rs \
@@ -101,7 +105,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
           target/release/deps/*media_backup* \
           target/release/deps/*media_restore* \
           target/release/deps/*media_recover* \
-          target/release/media-poc \
           target/release/aether-core \
           target/release/aether-node \
           target/release/media-bootstrap \
@@ -109,30 +112,26 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
           target/release/media-restore \
           target/release/media-recover && \
     cargo build --release --locked \
-        --bin media-poc \
         --bin aether-core \
         --bin aether-node \
         --bin media-bootstrap \
         --bin media-backup \
         --bin media-restore \
         --bin media-recover \
-        --bin media-extension-worker \
-        --bin media-extension-pack && \
+        --bin media-extension-worker && \
     strip --strip-all \
-        target/release/media-poc \
         target/release/aether-core \
         target/release/aether-node \
         target/release/media-bootstrap \
         target/release/media-backup \
         target/release/media-restore \
         target/release/media-recover \
-        target/release/media-extension-worker \
-        target/release/media-extension-pack
+        target/release/media-extension-worker
 
 # FFmpeg/ffprobe 9.0.2: same verified source as CI, packet-copy runtime profile.
 FROM debian:bookworm-slim AS probe-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates curl pkg-config nasm xz-utils \
+        build-essential ca-certificates curl pkg-config nasm xz-utils libdav1d-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
 RUN bash /tmp/build-ffmpeg.sh /probe runtime
@@ -217,6 +216,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         tini \
+        libdav1d6 \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
@@ -260,6 +260,9 @@ CMD ["aether-node"]
 # ==============================================================================
 FROM backup-runtime AS runtime
 
+RUN apt-get update && apt-get install -y --no-install-recommends libdav1d6 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffprobe /usr/local/bin/ffprobe
 RUN ln -s /usr/local/bin/ffmpeg /usr/bin/ffmpeg \
@@ -284,7 +287,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/l
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
 # The production standalone server is the same Core with its local Node.
 # Keep historical command names without shipping a second full Core executable.
-# The fixture-bench media-poc binary remains available in source builds only.
+# media-poc is only a compatibility alias: source builds run aether-core (default-run).
 RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc \
     && ln -s /usr/local/bin/aether-core /usr/local/bin/aether
 

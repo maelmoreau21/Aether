@@ -25,8 +25,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", STANDARD.encode(pair.public_key().as_ref()));
         return Ok(());
     }
+    if args.len() == 4 && args[1] == "verify" {
+        // Check a package exactly as the Core does before installing it, including a
+        // package signed outside this tool (for example by a release workflow).
+        let package: Package = serde_json::from_slice(&std::fs::read(&args[2])?)?;
+        let key = STANDARD.decode(std::fs::read_to_string(&args[3])?.trim())?;
+        media_poc::extensions::validate_package(&package, &key)
+            .map_err(|code| format!("invalid extension package: {code}"))?;
+        println!(
+            "{}@{} signed by {} is valid",
+            package.manifest.id, package.manifest.version, package.publisher_id
+        );
+        return Ok(());
+    }
     if args.len() != 7 || args[1] != "pack" {
-        return Err("Usage: media-extension-pack keygen KEY.pk8 | pack MANIFEST.json MODULE.wasm KEY.pk8 PUBLISHER_ID OUTPUT.json".into());
+        return Err("Usage: media-extension-pack keygen KEY.pk8 | pack MANIFEST.json MODULE.wasm KEY.pk8 PUBLISHER_ID OUTPUT.json | verify PACKAGE.json PUBLIC_KEY.txt".into());
     }
     let wasm = std::fs::read(&args[3])?;
     let manifest: Manifest = serde_json::from_slice(&std::fs::read(&args[2])?)?;

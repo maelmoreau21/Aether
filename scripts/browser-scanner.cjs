@@ -49,20 +49,20 @@ fs.mkdirSync(out, {recursive: true});
       await page.getByRole('dialog').screenshot({path:`${out}/library-editor-mobile.png`});
       await page.setViewportSize({width:1440,height:900});
       await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
-      await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
+      const libraryRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Gérer Films scanner navigateur',exact:true})});
+      await libraryRow.waitFor();
       await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
       await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
-      const article = page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
-      await article.getByText(/Terminé/).waitFor({timeout:60000});
-      assert.match(await article.locator('.scan-counters').textContent(), /2 (?:fichier\(s\) )?découvert/);
+      await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});
+      assert.match(await libraryRow.locator('.scan-counters').textContent(), /2 (?:fichier\(s\) )?découvert/);
       report.results.scan = true;
       await page.screenshot({path:`${out}/scan.png`});
       await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
       await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
-      await article.locator('.scan-counters').filter({hasText:/0 analysé.*2 réutilisé/}).waitFor({timeout:60000});
-      await article.getByText(/Terminé/).waitFor({timeout:60000});
+      await libraryRow.locator('.scan-counters').filter({hasText:/0 analysé\(s\).*2 réutilisé\(s\)/}).waitFor({timeout:60000});
+      await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});
       report.results.incremental = true;
     }
     await page.goto(origin+'/app/films/');
@@ -72,7 +72,6 @@ fs.mkdirSync(out, {recursive: true});
     await card.click();
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
-    await page.locator('.versions-panel summary').click();
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
     // Browser clock at the actual Svelte click handler boundary; excludes
     // Playwright dispatch latency. rVFC means compositor submission, not photons.
@@ -246,9 +245,78 @@ fs.mkdirSync(out, {recursive: true});
       report.results.long.interruptedAudioRequestRecovered=true;
       await page.locator('video').evaluate(v=>{v.pause();v.currentTime=2;});await page.waitForFunction(()=>!document.querySelector('video').seeking);await page.locator('video').evaluate(v=>v.play());
     }
+    // Earlier playback checks can exhaust the 12-second fixture on slower CI
+    // runners. Keep the playhead inside the ASS cue while checking subtitles.
+    await page.locator('video').evaluate(v=>{v.pause();v.currentTime=2;});
+    await page.waitForFunction(()=>{const v=document.querySelector('video');return v.paused&&!v.seeking&&Math.abs(v.currentTime-2)<.1;});
+    await page.evaluate(()=>{window.__scannerPreviousCaptions=[...document.querySelector('video').querySelectorAll('track')].map(t=>t.track);});
+    await openMenu('subtitles');
+    await page.locator('[data-subtitle-id]').filter({hasText:'EN · ASS'}).click();
+    // ASS now renders through libass/OffscreenCanvas, not video.textTracks.
+    // Compare pixels on the same paused video with controls hidden in captures.
+    const assCanvas = page.locator('canvas.JASSUB');
+    await assCanvas.waitFor({state:'visible'});
+    // A visible 300x150 placeholder exists before the worker is ready. Wait
+    // for the real selection transaction and renderer sizing before comparing.
+    await openMenu('subtitles');
+    await page.locator('[data-subtitle-id][aria-checked="true"]:not(:disabled)').filter({hasText:'EN · ASS'}).waitFor();
+    await page.locator('[aria-label="Fermer le menu"]').click();
+    await page.waitForFunction(()=>Boolean(document.querySelector('canvas.JASSUB')?.style.width));
+    assert.equal(await page.evaluate(()=>window.__scannerPreviousCaptions.every(t=>t.mode==='disabled')),true,'Detached native captions must be disabled to avoid lingering text over ASS');
+    await page.evaluate(()=>{delete window.__scannerPreviousCaptions;});
+    async function assFrame(hidden = false) {
+      // Use CSSOM properties, like the application does, rather than injecting
+      // a stylesheet rejected by Core's CSP. Do not bypass CSP for this test.
+      await page.evaluate(hidden=>{
+        const canvas=document.querySelector('canvas.JASSUB');
+        const controls=[...document.querySelector('.player-shell').children].filter(e=>e.tagName!=='VIDEO'&&e.tagName!=='CANVAS');
+        window.__scannerAssCapture={controls:controls.map(e=>[e,e.style.visibility]),canvas,opacity:canvas.style.opacity};
+        controls.forEach(e=>{e.style.visibility='hidden';});
+        if(hidden)canvas.style.opacity='0';
+      },hidden);
+      try { return await assCanvas.screenshot({animations:'disabled'}); }
+      finally { await page.evaluate(()=>{
+        const saved=window.__scannerAssCapture;
+        saved.controls.forEach(([e,value])=>{e.style.visibility=value;});
+        saved.canvas.style.opacity=saved.opacity;
+        delete window.__scannerAssCapture;
+      }); }
+    }
+    const withoutAss = await assFrame(true);
+    fs.writeFileSync(`${out}/ass-hidden${restart?'-restart':''}.png`,withoutAss);
+    async function waitForAssPixels(predicate, message) {
+      const deadline = Date.now() + 5000;
+      let lastFrame;
+      do {
+        const frame = await assFrame();
+        lastFrame=frame;
+        if (predicate(frame)) return frame;
+        await page.waitForTimeout(100);
+      } while (Date.now() < deadline);
+      fs.writeFileSync(`${out}/ass-probe-failed${restart?'-restart':''}.png`,lastFrame);
+      assert.fail(message);
+    }
+    const renderedAss = await waitForAssPixels(frame=>!frame.equals(withoutAss),'ASS must draw visible pixels on the paused video');
+    fs.writeFileSync(`${out}/ass-rendered${restart?'-restart':''}.png`,renderedAss);
+    assert.equal(await page.evaluate(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing')),false);
+    await openMenu('subtitles');
+    await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).fill('30');
+    await page.locator('.menu-heading').click();
+    await waitForAssPixels(frame=>frame.equals(withoutAss),'ASS offset must clear pixels outside the cue while paused');
+    await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).fill('0');
+    await page.locator('.menu-heading').click();
+    await waitForAssPixels(frame=>frame.equals(renderedAss),'Resetting ASS offset must restore the rendered cue');
+    await page.locator('[data-subtitle-id="off"]').click();
+    await page.waitForFunction(()=>!document.querySelector('canvas.JASSUB'));
+    report.results.assCanvas={rendered:true,pausedOffset:true,cleanup:true};
+
+    // Exercise the text fallback explicitly on a client without OffscreenCanvas.
+    // This capability simulation is distinct from the real libass checks above.
+    await page.evaluate(()=>{window.__scannerOffscreenCanvas=window.OffscreenCanvas;window.OffscreenCanvas=undefined;});
     await openMenu('subtitles');
     await page.locator('[data-subtitle-id]').filter({hasText:'EN · ASS'}).click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && t.activeCues?.[0]?.text.includes('ASS Hello, world')));
+    assert.equal(await assCanvas.count(),0,'Text fallback must not leave a libass overlay');
     report.results.assTextFallback=true;
     await openMenu('subtitles');
     await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).fill('1');
@@ -258,6 +326,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('.menu-heading').click();
     await page.locator('[aria-label="Fermer le menu"]').click();
     await page.screenshot({path:`${out}/ass-fallback${restart?'-restart':''}.png`});
+    await page.evaluate(()=>{window.OffscreenCanvas=window.__scannerOffscreenCanvas;delete window.__scannerOffscreenCanvas;});
+    await page.locator('video').evaluate(v=>v.play());
     if (!long) {
       await page.locator('video').evaluate(v=>{v.pause();v.currentTime=4.25;});
       await page.waitForFunction(()=>!document.querySelector('video').seeking);
@@ -326,6 +396,13 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('[data-subtitle-id]').filter({hasText:'EN · VTT'}).click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && t.activeCues?.[0]?.text==='External WebVTT subtitle'));
     await page.screenshot({path:`${out}/webvtt-rendered${restart?'-restart':''}.png`});
+    if (restart && process.env.MEDIA_TEST_DOWNLOADED_SUBTITLE === '1') {
+      await openMenu('subtitles');
+      await page.locator('[data-subtitle-id^="downloaded-"]').click();
+      await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && t.activeCues?.[0]?.text==='Downloaded application subtitle'));
+      await page.screenshot({path:`${out}/downloaded-subtitle-restart.png`});
+      report.results.downloadedSubtitleAfterRestart={selected:true,activeCue:true,source:'application database offline fixture'};
+    }
     await openMenu('subtitles'); await page.locator('[data-subtitle-id="off"]').click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
     await page.waitForFunction(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled===false);
@@ -340,7 +417,6 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForFunction(async()=>{ const r=await fetch('/api/v1/progress'); const data=await r.json(); return data.items.some(item=>item.position>3.8); });
     // The final-window and long-seek regressions can legitimately mark watched.
     // Establish the unwatched precondition before testing the manual toggle.
-    await page.locator('.personal-panel summary').click();
     if (await page.getByRole('button',{name:'Marquer non vu',exact:true}).isVisible()) await page.getByRole('button',{name:'Marquer non vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer comme vu',exact:true}).click();
     await page.getByRole('button',{name:'Marquer non vu',exact:true}).waitFor();

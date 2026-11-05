@@ -54,7 +54,7 @@ crates/core/                  package actuel conservé pendant la transition
   src/db/{mod,identity,catalog,inventory,jobs}.rs
   src/playback.rs              résolution autorisée et descripteurs publics
   src/fixture_bench/           expériences et associations synthétiques
-  src/main.rs                 hôte standalone : Core + LocalNode + statiques
+  src/bin/aether-core.rs      hôte unique : Core + LocalNode + statiques
   src/bootstrap.rs            bootstrap utilisant la même base
   src/bin/media-core.rs        hôte Core seul, au jalon distant
 apps/web/                     inchangé par cet audit
@@ -328,7 +328,7 @@ Pas de délégation simultanée des mêmes fichiers avec l'IA packaging.
 
 Inspection des sources, manifests, six migrations et tests présents ;
 `cargo metadata --locked --no-deps --format-version 1` exécuté avec succès.
-Résultats de la suite Rust et vérification du diff consignés dans `MEMORY.md`
+Résultats de la suite Rust et vérification du diff consignés dans `.ai/MEMORY.md`
 avec cette décision : fmt et Clippy strict réussis, suite Rust 50 réussis / 5
 ignorés (quatre navigateurs et un helper subprocess), `git diff --check` réussi.
 Deux éléments non suivis (`.agents/`, `ORIGINAL_REQUEST.md`) sont apparus pendant

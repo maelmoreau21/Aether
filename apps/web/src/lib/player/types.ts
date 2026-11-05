@@ -5,6 +5,7 @@ export interface CodecTrack {
 }
 export interface Source {
   id: string;
+  reportTrackId?: string;
   audioTrackId: string;
   language: string;
   url: string;
@@ -29,10 +30,10 @@ export interface Source {
   label?: string;
   audioOffsetSeconds?: number;
 }
-export interface Subtitle { id: string; language: string; label: string; url: string; forced?: boolean; sdh?: boolean; sourceFormat?: string }
+export interface Subtitle { id: string; reportTrackId?: string; language: string; label: string; url: string; assUrl?: string | null; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
   chapters?: { start: number; title: string }[];
-  trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string } | null;
+  trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string; mime?: 'image/jpeg' | 'image/webp' } | null;
   intro?: { start: number; end: number };
   credits?: { start: number; end: number };
   recap?: { start: number; end: number };
@@ -55,6 +56,7 @@ export interface Media {
 }
 export interface PlaybackState { position: number; duration: number; paused: boolean; volume: number; speed: number }
 export interface Player {
+  playbackInfo?(): import('../statistics/collector').PlaybackInfo;
   setStatusListener?(listener:(message:string)=>void):void;
   load(media: Media, initialAudioTrackId?: string, initialPosition?: number | Promise<number>): Promise<void>;
   play(): Promise<void>;

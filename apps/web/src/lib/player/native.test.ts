@@ -4,6 +4,8 @@ import { ExternalAudio } from './external-audio';
 import { SegmentedAudio } from './segmented-audio';
 import { AudioSelectionRetainedError } from './errors';
 import type { Media } from './types';
+import { createAssRenderer } from './ass-renderer';
+vi.mock('./ass-renderer', () => ({ createAssRenderer: vi.fn() }));
 vi.mock('./external-audio', () => ({ ExternalAudio: class {
   async load() {} async bufferForPlayback() {} async play() {} destroy() {} setOffset() {} activate() {} assertReady() {} pause() {} isBuffering() { return false; }
 } }));
@@ -11,6 +13,7 @@ class Video extends EventTarget {
   currentTime = 0; duration = 12; paused = true; volume = 0.4; playbackRate = 1.5;
   src = ''; loads = 0; auto = true; readyState = 4; seeking = false;
   buffered = {length:1,start:()=>0,end:()=>12};
+  textTracks = [];
   pause() { this.paused = true; }
   play() { this.paused = false; return Promise.resolve(); }
   querySelectorAll() { return []; }
@@ -24,6 +27,36 @@ const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr',
 function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
+  it('disables a native caption before detaching it on a paused subtitle change', async () => {
+    const {video,player}=setup();
+    const caption={mode:'showing'};
+    const remove=vi.fn(()=>expect(caption.mode).toBe('disabled'));
+    vi.spyOn(video,'querySelectorAll').mockReturnValue([{track:caption,remove}] as never);
+    await player.selectSubtitle(null);
+    expect(remove).toHaveBeenCalledOnce();
+    player.destroy();
+  });
+  it('keeps ASS offsets and releases renderers superseded by a repeated selection', async () => {
+    vi.stubGlobal('OffscreenCanvas', class {}); vi.stubGlobal('Worker', class {});
+    const {player}=setup();
+    await player.load({...media,subtitles:[{id:'ass',language:'fr',label:'ASS',url:'/fallback.vtt',assUrl:'/original.ass'}]});
+    const renderer = {timeOffset:0,destroy:vi.fn(async()=>{})};
+    vi.mocked(createAssRenderer).mockResolvedValueOnce(renderer);
+    player.setSubtitleOffset(2);
+    await player.selectSubtitle('ass');
+    expect(createAssRenderer).toHaveBeenLastCalledWith(expect.anything(),'/original.ass',2);
+    player.setSubtitleOffset(-1); expect(renderer.timeOffset).toBe(1);
+    let resolve!: (value: typeof renderer)=>void;
+    vi.mocked(createAssRenderer).mockImplementationOnce(()=>new Promise(ready=>{resolve=ready;}));
+    const pending=player.selectSubtitle('ass');
+    await vi.waitFor(()=>expect(resolve).toBeTypeOf('function'));
+    await player.selectSubtitle(null);
+    const stale={timeOffset:0,destroy:vi.fn(async()=>{})}; resolve(stale);
+    await pending;
+    expect(renderer.destroy).toHaveBeenCalledOnce();
+    expect(stale.destroy).toHaveBeenCalledOnce();
+    player.destroy();
+  });
   it('starts external audio metadata immediately and supplies the saved resume position', async () => {
     const {video,player}=setup();video.auto=false;
     const load=vi.spyOn(ExternalAudio.prototype,'load');

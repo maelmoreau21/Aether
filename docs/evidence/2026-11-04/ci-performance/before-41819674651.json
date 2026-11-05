@@ -1,0 +1,1455 @@
+{
+  "run_id": 41819674651,
+  "url": "https://github.com/maelmoreau21/Aether/actions/runs/41819674651",
+  "commit": "b20fc4ef9db18d6344cd366ca319a93a52b8fc7e",
+  "event": "push",
+  "conclusion": "success",
+  "complete": true,
+  "workflow_wall_seconds": 1317.0,
+  "runner_seconds": 4327.0,
+  "runner_minutes_rounded_per_job": 81,
+  "billing_scope": "Observed job wall time; per-job rounding estimate, excludes unknown billing plan, discounts and rates",
+  "cache_scope": "Classify from logs; warm/cold is not inferred from a successful run",
+  "jobs": [
+    {
+      "id": 126539388932,
+      "name": "Images Docker (amd64, compilation native partagée)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:32Z",
+      "completed_at": "2026-11-04T11:17:15Z",
+      "seconds": 103.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 59.0
+        },
+        {
+          "name": "Vérifier le runtime Node optimisé avant publication",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les trois services et une vraie image AV1 de chapitre",
+          "conclusion": "success",
+          "seconds": 22.0
+        },
+        {
+          "name": "Conserver les mesures et aperçus Docker",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Post Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539389480,
+      "name": "Rust (partition 1)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:32Z",
+      "completed_at": "2026-11-04T11:24:03Z",
+      "seconds": 511.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Libérer de l'espace disque sur le runner",
+          "conclusion": "success",
+          "seconds": 47.0
+        },
+        {
+          "name": "Installer la toolchain Rust",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 10.0
+        },
+        {
+          "name": "Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 12.0
+        },
+        {
+          "name": "Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer le remux linguistique (pistes FR/EN)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Générer les fixtures représentatives (10-bit / 5.1)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les segments MSE",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les manifestes DASH",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Prepare P1 fixture sources",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les fixtures MSE/DASH préparées, y compris après restauration du cache",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les métriques de comparaison des lecteurs",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les statistiques de marge de sécurité",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Valider la récupération audio bornée",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier le formatage (cargo fmt)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Analyse statique stricte (cargo clippy)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Exécuter les tests unitaires (cargo test --lib --bins)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier l'ABI du SDK avec un module Rust de test",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Exécuter les tests d'intégration (cargo test --test '*')",
+          "conclusion": "success",
+          "seconds": 426.0
+        },
+        {
+          "name": "Vérifier la couverture des partitions de tests",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Post Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539389793,
+      "name": "Images Docker (arm64, compilation native partagée)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:34Z",
+      "completed_at": "2026-11-04T11:17:07Z",
+      "seconds": 93.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 36.0
+        },
+        {
+          "name": "Vérifier le runtime Node optimisé avant publication",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les trois services et une vraie image AV1 de chapitre",
+          "conclusion": "success",
+          "seconds": 38.0
+        },
+        {
+          "name": "Conserver les mesures et aperçus Docker",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539389983,
+      "name": "Rust (partition 2)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:32Z",
+      "completed_at": "2026-11-04T11:26:47Z",
+      "seconds": 675.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Libérer de l'espace disque sur le runner",
+          "conclusion": "success",
+          "seconds": 78.0
+        },
+        {
+          "name": "Installer la toolchain Rust",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 9.0
+        },
+        {
+          "name": "Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer le remux linguistique (pistes FR/EN)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Générer les fixtures représentatives (10-bit / 5.1)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les segments MSE",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les manifestes DASH",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Prepare P1 fixture sources",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les fixtures MSE/DASH préparées, y compris après restauration du cache",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les métriques de comparaison des lecteurs",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les statistiques de marge de sécurité",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Valider la récupération audio bornée",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier le formatage (cargo fmt)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Analyse statique stricte (cargo clippy)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Exécuter les tests unitaires (cargo test --lib --bins)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier l'ABI du SDK avec un module Rust de test",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Exécuter les tests d'intégration (cargo test --test '*')",
+          "conclusion": "success",
+          "seconds": 569.0
+        },
+        {
+          "name": "Vérifier la couverture des partitions de tests",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Post Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539394799,
+      "name": "Audit de sécurité (cargo audit)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:33Z",
+      "completed_at": "2026-11-04T11:18:39Z",
+      "seconds": 186.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Audit de sécurité des dépendances RustSec",
+          "conclusion": "success",
+          "seconds": 178.0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539395097,
+      "name": "Navigateur Chrome (Films & Séries)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:32Z",
+      "completed_at": "2026-11-04T11:22:16Z",
+      "seconds": 404.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Purger les preuves navigateur préexistantes",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Installer la toolchain Rust",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Installer Node.js",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Installer FFmpeg (génération des fixtures et ffprobe)",
+          "conclusion": "success",
+          "seconds": 10.0
+        },
+        {
+          "name": "Installer les dépendances npm du frontend",
+          "conclusion": "success",
+          "seconds": 5.0
+        },
+        {
+          "name": "Vérifier Chrome préinstallé, installer seulement si nécessaire",
+          "conclusion": "success",
+          "seconds": 10.0
+        },
+        {
+          "name": "Construire le frontend SvelteKit statique",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)",
+          "conclusion": "success",
+          "seconds": 12.0
+        },
+        {
+          "name": "Préparer le remux linguistique (pistes FR/EN)",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Générer les fixtures représentatives (10-bit / 5.1)",
+          "conclusion": "success",
+          "seconds": 12.0
+        },
+        {
+          "name": "Préparer les sources P1 (clips MKV / MP4 FR/EN)",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Exécuter les parcours Films et Séries (scan, lecture, redémarrage, permissions et sessions)",
+          "conclusion": "success",
+          "seconds": 169.0
+        },
+        {
+          "name": "Vérifier playlists, partage connecté, musique persistante et paroles",
+          "conclusion": "success",
+          "seconds": 49.0
+        },
+        {
+          "name": "Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté",
+          "conclusion": "success",
+          "seconds": 57.0
+        },
+        {
+          "name": "Validate separate MP4/WebM video and independent Opus 2.0/5.1/7.1",
+          "conclusion": "success",
+          "seconds": 45.0
+        },
+        {
+          "name": "Vérifier la génération fraîche des rapports et captures navigateur",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Archiver les rapports et captures navigateur",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Installer FFmpeg (génération des fixtures et ffprobe)",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Installer Node.js",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539397295,
+      "name": "Rust (partition 0)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:33Z",
+      "completed_at": "2026-11-04T11:25:31Z",
+      "seconds": 598.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Libérer de l'espace disque sur le runner",
+          "conclusion": "success",
+          "seconds": 79.0
+        },
+        {
+          "name": "Installer la toolchain Rust",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 9.0
+        },
+        {
+          "name": "Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 12.0
+        },
+        {
+          "name": "Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer le remux linguistique (pistes FR/EN)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Générer les fixtures représentatives (10-bit / 5.1)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les segments MSE",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les manifestes DASH",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Prepare P1 fixture sources",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les fixtures MSE/DASH préparées, y compris après restauration du cache",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les métriques de comparaison des lecteurs",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les statistiques de marge de sécurité",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Valider la récupération audio bornée",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier le formatage (cargo fmt)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Analyse statique stricte (cargo clippy)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Exécuter les tests unitaires (cargo test --lib --bins)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier l'ABI du SDK avec un module Rust de test",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Exécuter les tests d'intégration (cargo test --test '*')",
+          "conclusion": "success",
+          "seconds": 487.0
+        },
+        {
+          "name": "Vérifier la couverture des partitions de tests",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Post Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539400292,
+      "name": "Validation des workflows",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:34Z",
+      "completed_at": "2026-11-04T11:15:42Z",
+      "seconds": 8.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Pull rhysd/actionlint:1.7.12",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Run rhysd/actionlint:1.7.12",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/setup-python@v5",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Validate manual release version policy",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Verify FFmpeg source download fallback and integrity",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Verify multiarchitecture manifest publication gates offline",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/setup-python@v5",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539424386,
+      "name": "Rust (contrôles et contrats)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:37Z",
+      "completed_at": "2026-11-04T11:26:03Z",
+      "seconds": 626.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Initialize containers",
+          "conclusion": "success",
+          "seconds": 10.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Libérer de l'espace disque sur le runner",
+          "conclusion": "success",
+          "seconds": 41.0
+        },
+        {
+          "name": "Installer la toolchain Rust",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 11.0
+        },
+        {
+          "name": "Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer le remux linguistique (pistes FR/EN)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Générer les fixtures représentatives (10-bit / 5.1)",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les segments MSE",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Préparer les manifestes DASH",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Prepare P1 fixture sources",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les fixtures MSE/DASH préparées, y compris après restauration du cache",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Valider les métriques de comparaison des lecteurs",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Valider les statistiques de marge de sécurité",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Valider la récupération audio bornée",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Vérifier le formatage (cargo fmt)",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Analyse statique stricte (cargo clippy)",
+          "conclusion": "success",
+          "seconds": 33.0
+        },
+        {
+          "name": "Exécuter les tests unitaires (cargo test --lib --bins)",
+          "conclusion": "success",
+          "seconds": 233.0
+        },
+        {
+          "name": "Vérifier l'ABI du SDK avec un module Rust de test",
+          "conclusion": "success",
+          "seconds": 39.0
+        },
+        {
+          "name": "Exécuter les tests d'intégration (cargo test --test '*')",
+          "conclusion": "skipped",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier la couverture des partitions de tests",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Contrats PostgreSQL 18 (HTTP, OIDC, deux Nodes)",
+          "conclusion": "success",
+          "seconds": 229.0
+        },
+        {
+          "name": "Post Installer FFmpeg (requis par les tests unitaires et intégration media-node)",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Cache des fixtures synthétiques",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Cache des dépendances Cargo",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Stop containers",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126539512532,
+      "name": "Frontend SvelteKit",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:15:52Z",
+      "completed_at": "2026-11-04T11:16:37Z",
+      "seconds": 45.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Installer Node.js",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Installer les dépendances npm",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Audit de sécurité des dépendances npm",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Vérification TypeScript & Svelte (svelte-check)",
+          "conclusion": "success",
+          "seconds": 11.0
+        },
+        {
+          "name": "Linting (ESLint / Prettier)",
+          "conclusion": "success",
+          "seconds": 8.0
+        },
+        {
+          "name": "Tests unitaires frontend (Vitest)",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Build statique servi par Rust",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Post Installer Node.js",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Récupérer le code source",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126543541914,
+      "name": "Rust (Format, Clippy, Tests)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:26:50Z",
+      "completed_at": "2026-11-04T11:26:53Z",
+      "seconds": 3.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Exiger la réussite de toutes les partitions Rust",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126543584744,
+      "name": "Calcul du numéro bêta",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:26:55Z",
+      "completed_at": "2026-11-04T11:27:03Z",
+      "seconds": 8.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run actions/setup-python@v5",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run set -euo pipefail",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/setup-python@v5",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126543661093,
+      "name": "Création du tag bêta Git",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:27:05Z",
+      "completed_at": "2026-11-04T11:27:13Z",
+      "seconds": 8.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Poser le tag bêta",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126543737181,
+      "name": "Publication Docker GHCR (develop) / build-and-publish (amd64, ubuntu-latest)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:27:15Z",
+      "completed_at": "2026-11-04T11:34:48Z",
+      "seconds": 453.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Run docker/login-action@v3",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run docker/metadata-action@v5",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Run docker/metadata-action@v5",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run docker/metadata-action@v5",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 395.0
+        },
+        {
+          "name": "Vérifier les trois images (provenance, version et runtime Node)",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Vérifier les services et l’extraction AV1 avant tout push",
+          "conclusion": "success",
+          "seconds": 17.0
+        },
+        {
+          "name": "Pousser uniquement les références immuables de l’architecture vérifiée",
+          "conclusion": "success",
+          "seconds": 8.0
+        },
+        {
+          "name": "Sauvegarder les digests en artifact",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Conserver les vérifications locales",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Post Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Run docker/login-action@v3",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 8.0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126543737322,
+      "name": "Publication Docker GHCR (develop) / build-and-publish (arm64, ubuntu-24.04-arm)",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:27:18Z",
+      "completed_at": "2026-11-04T11:36:46Z",
+      "seconds": 568.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 6.0
+        },
+        {
+          "name": "Run docker/login-action@v3",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run docker/metadata-action@v5",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Run docker/metadata-action@v5",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run docker/metadata-action@v5",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 487.0
+        },
+        {
+          "name": "Vérifier les trois images (provenance, version et runtime Node)",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Vérifier les services et l’extraction AV1 avant tout push",
+          "conclusion": "success",
+          "seconds": 33.0
+        },
+        {
+          "name": "Pousser uniquement les références immuables de l’architecture vérifiée",
+          "conclusion": "success",
+          "seconds": 23.0
+        },
+        {
+          "name": "Sauvegarder les digests en artifact",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Conserver les vérifications locales",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Run docker/bake-action@v6",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Post Run docker/login-action@v3",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 3.0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    },
+    {
+      "id": 126548274400,
+      "name": "Publication Docker GHCR (develop) / Publier les manifests après les deux validations natives",
+      "conclusion": "success",
+      "started_at": "2026-11-04T11:36:48Z",
+      "completed_at": "2026-11-04T11:37:26Z",
+      "seconds": 38.0,
+      "steps": [
+        {
+          "name": "Set up job",
+          "conclusion": "success",
+          "seconds": 2.0
+        },
+        {
+          "name": "Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 4.0
+        },
+        {
+          "name": "Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 7.0
+        },
+        {
+          "name": "Run docker/login-action@v3",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Run actions/download-artifact@v4",
+          "conclusion": "success",
+          "seconds": 1.0
+        },
+        {
+          "name": "Vérifier les six références et publier les trois manifests",
+          "conclusion": "success",
+          "seconds": 19.0
+        },
+        {
+          "name": "Post Run docker/login-action@v3",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run docker/setup-buildx-action@v3",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Post Run actions/checkout@v4",
+          "conclusion": "success",
+          "seconds": 0
+        },
+        {
+          "name": "Complete job",
+          "conclusion": "success",
+          "seconds": 0
+        }
+      ]
+    }
+  ]
+}

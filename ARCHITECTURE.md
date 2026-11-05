@@ -1,12 +1,12 @@
 > Moteur de tâches à Core unique (25 octobre 2026) : file SQLite/PostgreSQL persistante, décisions Core, exécution confinée dans les Media Nodes appairés et dans le Node standalone, leases/tentatives et priorité à la lecture. Les travaux distribués n’exigent pas plusieurs Core ni un broker externe. Contrat réel et limites : [DISTRIBUTED_TASKS.md](docs/DISTRIBUTED_TASKS.md).
 
-> PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et MEMORY.md ; P2 reste ouvert.
+> PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et .ai/MEMORY.md ; P2 reste ouvert.
 
 > CI/GHCR (18 octobre 2026) : validation YAML réparée localement, publication
 > réutilisable conditionnée à tous les contrôles et aux trois builds Docker.
 > JWT utilise AWS-LC ; aucun changement de schéma ni de modes de déploiement.
 > Validation distante/publication encore en attente d'autorisation explicite.
-> Contrat et limites : [CI/GHCR](docs/CI_GHCR.md). PostgreSQL 18 reste non implémenté.
+> Contrat et limites de ce jalon historique : [CI/GHCR](docs/CI_GHCR.md). Pour PostgreSQL, voir l’état et les limites dans [POSTGRESQL.md](docs/POSTGRESQL.md).
 >
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités
 > issuer/subject et sessions Core communes aux deux modes Docker.
@@ -18,6 +18,16 @@
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.
 
 # ARCHITECTURE.md — Architecture cible Aether
+
+## Organisation interne du backend — 4 novembre 2026
+
+Les façades `crates/core/src/inventory/mod.rs`, `crates/core/src/nodes/mod.rs`
+et `crates/node/src/server/mod.rs` conservent les chemins publics Rust existants.
+Leurs sous-modules privés séparent publication/catalogue/livraison, gestion des
+Nodes et serveur média, avec des imports explicites et les mêmes instances d'état.
+La publication garde sa transaction unique ; les signatures, capacités, gardes
+de flux et leases restent avec leurs opérations. Rôles, dépendances, validations
+et limites : [modules backend](docs/BACKEND_MODULES.md).
 
 Stockage privé des extensions (25 octobre 2026) : connexions SQLx exclusivement
 dans le Core, broker borné via les pipes du worker Wasm, données KV et objets
@@ -39,16 +49,18 @@ Le probe technique et le lecteur restent distincts. Voir [LOCAL_FILM_NFO.md](doc
 Mise à jour scanner Films P1 (16 octobre 2026) : inventaire relationnel SQLite,
 jobs locaux et lecture native autorisée implémentés. Le parcours des fichiers
 reste dans le Node interne, l'ingestion et le catalogue dans le Core. Le mode
-`MEDIA_LIBRARY_ROOT` démarre sans fixtures. État/limites :
+`MEDIA_LIBRARY_ROOT` configure la racine locale du Core ; `MEDIA_LIBRARY_DIR` est la variable de montage hôte de l’exemple Compose. État/limites :
 [LOCAL_FILM_SCANNER.md](docs/LOCAL_FILM_SCANNER.md). Les mentions antérieures
 « pas de scanner » ci-dessous sont historiques.
 
-État local du 16 octobre 2026 : connexion/session SQLite ajoutées au Core existant,
-permissions communes avant les routes catalogue/média et séparation du banc P0
-par feature de test. Voir `docs/LOCAL_SESSIONS.md`. Aucun Node distant, OIDC ou
-gestion de bibliothèques personnelles ajouté ; les sections cibles restent futures.
+État local : le Core persiste les comptes et sessions SQLite, applique les
+permissions communes et expose le catalogue issu des bibliothèques locales.
+OIDC et le transport multi-Node disposent de contrats et de parcours ciblés ;
+leurs limites de déploiement restent documentées dans les preuves associées.
+Voir `docs/LOCAL_SESSIONS.md`, `docs/OIDC.md` et
+`docs/archive/ci/P2_DOCKER_VALIDATION.md`.
 
-> **Architecture cible, pas un état de livraison.** Un banc P0 expérimental et le changement FR/EN par remux sont testés localement ; les composants produit ci-dessous restent des intentions. Voir `MEMORY.md` et les preuves de compatibilité pour l'état réel.
+> **Architecture cible et décisions historiques.** Les sections datées décrivent leur jalon, pas nécessairement l’état courant. Vérifier le code, les tests et les preuves de compatibilité avant de conclure qu’une fonction est disponible.
 
 ## 1. Objectif
 
@@ -243,9 +255,8 @@ Pour N Core plus tard : PostgreSQL partagé, sessions et révocations accessible
 /
 ├── AGENTS.md
 ├── ARCHITECTURE.md
-├── MEMORY.md
+├── .ai/                       # MEMORY, DEV_STATE, ORIGINAL_REQUEST, PROMPT_DEMARRAGE_IA
 ├── README.md
-├── PROMPT_DEMARRAGE_IA.md
 ├── Cargo.toml                 # après initialisation effective
 ├── apps/web/                  # SvelteKit, frontend indépendant
 ├── crates/
@@ -288,7 +299,7 @@ Voir `docs/DEVELOPMENT_PLAN.md`. **La première réalisation** est un banc d'ess
 Le banc Rust sert aussi un MPD fixe et un bundle Shaka5.2.13 préparés hors
 lecture. Les flux AV1/Opus sont les copies identiques du témoin MSE conservé.
 La comparaison reste un outil P0, sans nouvelle couche produit ni dépendance
-FFmpeg de lecture. Voir docs/P0C_SHAKA_EXPERIMENT.md pour mesures et limites.
+FFmpeg de lecture. Voir docs/archive/player-experiments/P0C_SHAKA_EXPERIMENT.md pour mesures et limites.
 
 ## État P1 autorisé (15 octobre 2026)
 
@@ -300,7 +311,7 @@ crates/shared/src/brand.rs, repli Web config/brand.ts puis configuration Core.
 Préparation FR/EN hors lecture ; streaming réutilise le Node interne P0.
 Pas encore de Core produit avec comptes/SQLite/bibliothèques. Les expériences
 Shaka/MSE sont conservées séparément et ne sont pas chargées par l'application.
-Voir docs/P1_WEB_INTEGRATION.md ; les comparaisons P0 sont suspendues.
+Voir docs/archive/milestones/P1_WEB_INTEGRATION.md ; les comparaisons P0 sont suspendues.
 
 ### Direction visuelle P1 v1
 
@@ -328,7 +339,7 @@ composants de catalogue séparés de l'API et du moteur Player existant. Le buil
 externalise le bootstrap de chaque page pour les accès directs sous CSP.
 Pas de SQLite, scanner ou comptes ajouté : les bibliothèques personnelles
 restent bloquées avant bootstrap, sessions et autorisation backend.
-Périmètre vérifié et prochaine étape : docs/CATALOGUE_P1.md.
+Périmètre vérifié et prochaine étape : docs/archive/milestones/CATALOGUE_P1.md.
 
 Validation locale : 15 tests Rust, check Web 0/0, lint, 8 tests Vitest et build
 réussis ; parcours catalogue et non-régression lecteur sous Chrome headless
@@ -342,7 +353,7 @@ Le module identity du Core persiste les comptes avec SQLx/SQLite, applique les
 migrations embarquées et fournit un bootstrap CLI local. La séparation compte /
 credential local prépare les futurs liens OIDC par issuer+subject et sessions
 par user_id ; ces mécanismes ne sont pas implémentés. Aucun nouvel endpoint.
-Voir docs/LOCAL_ADMIN.md et MEMORY.md pour preuves et limites.
+Voir docs/LOCAL_ADMIN.md et .ai/MEMORY.md pour preuves et limites.
 
 ## Bibliothèques locales P1 — 16 octobre 2026
 
@@ -362,4 +373,4 @@ son autorisation au Core ; le média reste envoyé par le Node au navigateur.
 L'indisponibilité Core refuse les nouvelles requêtes directes. La communication
 interne sortante partage un connecteur HTTPS vérifié et une politique explicite
 d'autorités/réseau ; la terminaison TLS peut être assurée par un proxy de confiance.
-Contrat, limites et preuves : [P2 Docker](docs/P2_DOCKER_VALIDATION.md).
+Contrat, limites et preuves : [P2 Docker](docs/archive/ci/P2_DOCKER_VALIDATION.md).

@@ -1,8 +1,10 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
 pub mod account;
+pub mod acquisition;
 pub mod admin_backups;
 pub mod admin_users;
 pub mod api_keys;
+pub mod applications;
 pub mod auth;
 pub mod automation;
 pub mod automation_execution;
@@ -11,18 +13,18 @@ pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
-pub mod extension_data_lifecycle;
-pub mod extension_files;
-pub mod extension_runtime;
 pub mod extensions;
 pub mod groups;
+pub mod imports;
 pub mod oidc;
 pub mod postgres_backup;
+pub mod reports;
 pub mod scheduler;
 pub mod server_settings;
 pub mod system_memory;
 pub mod system_task_queue;
 pub mod system_tasks;
+pub mod task_triggers;
 use media_contracts::brand;
 pub mod artwork;
 pub mod assets;
@@ -31,6 +33,7 @@ pub mod consolidation;
 mod demo;
 pub mod feedback;
 pub mod identity;
+mod image_import;
 pub mod inventory;
 pub mod libraries;
 pub mod library_options;
@@ -39,15 +42,17 @@ pub mod media;
 pub mod music;
 pub mod node;
 pub mod nodes;
+pub mod notifications;
 pub mod parties;
 pub mod permissions;
 pub mod playlists;
 pub mod preferences;
 pub mod product;
-#[cfg(test)]
-mod product_tests;
 pub mod progress;
+mod provider_download;
+pub mod recommendations;
 pub mod scans;
+pub mod statistics;
 pub mod trickplay;
 pub mod user_media_policy;
 
@@ -70,14 +75,20 @@ fn media_routes(inventory: node::Inventory) -> Router {
         .route("/api/v1/catalog", get(catalog::list))
         .route("/api/v1/catalog/{id}", get(catalog::detail))
         .route("/api/v1/demo/subtitles/{name}", get(node::demo_subtitle))
-        .route("/mse", get(|| async { Html(include_str!("mse.html")) }))
-        .route("/shaka", get(|| async { Html(include_str!("shaka.html")) }))
+        .route(
+            "/mse",
+            get(|| async { Html(include_str!("../experiments/mse.html")) }),
+        )
+        .route(
+            "/shaka",
+            get(|| async { Html(include_str!("../experiments/shaka.html")) }),
+        )
         .route(
             "/audio-seek-policy.js",
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("audio-seek-policy.js"),
+                    include_str!("../experiments/audio-seek-policy.js"),
                 )
             }),
         )
@@ -86,7 +97,7 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("shaka.js"),
+                    include_str!("../experiments/shaka.js"),
                 )
             }),
         )
@@ -96,7 +107,7 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(|| async {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    include_str!("mse.js"),
+                    include_str!("../experiments/mse.js"),
                 )
             }),
         )
@@ -114,9 +125,15 @@ fn media_routes(inventory: node::Inventory) -> Router {
             get(node::content).head(node::content),
         );
     if is_bench {
-        router = router.route("/", get(|| async { Html(include_str!("bench.html")) }));
+        router = router.route(
+            "/",
+            get(|| async { Html(include_str!("../experiments/bench.html")) }),
+        );
     } else {
-        router = router.route("/bench", get(|| async { Html(include_str!("bench.html")) }));
+        router = router.route(
+            "/bench",
+            get(|| async { Html(include_str!("../experiments/bench.html")) }),
+        );
     }
     router.with_state(Arc::new(inventory))
 }
@@ -196,7 +213,16 @@ async fn secure_app_with_jobs_and_web_dist(
             get(indexed_subtitle).head(indexed_subtitle),
         )
         .route("/api/v1/media/{id}", get(indexed_descriptor))
+        .route("/api/v1/assets/{id}/details", get(indexed_asset_details))
         .route("/api/v1/assets/{id}/trickplay", get(indexed_trickplay))
+        .route(
+            "/api/v1/assets/{id}/chapter-images",
+            get(indexed_chapter_manifest),
+        )
+        .route(
+            "/api/v1/assets/{id}/chapter-images/{index}",
+            get(indexed_chapter_image).head(indexed_chapter_image),
+        )
         .route(
             "/api/v1/assets/{id}/trickplay/{index}",
             get(indexed_trickplay_tile).head(indexed_trickplay_tile),
@@ -225,9 +251,16 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(libraries::router(auth.clone(), root.clone()))
             .merge(nodes::router(auth.clone(), replay_window))
             .merge(progress::router(auth.clone()))
+            .merge(statistics::router(auth.clone()))
             .merge(feedback::router(auth.clone()))
+            .merge(recommendations::router(auth.clone()))
+            .merge(notifications::router(auth.clone()))
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
+            .merge(applications::router(auth.clone()))
+            .merge(acquisition::router(auth.clone()))
+            .merge(reports::router(auth.clone()))
+            .merge(imports::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(parties::router(auth.clone()))
             .merge(playlists::router(auth.clone()))
@@ -240,6 +273,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(admin_backups::router(auth.clone(), root.clone()).await?)
             .merge(scheduler::router(auth.clone()).await?)
             .merge(system_tasks::router(auth.clone(), root.clone()).await?)
+            .merge(task_triggers::router(auth.clone()))
             .merge(system_memory::router(auth.clone()))
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
@@ -260,6 +294,7 @@ async fn local_stream_priority(
     request: Request,
     next: Next,
 ) -> Response {
+    media_node::trickplay::global_manager().set_active_streams(scans::LOCAL_STREAMS.clone());
     let path = request.uri().path();
     let is_prepared_or_audio = path.contains("/prepared/") || path.contains("/audio/");
     let streamed = path.contains("/content") || is_prepared_or_audio;
@@ -292,10 +327,22 @@ async fn local_stream_priority(
 
 async fn indexed_subtitle(
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
-    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, String)>,
     request: Request,
 ) -> Response {
-    inventory::subtitle(&store, &id, index, request).await
+    if let Some(download) = index.strip_prefix("downloaded-") {
+        return extensions::subtitles::content(
+            &store,
+            &id,
+            download,
+            request.method() == axum::http::Method::HEAD,
+        )
+        .await;
+    }
+    match index.parse::<usize>() {
+        Ok(index) => inventory::subtitle(&store, &id, index, request).await,
+        Err(_) => error(StatusCode::NOT_FOUND, "unknown_subtitle"),
+    }
 }
 
 async fn indexed_prepared(
@@ -331,6 +378,21 @@ async fn indexed_trickplay(
     trickplay::manifest(&store, &id, request).await
 }
 
+async fn indexed_chapter_manifest(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    trickplay::chapter_manifest(&store, &id).await
+}
+
+async fn indexed_chapter_image(
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
+    request: Request,
+) -> Response {
+    trickplay::chapter_image(&store, &id, index, request).await
+}
+
 async fn indexed_trickplay_tile(
     axum::Extension(store): axum::Extension<identity::IdentityStore>,
     axum::extract::Path((id, index)): axum::extract::Path<(String, usize)>,
@@ -355,6 +417,24 @@ async fn indexed_descriptor(
     .await
     {
         Ok(Some(media)) => Json(media).into_response(),
+        Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
+        Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    }
+}
+
+/// Technical sheet of one asset; Node-side paths only for administrators.
+async fn indexed_asset_details(
+    axum::Extension(identity): axum::Extension<auth::Authenticated>,
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    let administrator = identity.user.role == identity::Role::Administrator;
+    match inventory::asset_details(&store, &id, administrator).await {
+        Ok(Some(details)) => (
+            [(header::CACHE_CONTROL, "private, no-store")],
+            Json(details),
+        )
+            .into_response(),
         Ok(None) => error(StatusCode::NOT_FOUND, "unknown_media"),
         Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     }
@@ -627,7 +707,7 @@ pub fn local_security_with_store(
                     }
                 }
                 let csp = format!(
-                    "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
+                    "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; manifest-src 'self'; font-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
                 );
                 if let Ok(val) = HeaderValue::from_str(&csp) {
                     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);
@@ -637,7 +717,7 @@ pub fn local_security_with_store(
         }))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
-        .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("bench.js")) }))
+        .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../experiments/bench.js")) }))
 }
 
 pub fn error(status: StatusCode, code: &'static str) -> Response {
@@ -685,11 +765,6 @@ mod tests {
     }
 }
 
-pub mod extension_storage;
-
 pub mod task_engine;
 mod task_execution;
 pub mod timeline_markers;
-
-pub mod extension_data;
-pub mod extension_objects;

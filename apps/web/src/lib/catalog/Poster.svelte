@@ -8,6 +8,8 @@
   import { serverPresentation } from '../config/presentation';
   import Icon from '../ui/Icon.svelte';
   import { imagePreviewUrl, isImageLoaded, markImageLoaded } from './image-url';
+  import { tvLayout } from '../theme';
+  import { fitArtwork } from '../ui/fit-artwork';
 
   let failedUrls = $state<string[]>([]);
   let {
@@ -23,7 +25,11 @@
   } = $props();
 
   const displayTitle = $derived(localizedTitle(work, $locale));
-  const posterUrl = $derived(selectArtwork(work, $session).poster);
+  const artwork = $derived(selectArtwork(work, $session));
+  // TV : landscape.jpg (16:9) dans les rails et grilles ; ailleurs folder.jpg (affiche).
+  const landscapeUrl = $derived(artwork.landscape || artwork.backdrop);
+  const wide = $derived($tvLayout && showMetadata && Boolean(landscapeUrl));
+  const posterUrl = $derived(wide ? landscapeUrl : artwork.poster);
   const previewUrl = $derived(imagePreviewUrl(posterUrl, showMetadata ? 320 : 640));
   const imageUrl = $derived([previewUrl, posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
   let loadedUrl = $state('');
@@ -63,6 +69,7 @@
         fetchpriority={eager ? 'high' : 'auto'}
         decoding="async"
         use:checkLoaded
+        use:fitArtwork
         onload={() => {
           loadedUrl = imageUrl;
           markImageLoaded(imageUrl);
@@ -124,9 +131,9 @@
 
 {#if href}
   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-  <a class="media-card" {href} aria-label={`Voir ${displayTitle}`}>{@render posterBody()}</a>
+  <a class="media-card" class:landscape={wide} {href} aria-label={`Voir ${displayTitle}`}>{@render posterBody()}</a>
 {:else}
-  <div class="media-card">{@render posterBody()}</div>
+  <div class="media-card" class:landscape={wide}>{@render posterBody()}</div>
 {/if}
 
 <style>
@@ -141,15 +148,12 @@
     aspect-ratio: 2 / 3;
     position: relative;
     overflow: hidden;
-    background: var(--color-surface);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-card);
-    transition:
-      transform 250ms cubic-bezier(0.25, 0.8, 0.25, 1),
-      border-color 250ms cubic-bezier(0.25, 0.8, 0.25, 1),
-      box-shadow 250ms cubic-bezier(0.25, 0.8, 0.25, 1);
+    background: var(--pn-2);
+    border-radius: var(--r-md);
+    transition: transform var(--t-slow) var(--ease), box-shadow var(--t-slow) ease;
   }
+
+  .landscape .poster { aspect-ratio: 16 / 9; }
 
   .poster img {
     position: absolute;
@@ -158,82 +162,74 @@
     height: 100%;
     object-fit: cover;
     opacity: 0;
-    transition: opacity var(--transition-normal);
+    transition: opacity var(--t-med) ease;
   }
 
-  .poster img.loaded {
-    opacity: 1;
-  }
+  .poster img.loaded { opacity: 1; }
 
   @media (hover: hover) and (pointer: fine) {
-    a.media-card:hover .poster,
-    a.media-card:focus-visible .poster {
-      transform: scale(1.06);
-      border-color: var(--color-line-strong);
-      box-shadow: var(--shadow-card-hover);
-      z-index: 5;
+    a.media-card:hover .poster {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow);
     }
   }
 
-  .media-card:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 4px;
-    border-radius: var(--radius-md);
+  a.media-card:focus-visible { outline: none; }
+  a.media-card:focus-visible .poster {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
   }
 
   .card-hover-overlay {
     position: absolute;
     inset: 0;
-    background: var(--gradient-card);
+    background: linear-gradient(0deg, var(--media-shade) 0%, rgb(6 8 14 / 0) 58%);
     display: flex;
     align-items: flex-end;
-    justify-content: center;
-    padding: 16px 12px;
+    justify-content: flex-start;
+    padding: 12px;
     opacity: 0;
-    transition: opacity 220ms ease;
+    transition: opacity var(--t-med) ease;
     pointer-events: none;
   }
 
   @media (hover: hover) and (pointer: fine) {
     a.media-card:hover .card-hover-overlay,
-    a.media-card:focus-visible .card-hover-overlay {
-      opacity: 1;
-    }
+    a.media-card:focus-visible .card-hover-overlay { opacity: 1; }
   }
 
   .hover-action-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 14px;
-    border-radius: var(--radius-pill);
-    background: var(--color-glass-raised);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--color-line-strong);
-    color: var(--color-text-bright);
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 10px;
+    background: var(--on-media);
+    color: #0b0e18;
     font-size: 12px;
-    font-weight: 650;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+    font-weight: 800;
   }
 
+  /* Repli typographique quand folder.jpg manque */
   .poster-fallback {
     display: flex;
     height: 100%;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 16px;
-    padding: 20px 12px;
-    text-align: center;
-    color: var(--color-muted);
-    background: radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.04), transparent 70%), var(--color-surface);
+    align-items: flex-start;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 14px;
+    color: var(--mu);
+    background: var(--bg-2);
   }
 
   .poster-fallback span {
-    font-size: 14.5px;
-    font-weight: 600;
-    line-height: 1.4;
+    font-size: 16px;
+    font-weight: 800;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    color: var(--tx);
     overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -250,47 +246,44 @@
     place-items: center;
     width: 26px;
     height: 26px;
-    border-radius: 50%;
-    color: var(--color-on-play);
-    background: var(--color-play);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    border-radius: 9px;
+    color: var(--on-media);
+    background: rgb(6 8 14 / 0.6);
   }
 
   .offline-badge {
     position: absolute;
     bottom: 10px;
-    left: 8px;
-    right: 8px;
+    left: 10px;
+    right: 10px;
     padding: 6px;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 700;
     text-align: center;
-    color: #fff;
-    background: rgba(24, 24, 27, 0.92);
-    backdrop-filter: blur(8px);
-    border: 1px solid var(--color-line);
-    border-radius: var(--radius-xs);
+    color: var(--on-media);
+    background: rgb(6 8 14 / 0.75);
+    border-radius: var(--r-xs);
   }
 
   .poster-progress {
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
     height: 4px;
-    background: rgba(24, 24, 27, 0.85);
+    border-radius: 4px;
+    overflow: hidden;
+    background: rgb(255 255 255 / 0.25);
   }
 
   .poster-progress span {
     display: block;
     height: 100%;
-    background: var(--color-play);
-    box-shadow: 0 0 8px var(--color-accent-glow);
+    border-radius: 4px;
+    background: var(--ac);
   }
 
-  .metadata-block {
-    padding-top: 10px;
-  }
+  .metadata-block { padding-top: 10px; }
 
   h3 {
     display: -webkit-box;
@@ -300,31 +293,26 @@
     overflow: hidden;
     margin: 0;
     font-size: 14px;
-    font-weight: 600;
-    line-height: 1.4;
-    color: var(--color-text-bright);
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--tx);
     overflow-wrap: anywhere;
-    transition: color var(--transition-fast);
-  }
-
-  a.media-card:hover h3 {
-    color: var(--color-accent-hover);
   }
 
   p {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
-    margin: 4px 0 0;
-    color: var(--color-muted);
-    font-size: 12px;
+    gap: 8px;
+    margin: 3px 0 0;
+    color: var(--mu);
+    font-size: 13px;
   }
 
   .rating {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    color: #FBBF24;
-    font-weight: 600;
+    color: var(--ac);
+    font-weight: 800;
   }
 </style>

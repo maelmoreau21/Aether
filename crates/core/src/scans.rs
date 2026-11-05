@@ -540,7 +540,9 @@ async fn enqueue_one(
             let _ = inventory::clean_staging(&store, &scan_id).await;
 
             crate::database::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-                .bind(if report.complete { "completed" } else { "error" })
+                // Unreadable subfolders are warnings (publication stays partial via
+                // `report.complete`); only an interrupted traversal fails the scan.
+                .bind(if report.interrupted { "error" } else { "completed" })
                 .bind(report.discovered as i64)
                 .bind(report.probed as i64)
                 .bind(report.reused as i64)
@@ -560,7 +562,7 @@ async fn enqueue_one(
                     attempt,
                     &node_id,
                     now,
-                    if report.complete { None } else { Some("Scan completed with errors") },
+                    if report.interrupted { Some("Scan interrupted") } else { None },
                 )
                 .await;
             }

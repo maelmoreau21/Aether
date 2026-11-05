@@ -172,25 +172,25 @@
     max-height: calc(100dvh - 48px);
     padding: 0;
     overflow: hidden auto;
-    border: 1px solid var(--line);
-    border-radius: var(--r-xl);
-    background: var(--bg-3);
+    border: 1px solid var(--color-line-subtle);
+    border-radius: var(--r-lg);
+    background: var(--color-surface-elevated);
     color: var(--tx);
     font-family: var(--font);
-    box-shadow: var(--shadow);
+    box-shadow: var(--shadow-md);
   }
 
   dialog.path-picker-dialog::backdrop {
-    background: rgb(6 8 14 / 0.55);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: var(--color-overlay);
+    opacity: 0.85;
   }
 
   .picker-header {
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 20px 24px 0;
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--color-line-subtle);
   }
 
   .back-btn {
@@ -200,16 +200,16 @@
     justify-content: center;
     width: 44px;
     height: 44px;
-    border: 0;
-    border-radius: 14px;
-    background: var(--pn);
+    border: 1px solid var(--color-line);
+    border-radius: var(--r-sm);
+    background: transparent;
     color: var(--tx);
     cursor: pointer;
     transition: background-color var(--t-fast) ease;
   }
 
   .back-btn:hover {
-    background: var(--pn-2);
+    background: var(--color-surface-hover);
   }
 
   h2 {
@@ -242,19 +242,19 @@
     display: flex;
     align-items: center;
     overflow: hidden;
-    border: 1px solid transparent;
+    border: 1px solid var(--color-line-subtle);
     border-radius: var(--r-sm);
-    background: var(--pn);
+    background: var(--color-surface);
     transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
   }
 
   .input-wrapper:hover {
-    background: var(--pn-2);
+    background: var(--color-surface-hover);
   }
 
   .input-wrapper:focus-within {
     border-color: var(--ac);
-    background: var(--bg-3);
+    background: var(--color-surface);
   }
 
   .input-wrapper input {
@@ -289,7 +289,7 @@
 
   .search-btn:hover {
     color: var(--tx);
-    background: var(--pn);
+    background: var(--color-surface-hover);
   }
 
   .search-btn:focus-visible { outline-offset: -3px; }
@@ -301,18 +301,18 @@
     align-items: center;
     min-height: 44px;
     padding: 0 16px;
-    border: 0;
+    border: 1px solid var(--color-line);
     border-radius: var(--r-md);
-    background: var(--pn-2);
+    background: transparent;
     color: var(--tx);
     font: inherit;
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
     transition: background-color var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
 
-  .navigation-actions button:hover:not(:disabled) { background: var(--pn-3); }
+  .navigation-actions button:hover:not(:disabled) { background: var(--color-surface-hover); }
 
   button:active:not(:disabled) { transform: scale(0.98); }
 
@@ -332,8 +332,8 @@
     max-height: min(340px, 45dvh);
     overflow-y: auto;
     overscroll-behavior: contain;
-    border: 1px solid var(--line);
     border-radius: var(--r-md);
+    background: var(--color-surface);
   }
 
   .dirs-container.is-loading {
@@ -350,7 +350,7 @@
     min-height: 48px;
     padding: 0 16px;
     border: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--color-line-subtle);
     background: transparent;
     color: var(--tx);
     font: inherit;
@@ -366,7 +366,7 @@
   }
 
   .dir-item:hover {
-    background: var(--pn);
+    background: var(--color-surface-hover);
   }
 
   .dir-item:focus-visible { outline-offset: -3px; }
@@ -404,14 +404,14 @@
 
   .ok-btn {
     min-width: 140px;
-    height: 48px;
+    height: 44px;
     padding: 0 22px;
     border: 0;
     border-radius: var(--r-md);
     background: var(--btn);
     color: var(--btn-tx);
     font: inherit;
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     box-shadow: none;
     cursor: pointer;

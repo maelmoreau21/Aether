@@ -48,33 +48,33 @@
   <button disabled={busy}>Enregistrer les restrictions</button>
 </fieldset>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</form>
 <style>
-form { display: grid; gap: 16px; font-family: var(--font); color: var(--tx); }
+form { display: grid; gap: 16px; font-family: var(--font-sans); color: var(--color-text); }
   fieldset { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
   fieldset:disabled { opacity: 0.7; }
-  legend { margin: 0 0 16px; padding: 0; font-size: 17px; font-weight: 700; }
-  h3 { margin: 8px 0 0; padding-top: 20px; border-top: 1px solid var(--line); font-size: 17px; font-weight: 700; }
-  p { max-width: 720px; margin: 0; color: var(--mu); font-size: 13px; line-height: 1.5; }
+  legend { margin: 0 0 16px; padding: 0; font-size: 17px; font-weight: 600; }
+  h3 { margin: 8px 0 0; padding-top: 20px; border-top: 1px solid var(--color-line-subtle); font-size: 17px; font-weight: 700; }
+  p { max-width: 720px; margin: 0; color: var(--color-muted); font-size: 13px; line-height: 1.5; }
   label { display: grid; gap: 8px; min-width: 0; font-size: 14px; font-weight: 700; }
   label:has(> input[type='checkbox']) { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; cursor: pointer; }
-  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--color-accent); }
   input:not([type='checkbox']), select {
     box-sizing: border-box;
     width: 100%;
     max-width: 360px;
     height: 46px;
     padding: 0 14px;
-    border: 1px solid transparent;
-    border-radius: var(--r-sm);
-    background-color: var(--pn);
-    color: var(--tx);
+    border: 1px solid var(--color-line-subtle);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-canvas);
+    color: var(--color-text);
     font: inherit;
     font-size: 14px;
     font-weight: 500;
     box-shadow: none;
-    transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
   }
-  input:not([type='checkbox']):hover, select:hover { background-color: var(--pn-2); }
-  input:not([type='checkbox']):focus, select:focus { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input:not([type='checkbox']):hover, select:hover { border-color: var(--color-line); }
+  input:not([type='checkbox']):focus, select:focus { outline: none; border-color: var(--color-accent); background-color: var(--color-canvas); }
   input:not([type='number']):not([type='checkbox']):not([type='time']) { max-width: 520px; }
   .window {
     display: grid;
@@ -82,7 +82,7 @@ form { display: grid; gap: 16px; font-family: var(--font); color: var(--tx); }
     align-items: start;
     gap: 12px;
     padding: 0 0 16px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--color-line-subtle);
   }
   .window input, .window select { max-width: none; }
   .window > button { align-self: start; margin-top: 30px; }
@@ -90,27 +90,27 @@ form { display: grid; gap: 16px; font-family: var(--font); color: var(--tx); }
     justify-self: start;
     height: 44px;
     padding: 0 18px;
-    border: 0;
-    border-radius: var(--r-md);
-    background: var(--pn-2);
-    color: var(--tx);
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: 1px solid var(--color-line);
+    color: var(--color-text);
     font: inherit;
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
     cursor: pointer;
-    transition: background-color var(--t-fast) var(--ease), opacity var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);
+    transition: background-color var(--transition-fast), opacity var(--transition-fast), transform var(--transition-fast);
   }
-  button:hover:not(:disabled) { background: var(--pn-3); }
+  button:hover:not(:disabled) { background: var(--color-raised); }
   button:active:not(:disabled) { transform: scale(0.98); }
-  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
-  .window > button { background: var(--err-soft); color: var(--err); }
-  .window > button:hover:not(:disabled) { background: var(--pn-2); }
-  button:not([type]) { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); }
-  button:not([type]):hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
-  p[role='alert'], p[role='status'] { max-width: none; padding: 12px 16px; border-radius: var(--r-md); color: var(--tx); font-size: 14px; }
-  p[role='alert'] { background: var(--err-soft); }
-  p[role='status'] { background: var(--ok-soft); }
+  .window > button { color: var(--color-danger); }
+  .window > button:hover:not(:disabled) { background: var(--color-danger-soft); }
+  button:not([type]) { height: 44px; padding: 0 22px; border-color: transparent; background: var(--color-accent); color: var(--color-on-accent); }
+  button:not([type]):hover:not(:disabled) { background: var(--color-accent-hover); }
+  p[role='alert'], p[role='status'] { max-width: none; padding: 12px 16px; border-radius: var(--radius-md); color: var(--color-text); font-size: 14px; }
+  p[role='alert'] { background: var(--color-danger-soft); }
+  p[role='status'] { background: var(--color-success-soft); }
   @media (max-width: 820px) {
     .window { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .window > button { margin-top: 0; }

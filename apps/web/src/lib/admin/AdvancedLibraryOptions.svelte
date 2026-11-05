@@ -81,26 +81,26 @@
 </details>
 
 <style>
-  .advanced-section { min-width: 0; padding-bottom: 12px; border-bottom: 1px solid var(--line); font-family: var(--font); color: var(--tx); }
-  .advanced-section:first-of-type { border-top: 1px solid var(--line); }
+  .advanced-section { min-width: 0; padding-bottom: 12px; border-bottom: 1px solid var(--color-line-subtle); font-family: var(--font); color: var(--tx); }
+  .advanced-section:first-of-type { border-top: 1px solid var(--color-line-subtle); }
   summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; min-height: 56px; padding: 8px 0; font-size: 15px; font-weight: 700; list-style: none; cursor: pointer; border-radius: var(--r-xs); }
   summary::-webkit-details-marker { display: none; }
   summary::after { content: '+'; margin-left: auto; color: var(--mu); font-size: 20px; font-weight: 600; line-height: 1; }
   details[open] > summary::after { content: '−'; }
   summary:hover::after { color: var(--tx); }
   summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
-  summary small { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--mu); font-size: 12px; font-weight: 700; }
+  summary small { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--color-raised); color: var(--mu); font-size: 12px; font-weight: 600; }
   p { font-size: 14px; line-height: 1.6; color: var(--mu); }
-  .notice { margin: 4px 0 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--pn); }
+  .notice { margin: 4px 0 12px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--color-surface); }
   .hint { margin-top: 8px; font-size: 13px; }
   label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 700; line-height: 1.5; color: var(--tx); }
   .check { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 0; padding: 12px 0; font-weight: 600; cursor: pointer; }
   .check:has(input:disabled) { color: var(--mu); cursor: not-allowed; }
   input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--ac); }
-  input:not([type='checkbox']), select { width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  input:not([type='checkbox']), select { width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background-color: var(--color-surface); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
   select { padding-right: 40px; }
-  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--pn-2); border-color: transparent; }
-  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
+  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--color-surface-hover); border-color: var(--color-line); }
+  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--color-surface); }
   .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
   @media (max-width: 640px) {
     .grid { grid-template-columns: minmax(0, 1fr); gap: 0; }

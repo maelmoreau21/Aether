@@ -56,10 +56,10 @@
   color-scheme: light;
   --logo-a: #e08a00;
   --logo-b: #dc3a2e;
-  --bg: #eef0f4;
-  --bg-rgb: 238, 240, 244;
-  --bg-2: #f7f8fa;
-  --bg-3: #ffffff;
+  --bg: #d9dce2;
+  --bg-rgb: 217, 220, 226;
+  --bg-2: #e3e5ea;
+  --bg-3: #eceef2;
   --pn: rgb(17 21 34 / 0.045);
   --pn-2: rgb(17 21 34 / 0.08);
   --pn-3: rgb(17 21 34 / 0.12);
@@ -82,7 +82,7 @@
   --btn: #111522;
   --btn-tx: #f4f5f8;
   --ambient-opacity: 0.2;
-  --glass: rgb(247 248 250 / 0.88);
+  --glass: rgb(227 229 234 / 0.88);
   --shadow-c: rgb(17 21 34 / 0.12);
 }
 

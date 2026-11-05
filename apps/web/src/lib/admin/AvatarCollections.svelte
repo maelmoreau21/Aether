@@ -83,70 +83,61 @@
   {:else}<p>Aucun avatar pour le moment. Ajoutez des images ou importez un pack.</p>{/if}
 </section>
 <style>
-  .avatar-collections { display: grid; gap: 20px; min-width: 0; margin-top: 8px; font-family: var(--font); color: var(--tx); }
+  .avatar-collections { display: grid; gap: 16px; min-width: 0; margin-top: 8px; font-family: var(--font-sans); color: var(--color-text); }
   .avatar-collections > p { margin: 0; }
-  h3 { margin: 4px 0 -12px; font-size: 17px; font-weight: 700; }
-  p, small { font-size: 14px; line-height: 1.6; color: var(--mu); }
-  small { display: block; font-size: 13px; }
-  /* Panneaux de réglages */
-  fieldset, .upload, .legacy-notice { min-width: 0; margin: 0; padding: 24px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--bg-2); }
-  fieldset { display: grid; gap: 4px; }
-  legend { float: left; width: 100%; margin: 0 0 8px; padding: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
+  h3 { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
+  p, small { margin: 0; font-size: 13px; line-height: 1.6; color: var(--color-muted); }
+  small { display: block; }
+  /* Surfaces plates */
+  fieldset, .upload, .legacy-notice { min-width: 0; margin: 0; padding: 16px 20px; border: 0; border-radius: var(--radius-md); background: var(--color-surface); }
+  fieldset { display: grid; gap: 0; }
+  legend { float: left; width: 100%; margin: 0 0 4px; padding: 0; font-size: 15px; font-weight: 600; color: var(--color-text); }
   legend + label { clear: both; }
-  fieldset label { display: flex; flex: none; align-items: center; gap: 12px; min-height: 44px; font-size: 14px; font-weight: 600; }
+  fieldset label { display: flex; flex: none; align-items: center; gap: 12px; min-height: 44px; padding: 4px 0; border-top: 1px solid var(--color-line-subtle); font-size: 14px; font-weight: 500; }
   fieldset > button { justify-self: start; margin-top: 12px; }
-  input[type='checkbox'] { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--ac); }
-  .legacy-notice { display: grid; justify-items: start; gap: 4px; background: var(--info-soft); border-color: transparent; }
-  .legacy-notice strong { font-size: 15px; font-weight: 700; color: var(--tx); }
-  .legacy-notice p { margin: 0 0 12px; color: var(--tx); }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; min-height: 0; margin: 0; accent-color: var(--color-accent); }
+  .legacy-notice { display: grid; justify-items: start; gap: 4px; background: var(--color-warning-soft); }
+  .legacy-notice strong { font-size: 14px; font-weight: 600; color: var(--color-text); }
+  .legacy-notice p { margin-bottom: 8px; }
   .avatar-collections > button { justify-self: start; }
-  .upload { padding-top: 8px; padding-bottom: 8px; }
-  .upload[open] { padding-bottom: 24px; }
-  summary { display: flex; align-items: center; min-height: 48px; font-size: 17px; font-weight: 700; cursor: pointer; }
-  summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: var(--r-xs); }
+  .upload { padding-top: 4px; padding-bottom: 4px; }
+  .upload[open] { padding-bottom: 16px; }
+  summary { display: flex; align-items: center; min-height: 48px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .upload[open] > summary { border-bottom: 1px solid var(--color-line-subtle); }
+  summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-xs); }
   /* Formulaires */
-  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 12px 0 0; }
+  form { display: flex; flex-wrap: wrap; align-items: end; gap: 12px 16px; margin: 16px 0 0; }
   .upload form + small { margin-top: 12px; }
-  label { display: grid; flex: 1; gap: 8px; min-width: 180px; font-size: 14px; font-weight: 700; color: var(--tx); }
-  input:not([type='checkbox']), select { box-sizing: border-box; width: 100%; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
-  select { padding-right: 40px; }
-  input[type='url'] { font-family: var(--font-mono); font-size: 14px; }
-  input[type='file'] { display: flex; align-items: center; height: auto; min-height: 46px; padding: 6px 8px; font-size: 13px; color: var(--mu); }
-  input[type='file']::file-selector-button { height: 34px; margin-right: 12px; padding: 0 14px; border: 0; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font: inherit; font-weight: 700; cursor: pointer; }
-  input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--pn-2); border-color: transparent; }
-  input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--bg-3); }
-  .import-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  label { display: grid; flex: 1; gap: 8px; min-width: 180px; font-size: 14px; font-weight: 600; color: var(--color-text); }
+  input:not([type='checkbox']), select { box-sizing: border-box; width: 100%; height: 42px; padding: 0 12px; border: 1px solid var(--color-line-subtle); border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font: inherit; font-size: 14px; font-weight: 400; }
+  input[type='file'] { display: flex; align-items: center; height: auto; min-height: 42px; padding: 5px 8px; font-size: 13px; color: var(--color-muted); }
+  input[type='file']::file-selector-button { height: 32px; margin-right: 12px; padding: 0 12px; border: 1px solid var(--color-line); border-radius: var(--radius-xs); background: transparent; color: var(--color-text); font: inherit; cursor: pointer; }
+  input:not([type='checkbox']):focus-visible, select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  .import-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-line-subtle); }
   .collection-picker { max-width: 520px; margin-top: 8px; }
-  /* Boutons */
-  button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 0; border-radius: var(--r-md); background: var(--pn-2); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
-  button:hover:not(:disabled) { background: var(--pn-3); }
-  button:active:not(:disabled) { transform: scale(0.98); }
-  button:disabled { opacity: 0.45; cursor: wait; }
-  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
-  .primary { min-height: 46px; background: var(--btn); color: var(--btn-tx); box-shadow: none; }
-  .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
-  .danger { background: var(--err-soft); color: var(--err); }
-  .danger:hover:not(:disabled) { background: var(--err-soft); opacity: 0.85; }
+  /* Boutons : primaire = action principale de la zone, le reste ghost */
+  button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 18px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color var(--transition-fast); }
+  button:hover:not(:disabled) { background: var(--color-raised); }
+  button:disabled { opacity: 0.55; cursor: wait; }
+  button:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+  .primary { border: 0; background: var(--color-play); color: var(--color-on-play); font-weight: 600; }
+  .primary:hover:not(:disabled) { background: var(--color-play-hover); }
+  .danger { color: var(--status-error); }
   /* Galerie : l'image est la carte */
-  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 20px 16px; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 16px 12px; }
   .gallery article { display: grid; justify-items: center; align-content: start; gap: 8px; min-width: 0; }
-  .gallery img { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: var(--r-md); background: var(--pn); }
-  .gallery span { max-width: 100%; font-size: 13px; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
-  .gallery button { width: 100%; min-height: 44px; padding: 0 10px; font-size: 13px; }
-  [role='alert'] { margin: 0; color: var(--err); }
-  [role='status'] { margin: 0; }
+  .gallery img { width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: var(--radius-sm); background: var(--color-raised); }
+  .gallery span { max-width: 100%; font-size: 12px; text-align: center; overflow-wrap: anywhere; }
+  .gallery button { width: 100%; min-height: 34px; padding: 4px 10px; font-size: 12px; border-color: transparent; }
+  [role='alert'] { color: var(--status-error); }
   /* Dans la carte d'une extension : pas de panneau dans un panneau */
-  .embedded fieldset, .embedded .upload { padding: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; }
-  .embedded .upload[open] { padding-bottom: 8px; }
+  .embedded fieldset, .embedded .upload { padding-inline: 0; border-radius: 0; background: transparent; }
   @media (max-width: 640px) {
-    fieldset, .upload, .legacy-notice { padding: 16px; border-radius: var(--r-md); }
-    .upload { padding-top: 4px; padding-bottom: 4px; }
-    .upload[open] { padding-bottom: 16px; }
     form { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
     label { min-width: 0; }
     button, fieldset > button, .avatar-collections > button { width: 100%; justify-self: stretch; }
-    .gallery { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 16px 12px; }
+    .gallery { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); }
     input:not([type='checkbox']), select { font-size: 16px; }
   }
-  @media (prefers-reduced-motion: reduce) { button, input, select { transition: none; } }
+  @media (prefers-reduced-motion: reduce) { button { transition: none; } }
 </style>

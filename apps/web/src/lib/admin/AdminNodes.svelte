@@ -389,14 +389,14 @@
   /* En-tête de section : titre + phrase d'explication, action principale à droite */
   .section-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
   .header-left-part { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .header-icon-wrap { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: 14px; background: var(--pn); color: var(--tx); }
+  .header-icon-wrap { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--color-surface); color: var(--tx); }
   .section-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
   .section-subtitle { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--mu); }
 
   .columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 20px; align-items: start; }
 
   /* Panneaux */
-  .card { min-width: 0; padding: 24px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .card { min-width: 0; padding: 24px; background: var(--color-surface); border-radius: var(--r-md); }
   .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; color: var(--mu); }
   .card-header h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
 
@@ -415,7 +415,7 @@
 
   /* Liste des nœuds : lignes séparées, pas de carte dans la carte */
   .items-list { display: grid; }
-  .item-card { display: flex; justify-content: space-between; gap: 20px; min-width: 0; padding: 18px 0; border-top: 1px solid var(--line); }
+  .item-card { display: flex; justify-content: space-between; gap: 20px; min-width: 0; padding: 18px 0; border-top: 1px solid var(--color-line-subtle); }
   .item-card:first-child { border-top: 0; padding-top: 4px; }
   .item-content { flex: 1; min-width: 0; }
   .item-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
@@ -436,35 +436,35 @@
     gap: 8px;
     height: 44px;
     padding: 0 16px;
-    border: 0;
+    border: 1px solid var(--color-line);
     border-radius: var(--r-md);
-    background: var(--pn-2);
+    background: transparent;
     color: var(--tx);
     font-family: var(--font);
     font-size: 14px;
-    font-weight: 700;
+    font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
     transition: background-color var(--t-fast) ease, transform var(--t-fast) var(--ease);
   }
   .action-btn:hover:not(:disabled),
-  .copy-btn:hover:not(:disabled) { background: var(--pn-3); }
-  .danger-btn { background: var(--err-soft); color: var(--err); }
-  .danger-btn:hover:not(:disabled) { background: var(--err-soft); box-shadow: inset 0 0 0 1px currentColor; }
+  .copy-btn:hover:not(:disabled) { background: var(--color-surface-hover); }
+  .danger-btn { border-color: var(--color-danger); background: transparent; color: var(--err); }
+  .danger-btn:hover:not(:disabled) { background: var(--err-soft); }
 
   .primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 8px;
-    height: 48px;
+    height: 44px;
     padding: 0 22px;
     border: 0;
     border-radius: var(--r-md);
     background: var(--btn);
     color: var(--btn-tx);
     font-family: var(--font);
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 700;
     box-shadow: none;
     cursor: pointer;
@@ -488,31 +488,31 @@
     width: 100%;
     height: 46px;
     padding: 0 14px;
-    border: 1px solid transparent;
+    border: 1px solid var(--color-line-subtle);
     border-radius: var(--r-sm);
-    background: var(--pn);
+    background: var(--color-surface);
     color: var(--tx);
     font-family: var(--font);
     font-size: 14px;
     box-shadow: none;
     transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease;
   }
-  input:hover { background: var(--pn-2); }
-  input:focus { outline: none; border-color: var(--ac); background: var(--bg-3); }
+  input:hover { background: var(--color-surface-hover); }
+  input:focus { outline: none; border-color: var(--ac); background: var(--color-surface); }
   .actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; }
 
   .muted { margin: 0 0 4px; color: var(--mu); font-size: 14px; line-height: 1.55; }
   .muted strong { color: var(--tx); font-weight: 700; }
 
   /* Dialogue d'ajout */
-  .modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgb(6 8 14 / 0.55); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-  .modal-card { display: flex; flex-direction: column; width: 100%; max-width: 680px; max-height: 90vh; overflow: hidden; background: var(--bg-3); color: var(--tx); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow); }
+  .modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--color-overlay); }
+  .modal-card { display: flex; flex-direction: column; width: 100%; max-width: 680px; max-height: 90vh; overflow: hidden; background: var(--color-surface-elevated); color: var(--tx); border: 1px solid var(--color-line-subtle); border-radius: var(--r-lg); box-shadow: var(--shadow-md); }
   .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 28px 16px; }
   .modal-title-wrap { display: flex; align-items: center; gap: 14px; min-width: 0; }
   .modal-title { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
   .modal-desc { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--mu); }
-  .icon-close-btn { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 14px; background: var(--pn); color: var(--mu); font-size: 16px; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease; }
-  .icon-close-btn:hover { background: var(--pn-2); color: var(--tx); }
+  .icon-close-btn { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 0; border: 1px solid var(--color-line); border-radius: var(--r-sm); background: transparent; color: var(--mu); font-size: 16px; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease; }
+  .icon-close-btn:hover { background: var(--color-surface-hover); color: var(--tx); }
   .modal-body { flex: 1; overflow-y: auto; padding: 8px 28px 24px; }
 
   .info-callout { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 20px; padding: 14px 16px; border-radius: var(--r-md); background: var(--info-soft); color: var(--tx); font-size: 14px; line-height: 1.55; }
@@ -526,14 +526,14 @@
   .token-field { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13px; letter-spacing: 0.02em; }
   .compose-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
   .compose-header label { margin: 0; }
-  .compose-textarea { display: block; width: 100%; padding: 14px; border: 1px solid transparent; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: vertical; }
-  .compose-textarea:focus { outline: none; border-color: var(--ac); background: var(--bg-3); }
+  .compose-textarea { display: block; width: 100%; padding: 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background: var(--color-surface); color: var(--tx); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; resize: vertical; }
+  .compose-textarea:focus { outline: none; border-color: var(--ac); background: var(--color-surface); }
 
-  .modal-steps { padding: 14px 16px; border-radius: var(--r-md); background: var(--pn); font-size: 13px; line-height: 1.6; color: var(--mu); }
+  .modal-steps { padding: 14px 16px; border-radius: var(--r-md); background: var(--color-surface); font-size: 13px; line-height: 1.6; color: var(--mu); }
   .modal-steps p { margin: 0 0 6px; color: var(--tx); }
   .modal-steps ol { margin: 0; padding-left: 20px; }
 
-  .modal-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 28px 24px; border-top: 1px solid var(--line); }
+  .modal-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 28px 24px; border-top: 1px solid var(--color-line-subtle); }
 
   @media (max-width: 1023px) {
     .columns { grid-template-columns: minmax(0, 1fr); }

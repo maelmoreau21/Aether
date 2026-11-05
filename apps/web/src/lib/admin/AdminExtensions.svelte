@@ -7,6 +7,8 @@
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
   import { SvelteMap } from 'svelte/reactivity';
+  import { extensionPins, isPinnableExtension, toggleExtensionPin } from './extension-pins';
+  import { loadFeatures } from '../applications/api';
   type ConfigOption = { label: string; value: string };
   type ConfigField = {
     key: string;
@@ -129,6 +131,7 @@
       adminRequest<{ entries: CatalogueEntry[] }>('/api/v1/admin/extensions/catalogue')
     ]);
     installed = extensions.extensions.map(extension=>({...extension,manifest:displayManifest(extension.manifest)}));
+    await loadFeatures(true).catch(() => {});
     repositories = sources.repositories; catalogue = available.entries.map(entry=>({...entry,manifest:displayManifest(entry.manifest)}));
 
     for (const ext of installed) {
@@ -575,6 +578,10 @@
             </button>
           {/if}
           <button disabled={busy} onclick={()=>{managedId=extension.manifest.id;settingsOpen=true;}}>Paramètres de {displayName(extension.manifest.name)}</button>
+          {#if isPinnableExtension(extension.manifest.id)}
+            <button aria-pressed={$extensionPins.includes(extension.manifest.id)} disabled={busy || !extension.enabled} onclick={() => toggleExtensionPin(extension.manifest.id)}><Icon name="star" size={14} />{$extensionPins.includes(extension.manifest.id) ? 'Désépingler' : 'Épingler dans le menu'}</button>
+            {#if extension.enabled}<a class="button-link" href={`#${extension.manifest.id === 'media-requests' ? 'requests' : 'reports'}-section`}>Ouvrir {displayName(extension.manifest.name)}</a>{/if}
+          {/if}
         </div></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
   {/if}
   {/if}

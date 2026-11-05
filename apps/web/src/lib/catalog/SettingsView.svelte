@@ -3,6 +3,7 @@
   import { preferences, ensurePreferences, savePreferences } from '../preferences';
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
+  import { features } from '../applications/api';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
   import AppearanceCustomization from './AppearanceCustomization.svelte';
   import RecommendationSettings from './RecommendationSettings.svelte';
@@ -145,7 +146,12 @@
         {#each pages.filter(page => page.group === group) as page (page.id)}
           <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{page.label}</a>
         {/each}
-        {#if group === 'Moi'}<a href={resolve('downloads/')}><Icon name="download" size={18} />Téléchargements</a>{/if}
+        {#if group === 'Moi'}
+          {#if $features.requests}<a href={resolve('requests/')}><Icon name="download" size={18} />Demandes</a>{/if}
+          {#if $features.reports}<a href={resolve('reports/')}><Icon name="alert" size={18} />Signalements</a>{/if}
+          <a href={resolve('statistics/')}><Icon name="clock" size={18} />Mes statistiques</a>
+          <a href={resolve('downloads/')}><Icon name="download" size={18} />Téléchargements</a>
+        {/if}
       {/each}
       {#if $session?.user.role === 'administrator'}<a class="server-link" href={resolve('admin/libraries/#overview')}><Icon name="server" size={20} />Administration du serveur</a>{/if}
     </nav>

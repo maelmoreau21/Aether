@@ -3,6 +3,7 @@
   import { session } from '../auth/session';
   import { applicationRequest, categoryLabels, dateLabel, features, loadFeatures, statusLabels, type MediaReport } from './api';
   import './applications.css';
+  let { embedded = false }: { embedded?: boolean } = $props();
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -39,7 +40,7 @@
   }
 </script>
 <div class="application-page">
-  <header class="heading"><div><p class="muted">Suivi des problèmes de votre médiathèque</p><h1>Signalements</h1><p class="muted">Pour ouvrir un signalement précis, utilisez « Signaler » sur une fiche ou dans le lecteur.</p></div><button disabled={busy || loading || !$features.reports} onclick={() => { busy = true; void refresh().catch(cause => error = String(cause instanceof Error ? cause.message : cause)).finally(() => busy = false); }}>Actualiser</button></header>
+  <header class="heading"><div><p class="muted">Suivi des problèmes de votre médiathèque</p>{#if !embedded}<h1>Signalements</h1>{/if}<p class="muted">Pour ouvrir un signalement précis, utilisez « Signaler » sur une fiche ou dans le lecteur.</p></div><button disabled={busy || loading || !$features.reports} onclick={() => { busy = true; void refresh().catch(cause => error = String(cause instanceof Error ? cause.message : cause)).finally(() => busy = false); }}>Actualiser</button></header>
   {#if error}<p role="alert" class="feedback error">{error}</p>{/if}
   {#if loading}<p class="empty" role="status">Chargement…</p>{:else if !$features.reports}<p class="panel">L’extension officielle Signalements doit être installée et activée par un administrateur.</p>{:else}
     <div class="heading"><h2>{isAdmin ? 'Tous les signalements' : 'Mes signalements'}</h2><label>État<select bind:value={filter}><option value="all">Tous les états</option>{#each ['open','in_progress','resolved','closed'] as status (status)}<option value={status}>{statusLabels[status]}</option>{/each}</select></label></div>

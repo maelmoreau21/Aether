@@ -24,6 +24,9 @@
   import AdminTasks from '../../../lib/admin/AdminTasks.svelte';
   import AdminMaintenance from '../../../lib/admin/AdminMaintenance.svelte';
   import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
+  import Requests from '../../../lib/applications/Requests.svelte';
+  import Reports from '../../../lib/applications/Reports.svelte';
+  import AcquisitionAdmin from '../../../lib/applications/AcquisitionAdmin.svelte';
   import AdminGroups from '../../../lib/admin/AdminGroups.svelte';
   import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
   import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
@@ -502,11 +505,15 @@
             <AdminArtwork {libraries} />
           </div>
           <AdminCapabilities section={currentHash.slice(1)} />
+          {#if currentHash === '#requests-section'}<div class="extension-application"><Requests embedded /></div>{/if}
+          {#if currentHash === '#reports-section'}<div class="extension-application"><Reports embedded /></div>{/if}
+          {#if currentHash === '#acquisition-section'}<div class="extension-application"><AcquisitionAdmin embedded /></div>{/if}
     {/if}
   {/if}
 </AdminShell>
 
 <style>
+  .extension-application :global(.application-page) { max-width: none; padding: 0; }
 .error-banner,
   .notice-banner {
     display: flex;

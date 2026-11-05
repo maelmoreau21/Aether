@@ -5,6 +5,7 @@
   import { applicationRequest, features, loadFeatures, type RemoteServer } from './api';
   import LegacyImport from './LegacyImport.svelte';
   import './applications.css';
+  let { embedded = false }: { embedded?: boolean } = $props();
   interface Profile { id: number; name: string }
   interface Options { rootFolders: { path: string }[]; qualityProfiles: Profile[]; metadataProfiles: Profile[] }
   interface Location { id: string; name: string; kind: 'films' | 'series' | 'music'; nodeId: string; nodeName?: string; root: string }
@@ -69,7 +70,7 @@
   }
 </script>
 <div class="application-page">
-  <header class="heading"><div><p class="muted">Administration</p><h1>Demandes et acquisitions</h1></div><a class="button-link" href={resolve('requests/')}>Voir les demandes</a></header>
+  <header class="heading"><div><p class="muted">Administration</p>{#if embedded}<h2>Acquisition et imports</h2>{:else}<h1>Demandes et acquisitions</h1>{/if}</div><a class="button-link" href={embedded ? '#requests-section' : resolve('requests/')}>Voir les demandes</a></header>
   {#if error}<p role="alert" class="feedback error">{error}</p>{/if}{#if message}<p role="status" class="feedback success">{message}</p>{/if}
   {#if !administrator}<p class="panel">Cette page est réservée aux administrateurs.</p>{:else if loading}<p role="status">Chargement…</p>{:else if !$features.requests && !$features.reports}<p class="panel">Installez et activez Demandes ou Signalements dans l’administration des extensions.</p>{:else}
     <div class="stack">

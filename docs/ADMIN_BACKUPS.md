@@ -33,6 +33,34 @@ du Core, avec permissions 0700. Le Core ne change pas automatiquement le
 propriétaire du volume. Diagnostic réel et correction ciblée du 2 novembre :
 [sauvegarde NAS](archive/fixes/BACKUP_NAS_FIX_2026_11_02.md).
 
+Si Compose impose `user: UID:GID`, un nouveau volume nommé peut être initialisé
+avec le propriétaire du dossier fourni par l'image (`10001:10001`), même si le
+processus utilise un autre UID. À la création ou recréation du volume, vérifier
+le montage exact avec `docker inspect`, puis son propriétaire avec `stat` sous
+l'utilisateur du service. Faire correspondre le propriétaire du **seul dossier
+du volume de sauvegardes** à l'UID/GID configuré, en conservant 0700 ; ne pas
+appliquer de changement récursif ni de permissions ouvertes aux archives.
+Conserver ce volume lors des mises à jour (ne pas le recréer avec `down -v`).
+Un bind mount préparé avec ce propriétaire avant démarrage est une autre option.
+L'API distingue désormais un refus de lecture lié aux permissions d'un chemin
+configuré qui est un fichier ; les réponses ne révèlent aucun chemin du serveur.
+
+Le 5 novembre 2026, le NAS présentait de nouveau `/backups` en `10001:10001`,
+0700, avec un Core `1039:65539` et des erreurs `read_dir: PermissionDenied`.
+Le montage a été vérifié : volume `aether_backups`, dossier hôte
+`/volume2/@docker/volumes/aether_backups/_data`, monté en lecture/écriture.
+Le propriétaire de ce seul dossier a été corrigé vers `1039:65539`, sans changer
+le mode 0700. Lecture de la liste, création d'une sonde privée 0600, relecture et
+suppression de cette seule sonde ont réussi sous l'utilisateur du service.
+Ni redémarrage, ni modification de médias/archives, ni déploiement de code.
+La création/restauration d'une archive complète et le parcours HTTP authentifié
+de production n'ont pas été exercés lors de cette intervention.
+Validation locale Windows : `cargo test -p media-poc --test admin_backups`
+réussit (2 tests, dont création/téléchargement/extraction/restauration SQLite
+et refus de chemin), ainsi que `cargo fmt --check` et `git diff --check`.
+Le scénario ajouté de permissions Unix puis rétablissement attend une exécution
+sous Unix ; il est exclu de la compilation Windows.
+
 ## Récupération et vérifications
 
 Arrêter le Core ; extraire vers un nouvel emplacement privé ; restaurer la base via `media-restore` (SQLite destination nouvelle, PostgreSQL base vide), puis rétablir la configuration extraite et vérifier le redémarrage. La restauration de la base active depuis HTTP reste exclue.

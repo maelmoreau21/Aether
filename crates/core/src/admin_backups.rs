@@ -298,7 +298,7 @@ async fn list(
         match validate_directory(&state).await {
             Ok(directory) => {
                 let listing_result =
-                    tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, StatusCode> {
+                    tokio::task::spawn_blocking(move || -> Result<Vec<Archive>, std::io::Error> {
                         if !directory.exists() {
                             return Ok(Vec::new());
                         }
@@ -312,7 +312,7 @@ async fn list(
                                     "admin_backups: read_dir error in {:?}: {:?}",
                                     directory, err
                                 );
-                                return Err(StatusCode::FORBIDDEN);
+                                return Err(err);
                             }
                         };
                         let mut archives = Vec::new();
@@ -356,13 +356,19 @@ async fn list(
                     .await;
                 match listing_result {
                     Ok(Ok(archives)) => (true, None, archives),
-                    Ok(Err(err_code)) => {
-                        eprintln!("admin_backups: listing archives returned {:?}", err_code);
-                        (
-                            false,
-                            Some("Impossible de lire les archives de sauvegarde."),
-                            Vec::new(),
-                        )
+                    Ok(Err(error)) => {
+                        let reason = match error.kind() {
+                            std::io::ErrorKind::PermissionDenied => {
+                                "Le processus du serveur ne peut pas lire le dossier de sauvegarde. Vérifiez le propriétaire et les permissions du volume de sauvegardes pour l’UID/GID du conteneur."
+                            }
+                            std::io::ErrorKind::NotADirectory => {
+                                "Le chemin de sauvegarde configuré ne correspond pas à un dossier. Vérifiez le montage du volume de sauvegardes."
+                            }
+                            _ => {
+                                "Impossible de lire les archives de sauvegarde. Vérifiez le volume et les journaux du serveur."
+                            }
+                        };
+                        (false, Some(reason), Vec::new())
                     }
                     Err(join_err) => {
                         eprintln!("admin_backups: join error on listing: {:?}", join_err);

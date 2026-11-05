@@ -17,6 +17,21 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 5 novembre 2026 — Administration, profil et sauvegardes
+
+- Administration pleine largeur ; rubrique Extensions, épingles Demandes/Signalements
+  locales au navigateur et par compte ; Clés API dans Système. Liens personnels
+  Demandes/Signalements/statistiques déplacés dans Moi des paramètres. Voir
+  `docs/UI_DIRECTION.md`.
+- NAS : volume `/backups` recréé sous 10001:10001, Core sous 1039:65539, mode0700.
+  Propriétaire du seul dossier corrigé sans récursion ; lecture/écriture/relecture
+  d’une sonde privée réussies, aucune archive ni média touché, sans redémarrage.
+  Diagnostic API local amélioré ; prévention : `docs/ADMIN_BACKUPS.md`.
+- Vérifié : check Svelte 0/0, lint, 11 tests Web ciblés, build Web ; Chrome avec APIs
+  synthétiques à 2560/390 px et épinglage après rechargement ; test Rust admin_backups
+  2/2 et fmt. Scénario permissions Unix exclu sous Windows. Aucun test HTTP authentifié
+  NAS ni sauvegarde/restauration complète de production, aucun déploiement de code.
+
 ## 4 novembre 2026 — Portraits « Distribution & équipe »
 
 - Cause : les crédits TMDb contenaient `thumbUrl` (`image.tmdb.org`), mais l'interface le

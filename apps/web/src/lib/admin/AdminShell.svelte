@@ -7,6 +7,8 @@
   import Icon from '../ui/Icon.svelte';
   import { t, locale } from '../i18n';
   import { adminNavigation, adminDestinationLabel, adminEntryFor, normalizeAdminSearch, searchAdmin, type AdminSearchResult } from './navigation';
+  import { extensionPins, toggleExtensionPin } from './extension-pins';
+  import { features, loadFeatures } from '../applications/api';
 
   let { title, currentHash, administrator, onnavigate, children }: {
     title: string; currentHash: string; administrator: boolean; onnavigate: (hash: string) => void; children: Snippet;
@@ -20,7 +22,7 @@
   const currentEntry = $derived(adminEntryFor(currentHash));
   let query = $state('');
   const searching = $derived(query.trim().length > 0);
-  const results = $derived(searchAdmin(query));
+  const results = $derived(searchAdmin(query).filter(result => !result.entry.extensionId || (result.entry.extensionId === 'media-requests' ? $features.requests : $features.reports)));
 
   /** Section shown after the matched setting; skipped when it would only repeat the match. */
   function resultContext(result: AdminSearchResult): string {
@@ -60,6 +62,7 @@
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   onMount(() => {
+    if (administrator) void loadFeatures().catch(() => {});
     const media = matchMedia('(min-width: 1100px)');
     const resize = () => {
       const wasNavigating = menuOpen || Boolean(sidebar?.contains(document.activeElement));
@@ -111,10 +114,12 @@
     {#each adminNavigation as group (group.label)}
       <div class="sidebar-group"><p class="group-label">{$locale === 'en' ? group.englishLabel : group.label}</p>
         {#each group.links as link (link.hash)}
+          {#if !link.extensionId || ($extensionPins.includes(link.extensionId) && (link.extensionId === 'media-requests' ? $features.requests : $features.reports))}
           {@const active = currentEntry?.hash === link.hash}
           <a class="sidebar-nav-item" class:active href={resolve(`admin/libraries/#${link.hash.slice(1)}`)} aria-current={active ? 'page' : undefined} onclick={event => choose(event, link.hash)}>
             <Icon name={link.icon} size={18} /><span>{adminDestinationLabel(link, $t, $locale === 'en')}</span>
           </a>
+          {/if}
         {/each}
       </div>
     {/each}
@@ -154,7 +159,11 @@
   <main id="admin-main-content" class="admin-content-area" tabindex="-1" bind:this={content}>
     {#if administrator && currentEntry}
       <header class="section-title">
-        <h1>{adminDestinationLabel(currentEntry, $t, $locale === 'en')}</h1>
+        <div class="section-heading"><h1>{adminDestinationLabel(currentEntry, $t, $locale === 'en')}</h1>
+          {#if currentEntry.extensionId && (currentEntry.extensionId === 'media-requests' ? $features.requests : $features.reports)}
+            <button class="pin-extension" aria-pressed={$extensionPins.includes(currentEntry.extensionId)} onclick={() => toggleExtensionPin(currentEntry.extensionId!)}><Icon name="star" size={17} />{$extensionPins.includes(currentEntry.extensionId) ? 'Désépingler' : 'Épingler'}</button>
+          {/if}
+        </div>
         {#if currentEntry.tabs}
           <nav class="section-tabs" aria-label={`Sous-sections : ${adminDestinationLabel(currentEntry, $t, $locale === 'en')}`}>
             {#each currentEntry.tabs as tab (tab.hash)}
@@ -182,11 +191,13 @@
   .back-link:hover { color: var(--tx); background: var(--pn); }
   .mobile-menu-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 44px; border: 0; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); font-size: 14px; font-weight: 700; max-width: 52vw; }
   .mobile-menu-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .admin-dashboard-container { width: 100%; max-width: 1440px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px var(--gutter) 64px; }
+  .admin-dashboard-container { width: 100%; max-width: none; box-sizing: border-box; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px var(--gutter) 64px; }
   .with-sidebar { grid-template-columns: 260px minmax(0, 1fr); }
   .admin-content-area { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
   .admin-content-area:focus { outline: none; }
   .section-title { display: flex; flex-direction: column; gap: 14px; }
+  .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+  .pin-extension { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px; border: 0; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font: inherit; cursor: pointer; }
   .section-title h1 { margin: 0; font-size: clamp(30px, 3.6vw, 44px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.02; }
   .section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
   .section-tabs a { display: flex; align-items: center; height: 46px; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--mu); font-size: 14px; font-weight: 700; white-space: nowrap; transition: color var(--t-fast) ease; }

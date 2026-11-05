@@ -5,6 +5,27 @@
 > datées ci-dessous résument des décisions intégrées ; leurs rapports détaillés
 > sont historiques et ne constituent pas une feuille de route.
 
+## Administration et paramètres personnels — 5 novembre 2026
+
+Le tableau de bord utilise toute la largeur disponible, avec des marges adaptatives,
+sans plafond à 1 440 px. Les Clés API sont dans Système. La rubrique Extensions
+regroupe la gestion des extensions et les raccourcis épinglés de Demandes et
+Signalements. L’épinglage se fait depuis les cartes installées ou leur écran ;
+il est conservé par compte dans ce navigateur, sans synchronisation serveur.
+Les raccourcis des extensions désactivées sont masqués. Acquisition et imports
+reste un onglet de Demandes dans l’administration.
+
+Le menu du profil donne accès aux paramètres personnels et au tableau de bord.
+Demandes, Signalements et Mes statistiques sont dans le groupe Moi des paramètres ;
+les deux premiers liens dépendent des extensions actives. Le lien « Demandes et
+imports » est retiré du menu du profil.
+
+Vérifications locales : Svelte, lint, tests ciblés navigation/épinglage, build Web,
+Chrome avec APIs synthétiques à 2 560 px et 390 px, accès paramètres personnels et
+persistance d’une épingle après rechargement. Les changements UI ne sont pas déployés.
+La réparation du stockage des sauvegardes sur le NAS et ses limites sont décrites
+dans [ADMIN_BACKUPS.md](ADMIN_BACKUPS.md).
+
 ## Direction et périmètre
 
 La direction historique améthyste est remplacée par Cinéma OLED (sombre) et

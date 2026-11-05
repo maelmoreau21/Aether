@@ -17,13 +17,20 @@ describe('administration task navigation', () => {
 describe('administration grouping', () => {
   it('keeps every historical section and native statistics reachable', async () => {
     const { adminEntries, adminEntryFor } = await import('./navigation');
-    expect(adminEntries).toHaveLength(12);
+    expect(adminEntries).toHaveLength(14);
     for (const hash of ['#overview', '#statistics-section', '#general-section', '#network-section', '#libraries-section', '#artwork-section', '#trickplay-section', '#nodes-section', '#avatars-section', '#users-section', '#groups-section', '#api-keys-section', '#tasks-section', '#backups-section', '#extensions-section']) {
       expect(parseAdminHash(hash).section).toBe(hash);
       expect(adminEntryFor(hash)).toBeDefined();
     }
     expect(adminEntryFor('#trickplay-section')?.label).toBe('Métadonnées et images');
     expect(adminEntryFor('#network-section')?.label).toBe('Paramètres du serveur');
+  });
+  it('groups API keys under System and application shortcuts under Extensions', async () => {
+    const { adminNavigation, adminEntryFor } = await import('./navigation');
+    expect(adminNavigation.find(group => group.label === 'Système')?.links.some(link => link.hash === '#api-keys-section')).toBe(true);
+    expect(adminNavigation.find(group => group.label === 'Extensions')?.links.map(link => link.hash)).toEqual(['#extensions-section', '#requests-section', '#reports-section']);
+    expect(adminEntryFor('#acquisition-section')?.extensionId).toBe('media-requests');
+    expect(parseAdminHash('#reports-section').section).toBe('#reports-section');
   });
 });
 

@@ -4,6 +4,7 @@
   import { session } from '../auth/session';
   import { applicationRequest, dateLabel, errorMessage, features, kindLabels, loadFeatures, parseSelection, requestPayload, statusLabels, type MediaRequest, type RequestKind, type SearchResult } from './api';
   import './applications.css';
+  let { embedded = false }: { embedded?: boolean } = $props();
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
@@ -68,7 +69,7 @@
   }
 </script>
 <div class="application-page">
-  <header class="heading"><div><p class="muted">Votre médiathèque, à la demande</p><h1>Demandes</h1><p class="muted">Films, séries et musique : recherchez un contenu et suivez son arrivée.</p></div>{#if isAdmin && $features.requests}<a class="button-link" href={resolve('requests/admin/')}>Gérer les demandes</a>{/if}</header>
+  <header class="heading"><div><p class="muted">Votre médiathèque, à la demande</p>{#if !embedded}<h1>Demandes</h1>{/if}<p class="muted">Films, séries et musique : recherchez un contenu et suivez son arrivée.</p></div>{#if isAdmin && $features.requests}<a class="button-link" href={embedded ? '#acquisition-section' : resolve('requests/admin/')}>Gérer les demandes</a>{/if}</header>
   {#if error}<p role="alert" class="feedback error">{error}</p>{/if}
   {#if message}<p role="status" class="feedback success">{message}</p>{/if}
   {#if loading}<p class="empty" role="status">Chargement…</p>

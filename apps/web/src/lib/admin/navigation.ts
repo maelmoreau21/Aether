@@ -3,7 +3,7 @@ import type { IconName } from '../ui/Icon.svelte';
 type LabelKey = 'admin_nav_overview' | 'admin_nav_libraries' | 'admin_nav_nodes' | 'admin_nav_users' | 'admin_nav_tasks';
 export interface AdminDestination { hash: string; label: string; englishLabel?: string; key?: LabelKey; icon: IconName }
 /** A sidebar entry. Entries with tabs group related sections behind one destination. */
-export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[] }
+export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[]; extensionId?: 'media-requests' | 'media-reports' }
 
 const artworkTabs: AdminDestination[] = [
   { hash: '#artwork-section', label: 'Images', englishLabel: 'Artwork', icon: 'image' },
@@ -27,13 +27,20 @@ export const adminNavigation: { label: string; englishLabel: string; links: Admi
   ] },
   { label: 'Accès', englishLabel: 'Access', links: [
     { hash: '#users-section', label: 'Utilisateurs', key: 'admin_nav_users', icon: 'users' },
-    { hash: '#groups-section', label: 'Groupes et permissions', englishLabel: 'Groups and permissions', icon: 'users' },
-    { hash: '#api-keys-section', label: 'Clés API', englishLabel: 'API keys', icon: 'shield' }
+    { hash: '#groups-section', label: 'Groupes et permissions', englishLabel: 'Groups and permissions', icon: 'users' }
+  ] },
+  { label: 'Extensions', englishLabel: 'Extensions', links: [
+    { hash: '#extensions-section', label: 'Gérer les extensions', englishLabel: 'Manage extensions', icon: 'sparkles' },
+    { hash: '#requests-section', label: 'Demandes', englishLabel: 'Requests', icon: 'download', extensionId: 'media-requests', tabs: [
+      { hash: '#requests-section', label: 'Demandes', englishLabel: 'Requests', icon: 'download' },
+      { hash: '#acquisition-section', label: 'Acquisition et imports', englishLabel: 'Acquisition and imports', icon: 'server' }
+    ] },
+    { hash: '#reports-section', label: 'Signalements', englishLabel: 'Reports', icon: 'alert', extensionId: 'media-reports' }
   ] },
   { label: 'Système', englishLabel: 'System', links: [
+    { hash: '#api-keys-section', label: 'Clés API', englishLabel: 'API keys', icon: 'shield' },
     { hash: '#tasks-section', label: 'Tâches planifiées', key: 'admin_nav_tasks', icon: 'clock' },
     { hash: '#backups-section', label: 'Sauvegardes', englishLabel: 'Backups', icon: 'server' },
-    { hash: '#extensions-section', label: 'Extensions', icon: 'sparkles' },
     { hash: '#general-section', label: 'Paramètres du serveur', englishLabel: 'Server settings', icon: 'settings', tabs: serverTabs }
   ] }
 ];
@@ -70,6 +77,9 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#tasks-section': ['Planification', 'Planifications et lancement manuel', 'Déclencheur périodique', 'Intervalle des tâches', 'File d’exécution', 'Opérations en cours', 'Suivi des opérations', 'Automatisation des métadonnées', 'Quotas fournisseurs', 'Nettoyer le journal des extensions'],
   '#backups-section': ['Sauvegarde automatique', 'Activer les sauvegardes automatiques', 'Planification automatique', 'Archives', 'Télécharger une sauvegarde', 'Base de données', 'Consommation mémoire', 'Cache disque Linux'],
   '#extensions-section': ['Extensions installées', 'Catalogue', 'Dépôts', 'Adresse du dépôt', 'Mettre à jour une extension', 'Historique des révisions', 'Accès demandés', 'Paramètres des extensions', 'Plugins'],
+  '#requests-section': ['Demandes', 'Valider une demande', 'Acquisition', 'Épingler les demandes'],
+  '#acquisition-section': ['Serveurs d’acquisition', 'Radarr', 'Sonarr', 'Lidarr', 'Imports', 'Règles de validation'],
+  '#reports-section': ['Signalements', 'Problèmes de lecture', 'Résoudre un signalement', 'Épingler les signalements'],
   '#general-section': ['Nom du serveur', 'Message d’accueil', 'Texte du bouton de connexion SSO', 'OIDC', 'SSO', 'Identifiants locaux', 'Reprise de lecture', 'Considéré comme vu', 'Durée minimale pour reprendre', 'Langue préférée', 'Pays', 'Métadonnées', 'Empreintes audio', 'Journal des extensions', 'Origines CORS autorisées', 'Partage des playlists'],
   '#network-section': ['Adresse publique', 'MEDIA_PUBLIC_URL', 'Interface Web', 'API', 'Cookies sécurisés', 'Cookies de session sécurisés (HTTPS)', 'HTTPS']
 };

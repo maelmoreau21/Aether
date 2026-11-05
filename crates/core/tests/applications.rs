@@ -396,7 +396,15 @@ async fn reports_extension_installed_by_an_administrator_accepts_reports() {
     let (package, public_key) = signed_package("reports");
     let mut install = serde_json::to_value(&package).unwrap();
     install["publicKey"] = json!(public_key);
-    let response = send(&f, Some(0), "POST", "/api/v1/admin/extensions", true, install).await;
+    let response = send(
+        &f,
+        Some(0),
+        "POST",
+        "/api/v1/admin/extensions",
+        true,
+        install,
+    )
+    .await;
     let status = response.status();
     let installed = body(response).await;
     assert_eq!(status, StatusCode::CREATED, "{installed}");
@@ -418,7 +426,15 @@ async fn reports_extension_installed_by_an_administrator_accepts_reports() {
     );
     let report = json!({"category":"video","description":"Image figée à la reprise","workId":"work-1","positionSeconds":42});
     for who in [1, 0] {
-        let response = send(&f, Some(who), "POST", "/api/v1/reports", true, report.clone()).await;
+        let response = send(
+            &f,
+            Some(who),
+            "POST",
+            "/api/v1/reports",
+            true,
+            report.clone(),
+        )
+        .await;
         let status = response.status();
         let created = body(response).await;
         assert_eq!(status, StatusCode::CREATED, "{created}");

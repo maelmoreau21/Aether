@@ -146,7 +146,7 @@ impl TempPattern {
     }
 }
 
-//// Published image-cache entries (`<32 or 64 hex digits>.img`) eligible for eviction.
+/// Published image-cache entries (`<32 or 64 hex digits>.img`) eligible for eviction.
 fn is_cached_image(name: &str) -> bool {
     name.strip_suffix(".img").is_some_and(|stem| {
         matches!(stem.len(), 32 | 64) && stem.bytes().all(|b| b.is_ascii_hexdigit())

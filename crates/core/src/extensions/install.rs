@@ -30,9 +30,12 @@ pub(super) struct InstallPackage {
 /// an application extension starts with an empty scope and refuses every call
 /// with `library_permission_denied`.
 fn default_all_libraries(permissions: &[String]) -> bool {
-    permissions
-        .iter()
-        .any(|permission| matches!(permission.as_str(), "metadata.read" | "reports" | "requests"))
+    permissions.iter().any(|permission| {
+        matches!(
+            permission.as_str(),
+            "metadata.read" | "reports" | "requests"
+        )
+    })
 }
 
 pub(super) async fn install(

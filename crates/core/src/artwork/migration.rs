@@ -219,7 +219,16 @@ async fn migrate_object(store: &IdentityStore, sha: &str) -> Result<(), StatusCo
         .await
         .map_err(db)?;
     tx.commit().await.map_err(db)?;
-    record(store, target, true, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64).await?;
+    record(
+        store,
+        target,
+        true,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64,
+    )
+    .await?;
     crate::inventory::invalidate_catalogue_cache();
     // No deletion: AssetStore's two-phase GC retains the former objects for its grace period.
     Ok(())

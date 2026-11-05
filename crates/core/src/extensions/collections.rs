@@ -905,7 +905,7 @@ mod tests {
             .await
             .unwrap()
             .to_bytes();
-        assert!(image_bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(image_bytes.starts_with(b"RIFF") && image_bytes.get(8..12) == Some(b"WEBP"));
         let response = app
             .clone()
             .oneshot(

@@ -121,6 +121,8 @@ pub struct TrickplayManager {
 
 static GLOBAL_MANAGER: LazyLock<Arc<TrickplayManager>> =
     LazyLock::new(|| Arc::new(TrickplayManager::from_env()));
+static WEBP_SUPPORT: LazyLock<tokio::sync::RwLock<HashMap<PathBuf, bool>>> =
+    LazyLock::new(|| tokio::sync::RwLock::new(HashMap::new()));
 
 pub fn global_manager() -> Arc<TrickplayManager> {
     GLOBAL_MANAGER.clone()
@@ -490,6 +492,25 @@ impl TrickplayManager {
         }
     }
 
+    async fn supports_libwebp(&self) -> bool {
+        if let Some(supported) = WEBP_SUPPORT.read().await.get(&self.ffmpeg_binary) {
+            return *supported;
+        }
+        let supported = match Command::new(&self.ffmpeg_binary)
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .await
+        {
+            Ok(output) => String::from_utf8_lossy(&output.stdout).contains("libwebp"),
+            Err(_) => false,
+        };
+        WEBP_SUPPORT
+            .write()
+            .await
+            .insert(self.ffmpeg_binary.clone(), supported);
+        supported
+    }
+
     /// Execute the FFmpeg generation, resuming partial work if present.
     pub async fn execute_generation(
         &self,
@@ -558,8 +579,13 @@ impl TrickplayManager {
             return Ok(());
         }
 
+        let use_webp = self.supports_libwebp().await;
+        let ext = if use_webp { "webp" } else { "jpg" };
+        let mime = if use_webp { "image/webp" } else { "image/jpeg" };
+        let version = if use_webp { 2 } else { 1 };
+
         // Use a deterministic in-progress folder to enable resumable generation across restarts
-        let work = self.cache_root.join(format!(".{key}.webp.in_progress"));
+        let work = self.cache_root.join(format!(".{key}.{ext}.in_progress"));
         tokio::fs::create_dir_all(&work)
             .await
             .map_err(|_| "cache_permission")?;
@@ -567,7 +593,7 @@ impl TrickplayManager {
         // Determine already completed sheets to resume from
         let mut completed_sheets = 0usize;
         while completed_sheets < sheet_limit {
-            let sheet_path = work.join(format!("{completed_sheets}.webp"));
+            let sheet_path = work.join(format!("{completed_sheets}.{ext}"));
             let Ok(meta) = tokio::fs::metadata(&sheet_path).await else {
                 break;
             };
@@ -575,7 +601,7 @@ impl TrickplayManager {
                 break;
             }
             let opened =
-                OpenedFile::open_in_root(&work, Path::new(&format!("{completed_sheets}.webp")))
+                OpenedFile::open_in_root(&work, Path::new(&format!("{completed_sheets}.{ext}")))
                     .await
                     .map_err(|_| "generated_image_invalid")?;
             if !validate_sheet(opened).await {
@@ -601,6 +627,7 @@ impl TrickplayManager {
                 quality,
                 cols,
                 rows,
+                use_webp,
             )
             .await?;
         }
@@ -611,7 +638,7 @@ impl TrickplayManager {
         let mut first_dims = None;
 
         while count < sheet_limit {
-            let sheet_path = work.join(format!("{count}.webp"));
+            let sheet_path = work.join(format!("{count}.{ext}"));
             let Ok(meta) = tokio::fs::metadata(&sheet_path).await else {
                 break;
             };
@@ -620,7 +647,7 @@ impl TrickplayManager {
             }
             if first_dims.is_none()
                 && let Ok(opened) =
-                    OpenedFile::open_in_root(&work, Path::new(&format!("{count}.webp"))).await
+                    OpenedFile::open_in_root(&work, Path::new(&format!("{count}.{ext}"))).await
             {
                 first_dims = decode_opened_image_dimensions(opened).await;
             }
@@ -638,8 +665,8 @@ impl TrickplayManager {
         let thumbnails = frame_count.min(count * (cols * rows) as usize);
 
         let manifest = CacheManifest {
-            version: 2,
-            mime: "image/webp".into(),
+            version,
+            mime: mime.into(),
             fingerprint: key.to_owned(),
             asset_id: request.asset_id.clone(),
             sheet_count: count,
@@ -687,6 +714,7 @@ impl TrickplayManager {
         quality: u8,
         cols: u32,
         rows: u32,
+        use_webp: bool,
     ) -> Result<(), &'static str> {
         let source_path = request.media_root.join(&request.relative_path);
         let remaining_sheets = sheet_limit - start_sheet;
@@ -725,8 +753,10 @@ impl TrickplayManager {
             .arg("-i")
             .arg(&source_path)
             .args(["-map", "0:v:0", "-an", "-sn", "-dn", "-vf"])
-            .arg(filter)
-            .args([
+            .arg(filter);
+
+        if use_webp {
+            cmd.args([
                 "-frames:v",
                 &remaining_sheets.to_string(),
                 "-c:v",
@@ -744,6 +774,20 @@ impl TrickplayManager {
             ])
             .arg(output.join("%d.webp"))
             .kill_on_drop(true);
+        } else {
+            cmd.args([
+                "-frames:v",
+                &remaining_sheets.to_string(),
+                "-q:v",
+                &quality.to_string(),
+                "-start_number",
+                &start_sheet.to_string(),
+                "-f",
+                "image2",
+            ])
+            .arg(output.join("%d.jpg"))
+            .kill_on_drop(true);
+        }
 
         cmd.stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -832,7 +876,11 @@ impl TrickplayManager {
             let partial = name
                 .strip_prefix('.')
                 .and_then(|s| s.strip_suffix(".in_progress"))
-                .map(|s| s.strip_suffix(".webp").unwrap_or(s));
+                .map(|s| {
+                    s.strip_suffix(".webp")
+                        .or_else(|| s.strip_suffix(".jpg"))
+                        .unwrap_or(s)
+                });
             if partial.is_some_and(cache_key) {
                 let active = self
                     .jobs

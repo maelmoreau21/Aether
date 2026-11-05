@@ -46,18 +46,19 @@ pub(crate) fn normalize_image(
     poster: bool,
 ) -> Result<Vec<u8>, StatusCode> {
     let image = crate::image_import::decode(&bytes, content_type)?;
-    let resized = if poster {
-        image.thumbnail(1000, 1500)
-    } else {
-        image.thumbnail(256, 256)
-    };
+    let (max_w, max_h) = if poster { (1000, 1500) } else { (256, 256) };
+    let not_resized = image.width() <= max_w && image.height() <= max_h;
     if content_type == "image/webp"
-        && resized.width() == image.width()
-        && resized.height() == image.height()
-        && media_node::image_encoding::reusable_webp(&bytes, resized.color().has_alpha())
+        && not_resized
+        && media_node::image_encoding::reusable_webp(&bytes, image.color().has_alpha())
     {
         return Ok(bytes.to_vec());
     }
+    let resized = if not_resized {
+        image
+    } else {
+        image.thumbnail(max_w, max_h)
+    };
     crate::image_import::encode(&resized, resized.color().has_alpha())
 }
 /// Deliberately small inert SVG subset for extension avatars: no scripts, links,

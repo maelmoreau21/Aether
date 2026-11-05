@@ -29,7 +29,7 @@ pub(crate) async fn migrate_one(store: &IdentityStore) -> Result<bool, StatusCod
         .collect::<Vec<_>>()
         .join(" OR ");
     let sql = format!(
-        "SELECT a.sha256 FROM assets a LEFT JOIN image_migration_attempts m ON m.sha256=a.sha256 WHERE (a.mime IN ('image/jpeg','image/png') OR (a.mime='image/webp' AND EXISTS(SELECT 1 FROM work_posters p WHERE p.sha256=a.sha256))) AND (m.sha256 IS NULL OR (m.outcome!='completed' AND m.retry_at<=?)) AND ({referenced}) ORDER BY a.sha256 LIMIT 1"
+        "SELECT a.sha256 FROM assets a LEFT JOIN image_migration_attempts m ON m.sha256=a.sha256 WHERE (a.mime IN ('image/jpeg','image/png') OR (a.mime='image/webp' AND EXISTS(SELECT 1 FROM work_posters p WHERE p.sha256=a.sha256 AND NOT EXISTS(SELECT 1 FROM poster_previews pv WHERE pv.work_id=p.work_id)))) AND (m.sha256 IS NULL OR (m.outcome!='completed' AND m.retry_at<=?)) AND ({referenced}) ORDER BY a.sha256 LIMIT 1"
     );
     let sha: Option<String> = query_scalar(sqlx::AssertSqlSafe(sql))
         .bind(timestamp)
@@ -219,6 +219,7 @@ async fn migrate_object(store: &IdentityStore, sha: &str) -> Result<(), StatusCo
         .await
         .map_err(db)?;
     tx.commit().await.map_err(db)?;
+    record(store, target, true, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as i64).await?;
     crate::inventory::invalidate_catalogue_cache();
     // No deletion: AssetStore's two-phase GC retains the former objects for its grace period.
     Ok(())

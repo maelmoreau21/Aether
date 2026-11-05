@@ -586,15 +586,43 @@ async fn update_schedule(
         }
         validate_directory(&state).await?;
     }
-    crate::database::query(
-        "UPDATE backup_schedule SET enabled=?,interval_minutes=?,next_due_at=? WHERE singleton=1",
-    )
-    .bind(i64::from(input.enabled))
-    .bind(input.interval_minutes)
-    .bind(now() + input.interval_minutes * 60)
-    .execute(state.auth.store.pool())
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    {
+        let timestamp = now();
+        let _writer = state.auth.store.task_writes.lock().await;
+        let mut conn = state
+            .auth
+            .store
+            .pool()
+            .acquire()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut tx = crate::database::begin_write(&mut conn)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        // Compatibility endpoint: the backup keeps exactly one interval trigger.
+        crate::task_triggers::replace_with_interval(
+            &mut tx,
+            "backup",
+            "backup",
+            input.interval_minutes,
+            input.enabled,
+            timestamp,
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        crate::database::query(
+            "UPDATE backup_schedule SET enabled=?,interval_minutes=?,next_due_at=? WHERE singleton=1",
+        )
+        .bind(i64::from(input.enabled))
+        .bind(input.interval_minutes)
+        .bind(timestamp + input.interval_minutes * 60)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        crate::database::commit(tx)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(load_schedule(&state).await?),
@@ -615,15 +643,54 @@ async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
         return Ok(());
     }
     // Atomic claim; advance from now to avoid missed-run storms. `running` means queued or running.
-    let claimed = crate::database::query("UPDATE backup_schedule SET next_due_at=?,last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND enabled=1 AND next_due_at=? AND next_due_at<=?")
-        .bind(started + schedule.interval_minutes * 60).bind(started).bind(schedule.next_due_at).bind(started)
-        .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if claimed.rows_affected() == 0 {
-        return Ok(());
-    }
-    if let Err(error) =
-        crate::system_task_queue::enqueue_backup(&state.auth.store, schedule.next_due_at, started)
+    // The next due instant is the earliest next firing of the backup's triggers.
+    let limit = {
+        let _writer = state.auth.store.task_writes.lock().await;
+        let mut conn = state
+            .auth
+            .store
+            .pool()
+            .acquire()
             .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut tx = crate::database::begin_write(&mut conn)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let claimed = crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND enabled=1 AND next_due_at=? AND next_due_at<=?")
+            .bind(started).bind(schedule.next_due_at).bind(started)
+            .execute(&mut *tx).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if claimed.rows_affected() == 0 {
+            return Ok(());
+        }
+        let advance = crate::task_triggers::advance(
+            &mut tx,
+            "backup",
+            "backup",
+            started,
+            schedule.interval_minutes,
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        crate::database::query(
+            "UPDATE backup_schedule SET next_due_at=?,enabled=? WHERE singleton=1",
+        )
+        .bind(advance.next.unwrap_or(started))
+        .bind(i64::from(advance.next.is_some()))
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        crate::database::commit(tx)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        advance.max_runtime_seconds
+    };
+    if let Err(error) = crate::system_task_queue::enqueue_backup(
+        &state.auth.store,
+        &schedule.next_due_at.to_string(),
+        started,
+        limit,
+    )
+    .await
     {
         eprintln!("scheduled backup could not be queued: {error}");
         crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
@@ -632,6 +699,29 @@ async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
         return Err(StatusCode::INTERNAL_SERVER_ERROR);
     }
     Ok(())
+}
+
+/// Queue one backup outside the periodic schedule (startup trigger, unified "run" action).
+/// Returns `false` when a backup is already queued or running.
+pub(crate) async fn trigger_backup(
+    store: &crate::identity::IdentityStore,
+    key: &str,
+    timestamp: i64,
+    max_runtime_seconds: Option<i64>,
+) -> Result<bool, sqlx::Error> {
+    let claimed = crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND last_outcome!='running'")
+        .bind(timestamp).execute(store.pool()).await?;
+    if claimed.rows_affected() == 0 {
+        return Ok(false);
+    }
+    if let Err(error) =
+        crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds).await
+    {
+        crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
+            .bind(now()).bind(timestamp).execute(store.pool()).await?;
+        return Err(error);
+    }
+    Ok(true)
 }
 
 /// Execute a queued scheduled backup under its durable-task lease. The outcome is recorded only
@@ -679,6 +769,23 @@ async fn run_scheduled(
     crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome=? WHERE singleton=1 AND last_outcome='running'")
         .bind(now()).bind(if result.is_ok() {"succeeded"} else {"failed"})
         .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if let (Some(job), Err(error)) = (fence, &result) {
+        // The administrator-facing reason, shown as the task's last-run message.
+        let mut detail = serde_json::from_str::<serde_json::Value>(&job.result_json)
+            .ok()
+            .filter(serde_json::Value::is_object)
+            .unwrap_or_else(|| serde_json::json!({}));
+        detail["code"] = error.code.into();
+        detail["message"] = error.message.into();
+        let _ = crate::database::query(
+            "UPDATE durable_tasks SET result_json=? WHERE id=? AND attempt=?",
+        )
+        .bind(detail.to_string())
+        .bind(&job.id)
+        .bind(job.attempt)
+        .execute(state.auth.store.pool())
+        .await;
+    }
     result.map(|_| ()).map_err(|error| error.status)
 }
 

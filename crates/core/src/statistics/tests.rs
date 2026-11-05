@@ -4,8 +4,8 @@ use axum::{
     http::{Request, header},
 };
 use tower::ServiceExt;
-const ORIGIN: &str = "http://127.0.0.1:3000";
-async fn call(
+pub(super) const ORIGIN: &str = "http://127.0.0.1:3000";
+pub(super) async fn call(
     app: &Router,
     method: &str,
     path: &str,
@@ -42,7 +42,7 @@ async fn call(
         String::from_utf8_lossy(&bytes).into(),
     )
 }
-async fn login(auth: &AuthState, user: &str, token: &str) -> (String, String) {
+pub(super) async fn login(auth: &AuthState, user: &str, token: &str) -> (String, String) {
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at,device_label) VALUES(?,?,?,?,?,'Fixture browser')")
         .bind(crate::auth::hash(token)).bind(user).bind(now()).bind(now()).bind(now()+3600).execute(&auth.store.pool).await.unwrap();
     let cookie = format!("media_session={token}");
@@ -51,7 +51,7 @@ async fn login(auth: &AuthState, user: &str, token: &str) -> (String, String) {
     let csrf = auth.authenticate(&headers).await.unwrap().csrf_token;
     (cookie, csrf)
 }
-async fn fixture(store: &IdentityStore) {
+pub(super) async fn fixture(store: &IdentityStore) {
     for (id, role) in [
         ("stats-admin", "administrator"),
         ("stats-reader", "user"),

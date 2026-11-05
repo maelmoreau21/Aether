@@ -41,8 +41,10 @@ pauses observées du lecteur, y compris celles nécessaires à une préparation.
   physique audio ni affichage effectif d'une image.
 
 Les dates des filtres portent sur le **début des sessions** ; bilans, classements
-et temps décrivent cette sélection. Les agrégats quotidiens de ces sessions sont
-répartis à minuit UTC et les horaires sont en UTC. Les notes et favoris indiquent
+et temps décrivent cette sélection. Les agrégats quotidiens stockés
+(`statistics_daily`) sont répartis à minuit UTC ; les analyses et le Wrapped
+recalculent jours, heures, jours de semaine et mois dans le fuseau du navigateur
+(paramètre `tz`). Les notes et favoris indiquent
 leur état actuel, indépendamment de la période et du nombre de lectures. Les
 notes ne sont pas pondérées par le nombre de sessions. Les classements restent
 explicites : personnes, temps, complétion, favoris ou notes ; aucun score de goût
@@ -54,6 +56,56 @@ restent distincts de ceux du catalogue vidéo. Chaque titre suivant et chaque
 nouvelle lecture après une fin ouvre une session. Une présence est envoyée toutes
 les 15 secondes ; après 90 secondes sans réception la session est interrompue.
 Une reprise de collecte crée un nouvel identifiant, sans inventer le temps perdu.
+
+## Analyses détaillées et Wrapped annuel
+
+Les analyses (`…/statistics/insights`) et le Wrapped sont calculés dans le Core
+à partir des mêmes sessions filtrées que les bilans : compte, permissions des
+bibliothèques et contrôle parental actuels s'appliquent à l'identique.
+
+- **Lecture comptée (règle JellyTrack)** : au moins **60 s** de temps consommé,
+  ou un média terminé (seul cas utile pour un média de moins d'une minute), ou une
+  session encore active. Les sessions plus courtes (« zapping ») restent dans les
+  **lectures ouvertes** (`summary.plays`, `totals.opened`) mais jamais dans
+  `summary.qualifiedPlays` ni `totals.plays`. Le temps consommé des analyses inclut
+  toutes les sessions ; le Wrapped exclut entièrement les sessions de moins de 60 s.
+- **Fuseau** : `tz` accepte un nom IANA (`Europe/Paris`, heure d'été comprise, base
+  embarquée via `jiff`) ou un décalage en minutes à l'est d'UTC (`-840` à `840`).
+  Une session est rattachée au jour, à l'heure et au mois locaux de son début.
+- **Croissance** : chaque indicateur est comparé à la fenêtre précédente de même
+  longueur (`growth`, en %, `null` sans base de comparaison).
+- **Séries** : un épisode est regroupé sous sa série (`inventory_episodes` →
+  `inventory_seasons`) ; il hérite du titre et des genres de la série quand il
+  n'en a pas.
+- **Complétion** : par personne et par titre, couverture cumulée de toutes ses
+  sessions rapportée à la durée connue : terminé ≥ 90 %, partiel 50–90 %,
+  décroché 25–50 %, abandonné < 25 %. Les « titres délaissés » listent les titres
+  les plus souvent arrêtés avant 50 % (et 25 %).
+- **Lectures simultanées** : nombre maximal de sessions dont les intervalles
+  [début, fin ou dernier signal] se chevauchent, au global et par jour local.
+- **Résolution** : meilleure hauteur disponible de l'œuvre (`max_height` : SD,
+  720p, 1080p, 4K), pas la source effectivement servie.
+- **Méthode et clients** : dernière méthode observée par session ; la part
+  « préparée » regroupe `remux`, `separate_audio` et `prepared`. La famille de
+  client (navigateur · système) est dérivée de l'appareil enregistré.
+- **Personnes** : réalisateurs et six premiers interprètes des fiches éditoriales
+  (corrections manuelles prioritaires) des 50 titres les plus regardés. Les
+  studios ne sont pas fournis par les métadonnées actuelles.
+- **Bornes** : au plus 100 000 sessions agrégées par réponse (`truncated`).
+
+Le **Wrapped** (`/app/statistics/wrapped/`) résume une année civile locale :
+heures, lectures, titres distincts (série = un titre), équivalent en jours, jours
+actifs, heures par mois, heure / jour / mois favoris, plus longue série de jours
+consécutifs, appareil favori, genres, films, séries, marathon (le plus d'épisodes
+distincts d'une série en un jour), artistes, albums, titres, personnes, temps par
+type, première et dernière lecture et comparaison avec l'année précédente.
+L'année par défaut est l'année en cours, ou la précédente en janvier. Les
+administrateurs règlent sa visibilité (`statistics_wrapped_settings` : activé par
+défaut, fenêtre annuelle facultative pouvant passer le Nouvel An, par défaut du
+1er décembre au 31 janvier) et consultent celui de chaque compte depuis son
+profil, même hors fenêtre. L'interface est un récit plein écran : défilement
+automatique toutes les 8 s, flèches, Espace, appui gauche/droite, maintien pour
+mettre en pause, résumé copiable ; `prefers-reduced-motion` coupe les animations.
 
 ## Confidentialité, stockage et arrêt
 
@@ -114,6 +166,11 @@ Les mutations exigent origine autorisée et `x-csrf-token`.
 | `GET/PUT /api/v1/admin/statistics/settings` | `{enabled:bool,eventRetentionDays:int,summaryRetentionDays:int}`. |
 | `POST /api/v1/admin/statistics/purge` | Purge bornée selon la conservation actuelle. |
 | `DELETE /api/v1/account/statistics` | Suppression de tout l'historique statistique personnel. |
+| `GET /api/v1/admin/statistics/insights` · `GET /api/v1/account/statistics/insights` | Mêmes filtres plus `tz` : totaux, croissance, jours de semaine, grille heure × jour, mois, calendrier, simultanéité, genres, séries, titres, personnes, complétion et titres délaissés, résolution, méthodes, clients. |
+| `GET /api/v1/admin/statistics/users/{id}` | Profil d'un compte (administrateur) : analyses ci-dessus restreintes au compte, 10 dernières lectures, première et dernière lecture de la période. |
+| `GET /api/v1/account/statistics/wrapped?year=&kind=all\|film\|episode\|music&tz=` | Wrapped du compte courant ; `{visible:false,settings}` hors visibilité. `availableYears` va de la première lecture à l'année en cours. |
+| `GET /api/v1/admin/statistics/wrapped/{userId}?year=&kind=&tz=` | Wrapped d'un compte pour l'administrateur, quelle que soit la visibilité. |
+| `GET/PUT /api/v1/admin/statistics/wrapped-settings` | `{visible,periodEnabled,startMonth,startDay,endMonth,endDay}`. |
 
 Filtres : `from` inclusif et `to` exclusif en secondes Unix, `userId` (admin),
 `libraryId`, `nodeId`, `kind` (`film`, `episode`, `music`), `device`, `rank`
@@ -145,6 +202,12 @@ Les tests ciblés couvrent les calculs de pause/déplacement/répétition/vitess
 chargement, les pistes et leur origine, le même contrat HTTP sur SQLite et
 PostgreSQL 18 jetable, les permissions et restrictions parentales, l'isolation des
 comptes, la déduplication, la clôture après expiration, la conservation et l'effacement.
+`statistics::aggregate` et `statistics::wrapped_tests` couvrent l'exclusion des
+sessions de moins de 60 s, le filtre d'année et les fuseaux (minuit du Nouvel An
+à Paris, heure d'été), le regroupement des épisodes par série, la série de jours,
+le marathon, la complétion, la simultanéité, la visibilité du Wrapped et l'accès
+administrateur ; `insights.test.ts` couvre les aides du calendrier, des écrans et
+du résumé copiable.
 Les tests Web couvrent aussi désactivation, changement de compte pendant une
 requête, échec réseau et séparation des lectures musicales.
 
@@ -159,6 +222,6 @@ anti-fraude ni de l'attention d'une personne. Un client tiers non instrumenté,
 un onglet tué, un appareil hors ligne ou une réponse perdue laisse des lacunes.
 Les files et les intervalles sont bornés ; une session dépassant 7 jours ou
 4 096 portions disjointes doit être renouvelée. La navigation, les recherches,
-les imports JellyTrack, les recommandations et les bilans annuels sont différés.
+les imports d'historique JellyTrack et les recommandations sont différés.
 Le NAS, les fournisseurs, les appareils physiques et la charge de production ne
 sont pas attestés par ces tests locaux.

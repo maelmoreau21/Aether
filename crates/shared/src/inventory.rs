@@ -95,6 +95,10 @@ pub struct ScanReport {
     pub reused: u64,
     /// False on interrupted/incomplete traversal: callers must not mark missing files unavailable.
     pub complete: bool,
+    /// True only when the traversal stopped early (cancellation, preemption). An incomplete but
+    /// finished traversal (unreadable subfolders, reported as warnings) is still a successful scan.
+    #[serde(default)]
+    pub interrupted: bool,
 }
 
 /// Core -> Node scan initiation contract.
@@ -141,6 +145,9 @@ pub struct ScanFinished {
     pub probed: u64,
     pub reused: u64,
     pub complete: bool,
+    /// See [`ScanReport::interrupted`]; absent from older Nodes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interrupted: Option<bool>,
 }
 
 /// Node -> Core scan failure report.

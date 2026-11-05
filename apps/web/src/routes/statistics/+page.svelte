@@ -1,9 +1,11 @@
 <script lang="ts">
-  import Navbar from '../../lib/ui/Navbar.svelte';
-  import Statistics from '../../lib/statistics/Statistics.svelte';
-  import { serverPresentation } from '../../lib/config/presentation';
+  // Former standalone page: kept so old links land in the matching settings panel.
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
+  import { t } from '../../lib/i18n';
+  onMount(() => { void goto(resolve('settings/#statistics'), { replaceState: true }); });
 </script>
-<svelte:head><title>Mes statistiques</title></svelte:head>
-<Navbar section="settings" name={$serverPresentation.serverName} />
-<main><Statistics /></main>
-<style>main{padding:clamp(20px,4vw,56px) var(--gutter);padding-bottom:calc(48px + var(--music-player-height,0px));}</style>
+<svelte:head><title>{$t('settings_statistics')}</title></svelte:head>
+<main><p><a href={resolve('settings/#statistics')}>{$t('settings_statistics')}</a></p></main>
+<style>main{padding:clamp(20px,4vw,56px) var(--gutter);}</style>

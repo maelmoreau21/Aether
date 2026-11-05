@@ -189,7 +189,7 @@
   .mobile-menu-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .admin-dashboard-container { width: 100%; max-width: none; box-sizing: border-box; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px var(--gutter) 64px; }
   .with-sidebar { grid-template-columns: 260px minmax(0, 1fr); }
-  .admin-content-area { display: flex; flex-direction: column; gap: 20px; min-width: 0; width: 100%; max-width: 1080px; }
+  .admin-content-area { display: flex; flex-direction: column; gap: 20px; min-width: 0; width: 100%; }
   .admin-content-area:focus { outline: none; }
   .section-title { display: flex; flex-direction: column; gap: 14px; }
   .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }

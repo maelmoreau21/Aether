@@ -410,6 +410,12 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     sqlx::raw_sql(include_str!("../migrations/quick_connect.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("../migrations/application_scope.sql"))
+        .execute(&mut *tx)
+        .await?;
+    sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 

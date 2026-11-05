@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import { t } from '../i18n';
   let { visible = true }: { visible?: boolean } = $props();
   interface Archive { id: string; size: number; createdAt: number }
-  interface Schedule { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string }
-  interface Listing { available: boolean; reason: string | null; running: boolean; archives: Archive[]; schedule: Schedule }
+  // The automatic schedule is the "backup" scheduled task (Tâches planifiées), not edited here.
+  interface Listing { available: boolean; reason: string | null; running: boolean; archives: Archive[] }
   
   interface MemoryReport {
     core: {
@@ -43,10 +44,6 @@
   let creating = $state(false);
   let error = $state('');
   let success = $state('');
-  let scheduleEnabled = $state(false);
-  let intervalMinutes = $state(1440);
-  let saving = $state(false);
-  const outcomeLabels: Record<string, string> = { never: 'Aucune exécution', running: 'En cours', succeeded: 'Réussie', failed: 'Échec — vérifiez le dossier serveur et son espace libre', interrupted: 'Interrompue au redémarrage' };
   let active = true;
 
   async function refresh() {
@@ -56,7 +53,7 @@
       const response = await fetch('/api/v1/admin/backups', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error(`Chargement impossible (HTTP ${response.status}).`);
       const data: Listing = await response.json();
-      if (active) { listing = data; scheduleEnabled = data.schedule.enabled; intervalMinutes = data.schedule.intervalMinutes; }
+      if (active) listing = data;
     } catch (cause) {
       if (active) error = cause instanceof Error ? cause.message : 'Chargement impossible.';
     } finally { if (active) loading = false; }
@@ -116,21 +113,6 @@
     } catch (cause) {
       if (active) error = cause instanceof Error && cause.name === 'TimeoutError' ? $t('timeout_backup') : cause instanceof Error ? cause.message : $t('backup_failed');
     } finally { if (active) creating = false; }
-  }
-
-  async function saveSchedule(event: SubmitEvent) {
-    event.preventDefault();
-    if (!$session || saving) return;
-    saving = true;
-    error = '';
-    success = '';
-    try {
-      const response = await fetch('/api/v1/admin/backups/schedule', { method: 'PUT', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken }, body: JSON.stringify({ enabled: scheduleEnabled, intervalMinutes }), signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error(`Planification impossible (HTTP ${response.status}).`);
-      if (active) { await refresh(); success = $t('schedule_saved'); }
-    } catch (cause) {
-      if (active) error = cause instanceof Error ? cause.message : $t('schedule_failed');
-    } finally { if (active) saving = false; }
   }
 
   const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
@@ -193,15 +175,9 @@
   {#if loading}<p role="status">{$t('loading_archives')}</p>{:else if listing}
     {#if !listing.available}<div class="notice"><strong>{$t('backup_unavailable')}</strong><p>{listing.reason ?? $t('backup_service_unavailable')}</p></div>{:else}
       <article><h3>{$t('automatic_schedule')}</h3>
-        <form onsubmit={saveSchedule}>
-          <label class="check-row"><input type="checkbox" bind:checked={scheduleEnabled} disabled={saving} /> Activer les sauvegardes automatiques</label>
-          <label class="interval-field">{$t('interval_minutes')} <input type="number" min="60" max="10080" step="1" required bind:value={intervalMinutes} disabled={saving} /></label>
-          <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer la planification'}</button>
-        </form>
-        <p>{$t('schedule_range_note')}</p>
-        {#if listing.schedule.enabled}<p>Prochaine tentative : {new Date(listing.schedule.nextDueAt * 1000).toLocaleString()}</p>{/if}
-        <p>Dernier résultat : {outcomeLabels[listing.schedule.lastOutcome] ?? listing.schedule.lastOutcome}</p>
-        {#if listing.schedule.lastCompletedAt}<p>Dernière fin : {new Date(listing.schedule.lastCompletedAt * 1000).toLocaleString()}</p>{/if}
+        <p>{$t('sched_backup_schedule_hint')}</p>
+        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied; the hash carries the task id. -->
+        <a class="link" href={resolve(`admin/libraries/#tasks-section?task=backup`)}>{$t('sched_backup_schedule_link')}</a>
       </article>
       <article><h3>{$t('archives')}</h3><p>{$t('archives_note')}</p>
       {#if listing.archives.length === 0}<p>{$t('no_backup_available')}</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
@@ -238,17 +214,7 @@
   /* Panneaux plats */
   article { display: grid; gap: 10px; min-width: 0; padding: 20px; border-radius: var(--radius-md); background: var(--color-surface); }
 
-  /* Planification : lignes séparées */
-  form { display: grid; justify-items: start; gap: 0; margin: 0; }
-  form > * { width: 100%; padding: 12px 0; border-top: 1px solid var(--color-line-subtle); }
-  form > :first-child { border-top: 0; padding-top: 4px; }
-  form > button { width: fit-content; margin-top: 4px; border-top: 1px solid var(--color-line); }
-  form label { color: var(--color-text); font-size: 14px; font-weight: 600; }
-  .check-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
-  .check-row input { width: 20px; height: 20px; margin: 0; accent-color: var(--color-accent); }
-  .interval-field { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 10px; }
-  input[type='number'] { box-sizing: border-box; width: 100%; max-width: 160px; height: 42px; padding: 0 12px; border: 1px solid var(--color-line-subtle); border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font: inherit; font-size: 14px; font-variant-numeric: tabular-nums; }
-  input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+  .link { width: fit-content; }
 
   /* Archives : lignes fines */
   .archives { margin: 4px 0 0; padding: 0; list-style: none; }
@@ -275,7 +241,6 @@
     li a, .memory-header button { width: 100%; }
     .actions button { flex: 1 1 auto; }
     .memory-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-    input[type='number'] { max-width: none; font-size: 16px; }
   }
   @media (prefers-reduced-motion: reduce) { button, a { transition: none; } }
 </style>

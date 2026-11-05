@@ -1,8 +1,11 @@
 <script lang="ts">
-  import Navbar from '../../lib/ui/Navbar.svelte';
-  import Reports from '../../lib/applications/Reports.svelte';
-  import { serverPresentation } from '../../lib/config/presentation';
+  // Former standalone page: kept so old links land in the matching settings panel.
+  import { onMount } from 'svelte';
+  import { goto } from '$app/navigation';
+  import { resolve } from '$app/paths';
+  import { t } from '../../lib/i18n';
+  onMount(() => { void goto(resolve('settings/#reports'), { replaceState: true }); });
 </script>
-<svelte:head><title>Signalements</title></svelte:head>
-<Navbar section="reports" name={$serverPresentation.serverName} />
-<main><Reports /></main>
+<svelte:head><title>{$t('settings_reports')}</title></svelte:head>
+<main><p><a href={resolve('settings/#reports')}>{$t('settings_reports')}</a></p></main>
+<style>main{padding:clamp(20px,4vw,56px) var(--gutter);}</style>

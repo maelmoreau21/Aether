@@ -24,7 +24,9 @@ async function run() {
     await page.getByRole('button',{name:'Désépingler du menu',exact:true}).waitFor();
     const old=page.locator('.revision-item').filter({hasText:'1.0.0'}); await old.getByRole('button',{name:/1\.0\.0/}).click();
     await old.getByRole('checkbox',{name:/Je confirme/}).check();
-    assert.equal(await old.getByRole('button',{name:'Installer v1.0.0'}).isDisabled(),true);
+    // An existing backup no longer blocks: it is replaced, and the page says so.
+    assert.equal(await old.getByRole('button',{name:'Installer v1.0.0'}).isEnabled(),true);
+    await old.getByText(/sera remplacée/).waitFor();
     await page.screenshot({path:`output/playwright/extension-versions/detail-${width}.png`,fullPage:true});
     ext.rollbackVersion=null; await page.reload();
     await page.getByRole('button',{name:'Ouvrir Demandes',exact:true}).click();

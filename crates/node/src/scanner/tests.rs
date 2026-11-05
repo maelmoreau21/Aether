@@ -538,3 +538,45 @@ fn clean_filename_strips_release_tags_and_parses_unparenthesized_year() {
         parse_series_episode(Path::new("Show/Season 1/Show.S01E01.1080p.BluRay.x264.mkv")).unwrap();
     assert_eq!(ep.episode_title, "S01E01");
 }
+
+/// An unreadable subfolder (Docker UID mismatch, NAS ACL) is a warning: the traversal finishes,
+/// publication stays partial (`complete == false`) and the scan is not interrupted or failed.
+#[cfg(unix)]
+#[tokio::test]
+async fn unreadable_subfolder_is_a_warning_not_an_interruption() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let locked = root.path().join("locked");
+    tokio::fs::create_dir(&locked).await.unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_dir(&locked).is_ok() {
+        // Running as root: permissions are not enforced, nothing to verify.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    }
+    let report = scan(root.path(), &HashMap::new(), &AtomicBool::new(false))
+        .await
+        .unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        !report.complete,
+        "missing files must not be marked unavailable"
+    );
+    assert!(!report.interrupted);
+    assert_eq!(report.errors_count, 0);
+    assert_eq!(report.warnings_count, 1);
+    assert_eq!(report.warnings[0].relative_path, "locked");
+}
+
+#[tokio::test]
+async fn cancelled_traversal_is_interrupted() {
+    let root = tempfile::tempdir().unwrap();
+    tokio::fs::create_dir(root.path().join("folder"))
+        .await
+        .unwrap();
+    let report = scan(root.path(), &HashMap::new(), &AtomicBool::new(true))
+        .await
+        .unwrap();
+    assert!(!report.complete);
+    assert!(report.interrupted);
+}

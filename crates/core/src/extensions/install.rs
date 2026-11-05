@@ -24,6 +24,17 @@ pub(super) struct InstallPackage {
     pub(super) upgrade: bool,
 }
 
+/// Initial library scope of a fresh install. Metadata providers and the native
+/// application surfaces (reports, requests) apply to every library: the caller's
+/// own library permissions still decide what each user may reach. Without this,
+/// an application extension starts with an empty scope and refuses every call
+/// with `library_permission_denied`.
+fn default_all_libraries(permissions: &[String]) -> bool {
+    permissions
+        .iter()
+        .any(|permission| matches!(permission.as_str(), "metadata.read" | "reports" | "requests"))
+}
+
 pub(super) async fn install(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -153,9 +164,9 @@ pub(super) async fn change_version_with_key(
                 .iter()
                 .any(|p| p == "storage.private")
             || package.manifest.storage_migration.is_some()
-            || serde_json::to_value(&installed.manifest.config_schema).ok()
-                != serde_json::to_value(&package.manifest.config_schema).ok()
         {
+            // Settings compatibility is checked below with the same rule as an
+            // upgrade: every field of the older schema must accept the saved value.
             return Err(err(
                 StatusCode::CONFLICT,
                 "extension_downgrade_incompatible",
@@ -268,13 +279,15 @@ pub(super) async fn change_version_with_key(
     // Repeat the private-data check under the write lock: a worker may have written
     // after the earlier read. Downgrades never reinterpret private data.
     if downgrade.is_some() {
-        let snapshots: i64 =
-            query_scalar("SELECT COUNT(*) FROM extension_update_revisions WHERE extension_id=?")
-                .bind(&id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(db)?;
-        if snapshots != 0 {
+        // The single rollback snapshot is replaced by the current revision. That is
+        // refused only while it still holds private data a rollback would restore.
+        let snapshot_data: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_update_data WHERE extension_id=?) + (SELECT COUNT(*) FROM extension_update_objects WHERE extension_id=?)")
+            .bind(&id)
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(db)?;
+        if snapshot_data != 0 {
             return Err(err(
                 StatusCode::CONFLICT,
                 "extension_downgrade_snapshot_exists",
@@ -364,7 +377,7 @@ pub(super) async fn install_with_key(
         .bind(&key_id)
         .bind(bytes)
         .bind(uuid::Uuid::new_v4().to_string())
-        .bind(i64::from(package.manifest.permissions.iter().any(|permission|permission=="metadata.read")))
+        .bind(i64::from(default_all_libraries(&package.manifest.permissions)))
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "extension_exists"))?;
@@ -422,14 +435,14 @@ pub async fn install_internal_with_key(
 }
 
 pub async fn bootstrap_essential_plugins(store: &crate::identity::IdentityStore) {
-    // The seeded official catalogue follows the Core's channel once. An explicit
-    // custom repository or a later administrator override is preserved.
-    if media_contracts::version::current_version_info().channel != "stable" {
-        let _ = query("UPDATE extension_repositories SET url=?,name='Aether Plugins (develop)' WHERE id='community-default' AND name='Aether Plugins' AND url=?")
-            .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/develop/repository/manifest.json")
-            .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json")
-            .execute(store.pool()).await;
-    }
+    // The official catalogue is one versioned manifest on `main` whose packages use
+    // absolute release URLs, for every Core channel. Earlier development builds
+    // pointed the seeded entry at `develop`; move only that untouched seed back.
+    // An explicit custom repository or a later administrator override is preserved.
+    let _ = query("UPDATE extension_repositories SET url=?,name='Aether Plugins' WHERE id='community-default' AND name='Aether Plugins (develop)' AND url=?")
+        .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/main/repository/manifest.json")
+        .bind("https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/develop/repository/manifest.json")
+        .execute(store.pool()).await;
 
     const PUB_KEY: &str = include_str!("../../embedded_plugins/publisher-public.txt");
     for (id, bytes) in [

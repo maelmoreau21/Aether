@@ -504,6 +504,7 @@ pub(super) async fn run_remote_scan_task(
                     probed: report.probed,
                     reused: report.reused,
                     complete: report.complete,
+                    interrupted: Some(report.interrupted),
                 },
             };
             let path = format!("/internal/v1/core/scans/{}/complete", req.scan_id.as_str());

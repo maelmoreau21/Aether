@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
-  import { SvelteMap } from 'svelte/reactivity';
+  import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { extensionPins, isPinnableExtension, toggleExtensionPin } from './extension-pins';
   import { loadFeatures } from '../applications/api';
   import { t } from '../i18n';
@@ -44,7 +44,9 @@
   type ExtensionSettings = Record<string, SettingValue>;
   type Installed = { manifest: Manifest; publisherId: string; sha256: string; enabled: boolean; libraryIds: string[]; allLibraries?: boolean; settings?: ExtensionSettings; rollbackVersion?: string | null };
   type Repository = { id: string; name: string; url: string; refreshedAt: number };
-  type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string };
+  // One entry per published version. Versioned catalogues (apiVersion 2) also give
+  // the release date, changelog, owner and whether an image can be fetched.
+  type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string; version?: string; timestamp?: string | null; changelog?: string | null; owner?: string | null; overview?: string | null; hasImage?: boolean };
   let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
   let category = $state('all');
   let catalogueId = $state<string | null>(null);
@@ -57,7 +59,6 @@
   let catalogue = $state<CatalogueEntry[]>([]);
   let repositoryName = $state('');
   let repositoryUrl = $state('');
-  let catalogueVersions = $state<Record<string,string>>({});
   const catalogueGroups = $derived.by(() => {
     const groups = new SvelteMap<string,CatalogueEntry[]>();
     for (const entry of catalogue) {
@@ -69,11 +70,30 @@
       return right[0]-left[0] || right[1]-left[1] || right[2]-left[2];
     })}));
   });
-  $effect(() => {
+  // Catalogue images arrive as data: URLs from the Core (the page only loads local images).
+  const images = new SvelteMap<string,string>();
+  const requestedImages = new SvelteSet<string>();
+  async function loadImages() {
     for (const group of catalogueGroups) {
-      if (!group.entries.some(entry => entry.manifest.version===catalogueVersions[group.key])) catalogueVersions[group.key]=group.entries[0].manifest.version;
+      const entry = group.entries[0];
+      if (!entry.hasImage || requestedImages.has(group.key)) continue;
+      requestedImages.add(group.key);
+      try {
+        const image = await adminRequest<{ dataUrl: string }>(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/image/${encodeURIComponent(entry.manifest.id)}`);
+        if (image.dataUrl.startsWith('data:image/')) images.set(group.key, image.dataUrl);
+      } catch { /* The generated artwork stays in place. */ }
     }
-  });
+  }
+  const imageFor = (id: string) => {
+    const group = catalogueGroups.find(item => item.entries[0].manifest.id === id && images.has(item.key));
+    return group ? images.get(group.key) : undefined;
+  };
+  const formatDate = (value?: string | null) => {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+  };
+  const changelogLines = (text?: string | null) => (text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
   let installed = $state<Installed[]>([]);
   const categories = $derived([...new Set([...catalogue.map(entry => categoryOf(entry.manifest)), ...installed.map(entry => categoryOf(entry.manifest))])].sort());
   let editingSettings = $state<Record<string, ExtensionSettings>>({});
@@ -135,6 +155,7 @@
     installed = extensions.extensions.map(extension=>({...extension,manifest:displayManifest(extension.manifest)}));
     await loadFeatures(true).catch(() => {});
     repositories = sources.repositories; catalogue = available.entries.map(entry=>({...entry,manifest:displayManifest(entry.manifest)}));
+    void loadImages();
 
     for (const ext of installed) {
       if (!editingSettings[ext.manifest.id]) {
@@ -153,7 +174,7 @@
   onMount(() => { void reload(); });
   function configure(extension: Installed, enabled: boolean) {
     return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, libraryIds: extension.libraryIds, allLibraries: extension.allLibraries ?? extension.libraryIds.length===0 })
+      method: 'PUT', body: JSON.stringify({ enabled, libraryIds: extension.libraryIds, allLibraries: extension.allLibraries === true || extension.libraryIds.length === 0 })
     }), enabled ? $t('extension_enabled_notice') : $t('extension_disabled_notice'));
   }
   async function saveSettings(id: string) {
@@ -243,17 +264,14 @@
       const manifest = entry ? entry.manifest : v === currentVersion ? currentManifest! : { ...currentManifest!, version: v, description: '', changelog: undefined, releaseDate: undefined };
       const cmp = currentVersion ? compareVersions(v, currentVersion) : 0;
 
-      let dateStr: string | null = null;
-      if (manifest.releaseDate) {
-        dateStr = manifest.releaseDate;
-      }
+      const dateStr = formatDate(entry?.timestamp ?? manifest.releaseDate);
 
       return {
         version: v,
         entry,
         manifest,
         releaseDate: dateStr,
-        changelog: manifest.changelog || null,
+        changelog: entry?.changelog || manifest.changelog || null,
         isCurrent: cmp === 0,
         isNewer: cmp > 0,
         isOlder: cmp < 0,
@@ -310,7 +328,7 @@
 </script>
 
 {#snippet artwork(manifest: Manifest)}
-  {@const bannerSrc = toBannerSrc(manifest.banner)}
+  {@const bannerSrc = toBannerSrc(manifest.banner) ?? imageFor(manifest.id) ?? null}
   {#if bannerSrc}
     <div class="extension-artwork has-banner">
       <img class="banner-img" src={bannerSrc} alt="" />
@@ -366,16 +384,49 @@
     {#if catalogueId}
       {@const group = catalogueGroups.find(item => item.key === catalogueId)}
       {#if group}
-        {@const entry = group.entries.find(item => item.manifest.version === catalogueVersions[group.key]) ?? group.entries[0]}
+        {@const entry = group.entries[0]}
         {@const existing = installed.find(item => item.manifest.id === entry.manifest.id)}
         <button class="back-installed" onclick={() => catalogueId=null}><Icon name="chevron-left" size={16} /> {$t('extension_catalogue')}</button>
         <div class="catalogue-detail">
           <div><h3>{displayName(entry.manifest.name)}</h3><p>{entry.manifest.description}</p>
-            <h4>Versions disponibles</h4>
-            <label>{$t('version')}<select bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as version (version.manifest.version)}<option value={version.manifest.version}>{version.manifest.version}{version.compatible ? '' : ` · ${$t('incompatible').toLowerCase()}`}</option>{/each}</select></label>
+            {#if entry.overview}<p class="catalogue-overview">{entry.overview}</p>{/if}
+            <h4>{$t('versions')}</h4>
+            <p class="section-help">{$t('catalogue_versions_hint')}</p>
+            <ol class="catalogue-versions" aria-label={$t('versions')}>
+              {#each group.entries as version (version.manifest.version)}
+                {@const order = existing ? compareVersions(version.manifest.version, existing.manifest.version) : 1}
+                {@const label = `${displayName(version.manifest.name)} v${version.manifest.version}`}
+                <li class="catalogue-version" class:current={order === 0}>
+                  <div class="catalogue-version-heading">
+                    <strong>v{version.manifest.version}</strong>
+                    {#if formatDate(version.timestamp ?? version.manifest.releaseDate)}<span class="revision-date">{formatDate(version.timestamp ?? version.manifest.releaseDate)}</span>{/if}
+                    {#if order === 0}<span class="badge success">{$t('extension_installed')}</span>{:else if version === group.entries[0]}<span class="badge update">{$t('latest_version')}</span>{/if}
+                    {#if !version.compatible}<span class="badge">{$t('incompatible')}</span>{/if}
+                  </div>
+                  {#if changelogLines(version.changelog ?? version.manifest.changelog).length}
+                    <ul class="catalogue-changelog">{#each changelogLines(version.changelog ?? version.manifest.changelog) as line, index (index)}<li>{line.replace(/^[•*-]\s*/, '')}</li>{/each}</ul>
+                  {:else}<p class="revision-fallback-desc">{$t('published_without_changelog')}</p>{/if}
+                  <div class="revision-action-row">
+                    {#if order === 0}
+                      <span class="installed-tag"><Icon name="check" size={16} /> {$t('current_version_installed')}</span>
+                    {:else if !existing}
+                      <button class:primary={version === group.entries[0]} aria-label={`${$t('install_this_version')} : ${label}`} disabled={busy || !version.compatible} onclick={() => installFromCatalogue(version)}><Icon name="download" size={16} /> {$t('install_this_version')}</button>
+                    {:else if order > 0}
+                      <button class="primary" aria-label={`${$t('update_to_version', { version: version.manifest.version })} : ${label}`} disabled={busy || !version.compatible} onclick={() => void switchVersion(version)}><Icon name="download" size={16} /> {$t('update_to_version', { version: version.manifest.version })}</button>
+                    {:else}
+                      <div class="restore-action"><p>{$t('downgrade_warning')}</p>
+                        <label><input type="checkbox" checked={downgradeConfirmedFor === version.manifest.version} onchange={(event) => downgradeConfirmedFor = event.currentTarget.checked ? version.manifest.version : ''} /> {$t('confirm_downgrade')}</label>
+                        {#if existing.rollbackVersion}<p>{$t('existing_backup', { version: existing.rollbackVersion })}</p>{/if}
+                        <button aria-label={`${$t('install_this_version')} : ${label}`} disabled={busy || !version.compatible || downgradeConfirmedFor !== version.manifest.version} onclick={() => void downgrade(version, existing)}>{$t('install_this_version')}</button>
+                      </div>
+                    {/if}
+                  </div>
+                </li>
+              {/each}
+            </ol>
             <h4>{$t('permissions')}</h4><p>{accessLabels(entry.manifest.permissions) || $t('none')}</p><p>{$t('services_contacted')} : {entry.manifest.httpHosts?.join(', ') || $t('none').toLowerCase()}</p>
           </div>
-          <aside>{@render artwork(entry.manifest)}<dl><div><dt>{$t('developer')}</dt><dd>{entry.manifest.author}</dd></div><div><dt>{$t('repository')}</dt><dd>{entry.repositoryName}</dd></div><div><dt>{$t('compatibility')}</dt><dd>{entry.compatible ? $t('compatible') : $t('incompatible')}</dd></div></dl>
+          <aside>{@render artwork(entry.manifest)}<dl><div><dt>{$t('developer')}</dt><dd>{entry.owner || entry.manifest.author}</dd></div><div><dt>{$t('repository')}</dt><dd>{entry.repositoryName}</dd></div><div><dt>{$t('compatibility')}</dt><dd>{entry.compatible ? $t('compatible') : $t('incompatible')}</dd></div></dl>
             {#if existing}<button class="primary" onclick={() => {tab='installed';managedId=existing.manifest.id;catalogueId=null;}}>{$t('extension_settings_for', { name: displayName(existing.manifest.name) })}</button>{:else}<button class="primary" disabled={busy || !entry.compatible} onclick={() => installFromCatalogue(entry)}>{$t('install')} {displayName(entry.manifest.name)}</button>{/if}
             <p class="section-help">{existing ? $t('already_installed_hint') : $t('install_disabled_hint')}</p>
           </aside>
@@ -384,14 +435,14 @@
     {:else}
     <div class="plugins-grid">
     {#each catalogueGroups.filter(group=>(category === 'all' || categoryOf(group.entries[0].manifest) === category) && `${group.entries[0].manifest.name} ${group.entries[0].manifest.description}`.toLowerCase().includes(search.toLowerCase())) as group (group.key)}
-      {@const entry=group.entries.find(item => item.manifest.version===catalogueVersions[group.key]) ?? group.entries[0]}
+      {@const entry=group.entries[0]}
       {@const existing=installed.find(item => item.manifest.id===entry.manifest.id)}
       <article class="card plugin-card catalogue-card">
         <button class="artwork-button" aria-label={`Détails de ${displayName(entry.manifest.name)}`} onclick={() => catalogueId=group.key}>{@render artwork(entry.manifest)}</button>
         <div class="catalogue-identity"><span class="extension-icon"><Icon name={entry.manifest.permissions.includes('avatars') ? 'profile' : 'globe'} size={28} /></span>{#if existing || !entry.compatible}<span class="badge" class:success={!!existing}>{existing ? 'Installée' : 'Incompatible'}</span>{/if}</div>
         <div class="catalogue-content"><h4>{displayName(entry.manifest.name)}</h4><p class="plugin-desc">{shortDescription(entry.manifest.description)}</p>
         <button class="details-link" onclick={() => catalogueId=group.key}>{$t('extension_details')} <Icon name="chevron-right" size={14} /></button>
-        </div><div class="catalogue-actions">{#if group.entries.length>1}<label for={`extension-version-${group.key}`}>Version<select aria-label={`Version de ${entry.manifest.name}`} id={`extension-version-${group.key}`} bind:value={catalogueVersions[group.key]} disabled={busy}>{#each group.entries as option (option.manifest.version)}<option value={option.manifest.version}>{option.manifest.version}{option.compatible ? '' : ' · incompatible'}</option>{/each}</select></label>{:else}<span class="version-label">v{entry.manifest.version}</span>{/if}
+        </div><div class="catalogue-actions"><span class="version-label">v{entry.manifest.version}{#if group.entries.length>1}<button class="version-count" onclick={() => catalogueId=group.key}>{$t('version_count', { count: group.entries.length })}</button>{/if}</span>
         <button class="primary" aria-label={existing ? `${entry.manifest.name} ${$t('installed').toLowerCase()}` : `${$t('install')} ${entry.manifest.name}`} disabled={busy || !entry.compatible || !!existing} onclick={() => installFromCatalogue(entry)}>{existing ? $t('installed') : $t('install')}</button></div>
       </article>
     {:else}<p>{$t('no_extension_results')}</p>{/each}
@@ -502,7 +553,7 @@
                           <div class="restore-action"><p>{$t('downgrade_warning')}</p>
                             <label><input type="checkbox" checked={downgradeConfirmedFor === rev.version} onchange={(event) => downgradeConfirmedFor = event.currentTarget.checked ? rev.version : ''} /> {$t('confirm_downgrade')}</label>
                             {#if extension.rollbackVersion}<p>{$t('existing_backup', { version: extension.rollbackVersion })}</p>{/if}
-                            <button disabled={busy || !rev.compatible || !!extension.rollbackVersion || downgradeConfirmedFor !== rev.version} onclick={() => void downgrade(rev.entry!, extension)}>{$t('install_version', { version: rev.version })}</button>
+                            <button disabled={busy || !rev.compatible || downgradeConfirmedFor !== rev.version} onclick={() => void downgrade(rev.entry!, extension)}>{$t('install_version', { version: rev.version })}</button>
                           </div>
                         {:else if rev.isOlder}
                           <span class="local-only-text">{$t('no_restorable_backup')}</span>
@@ -702,7 +753,6 @@
   .catalogue-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 36%); gap: 40px; margin-top: 8px; }
   .catalogue-detail h3 { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; }
   .catalogue-detail h4 { margin: 24px 0 8px; }
-  .catalogue-detail select { max-width: 320px; }
   .catalogue-detail aside { min-width: 0; }
   .catalogue-detail aside > button { width: 100%; }
   .catalogue-detail .extension-artwork { border-radius: var(--radius-sm); }
@@ -736,9 +786,20 @@
   .details-link { min-height: 0; padding: 4px 0; border: 0; background: transparent; color: var(--color-accent); }
   .details-link:hover:not(:disabled) { background: transparent; text-decoration: underline; }
   .catalogue-actions { display: flex; align-items: end; justify-content: space-between; gap: 12px; margin-top: auto; padding: 12px 16px 16px; border-top: 1px solid var(--color-line-subtle); }
-  .catalogue-actions label { min-width: 75px; max-width: 110px; }
   .catalogue-actions button { flex: 1; }
-  .version-label { align-self: center; font-family: var(--font-mono); font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+  .version-label { display: inline-flex; align-items: center; gap: 8px; align-self: center; font-family: var(--font-mono); font-size: 12px; color: var(--color-muted); white-space: nowrap; }
+  .catalogue-actions .version-count { flex: none; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--color-accent); font-family: var(--font-sans); font-size: 12px; }
+  .catalogue-actions .version-count:hover:not(:disabled) { background: transparent; text-decoration: underline; }
+
+  /* Versions publiées d'une extension du catalogue */
+  .catalogue-overview { white-space: pre-line; }
+  .catalogue-versions { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+  .catalogue-version { padding: 14px 4px; border-top: 1px solid var(--color-line-subtle); }
+  .catalogue-version:first-child { border-top: 0; }
+  .catalogue-version.current { background: var(--color-surface); border-radius: var(--radius-sm); padding-inline: 12px; }
+  .catalogue-version-heading { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .catalogue-version-heading strong { font-size: 14px; }
+  .catalogue-changelog { margin: 8px 0; padding-left: 18px; color: var(--color-muted); font-size: 13px; line-height: 1.5; }
 
   /* Installées */
   .installed-filters { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 16px; }

@@ -39,6 +39,15 @@ CREATE TABLE IF NOT EXISTS statistics_dimensions (
  dimension TEXT NOT NULL, label TEXT NOT NULL, seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
  PRIMARY KEY(session_id,dimension,label)
 );
+-- Yearly recap visibility (JellyTrack wrappedVisible/period). A separate singleton
+-- keeps this additive and idempotent on both engines without ALTER TABLE.
+CREATE TABLE IF NOT EXISTS statistics_wrapped_settings (
+ singleton BIGINT PRIMARY KEY CHECK(singleton=1), visible BIGINT NOT NULL DEFAULT 1,
+ period_enabled BIGINT NOT NULL DEFAULT 0,
+ start_month BIGINT NOT NULL DEFAULT 12, start_day BIGINT NOT NULL DEFAULT 1,
+ end_month BIGINT NOT NULL DEFAULT 1, end_day BIGINT NOT NULL DEFAULT 31
+);
+INSERT INTO statistics_wrapped_settings(singleton) VALUES(1) ON CONFLICT(singleton) DO NOTHING;
 INSERT INTO system_task_schedules(id,name,description,category,interval_minutes,enabled,next_due_at)
 VALUES('clean-statistics','Nettoyer les statistiques expirées','Purge bornée des événements et bilans expirés ; ferme les lecteurs sans nouvelles.','Maintenance',5,1,unixepoch()+300)
 ON CONFLICT(id) DO NOTHING;

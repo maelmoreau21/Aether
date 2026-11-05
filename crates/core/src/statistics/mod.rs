@@ -1,8 +1,12 @@
 //! Opt-in, local playback analytics. Collection never participates in media delivery.
+mod aggregate;
 mod calculation;
+mod insights;
 mod reports;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod wrapped_tests;
 use crate::{
     auth::{AuthState, Authenticated},
     database::{query, query_as, query_scalar},
@@ -61,6 +65,27 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/account/statistics/sessions/{id}",
             get(reports::personal_detail),
+        )
+        .route("/api/v1/admin/statistics/insights", get(insights::admin))
+        .route(
+            "/api/v1/account/statistics/insights",
+            get(insights::personal),
+        )
+        .route(
+            "/api/v1/admin/statistics/users/{id}",
+            get(insights::profile),
+        )
+        .route(
+            "/api/v1/account/statistics/wrapped",
+            get(insights::personal_wrapped),
+        )
+        .route(
+            "/api/v1/admin/statistics/wrapped/{user}",
+            get(insights::admin_wrapped),
+        )
+        .route(
+            "/api/v1/admin/statistics/wrapped-settings",
+            get(insights::read_wrapped_settings).put(insights::save_wrapped_settings),
         )
         .layer(DefaultBodyLimit::max(65536))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(

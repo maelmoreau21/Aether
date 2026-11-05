@@ -25,6 +25,14 @@ describe('administration grouping', () => {
     expect(adminEntryFor('#trickplay-section')?.label).toBe('Métadonnées et images');
     expect(adminEntryFor('#network-section')?.label).toBe('Paramètres du serveur');
   });
+  it('keeps operations tracking and automation reachable beside scheduled tasks', async () => {
+    const { adminEntryFor } = await import('./navigation');
+    for (const hash of ['#operations-section', '#automation-section']) {
+      expect(parseAdminHash(hash).section).toBe(hash);
+      expect(adminEntryFor(hash)?.hash).toBe('#tasks-section');
+    }
+    expect(parseAdminHash('#operations-section?task=backup').task).toBeNull();
+  });
   it('groups API keys under System and application shortcuts under Extensions', async () => {
     const { adminNavigation, adminEntryFor } = await import('./navigation');
     expect(adminNavigation.find(group => group.label === 'Système')?.links.some(link => link.hash === '#api-keys-section')).toBe(true);

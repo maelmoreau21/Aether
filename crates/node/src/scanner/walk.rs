@@ -135,6 +135,7 @@ where
     while !stack.is_empty() {
         if cancel.load(Ordering::Relaxed) {
             report.complete = false;
+            report.interrupted = true;
             break;
         }
         let entry = match stack.last_mut() {
@@ -145,12 +146,13 @@ where
                     continue;
                 }
                 Err(_) => {
+                    // Publication stays partial (complete=false); the scan itself succeeds.
                     report.complete = false;
                     let issue = ScanIssue {
                         relative_path: String::new(),
                         message: "directory traversal failed".into(),
                     };
-                    record_error(&mut report, &mut current_batch_errors, issue);
+                    record_warning(&mut report, &mut current_batch_warnings, issue);
                     stack.pop();
                     continue;
                 }
@@ -175,7 +177,7 @@ where
                     relative_path,
                     message: "file metadata unavailable".into(),
                 };
-                record_error(&mut report, &mut current_batch_errors, issue);
+                record_warning(&mut report, &mut current_batch_warnings, issue);
                 continue;
             }
         };
@@ -200,11 +202,13 @@ where
                     } else {
                         format!("directory unreadable: {err}")
                     };
+                    // An unreadable subfolder is a warning: its files are kept as they were
+                    // (complete=false) and the scan is not failed nor retried.
                     let issue = ScanIssue {
                         relative_path,
                         message,
                     };
-                    record_error(&mut report, &mut current_batch_errors, issue);
+                    record_warning(&mut report, &mut current_batch_warnings, issue);
                 }
             }
             continue;
@@ -264,6 +268,7 @@ where
             match result {
                 None => {
                     report.complete = false;
+                    report.interrupted = true;
                     break;
                 }
                 Some(Ok(probe)) => (probe, false),

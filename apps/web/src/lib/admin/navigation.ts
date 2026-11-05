@@ -11,6 +11,12 @@ const artworkTabs: AdminDestination[] = [
   { hash: '#trickplay-section', label: 'Miniatures Trickplay', labelKey: 'admin_trickplay_tab', icon: 'image' },
   { hash: '#avatars-section', label: 'Avatars', labelKey: 'admin_avatars_tab', icon: 'image' }
 ];
+/** Scheduled tasks first; durable operations and automation stay one click away. */
+const taskTabs: AdminDestination[] = [
+  { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock' },
+  { hash: '#operations-section', label: 'Suivi des opérations', labelKey: 'admin_operations_tab', icon: 'server' },
+  { hash: '#automation-section', label: 'Automatisations', labelKey: 'admin_automation_tab', icon: 'sparkles' }
+];
 const serverTabs: AdminDestination[] = [
   { hash: '#general-section', label: 'Général', labelKey: 'admin_general', icon: 'settings' },
   { hash: '#network-section', label: 'Réseau', labelKey: 'admin_network', icon: 'globe' }
@@ -40,7 +46,7 @@ export const adminNavigation: { label: string; labelKey: LabelKey; links: AdminE
   ] },
   { label: 'Système', labelKey: 'admin_group_system', links: [
     { hash: '#api-keys-section', label: 'Clés API', labelKey: 'admin_api_keys', icon: 'shield' },
-    { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock' },
+    { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock', tabs: taskTabs },
     { hash: '#backups-section', label: 'Sauvegardes', labelKey: 'admin_backups', icon: 'server' },
     { hash: '#general-section', label: 'Paramètres du serveur', labelKey: 'admin_server_settings', icon: 'settings', tabs: serverTabs }
   ] }
@@ -75,7 +81,9 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#users-section': ['Créer un utilisateur', 'Mot de passe', 'Rôle', 'Administrateur', 'Désactiver un compte', 'Appartenance aux groupes', 'Bibliothèques accessibles', 'Contrôle parental', 'Restrictions parentales', 'Âge maximal autorisé', 'Tags bloqués', 'Horaires d’accès', 'Téléchargement et synchronisation'],
   '#groups-section': ['Groupes d’utilisateurs', 'Groupe par défaut', 'Membres du groupe', 'Permissions sur les bibliothèques', 'Type d’affectation', 'Propriétés du groupe'],
   '#api-keys-section': ['Créer une clé', 'Expiration en jours', 'Révoquer une clé', 'Propriétaire de la clé', 'Jetons d’accès'],
-  '#tasks-section': ['Planification', 'Planifications et lancement manuel', 'Déclencheur périodique', 'Intervalle des tâches', 'Nettoyer le journal des extensions'],
+  '#tasks-section': ['Planification', 'Tâches planifiées', 'Ajouter un déclencheur', 'Tous les jours', 'Hebdomadaire', 'Intervalle', 'Au démarrage du serveur', 'Limite de temps', 'Nettoyer le cache', 'Nettoyer le journal des extensions', 'Sauvegarde planifiée'],
+  '#operations-section': ['Suivi des opérations', 'File des tâches', 'Opérations distribuées', 'Analyse technique', 'Préparation multimédia', 'Reprendre une opération', 'Annuler une opération'],
+  '#automation-section': ['Automatisations', 'Politiques d’automatisation', 'Historique des automatisations', 'Quotas des fournisseurs', 'Sources des métadonnées'],
   '#backups-section': ['Sauvegarde automatique', 'Activer les sauvegardes automatiques', 'Planification automatique', 'Archives', 'Télécharger une sauvegarde', 'Base de données', 'Consommation mémoire', 'Cache disque Linux'],
   '#extensions-section': ['Extensions installées', 'Catalogue', 'Dépôts', 'Adresse du dépôt', 'Mettre à jour une extension', 'Versions des extensions', 'Accès demandés', 'Paramètres des extensions', 'Plugins'],
   '#requests-section': ['Demandes', 'Valider une demande', 'Acquisition', 'Épingler les demandes'],

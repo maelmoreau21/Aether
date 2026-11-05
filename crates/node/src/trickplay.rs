@@ -100,6 +100,8 @@ pub struct TrickplayManager {
     active_streams: Arc<Mutex<Option<Arc<AtomicU32>>>>,
     jobs: Arc<Mutex<HashMap<String, JobState>>>,
     worker: Arc<Semaphore>,
+    /// The first cache sweep of this process also removes stale crash leftovers.
+    startup_swept: Arc<std::sync::atomic::AtomicBool>,
 }
 
 static GLOBAL_MANAGER: LazyLock<Arc<TrickplayManager>> =
@@ -131,13 +133,13 @@ impl TrickplayManager {
             active_streams: Arc::new(Mutex::new(active_streams)),
             jobs: Arc::new(Mutex::new(HashMap::new())),
             worker: Arc::new(Semaphore::const_new(1)),
+            startup_swept: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
     pub fn from_env() -> Self {
-        let cache_root = std::env::var_os("MEDIA_TRICKPLAY_CACHE_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("data/trickplay"));
+        // Relative to the deployment's data directory, never the (possibly read-only) CWD.
+        let cache_root = crate::data_subdir("MEDIA_TRICKPLAY_CACHE_DIR", "trickplay");
 
         let max_cache_bytes = std::env::var("MEDIA_TRICKPLAY_MAX_CACHE_MB")
             .ok()
@@ -466,6 +468,7 @@ impl TrickplayManager {
             active_streams: self.active_streams.clone(),
             jobs: self.jobs.clone(),
             worker: self.worker.clone(),
+            startup_swept: self.startup_swept.clone(),
         }
     }
 
@@ -627,7 +630,7 @@ impl TrickplayManager {
             .await
             .map_err(|_| "manifest_write")?;
 
-        match tokio::fs::rename(&work, &target).await {
+        match publish_work_dir(&work, &target).await {
             Ok(_) => {
                 self.enforce_quota().await;
                 Ok(())
@@ -771,6 +774,16 @@ impl TrickplayManager {
         };
         let mut entries = Vec::new();
         let mut total_size = 0u64;
+        // At startup no generation of this process is running yet: in-progress folders older
+        // than an hour (or already published) are crash leftovers. Younger ones stay resumable.
+        let startup = !self
+            .startup_swept
+            .swap(true, std::sync::atomic::Ordering::AcqRel);
+        let stale_after = if startup {
+            Duration::from_secs(3600)
+        } else {
+            Duration::from_secs(86400)
+        };
 
         while let Ok(Some(entry)) = read_dir.next_entry().await {
             let Ok(meta) = tokio::fs::symlink_metadata(entry.path()).await else {
@@ -792,14 +805,14 @@ impl TrickplayManager {
                     .unwrap_or_else(|e| e.into_inner())
                     .get(partial.unwrap_or(""))
                     .is_some_and(|s| matches!(s, JobState::Running));
-                if let Ok(mtime) = meta.modified()
-                    && !active
-                    && mtime
-                        .elapsed()
-                        .map(|d| d > Duration::from_secs(86400))
-                        .unwrap_or(false)
-                {
-                    let _ = tokio::fs::remove_dir_all(entry.path()).await;
+                let published = partial.is_some_and(|key| self.cache_root.join(key).is_dir());
+                let expired = meta
+                    .modified()
+                    .ok()
+                    .and_then(|mtime| mtime.elapsed().ok())
+                    .is_some_and(|age| age > stale_after);
+                if !active && (expired || (startup && published)) {
+                    remove_dir_tolerant(&entry.path()).await;
                 }
                 continue;
             }
@@ -1040,9 +1053,95 @@ async fn dir_total_bytes(path: &Path) -> u64 {
     total
 }
 
+/// Remove a directory tree; files held open by another process (Windows antivirus, indexers)
+/// are retried briefly, then left for a later sweep instead of failing.
+async fn remove_dir_tolerant(path: &Path) {
+    for attempt in 0..3u32 {
+        match tokio::fs::remove_dir_all(path).await {
+            Ok(()) => return,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+            Err(_) if attempt < 2 => {
+                tokio::time::sleep(Duration::from_millis(100 << attempt)).await;
+            }
+            Err(error) => {
+                eprintln!("trickplay: stale work folder kept for a later sweep: {error}");
+            }
+        }
+    }
+}
+
+/// Publish a finished work folder under its final name. Windows refuses to rename a folder
+/// while one of its files is still held open (antivirus scan right after ffmpeg wrote it) or
+/// onto an existing folder: retry with backoff, replace an existing incomplete target, and as a
+/// last resort copy the (flat) folder before removing the work copy.
+async fn publish_work_dir(work: &Path, target: &Path) -> io::Result<()> {
+    let mut last_error = None;
+    for attempt in 0..5u32 {
+        match tokio::fs::rename(work, target).await {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                if attempt == 0
+                    && tokio::fs::symlink_metadata(target)
+                        .await
+                        .is_ok_and(|meta| meta.is_dir() && !crate::files::is_linked(&meta))
+                {
+                    // A previous publication was interrupted: the work folder supersedes it.
+                    let _ = tokio::fs::remove_dir_all(target).await;
+                }
+                last_error = Some(error);
+                tokio::time::sleep(Duration::from_millis(50 << attempt)).await;
+            }
+        }
+    }
+    let staging = target.with_extension("publishing");
+    let _ = tokio::fs::remove_dir_all(&staging).await;
+    let copied = async {
+        tokio::fs::create_dir(&staging).await?;
+        let mut entries = tokio::fs::read_dir(work).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let meta = tokio::fs::symlink_metadata(entry.path()).await?;
+            if meta.is_file() && !crate::files::is_linked(&meta) {
+                tokio::fs::copy(entry.path(), staging.join(entry.file_name())).await?;
+            }
+        }
+        tokio::fs::rename(&staging, target).await
+    }
+    .await;
+    match copied {
+        Ok(()) => {
+            remove_dir_tolerant(work).await;
+            Ok(())
+        }
+        Err(error) => {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            Err(last_error.unwrap_or(error))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn publication_replaces_an_interrupted_target_and_stale_work_is_swept() {
+        let temp = tempfile::tempdir().unwrap();
+        let work = temp.path().join(".key.in_progress");
+        let target = temp.path().join("key");
+        tokio::fs::create_dir(&work).await.unwrap();
+        tokio::fs::write(work.join("0.jpg"), b"sheet")
+            .await
+            .unwrap();
+        tokio::fs::create_dir(&target).await.unwrap();
+        tokio::fs::write(target.join("partial"), b"old")
+            .await
+            .unwrap();
+        publish_work_dir(&work, &target).await.unwrap();
+        assert!(!work.exists());
+        assert!(target.join("0.jpg").exists());
+        assert!(!target.join("partial").exists());
+        remove_dir_tolerant(&temp.path().join("absent")).await;
+    }
 
     #[test]
     fn parses_jellyfin_grid_folder_name() {

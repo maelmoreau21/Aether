@@ -91,9 +91,34 @@ async fn save(
     if exists == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+    let timestamp = now();
+    let _writer = auth.store.task_writes.lock().await;
+    let mut conn = auth
+        .store
+        .pool()
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     crate::database::query("INSERT INTO scheduled_scans(library_id,interval_minutes,enabled,next_run_at) VALUES(?,?,?,?) ON CONFLICT(library_id) DO UPDATE SET interval_minutes=excluded.interval_minutes,enabled=excluded.enabled,next_run_at=excluded.next_run_at")
-        .bind(id).bind(input.interval_minutes).bind(i64::from(input.enabled)).bind(now()+input.interval_minutes*60)
-        .execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+        .bind(&id).bind(input.interval_minutes).bind(i64::from(input.enabled)).bind(timestamp+input.interval_minutes*60)
+        .execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Compatibility endpoint: the library scan keeps exactly one interval trigger.
+    crate::task_triggers::replace_with_interval(
+        &mut tx,
+        "scan",
+        &id,
+        input.interval_minutes,
+        input.enabled,
+        timestamp,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::database::commit(tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove(
@@ -102,9 +127,25 @@ async fn remove(
     headers: HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
     authorize(&auth, &headers, true).await?;
+    let _writer = auth.store.task_writes.lock().await;
+    let mut conn = auth
+        .store
+        .pool()
+        .acquire()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     crate::database::query("DELETE FROM scheduled_scans WHERE library_id=?")
-        .bind(id)
-        .execute(&auth.store.pool)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::task_triggers::remove_all(&mut tx, "scan", &id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::database::commit(tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
@@ -190,6 +231,12 @@ impl Scheduler {
         });
         Self(
             tokio::spawn(async move {
+                // "At server startup" triggers fire once per process start.
+                match crate::task_triggers::fire_startup(&auth, now()).await {
+                    Ok(0) => {}
+                    Ok(count) => eprintln!("Startup triggers queued {count} task(s)"),
+                    Err(error) => eprintln!("Startup triggers failed: {error}"),
+                }
                 let mut interval = tokio::time::interval(Duration::from_secs(15));
                 let mut cache_cursor = String::new();
                 let mut cache_ticks = 0u8;
@@ -268,10 +315,28 @@ pub async fn run_due(
     // the next pass finds the same request key instead of silently skipping a run.
     let request_key = format!("schedule:{id}:{previous}");
     queue_scopes(auth, &id, &request_key, timestamp).await?;
-    let claim=crate::database::query("UPDATE scheduled_scans SET next_run_at=?,last_run_at=?,last_request_key=?,last_outcome='dispatching' WHERE library_id=? AND enabled=1 AND next_run_at=?")
-        .bind(timestamp+minutes*60).bind(timestamp).bind(&request_key).bind(&id).bind(previous).execute(&auth.store.pool).await?;
-    if claim.rows_affected() == 0 {
-        return Ok(());
+    {
+        // Claim and advance every trigger in one write: the next run is the earliest next
+        // firing of the library's daily, weekly or interval triggers.
+        let _writer = auth.store.task_writes.lock().await;
+        let mut conn = auth.store.pool().acquire().await?;
+        let mut tx = crate::database::begin_write(&mut conn).await?;
+        let claim=crate::database::query("UPDATE scheduled_scans SET last_run_at=?,last_request_key=?,last_outcome='dispatching' WHERE library_id=? AND enabled=1 AND next_run_at=?")
+            .bind(timestamp).bind(&request_key).bind(&id).bind(previous).execute(&mut *tx).await?;
+        if claim.rows_affected() == 0 {
+            return Ok(());
+        }
+        let advance =
+            crate::task_triggers::advance(&mut tx, "scan", &id, timestamp, minutes).await?;
+        crate::database::query(
+            "UPDATE scheduled_scans SET next_run_at=?,enabled=? WHERE library_id=?",
+        )
+        .bind(advance.next.unwrap_or(timestamp + minutes * 60))
+        .bind(i64::from(advance.next.is_some()))
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+        crate::database::commit(tx).await?;
     }
     let outcome = "queued";
     // Keep the public deterministic pass useful without requiring a background timer.
@@ -281,11 +346,15 @@ pub async fn run_due(
     Ok(())
 }
 
+/// After a failed monitoring poll, the library is not polled again for this long (seconds).
+const MONITOR_FAILURE_BACKOFF: i64 = 1800;
+
 /// Monitoring polls through the Node scan queue, so Core never traverses remote roots.
-/// One admission per pass, low priority and at most once a minute per library.
+/// One admission per pass, low priority and at most once a minute per library, never while
+/// another scan of the library is pending, and not again soon after a failed poll.
 async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), sqlx::Error> {
-    let watch: Option<String> = crate::database::query_scalar("SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.realtimeMonitoring'),'0') AS TEXT) IN ('1','true') AND NOT EXISTS(SELECT 1 FROM durable_tasks t WHERE t.owner='library-monitor' AND (t.library_id=l.id OR t.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id AND active=1)) AND (t.status IN ('queued','running','paused') OR t.created_at>?)) ORDER BY COALESCE((SELECT MAX(t.created_at) FROM durable_tasks t WHERE t.library_id=l.id AND t.owner='library-monitor'),0),l.id LIMIT 1")
-        .bind(timestamp-60).fetch_optional(&auth.store.pool).await?;
+    let watch: Option<String> = crate::database::query_scalar("SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.realtimeMonitoring'),'0') AS TEXT) IN ('1','true') AND NOT EXISTS(SELECT 1 FROM durable_tasks t WHERE t.owner='library-monitor' AND (t.library_id=l.id OR t.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id AND active=1)) AND (t.status IN ('queued','running','paused') OR t.created_at>? OR (t.status='error' AND COALESCE(t.finished_at,t.updated_at)>?))) AND NOT EXISTS(SELECT 1 FROM durable_tasks a WHERE a.category='scan' AND a.status IN ('queued','running','paused') AND (a.library_id=l.id OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id))) ORDER BY COALESCE((SELECT MAX(t.created_at) FROM durable_tasks t WHERE t.library_id=l.id AND t.owner='library-monitor'),0),l.id LIMIT 1")
+        .bind(timestamp-60).bind(timestamp-MONITOR_FAILURE_BACKOFF).fetch_optional(&auth.store.pool).await?;
     if let Some(library) = watch {
         queue_scopes_with(
             auth,
@@ -296,6 +365,11 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
             10,
         )
         .await?;
+        // A monitoring poll is periodic: a failed poll waits for the next one (after
+        // MONITOR_FAILURE_BACKOFF) instead of being replayed three times with backoff.
+        crate::database::query("UPDATE durable_tasks SET max_attempts=1 WHERE owner='library-monitor' AND status='queued' AND attempt=0 AND max_attempts>1")
+            .execute(&auth.store.pool)
+            .await?;
     }
     let online: Option<(String,String)> = crate::database::query_as("SELECT l.id,l.options_json FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.onlineRefreshIntervalDays'),'0') AS BIGINT)>0 AND NOT EXISTS(SELECT 1 FROM automation_sweeps s WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id='' AND (s.completed_at IS NULL OR s.created_at>?-CAST(json_extract(l.options_json,'$.onlineRefreshIntervalDays') AS BIGINT)*86400)) ORDER BY COALESCE((SELECT MAX(s.created_at) FROM automation_sweeps s WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id=''),0),l.id LIMIT 1")
         .bind(timestamp).fetch_optional(&auth.store.pool).await?;
@@ -312,6 +386,19 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
         .await?;
         tx.commit().await?;
     }
+    Ok(())
+}
+
+/// Queue one library scan (every physical folder) outside its periodic schedule: startup
+/// triggers and the unified "run" action.
+pub(crate) async fn queue_library_scan(
+    auth: &AuthState,
+    library: &str,
+    key: &str,
+    timestamp: i64,
+) -> Result<(), sqlx::Error> {
+    queue_scopes(auth, library, key, timestamp).await?;
+    crate::task_engine::WAKE.notify_one();
     Ok(())
 }
 

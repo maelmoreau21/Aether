@@ -28,6 +28,43 @@ pub mod transport;
 pub mod trickplay;
 pub mod video_stream;
 
+/// Writable state directory shared with the rest of the deployment, used to resolve relative
+/// cache defaults instead of the process working directory (read-only in hardened containers):
+/// `MEDIA_NODE_DATA_DIR` (Media Node), else the directory of `MEDIA_DB_PATH` (Core, default
+/// `data/core.sqlite3`), made absolute once.
+pub fn default_data_dir() -> std::path::PathBuf {
+    static DIR: std::sync::LazyLock<std::path::PathBuf> = std::sync::LazyLock::new(|| {
+        let dir = std::env::var_os("MEDIA_NODE_DATA_DIR")
+            .filter(|value| !value.is_empty())
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                let db = std::path::PathBuf::from(
+                    std::env::var_os("MEDIA_DB_PATH").unwrap_or_else(|| "data/core.sqlite3".into()),
+                );
+                db.parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .map(std::path::Path::to_path_buf)
+                    .unwrap_or_else(|| std::path::PathBuf::from("."))
+            });
+        if dir.is_absolute() {
+            dir
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(&dir))
+                .unwrap_or(dir)
+        }
+    });
+    DIR.clone()
+}
+
+/// The directory configured in `variable` (kept as given), or `default_data_dir()/<relative>`.
+pub fn data_subdir(variable: &str, relative: &str) -> std::path::PathBuf {
+    std::env::var_os(variable)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| default_data_dir().join(relative))
+}
+
 #[inline]
 pub fn trim_memory() {
     #[cfg(all(target_os = "linux", target_env = "gnu"))]

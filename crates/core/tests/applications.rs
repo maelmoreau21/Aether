@@ -68,7 +68,9 @@ async fn fixture() -> Fixture {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = applications::router(auth.clone()).merge(reports::router(auth));
+    let app = applications::router(auth.clone())
+        .merge(reports::router(auth.clone()))
+        .merge(extensions::router(auth));
     Fixture {
         _dir: dir,
         store,
@@ -77,6 +79,12 @@ async fn fixture() -> Fixture {
     }
 }
 async fn install(store: &IdentityStore, cap: &str) {
+    let (package, public_key) = signed_package(cap);
+    extensions::install_internal_with_key(store, package, &public_key)
+        .await
+        .unwrap();
+}
+fn signed_package(cap: &str) -> (Package, String) {
     let wasm = if let Ok(directory) = std::env::var("MEDIA_APPLICATION_TEST_WASM_DIR") {
         std::fs::read(std::path::Path::new(&directory).join(format!("aether_plugin_{cap}.wasm")))
             .unwrap()
@@ -109,13 +117,7 @@ async fn install(store: &IdentityStore, cap: &str) {
         signature: String::new(),
     };
     package.signature = STANDARD.encode(key.sign(&package.signing_bytes().unwrap()).as_ref());
-    extensions::install_internal_with_key(
-        store,
-        package,
-        &STANDARD.encode(key.public_key().as_ref()),
-    )
-    .await
-    .unwrap();
+    (package, STANDARD.encode(key.public_key().as_ref()))
 }
 async fn send(
     f: &Fixture,
@@ -377,4 +379,82 @@ async fn reports_preserve_exact_inventory_track_and_reject_wrong_kind_or_asset()
             .status(),
         StatusCode::BAD_REQUEST
     );
+}
+
+async fn all_libraries(store: &IdentityStore, id: &str) -> i64 {
+    query_scalar("SELECT CAST(all_libraries AS BIGINT) FROM extensions WHERE id=?")
+        .bind(id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn reports_extension_installed_by_an_administrator_accepts_reports() {
+    let _worker = WORKER_TEST.lock().await;
+    let f = fixture().await;
+    let (package, public_key) = signed_package("reports");
+    let mut install = serde_json::to_value(&package).unwrap();
+    install["publicKey"] = json!(public_key);
+    let response = send(&f, Some(0), "POST", "/api/v1/admin/extensions", true, install).await;
+    let status = response.status();
+    let installed = body(response).await;
+    assert_eq!(status, StatusCode::CREATED, "{installed}");
+    // Application surfaces follow each caller's library permissions, not a grant list.
+    assert_eq!(all_libraries(&f.store, "media-reports").await, 1);
+    // Same body as the administration toggle sends for an extension without grants.
+    assert_eq!(
+        send(
+            &f,
+            Some(0),
+            "PUT",
+            "/api/v1/admin/extensions/media-reports",
+            true,
+            json!({"enabled":true,"libraryIds":[],"allLibraries":true})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let report = json!({"category":"video","description":"Image figée à la reprise","workId":"work-1","positionSeconds":42});
+    for who in [1, 0] {
+        let response = send(&f, Some(who), "POST", "/api/v1/reports", true, report.clone()).await;
+        let status = response.status();
+        let created = body(response).await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+    }
+    // A user without permission on the library is still refused.
+    let response = send(&f, Some(2), "POST", "/api/v1/reports", true, report).await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(body(response).await["error"], "library_permission_denied");
+}
+
+#[tokio::test]
+async fn startup_repairs_application_extensions_left_without_library_scope() {
+    let _worker = WORKER_TEST.lock().await;
+    let f = fixture().await;
+    install(&f.store, "reports").await;
+    install(&f.store, "requests").await;
+    // Former default: no library at all for application extensions.
+    query("UPDATE extensions SET all_libraries=0")
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+    // An explicit grant list is an administrator decision and must survive.
+    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('media-requests','films')")
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+    let report = json!({"category":"audio","description":"Son désynchronisé","workId":"work-1"});
+    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, report.clone()).await;
+    assert_eq!(body(response).await["error"], "library_permission_denied");
+    let reopened = IdentityStore::open(&f._dir.path().join("applications.sqlite"))
+        .await
+        .unwrap();
+    assert_eq!(all_libraries(&reopened, "media-reports").await, 1);
+    assert_eq!(all_libraries(&reopened, "media-requests").await, 0);
+    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, report).await;
+    let status = response.status();
+    let created = body(response).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
 }

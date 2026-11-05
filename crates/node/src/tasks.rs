@@ -9,18 +9,19 @@ use std::process::Stdio;
 use std::{io, path::Path};
 use tokio::io::AsyncReadExt;
 
+/// `MEDIA_FINGERPRINT_CACHE_DIR`, else `<data dir>/cache/fingerprints` (never the working directory).
+fn fingerprint_cache_dir() -> std::path::PathBuf {
+    crate::data_subdir("MEDIA_FINGERPRINT_CACHE_DIR", "cache/fingerprints")
+}
+
 fn fingerprint_cache_path(asset_id: &str, size: u64, modified_ns: &str) -> std::path::PathBuf {
-    let cache_dir = std::env::var_os("MEDIA_FINGERPRINT_CACHE_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("data/cache/fingerprints"));
+    let cache_dir = fingerprint_cache_dir();
     let sanitized_id = asset_id.replace(['/', '\\', ':', '.', ' '], "_");
     cache_dir.join(format!("{sanitized_id}_{size}_{modified_ns}.json"))
 }
 
 pub async fn clear_fingerprint_cache() -> io::Result<u64> {
-    let cache_dir = std::env::var_os("MEDIA_FINGERPRINT_CACHE_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("data/cache/fingerprints"));
+    let cache_dir = fingerprint_cache_dir();
     let mut cleared = 0u64;
     if let Ok(mut entries) = tokio::fs::read_dir(&cache_dir).await {
         while let Ok(Some(entry)) = entries.next_entry().await {

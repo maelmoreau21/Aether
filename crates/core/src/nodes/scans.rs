@@ -474,7 +474,8 @@ pub(super) async fn receive_scan_complete(
     let _ = crate::database::query(
         "UPDATE scan_jobs SET status=?, discovered=?, probed=?, reused=?, errors_json=?, errors_count=?, warnings_count=0 WHERE library_id=?",
     )
-    .bind(if comp.finished.complete { "completed" } else { "error" })
+    // Older Nodes do not report interruption: keep their former "incomplete means error".
+    .bind(if comp.finished.interrupted.map_or(comp.finished.complete, |interrupted| !interrupted) { "completed" } else { "error" })
     .bind(comp.finished.discovered as i64)
     .bind(comp.finished.probed as i64)
     .bind(comp.finished.reused as i64)

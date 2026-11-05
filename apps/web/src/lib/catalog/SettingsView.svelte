@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { preferences, ensurePreferences, savePreferences } from '../preferences';
   import { resolve } from '$app/paths';
+  import { goto } from '$app/navigation';
   import { session } from '../auth/session';
   import { features } from '../applications/api';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
@@ -11,6 +12,10 @@
   import AvatarEditor from './AvatarEditor.svelte';
   import OidcSettings from '../auth/OidcSettings.svelte';
   import AccountSecurity from '../auth/AccountSecurity.svelte';
+  import Requests from '../applications/Requests.svelte';
+  import Reports from '../applications/Reports.svelte';
+  import Statistics from '../statistics/Statistics.svelte';
+  import DownloadsPanel from './DownloadsPanel.svelte';
   import Icon from '../ui/Icon.svelte';
   import type { IconName } from '../ui/Icon.svelte';
   import { t, locale, localeOptions, setLocale, type TranslationKey, type SupportedLocale } from '../i18n';
@@ -81,8 +86,14 @@
     subtitleStyle = { ...subtitleStyle, [key]: value };
     savePreferences({ subtitleStyle: { ...subtitleStyle } });
   }
-  const pages: readonly { id: string; labelKey: TranslationKey; icon: IconName; groupKey: TranslationKey }[] = [
+  // `feature`: entry listed only while that optional extension is active. The
+  // panel itself still opens from its hash so a link never lands on the wrong page.
+  const pages: readonly { id: string; labelKey: TranslationKey; icon: IconName; groupKey: TranslationKey; feature?: 'requests' | 'reports' }[] = [
     { id: 'account', labelKey: 'settings_nav_profile', icon: 'profile', groupKey: 'settings_group_me' },
+    { id: 'requests', labelKey: 'settings_requests', icon: 'sparkles', groupKey: 'settings_group_me', feature: 'requests' },
+    { id: 'reports', labelKey: 'settings_reports', icon: 'warning', groupKey: 'settings_group_me', feature: 'reports' },
+    { id: 'statistics', labelKey: 'settings_statistics', icon: 'clock', groupKey: 'settings_group_me' },
+    { id: 'downloads', labelKey: 'downloads', icon: 'download', groupKey: 'settings_group_me' },
     { id: 'playback', labelKey: 'settings_nav_playback', icon: 'play', groupKey: 'settings_group_experience' },
     { id: 'display', labelKey: 'settings_nav_display', icon: 'image', groupKey: 'settings_group_experience' },
     { id: 'security', labelKey: 'settings_nav_security', icon: 'shield', groupKey: 'settings_group_security' },
@@ -118,7 +129,12 @@
       autoSkipCredits = saved.autoSkipCredits === true;
       if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
-    const sync = () => { const hash = window.location.hash.slice(1); const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account'; };
+    const sync = () => {
+      const hash = window.location.hash.slice(1);
+      // The embedded requests panel links administrators to the acquisition screen.
+      if (hash === 'acquisition-section') { void goto(resolve('admin/libraries/#acquisition-section'), { replaceState: true }); return; }
+      const id = hash === 'appearance' ? 'account' : hash === 'sso' ? 'security' : hash; current = pages.some(page => page.id === id) ? id : 'account';
+    };
     sync(); window.addEventListener('hashchange', sync);
     return () => { disposed = true; window.removeEventListener('hashchange', sync); };
   });
@@ -148,15 +164,9 @@
     <nav class="settings-nav" aria-label={$t('settings_title')}>
       {#each pageGroups as group (group)}
         <p class="nav-group">{$t(group)}</p>
-        {#each pages.filter(page => page.groupKey === group) as page (page.id)}
+        {#each pages.filter(page => page.groupKey === group && (!page.feature || $features[page.feature])) as page (page.id)}
           <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{$t(page.labelKey)}</a>
         {/each}
-        {#if group === 'settings_group_me'}
-          {#if $features.requests}<a href={resolve('requests/')}><Icon name="download" size={18} />{$t('settings_requests')}</a>{/if}
-          {#if $features.reports}<a href={resolve('reports/')}><Icon name="alert" size={18} />{$t('settings_reports')}</a>{/if}
-          <a href={resolve('statistics/')}><Icon name="clock" size={18} />{$t('settings_statistics')}</a>
-          <a href={resolve('downloads/')}><Icon name="download" size={18} />{$t('downloads')}</a>
-        {/if}
       {/each}
       {#if $session?.user.role === 'administrator'}<a class="server-link" href={resolve('admin/libraries/#overview')}><Icon name="server" size={20} />{$t('settings_server_admin')}</a>{/if}
     </nav>
@@ -254,6 +264,11 @@
           {#if artworkError}<p role="alert">{artworkError}</p>{/if}
         </form>
       </div>
+      <!-- Data panels mount only while shown: nothing is fetched for hidden pages. -->
+      <div class="embedded-panel" hidden={current !== 'requests'}>{#if current === 'requests'}<h2>{$t('settings_requests')}</h2><Requests embedded />{/if}</div>
+      <div class="embedded-panel" hidden={current !== 'reports'}>{#if current === 'reports'}<h2>{$t('settings_reports')}</h2><Reports embedded />{/if}</div>
+      <div class="embedded-panel" hidden={current !== 'statistics'}>{#if current === 'statistics'}<Statistics embedded />{/if}</div>
+      <div hidden={current !== 'downloads'}>{#if current === 'downloads'}<section class="card"><DownloadsPanel embedded /></section>{/if}</div>
       <div hidden={current !== 'security'}><section class="card"><h2>{$t('security')}</h2><AccountSecurity mode="security" /><h3>{$t('sso_connection')}</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
       <div hidden={current !== 'devices'}><section class="card"><h2>{$t('settings_nav_devices')}</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">{$t('playback')}</h2><p class="muted">{$t('playback_account_note')}</p>
@@ -485,6 +500,8 @@
   .settings-nav a.active { background: var(--pn-2); color: var(--tx); }
   .server-link { margin-top: 16px; border-top: 1px solid var(--line); border-radius: 0 0 12px 12px; padding-top: 4px; }
   .settings-content { min-width: 0; display: flex; flex-direction: column; }
+  .embedded-panel :global(.application-page) { max-width: none; padding: 0; }
+  .embedded-panel > h2 { margin-bottom: 4px; }
   .card {
     min-width: 0;
     overflow-wrap: anywhere;

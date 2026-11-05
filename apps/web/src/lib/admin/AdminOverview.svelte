@@ -83,7 +83,7 @@
   .page-head p { margin: 4px 0 0; font-size: 14px; color: var(--mu); }
   h3 { margin: 0; font-size: 16px; font-weight: 600; }
   small { font-size: 12px; color: var(--mu); }
-  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
   .stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 18px 20px; background: var(--pn); border-radius: var(--r-md); }
   .stat small { display: block; margin-bottom: 2px; }
   .stat strong { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -101,7 +101,7 @@
   .row-main strong { font-size: 14px; }
   .sub, .meta { font-size: 13px; color: var(--mu); overflow-wrap: anywhere; }
   .meta { flex: none; }
-  progress { width: 100%; max-width: 320px; height: 4px; margin-top: 4px; accent-color: var(--ac); }
+  progress { width: 100%; max-width: 480px; height: 4px; margin-top: 4px; accent-color: var(--ac); }
   .empty { margin: 0; font-size: 14px; color: var(--mu); } .empty[role='alert'] { color: var(--err); }
   .ghost { min-height: 38px; padding: 8px 16px; background: transparent; color: var(--tx); border: 1px solid var(--line-2); border-radius: var(--r-md); font: inherit; font-size: 13px; cursor: pointer; }
   .ghost:hover { background: var(--pn-2); } .ghost:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -110,5 +110,5 @@
   dl { display: grid; gap: 10px; margin: 12px 0 0; font-size: 13px; }
   dl div { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
   dt { color: var(--mu); } dd { margin: 0; overflow-wrap: anywhere; }
-  @media (max-width: 900px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

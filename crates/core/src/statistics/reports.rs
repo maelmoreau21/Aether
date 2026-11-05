@@ -5,26 +5,28 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-#[derive(Default, Deserialize)]
+#[derive(Clone, Default, Deserialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Filter {
-    from: Option<i64>,
-    to: Option<i64>,
-    user_id: String,
-    library_id: String,
-    node_id: String,
-    kind: String,
-    device: String,
-    offset: usize,
-    limit: Option<usize>,
-    rank: String,
+    pub(super) from: Option<i64>,
+    pub(super) to: Option<i64>,
+    pub(super) user_id: String,
+    pub(super) library_id: String,
+    pub(super) node_id: String,
+    pub(super) kind: String,
+    pub(super) device: String,
+    pub(super) offset: usize,
+    pub(super) limit: Option<usize>,
+    pub(super) rank: String,
+    /// Time zone for calendar buckets (insights): IANA name or minutes east of UTC.
+    pub(super) tz: String,
 }
-struct Selection {
-    sql: String,
-    binds: Vec<String>,
+pub(super) struct Selection {
+    pub(super) sql: String,
+    pub(super) binds: Vec<String>,
 }
 impl Selection {
-    fn statement(
+    pub(super) fn statement(
         &self,
         select: &str,
         tail: &str,
@@ -37,7 +39,7 @@ impl Selection {
         q
     }
 }
-async fn select(
+pub(super) async fn select(
     auth: &AuthState,
     headers: &HeaderMap,
     f: &Filter,
@@ -65,6 +67,7 @@ async fn select(
         || [&f.user_id, &f.library_id, &f.node_id, &f.kind, &f.device]
             .iter()
             .any(|v| v.len() > 160)
+        || super::aggregate::Zone::parse(&f.tz).is_none()
         || !matches!(f.kind.as_str(), "" | "film" | "episode" | "music")
         || !matches!(
             f.rank.as_str(),
@@ -132,7 +135,7 @@ fn session(row: &sqlx::any::AnyRow, epoch: i64, details: bool) -> Outcome<Value>
         "completed":row.get::<i64,_>("completed")!=0,"metrics":state}),
     )
 }
-const NAME: &str = "COALESCE(u.display_name,u.sso_username,c.login,'Utilisateur')";
+pub(super) const NAME: &str = "COALESCE(u.display_name,u.sso_username,c.login,'Utilisateur')";
 
 pub(super) async fn admin(
     State(auth): State<AuthState>,
@@ -156,9 +159,9 @@ async fn report(
 ) -> Outcome<Json<Value>> {
     let (actor, selection) = select(&auth, &headers, &f, admin).await?;
     let epoch = now();
-    let row=selection.statement("SELECT COUNT(*) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.canonical_id ELSE NULL END) AS media,COALESCE(SUM(s.seconds),0.0) AS seconds,COALESCE(SUM(s.covered_seconds),0.0) AS coverage,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed,CAST(COALESCE(SUM(CASE WHEN s.ended_at IS NULL AND s.updated_at>=unixepoch()-90 THEN 1 ELSE 0 END),0) AS BIGINT) AS active", "").fetch_one(&auth.store.pool).await.map_err(db)?;
+    let row=selection.statement(&format!("SELECT COUNT(*) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.canonical_id ELSE NULL END) AS media,COALESCE(SUM(s.seconds),0.0) AS seconds,COALESCE(SUM(s.covered_seconds),0.0) AS coverage,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed,CAST(COALESCE(SUM(CASE WHEN s.ended_at IS NULL AND s.updated_at>=unixepoch()-90 THEN 1 ELSE 0 END),0) AS BIGINT) AS active,CAST(COALESCE(SUM(CASE WHEN {} THEN 1 ELSE 0 END),0) AS BIGINT) AS qualified", super::aggregate::QUALIFIED_SQL), "").fetch_one(&auth.store.pool).await.map_err(db)?;
     let plays = count(&row, "plays");
-    let summary = json!({"plays":plays,"users":count(&row,"users"),"media":count(&row,"media"),"seconds":number(&row,"seconds"),"coveredSeconds":number(&row,"coverage"),"completed":count(&row,"completed"),"active":count(&row,"active")});
+    let summary = json!({"plays":plays,"qualifiedPlays":count(&row,"qualified"),"users":count(&row,"users"),"media":count(&row,"media"),"seconds":number(&row,"seconds"),"coveredSeconds":number(&row,"coverage"),"completed":count(&row,"completed"),"active":count(&row,"active")});
     let limit = f.limit.unwrap_or(50);
     let history = selection
         .statement(
@@ -317,8 +320,9 @@ async fn report(
         .map_err(db)?;
     let facets = json!({"libraries":libraries.iter().map(|r|json!({"id":r.get::<String,_>("library_id"),"name":r.get::<String,_>("name")})).collect::<Vec<_>>(),"nodes":nodes.iter().map(|r|r.get::<String,_>("node_id")).collect::<Vec<_>>(),"devices":devices.iter().map(|r|r.get::<String,_>("device")).collect::<Vec<_>>()});
     let s = settings(&auth.store).await?;
+    let wrapped = super::insights::wrapped_open(&auth.store, &f.tz, admin).await?;
     Ok(Json(
-        json!({"enabled":s.enabled!=0,"firstEnabledAt":s.first_enabled_at,"eventRetentionDays":s.event_retention_days,"summaryRetentionDays":s.summary_retention_days,
+        json!({"enabled":s.enabled!=0,"firstEnabledAt":s.first_enabled_at,"eventRetentionDays":s.event_retention_days,"summaryRetentionDays":s.summary_retention_days,"wrappedAvailable":wrapped,
         "periods":periods.iter().map(|r|json!({"startedAt":r.get::<i64,_>("started_at"),"endedAt":r.get::<Option<i64>,_>("ended_at")})).collect::<Vec<_>>(),
         "summary":summary,"sessions":history,"offset":f.offset,"hasMore":f.offset+history.len()<(plays as usize),
         "popular":popular,"users":users,"daily":daily,"hours":hours,"behavior":behavior,"distributions":distributions,"music":music,"facets":facets,"timezone":"UTC"}),

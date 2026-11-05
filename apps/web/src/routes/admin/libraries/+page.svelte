@@ -5,7 +5,7 @@
 <script lang="ts">
   import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
-  import { asset } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
   import { replaceState } from '$app/navigation';
   import { page } from '$app/state';
 
@@ -340,7 +340,7 @@
   function syncSection() {
     const selected = parseAdminHash(window.location.hash);
     if (window.location.hash.split('?', 1)[0] === '#trickplay-section') {
-      replaceState(selected.section, page.state);
+      replaceState(resolve('admin/libraries/#libraries-section'), page.state);
     }
     currentHash = selected.section;
     selectedTaskId = selected.task;

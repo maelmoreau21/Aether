@@ -22,8 +22,8 @@ pub async fn response(
             .into_response();
     }
     if manager.check_native_cache(&request).await.is_some()
-        && let Ok(opened) = manager.open_sheet(&request, 0).await
-        && let Ok(response) = crate::serve_opened(opened, &http, "image/jpeg").await
+        && let Ok((opened, mime)) = manager.open_sheet_with_mime(&request, 0).await
+        && let Ok(response) = crate::serve_opened(opened, &http, &mime).await
     {
         let (mut parts, body) = response.into_parts();
         parts.headers.insert(

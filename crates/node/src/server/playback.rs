@@ -493,6 +493,7 @@ pub(super) async fn internal_trickplay_manifest(
                 "columns": cached.columns,
                 "rows": cached.rows,
                 "sheetCount": cached.sheet_count,
+                "mime": cached.mime,
                 "thumbnailCount": cached.thumbnail_count,
                 "urlPrefix": format!("/api/v1/assets/{id}/trickplay/")
             })),
@@ -514,6 +515,7 @@ pub(super) async fn internal_trickplay_manifest(
                 "columns": jellyfin.columns,
                 "rows": jellyfin.rows,
                 "sheetCount": jellyfin.sheet_count,
+                "mime": jellyfin.mime,
                 "thumbnailCount": jellyfin.thumbnail_count,
                 "urlPrefix": format!("/api/v1/assets/{id}/trickplay/")
             })),
@@ -583,8 +585,12 @@ pub(super) async fn internal_trickplay_tile(
         chapter_time: None,
     };
 
-    match state.trickplay.open_sheet(&trickplay_req, index).await {
-        Ok(opened) => match crate::stream::serve_opened(opened, &req, "image/jpeg").await {
+    match state
+        .trickplay
+        .open_sheet_with_mime(&trickplay_req, index)
+        .await
+    {
+        Ok((opened, mime)) => match crate::stream::serve_opened(opened, &req, &mime).await {
             Ok(response) => {
                 let (mut parts, body) = response.into_parts();
                 parts.headers.insert(

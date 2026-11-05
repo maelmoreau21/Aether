@@ -15,15 +15,9 @@ export const defaultArtworkRotationPolicy: ArtworkRotationPolicy = {
   includeUnknownLanguage: true, allowAnyLanguageFallback: true,
 };
 let current = $state<ArtworkRotationPolicy>(defaultArtworkRotationPolicy);
-let timer: ReturnType<typeof setInterval> | undefined;
 export function artworkRotationPolicy(): ArtworkRotationPolicy { return current; }
 export function setArtworkRotationPolicy(value: ArtworkRotationPolicy): void {
-  if (timer) clearInterval(timer);
-  timer = undefined;
   current = value;
-  if (typeof window !== 'undefined' && value.enabled && value.minHoursBetweenSwitches > 0) {
-    timer = setInterval(() => { current = { ...current }; }, 60_000);
-  }
 }
 onSessionGenerationChange(() => { setArtworkRotationPolicy(defaultArtworkRotationPolicy); });
 

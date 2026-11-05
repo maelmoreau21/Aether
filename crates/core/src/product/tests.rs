@@ -230,6 +230,69 @@ async fn parental_filters_overrides_lists_and_explicit_grouping() {
     .await;
     assert_eq!(catalog["total"], 1);
     assert_eq!(catalog["items"][0]["id"], "young");
+    // Person filtering must happen before paging and retain parental restrictions.
+    query("UPDATE inventory_works SET editorial_json=? WHERE id IN ('young','adult')")
+        .bind(json!({"actors":[{"name":"Jane Doe","role":"Actor"}]}).to_string())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    let people = value(
+        request(
+            &app,
+            "/api/v1/catalog?person=Jane%20Doe&limit=1",
+            "GET",
+            &b,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(people["total"], 1);
+    assert_eq!(people["items"][0]["id"], "young");
+    let first = value(
+        request(
+            &app,
+            "/api/v1/catalog?person=Jane%20Doe&limit=1",
+            "GET",
+            &a,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    let next = value(
+        request(
+            &app,
+            "/api/v1/catalog?person=Jane%20Doe&limit=1&offset=1",
+            "GET",
+            &a,
+            "",
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(first["total"], 2);
+    assert_eq!(first["hasMore"], true);
+    assert_ne!(first["items"][0]["id"], next["items"][0]["id"]);
+    assert_eq!(next["hasMore"], false);
+    assert_eq!(
+        value(
+            request(
+                &app,
+                "/api/v1/catalog?person=Jane",
+                "GET",
+                &b,
+                "",
+                Value::Null
+            )
+            .await
+        )
+        .await["total"],
+        0
+    );
     for path in [
         "/api/v1/catalog/adult",
         "/api/v1/media/adult",

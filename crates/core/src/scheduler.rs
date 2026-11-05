@@ -156,6 +156,7 @@ pub struct Scheduler(
     tokio::task::JoinHandle<()>,
     tokio::task::JoinHandle<()>,
     tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
 );
 impl Drop for Scheduler {
     fn drop(&mut self) {
@@ -163,6 +164,7 @@ impl Drop for Scheduler {
         self.1.abort();
         self.2.abort();
         self.3.abort();
+        self.4.abort();
     }
 }
 impl Scheduler {
@@ -185,6 +187,12 @@ impl Scheduler {
                 if crate::imports::tick(&application_auth.store).await.is_err() {
                     eprintln!("Application import pass failed; retrying on next tick");
                 }
+                if crate::artwork::migrate_one(&application_auth.store)
+                    .await
+                    .is_err()
+                {
+                    eprintln!("Artwork migration deferred; original references preserved");
+                }
             }
         });
         let notification_auth = auth.clone();
@@ -201,6 +209,23 @@ impl Scheduler {
                     .is_err()
                 {
                     eprintln!("Notification worker pass failed; retrying on next tick");
+                }
+            }
+        });
+        let artwork_auth = auth.clone();
+        let artwork_jobs = jobs.clone();
+        let artwork = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            loop {
+                interval.tick().await;
+                if artwork_jobs.is_cancelled() {
+                    break;
+                }
+                if crate::extensions::artwork_collection_tick(&artwork_auth)
+                    .await
+                    .is_err()
+                {
+                    eprintln!("Artwork collection pass deferred; progress remains persisted");
                 }
             }
         });
@@ -267,6 +292,7 @@ impl Scheduler {
             worker,
             notifications,
             applications,
+            artwork,
         )
     }
 }

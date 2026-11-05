@@ -25,6 +25,9 @@ tokio-native-tls = "0.3.1"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 
+webp = { version = "=0.3.1", default-features = false }
+lcms2 = { version = "=6.2.0", features = ["static"] }
+
 [[bin]]
 name = "aether-node"
 path = "src/bin/aether-node.rs"

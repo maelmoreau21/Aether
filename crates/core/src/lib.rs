@@ -33,6 +33,7 @@ pub mod consolidation;
 mod demo;
 pub mod feedback;
 pub mod identity;
+mod image_import;
 pub mod inventory;
 pub mod libraries;
 pub mod library_options;

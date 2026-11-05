@@ -6,7 +6,7 @@ import { setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-
 
 const current: Session = { user: { id: 'viewer', login: 'viewer', role: 'user' }, csrfToken: 'session-one' };
 const work: Work = { id: 'film', title: 'Film', kind: 'film', year: null, description: '', libraryId: 'library', synthetic: false, artwork: { backdrop: '/fallback' }, posterUrl: '/poster' };
-const variant = (id: string, kind = 'backdrop', language: string | null = null, origin = 'provider', position = 0) => ({ id, kind, language, origin, position, url: `/images/${id}` });
+const variant = (id: string, kind = 'backdrop', language: string | null = null, origin = 'provider', position = 0, pinned = false) => ({ id, kind, language, origin, position, pinned, url: `/images/${id}` });
 const policy: ArtworkRotationPolicy = { enabled: true, enableMovies: true, enableSeries: true, rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4, preferredLanguage: 'fr', fallbackLanguage: 'en', includeUnknownLanguage: true, allowAnyLanguageFallback: true };
 
 beforeEach(() => {
@@ -37,12 +37,12 @@ test('stays stable across API ordering, navigation and reload; next login avoids
   expect(localStorage.getItem('media_artwork_choices_viewer')).not.toContain(current.csrfToken);
 });
 
-test('manual overrides remain fixed and the chosen language takes priority over neutral images', () => {
+test('scene artwork prefers neutral images and manual overrides remain fixed', () => {
   const images = [variant('neutral'), variant('english', 'backdrop', 'en'), variant('french', 'backdrop', 'fr')];
-  expect(selectArtwork({ ...work, imageVariants: images }, current).backdrop).toBe('/images/french');
-  expect(selectArtwork({ ...work, imageVariants: images }, current, ['de', 'en']).backdrop).toBe('/images/english');
-  expect(selectArtwork({ ...work, imageVariants: [...images, variant('manual', 'backdrop', 'de', 'manual')] }, current).backdrop).toBe('/images/manual');
-  expect(selectArtwork({ ...work, imageVariants: [...images, variant('legacy', 'backdrop', null, 'legacy')] }, current).backdrop).toBe('/images/legacy');
+  expect(selectArtwork({ ...work, imageVariants: images }, current).backdrop).toBe('/images/neutral');
+  expect(selectArtwork({ ...work, imageVariants: images }, current, ['de', 'en']).backdrop).toBe('/images/neutral');
+  expect(selectArtwork({ ...work, imageVariants: [...images, variant('manual', 'backdrop', 'de', 'manual', 0, true)] }, current).backdrop).toBe('/images/manual');
+  expect(selectArtwork({ ...work, imageVariants: [...images, variant('legacy', 'backdrop', null, 'legacy', 0, true)] }, current).backdrop).toBe('/images/legacy');
 });
 
 test('rotates every role independently and retains a remaining image when a variant disappears', () => {
@@ -86,7 +86,7 @@ test('server poster choice is shared unless a manual image or personal rotation 
   const images = [variant('a', 'poster', 'fr'), variant('server', 'poster', 'en', 'provider', -1)];
   setArtworkRotationPolicy({ ...policy, enabled: false });
   expect(selectArtwork({ ...work, imageVariants: images }, current).poster).toBe('/images/server');
-  expect(selectArtwork({ ...work, imageVariants: [...images, variant('manual', 'poster', null, 'manual')] }, current).poster).toBe('/images/manual');
+  expect(selectArtwork({ ...work, imageVariants: [...images, variant('manual', 'poster', null, 'manual', 0, true)] }, current).poster).toBe('/images/manual');
   setArtworkRotationPolicy({ ...policy, preferredLanguage: 'fr', allowAnyLanguageFallback: false });
   expect(selectArtwork({ ...work, imageVariants: images }, current).poster).toBe('/images/a');
 });
@@ -100,14 +100,14 @@ test('media type, pool size and sequential setting control rotation', () => {
   expect(selectArtwork(item, { ...current, csrfToken: 'next' }).poster).toBe(first === '/images/a' ? '/images/b' : '/images/a');
 });
 
-test('rotates at the configured interval within the same visit', () => {
+test('remains stable after the configured interval within the same visit', () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-27T10:00:00Z'));
   setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', minHoursBetweenSwitches: 1 });
   const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
   const first = selectArtwork(item, current).poster;
   vi.advanceTimersByTime(3_600_000);
-  expect(selectArtwork(item, current).poster).not.toBe(first);
+  expect(selectArtwork(item, current).poster).toBe(first);
   vi.useRealTimers();
 });
 
@@ -153,4 +153,33 @@ test('poster language follows interface or the known original language, with int
   expect(selectArtwork({ ...item, originalLanguage: 'de' }, current, ['fr', 'en']).poster).toBe('/images/fr');
   setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'original' });
   expect(selectArtwork(item, current, ['fr', 'en']).poster).toBe('/images/ja');
+});
+
+
+test('logos follow the interface language, fall back to neutral, then to a text title', () => {
+  const images = [variant('english', 'logo', 'en'), variant('french', 'logo', 'fr')];
+  expect(selectArtwork({ ...work, imageVariants: images }, current, ['fr', 'en']).logo).toBe('/images/french');
+  expect(selectArtwork({ ...work, artwork: { logo: '/old-english' }, imageVariants: [images[0]] }, current, ['fr', 'en']).logo).toBeNull();
+  expect(selectArtwork({ ...work, imageVariants: [images[0], variant('neutral', 'logo')] }, current, ['fr']).logo).toBe('/images/neutral');
+  expect(selectArtwork({ ...work, imageVariants: [variant('manual', 'logo', 'en', 'manual', 0, true)] }, current, ['fr']).logo).toBe('/images/manual');
+  expect(selectArtwork({ ...work, imageVariants: images }, current, ['fr-CA']).logo).toBe('/images/french');
+});
+
+
+test('manual imports join the language pool; only explicit pins override language and rotation', () => {
+  setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: 'interface' });
+  const images = [variant('manual-ja', 'poster', 'ja', 'manual'), variant('fr', 'poster', 'fr-CA')];
+  expect(selectArtwork({ ...work, originalLanguage: 'ja', imageVariants: images }, current, ['fr-FR']).poster).toBe('/images/fr');
+  images[0].pinned = true;
+  expect(selectArtwork({ ...work, imageVariants: images }, current, ['fr']).poster).toBe('/images/manual-ja');
+});
+
+test('VO uses the known original, then neutral, interface, English, and other languages', () => {
+  setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'original' });
+  const images = [variant('english', 'poster', 'en-US'), variant('french', 'poster', 'fr-CA'), variant('neutral', 'poster'), variant('japanese', 'poster', 'ja')];
+  const item = { ...work, originalLanguage: 'ja', imageVariants: images };
+  expect(selectArtwork(item, current, ['fr-FR']).poster).toBe('/images/japanese');
+  expect(selectArtwork({ ...item, imageVariants: images.slice(0, 3) }, current, ['fr-FR']).poster).toBe('/images/neutral');
+  expect(selectArtwork({ ...item, originalLanguage: 'en' }, current, ['fr-FR']).poster).toBe('/images/english');
+  expect(selectArtwork({ ...item, originalLanguage: null }, current, ['fr-FR']).poster).toBe('/images/french');
 });

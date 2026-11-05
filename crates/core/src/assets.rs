@@ -43,6 +43,7 @@ pub const REFERENCING_COLUMNS: &[(&str, &str)] = &[
     ("extension_avatar_images", "sha256"),
     ("avatar_images", "sha256"),
     ("library_artwork", "sha256"),
+    ("library_artwork_previews", "sha256"),
     ("person_images", "sha256"),
     ("poster_previews", "sha256"),
     ("user_avatars", "sha256"),

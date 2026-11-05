@@ -82,6 +82,7 @@ pub struct CatalogQuery {
     quality: Option<i64>,
     codec: Option<String>,
     language: Option<String>,
+    person: Option<String>,
     kind: Option<String>,
     q: Option<String>,
     sort: Option<String>,
@@ -222,6 +223,9 @@ pub async fn list(
         || query.genre.as_ref().is_some_and(|v| v.len() > 100)
         || query.codec.as_ref().is_some_and(|v| v.len() > 64)
         || query.language.as_ref().is_some_and(|v| v.len() > 35)
+        || query.person.as_ref().is_some_and(|v| {
+            v.trim().is_empty() || v.len() > 200 || v.chars().any(char::is_control)
+        })
         || query.year.is_some_and(|v| !(1800..=2200).contains(&v))
         || query.quality.is_some_and(|v| !(1..=16384).contains(&v))
     {
@@ -270,6 +274,7 @@ pub async fn list(
             quality: query.quality,
             codec: query.codec,
             language: query.language,
+            person: query.person,
         };
         return match crate::inventory::catalogue_page(
             store,
@@ -295,6 +300,7 @@ pub async fn list(
                 .as_ref()
                 .is_none_or(|v| v.0.0.iter().any(|id| id == work.library_id))
                 && query.kind.as_deref().is_none_or(|kind| work.kind == kind)
+                && query.person.is_none()
                 && work.title.to_lowercase().contains(&search)
         })
         .collect();

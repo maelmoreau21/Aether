@@ -36,6 +36,12 @@
 
 # API expérimentale du banc P0
 
+`GET /api/v1/catalog?person=<nom>` filtre les films et séries accessibles par
+nom exact d'acteur, réalisateur ou scénariste ; `offset`, `limit` et `count`
+suivent le contrat du catalogue. Les homonymes peuvent être confondus en l'absence
+d'identifiants personne dans les métadonnées historiques. Les portraits des
+crédits `crewCredits` utilisent le même proxy par œuvre que ceux des acteurs.
+
 Réglages locaux de bibliothèque, images admin, permissions de téléchargement et
 contrôle parental étendu (21 octobre 2026) : [contrat et limites](LIBRARY_OPTIONS.md).
 

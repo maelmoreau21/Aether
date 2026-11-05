@@ -99,13 +99,13 @@ pub(super) struct SearchCandidates {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Collect {
-    work_id: String,
+    pub(super) work_id: String,
     #[serde(default = "default_languages")]
-    languages: Vec<String>,
+    pub(super) languages: Vec<String>,
     #[serde(default = "yes")]
-    include_neutral: bool,
+    pub(super) include_neutral: bool,
     #[serde(default = "default_max")]
-    max_images: usize,
+    pub(super) max_images: usize,
 }
 fn default_languages() -> Vec<String> {
     vec!["fr".into(), "en".into()]
@@ -126,11 +126,11 @@ pub(super) struct CollectBatch {
     #[serde(default = "one")]
     limit: usize,
     #[serde(default = "default_languages")]
-    languages: Vec<String>,
+    pub(super) languages: Vec<String>,
     #[serde(default = "yes")]
-    include_neutral: bool,
+    pub(super) include_neutral: bool,
     #[serde(default = "default_max")]
-    max_images: usize,
+    pub(super) max_images: usize,
 }
 
 fn one() -> usize {
@@ -467,10 +467,26 @@ pub(super) async fn collect(
     Json(input): Json<Collect>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
+    collect_with_context(&auth, &headers, input, None).await
+}
+pub(super) async fn collect_with_context(
+    auth: &AuthState,
+    headers: &HeaderMap,
+    input: Collect,
+    background: Option<super::run::Background<'_>>,
+) -> Result<Json<Value>, Error> {
     if input.max_images == 0 || input.max_images > 12 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_limit"));
     }
-    let ordered = languages(&json!({"languages":input.languages}))?;
+    let mut ordered = languages(&json!({"languages":input.languages}))?;
+    if let Some(original) = crate::artwork::original_language(&auth.store, &input.work_id)
+        .await
+        .map_err(db)?
+        && !ordered.iter().any(|v| v == &original)
+        && ordered.len() < 5
+    {
+        ordered.push(original);
+    }
     let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
         .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let context = context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
@@ -481,9 +497,13 @@ pub(super) async fn collect(
         .as_object()
         .filter(|ids| !ids.is_empty())
         .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "external_ids_required"))?;
-    crate::feedback::authorized(&auth, &headers, &input.work_id, false)
-        .await
-        .map_err(|s| err(s, "work_denied"))?;
+    if let Some(super::run::Background::Artwork(job)) = background {
+        super::artwork_jobs::authorize_work(auth, job, &input.work_id).await?;
+    } else {
+        crate::feedback::authorized(auth, headers, &input.work_id, false)
+            .await
+            .map_err(|s| err(s, "work_denied"))?;
+    }
     let mut rows: Vec<(String,String,String)> = query_as("SELECT e.id,e.package_json,e.generation FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
         .fetch_all(auth.store.pool()).await.map_err(db)?;
     let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
@@ -525,7 +545,16 @@ pub(super) async fn collect(
         {
             continue;
         }
-        if !permitted(&auth, &headers, &id, &context.library_id, &generation).await? {
+        if !super::run::worker_permitted(
+            auth,
+            headers,
+            &id,
+            &context.library_id,
+            &generation,
+            background,
+        )
+        .await?
+        {
             continue;
         }
         let provider_id = ids.get(&id).and_then(Value::as_str).unwrap_or("");
@@ -549,12 +578,7 @@ pub(super) async fn collect(
         let provider_deadline = deadline.min(tokio::time::Instant::now() + Duration::from_secs(15));
         let result = tokio::time::timeout_at(
             provider_deadline,
-            super::run(
-                State(auth.clone()),
-                headers.clone(),
-                Path(id.clone()),
-                Json(request),
-            ),
+            super::run::run_with_context(auth, headers, &id, request, background),
         )
         .await;
         match result {
@@ -669,12 +693,7 @@ pub(super) async fn collect(
         };
         match tokio::time::timeout_at(
             deadline,
-            adapters::import_image(
-                State(auth.clone()),
-                headers.clone(),
-                Path(provider.clone()),
-                Json(request),
-            ),
+            adapters::import_image_with_context(auth, headers, &provider, request, background),
         )
         .await
         {

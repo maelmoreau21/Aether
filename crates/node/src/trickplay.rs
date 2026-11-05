@@ -44,6 +44,8 @@ pub struct TrickplayManifest {
     pub sheet_count: usize,
     pub thumbnail_count: usize,
     pub url_prefix: String,
+    #[serde(default = "jpeg_mime")]
+    pub mime: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -61,6 +63,19 @@ pub struct CacheManifest {
     pub rows: u32,
     pub total_bytes: u64,
     pub completed: bool,
+    #[serde(default = "jpeg_mime")]
+    pub mime: String,
+}
+
+fn jpeg_mime() -> String {
+    "image/jpeg".into()
+}
+fn sheet_extension(mime: &str) -> Option<&'static str> {
+    match mime {
+        "image/jpeg" => Some("jpg"),
+        "image/webp" => Some("webp"),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -214,7 +229,8 @@ impl TrickplayManager {
             .ok()?;
         let meta: CacheManifest = serde_json::from_slice(&manifest_bytes).ok()?;
 
-        if meta.version != 1
+        if !matches!(meta.version, 1 | 2)
+            || sheet_extension(&meta.mime).is_none()
             || !meta.completed
             || meta.fingerprint != key
             || meta.sheet_count == 0
@@ -228,8 +244,9 @@ impl TrickplayManager {
         }
 
         // Validate that the first and last sheets actually exist on disk and are non-empty.
-        let first_file = target_dir.join("0.jpg");
-        let last_file = target_dir.join(format!("{}.jpg", meta.sheet_count - 1));
+        let extension = sheet_extension(&meta.mime)?;
+        let first_file = target_dir.join(format!("0.{extension}"));
+        let last_file = target_dir.join(format!("{}.{extension}", meta.sheet_count - 1));
         if !first_file.is_file() || !last_file.is_file() {
             return None;
         }
@@ -309,7 +326,7 @@ impl TrickplayManager {
             }
 
             // Decode image dimensions
-            let dims = decode_opened_jpeg_dimensions(opened_0).await?;
+            let dims = decode_opened_image_dimensions(opened_0).await?;
             let (total_w, total_h) = dims;
 
             let (cols, rows, width, height) = if let Some((w, c, r)) = parsed_grid {
@@ -360,6 +377,7 @@ impl TrickplayManager {
             }
 
             return Some(TrickplayManifest {
+                mime: jpeg_mime(),
                 status: "ready",
                 source: "jellyfin",
                 interval_ms,
@@ -510,12 +528,12 @@ impl TrickplayManager {
         let cols = if request.chapter_time.is_some() {
             1
         } else {
-            DEFAULT_COLUMNS
+            DEFAULT_COLUMNS.min(8192 / width)
         };
         let rows = if request.chapter_time.is_some() {
             1
         } else {
-            DEFAULT_ROWS
+            DEFAULT_ROWS.min(8192 / (width * 2))
         };
 
         let frame_count = if request.chapter_time.is_some() {
@@ -541,7 +559,7 @@ impl TrickplayManager {
         }
 
         // Use a deterministic in-progress folder to enable resumable generation across restarts
-        let work = self.cache_root.join(format!(".{key}.in_progress"));
+        let work = self.cache_root.join(format!(".{key}.webp.in_progress"));
         tokio::fs::create_dir_all(&work)
             .await
             .map_err(|_| "cache_permission")?;
@@ -549,11 +567,23 @@ impl TrickplayManager {
         // Determine already completed sheets to resume from
         let mut completed_sheets = 0usize;
         while completed_sheets < sheet_limit {
-            let sheet_path = work.join(format!("{completed_sheets}.jpg"));
+            let sheet_path = work.join(format!("{completed_sheets}.webp"));
             let Ok(meta) = tokio::fs::metadata(&sheet_path).await else {
                 break;
             };
             if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_IMAGE_BYTES {
+                break;
+            }
+            let opened =
+                OpenedFile::open_in_root(&work, Path::new(&format!("{completed_sheets}.webp")))
+                    .await
+                    .map_err(|_| "generated_image_invalid")?;
+            if !validate_sheet(opened).await {
+                // An interrupted encoder can leave a non-empty truncated final sheet.
+                // Only this uncommitted work file is discarded before resuming it.
+                tokio::fs::remove_file(&sheet_path)
+                    .await
+                    .map_err(|_| "cache_permission")?;
                 break;
             }
             completed_sheets += 1;
@@ -581,7 +611,7 @@ impl TrickplayManager {
         let mut first_dims = None;
 
         while count < sheet_limit {
-            let sheet_path = work.join(format!("{count}.jpg"));
+            let sheet_path = work.join(format!("{count}.webp"));
             let Ok(meta) = tokio::fs::metadata(&sheet_path).await else {
                 break;
             };
@@ -590,9 +620,9 @@ impl TrickplayManager {
             }
             if first_dims.is_none()
                 && let Ok(opened) =
-                    OpenedFile::open_in_root(&work, Path::new(&format!("{count}.jpg"))).await
+                    OpenedFile::open_in_root(&work, Path::new(&format!("{count}.webp"))).await
             {
-                first_dims = decode_opened_jpeg_dimensions(opened).await;
+                first_dims = decode_opened_image_dimensions(opened).await;
             }
             total_bytes = total_bytes.saturating_add(meta.len());
             count += 1;
@@ -602,16 +632,14 @@ impl TrickplayManager {
             return Err("no_frames_generated");
         }
 
-        let (thumb_w, thumb_h) = if let Some((tot_w, tot_h)) = first_dims {
-            (tot_w / cols, tot_h / rows)
-        } else {
-            (width, (width * 9) / 16)
-        };
+        let (tot_w, tot_h) = first_dims.ok_or("generated_image_invalid")?;
+        let (thumb_w, thumb_h) = (tot_w / cols, tot_h / rows);
 
         let thumbnails = frame_count.min(count * (cols * rows) as usize);
 
         let manifest = CacheManifest {
-            version: 1,
+            version: 2,
+            mime: "image/webp".into(),
             fingerprint: key.to_owned(),
             asset_id: request.asset_id.clone(),
             sheet_count: count,
@@ -668,12 +696,12 @@ impl TrickplayManager {
             .unwrap_or((start_sheet as f64 * sheet_capacity) * (interval_ms as f64 / 1000.0));
 
         // FFmpeg filterchain:
-        // format=yuvj420p guarantees seamless compatibility with AV1 10-bit, HEVC 10-bit, VP9, etc.
+        // format=yuv420p guarantees seamless compatibility with AV1 10-bit, HEVC 10-bit, VP9, etc.
         let filter = if request.chapter_time.is_some() {
-            format!("scale={width}:-2:flags=fast_bilinear,format=yuvj420p")
+            format!("scale={width}:-2:flags=fast_bilinear,format=yuv420p")
         } else {
             format!(
-                "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuvj420p,tile={cols}x{rows}"
+                "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuv420p,tile={cols}x{rows}"
             )
         };
 
@@ -701,14 +729,20 @@ impl TrickplayManager {
             .args([
                 "-frames:v",
                 &remaining_sheets.to_string(),
-                "-q:v",
-                &quality.to_string(),
+                "-c:v",
+                "libwebp",
+                "-quality",
+                &(100.0 - f32::from(quality) * 2.0)
+                    .clamp(38.0, 98.0)
+                    .to_string(),
+                "-compression_level",
+                "3",
                 "-start_number",
                 &start_sheet.to_string(),
                 "-f",
                 "image2",
             ])
-            .arg(output.join("%d.jpg"))
+            .arg(output.join("%d.webp"))
             .kill_on_drop(true);
 
         cmd.stdin(std::process::Stdio::null())
@@ -797,7 +831,8 @@ impl TrickplayManager {
             // Clean orphaned crash directories older than 1 hour
             let partial = name
                 .strip_prefix('.')
-                .and_then(|s| s.strip_suffix(".in_progress"));
+                .and_then(|s| s.strip_suffix(".in_progress"))
+                .map(|s| s.strip_suffix(".webp").unwrap_or(s));
             if partial.is_some_and(cache_key) {
                 let active = self
                     .jobs
@@ -849,6 +884,15 @@ impl TrickplayManager {
         request: &TrickplayRequest,
         index: usize,
     ) -> io::Result<OpenedFile> {
+        self.open_sheet_with_mime(request, index)
+            .await
+            .map(|(file, _)| file)
+    }
+    pub async fn open_sheet_with_mime(
+        &self,
+        request: &TrickplayRequest,
+        index: usize,
+    ) -> io::Result<(OpenedFile, String)> {
         if index >= MAX_SHEETS {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -859,12 +903,16 @@ impl TrickplayManager {
         // 1. Check Aether native cache first
         let key = self.fingerprint(request);
         let target_dir = self.cache_root.join(&key);
-        let sheet_name = format!("{index}.jpg");
-        if let Ok(opened) = OpenedFile::open_in_root(&target_dir, Path::new(&sheet_name)).await
+        if let Some(meta) = self.check_native_cache(request).await
+            && index < meta.sheet_count
+            && let Some(extension) = sheet_extension(&meta.mime)
+            && let Ok(opened) =
+                OpenedFile::open_in_root(&target_dir, Path::new(&format!("{index}.{extension}")))
+                    .await
             && opened.size() > 0
             && opened.size() <= MAX_IMAGE_BYTES
         {
-            return Ok(opened);
+            return Ok((opened, meta.mime));
         }
 
         // 2. Fall back to Jellyfin read-only sheet
@@ -894,7 +942,7 @@ impl TrickplayManager {
                             && opened.size() > 0
                             && opened.size() <= MAX_IMAGE_BYTES
                         {
-                            return Ok(opened);
+                            return Ok((opened, jpeg_mime()));
                         }
                     }
                 }
@@ -1023,10 +1071,14 @@ async fn count_contiguous_sheets(root: &Path, sheet_rel: &Path) -> usize {
     count
 }
 
-async fn decode_opened_jpeg_dimensions(opened: OpenedFile) -> Option<(u32, u32)> {
+async fn decode_opened_image_dimensions(opened: OpenedFile) -> Option<(u32, u32)> {
     tokio::task::spawn_blocking(move || {
         let reader = std::io::BufReader::new(opened.std_file());
-        let decoder = image::codecs::jpeg::JpegDecoder::new(reader).ok()?;
+        let decoder = image::ImageReader::new(reader)
+            .with_guessed_format()
+            .ok()?
+            .into_decoder()
+            .ok()?;
         let (w, h) = decoder.dimensions();
         if w > 0 && h > 0 && w <= 8192 && h <= 8192 {
             Some((w, h))
@@ -1037,6 +1089,24 @@ async fn decode_opened_jpeg_dimensions(opened: OpenedFile) -> Option<(u32, u32)>
     .await
     .ok()
     .flatten()
+}
+
+async fn validate_sheet(opened: OpenedFile) -> bool {
+    tokio::task::spawn_blocking(move || {
+        let mut reader = image::ImageReader::new(std::io::BufReader::new(opened.std_file()))
+            .with_guessed_format()
+            .ok()?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(8192);
+        limits.max_image_height = Some(8192);
+        limits.max_alloc = Some(128 * 1024 * 1024);
+        reader.limits(limits);
+        reader.decode().ok().map(|_| ())
+    })
+    .await
+    .ok()
+    .flatten()
+    .is_some()
 }
 
 async fn dir_total_bytes(path: &Path) -> u64 {
@@ -1122,6 +1192,81 @@ async fn publish_work_dir(work: &Path, target: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn webp_native_legacy_jpeg_and_jellyfin_have_matching_mime_and_survive_restart() {
+        let temp = tempfile::tempdir().unwrap();
+        let media = temp.path().join("media");
+        std::fs::create_dir(&media).unwrap();
+        std::fs::write(media.join("film.mkv"), b"synthetic video identity only").unwrap();
+        let opened = OpenedFile::open_in_root(&media, Path::new("film.mkv"))
+            .await
+            .unwrap();
+        let request = TrickplayRequest {
+            asset_id: "fixture".into(),
+            media_root: media.clone(),
+            relative_path: "film.mkv".into(),
+            duration: 10.0,
+            size: opened.size(),
+            modified_ns: opened.modified_ns().into(),
+            interval_ms: None,
+            width: None,
+            quality: None,
+            chapter_time: None,
+        };
+        let cache = temp.path().join("cache");
+        std::fs::create_dir(&cache).unwrap();
+        let manager =
+            TrickplayManager::new(cache.clone(), 16 * 1024 * 1024, "ffmpeg".into(), true, None);
+        let key = manager.fingerprint(&request);
+        let image = image::DynamicImage::new_rgb8(320, 180);
+        let jellyfin = media.join("film.mkv.trickplay").join("320 - 1x1");
+        std::fs::create_dir_all(&jellyfin).unwrap();
+        image
+            .save_with_format(jellyfin.join("0.jpg"), image::ImageFormat::Jpeg)
+            .unwrap();
+        assert_eq!(
+            manager.check_jellyfin(&request).await.unwrap().mime,
+            "image/jpeg"
+        );
+        assert_eq!(
+            manager.open_sheet_with_mime(&request, 0).await.unwrap().1,
+            "image/jpeg"
+        );
+        for (version, mime, extension, format) in [
+            (1, "image/jpeg", "jpg", image::ImageFormat::Jpeg),
+            (2, "image/webp", "webp", image::ImageFormat::WebP),
+        ] {
+            let target = cache.join(&key);
+            std::fs::create_dir_all(&target).unwrap();
+            image
+                .save_with_format(target.join(format!("0.{extension}")), format)
+                .unwrap();
+            let mut metadata = serde_json::json!({"version":version,"fingerprint":key,"assetId":"fixture","sheetCount":1,"thumbnailCount":1,"intervalMs":10000,"width":320,"height":180,"columns":1,"rows":1,"totalBytes":100,"completed":true});
+            if version == 2 {
+                metadata["mime"] = serde_json::json!(mime);
+            }
+            std::fs::write(
+                target.join("manifest.json"),
+                serde_json::to_vec(&metadata).unwrap(),
+            )
+            .unwrap();
+            let restarted =
+                TrickplayManager::new(cache.clone(), 16 * 1024 * 1024, "ffmpeg".into(), true, None);
+            assert_eq!(
+                restarted.check_native_cache(&request).await.unwrap().mime,
+                mime
+            );
+            let (opened, actual) = restarted.open_sheet_with_mime(&request, 0).await.unwrap();
+            assert_eq!(actual, mime);
+            assert!(validate_sheet(opened).await);
+        }
+        assert_eq!(
+            std::fs::read(media.join("film.mkv")).unwrap(),
+            b"synthetic video identity only"
+        );
+        assert!(!media.join("0.webp").exists());
+    }
 
     #[tokio::test]
     async fn publication_replaces_an_interrupted_target_and_stale_work_is_swept() {
@@ -1268,7 +1413,7 @@ mod tests {
         );
         assert_eq!(manifest.width, 320);
         let image = manager.open_sheet(&request, 0).await.unwrap();
-        assert_eq!(decode_opened_jpeg_dimensions(image).await.unwrap().0, 320);
+        assert_eq!(decode_opened_image_dimensions(image).await.unwrap().0, 320);
         let restarted = TrickplayManager::new(
             tmp.path().join("cache"),
             16 * 1024 * 1024,

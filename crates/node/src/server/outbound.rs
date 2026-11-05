@@ -407,10 +407,14 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
                 quality: None,
                 chapter_time: None,
             };
-            match state.trickplay.open_sheet(&trickplay_req, index).await {
-                Ok(opened) => {
+            match state
+                .trickplay
+                .open_sheet_with_mime(&trickplay_req, index)
+                .await
+            {
+                Ok((opened, mime)) => {
                     if let Ok(response) =
-                        crate::stream::serve_opened(opened, &synthetic_req, "image/jpeg").await
+                        crate::stream::serve_opened(opened, &synthetic_req, &mime).await
                     {
                         let (mut parts, body) = response.into_parts();
                         parts.headers.insert(
@@ -479,6 +483,7 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
                 "columns": cached.columns,
                 "rows": cached.rows,
                 "sheetCount": cached.sheet_count,
+                "mime": cached.mime,
                 "thumbnailCount": cached.thumbnail_count,
                 "urlPrefix": format!("/api/v1/assets/{}/trickplay/", req.target_id)
             })
@@ -492,6 +497,7 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
                 "columns": jellyfin.columns,
                 "rows": jellyfin.rows,
                 "sheetCount": jellyfin.sheet_count,
+                "mime": jellyfin.mime,
                 "thumbnailCount": jellyfin.thumbnail_count,
                 "urlPrefix": format!("/api/v1/assets/{}/trickplay/", req.target_id)
             })

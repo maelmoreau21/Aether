@@ -173,16 +173,48 @@ pub(super) async fn permitted(
     Ok(count == 1)
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Background<'a> {
+    Task(&'a crate::task_engine::Job),
+    Artwork(&'a super::artwork_jobs::Job),
+}
+impl Background<'_> {
+    fn owner(self) -> String {
+        match self {
+            Self::Task(j) => j.owner.clone(),
+            Self::Artwork(j) => j.owner.clone(),
+        }
+    }
+}
+
 pub(super) async fn run(
     State(auth): State<AuthState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(input): Json<Run>,
 ) -> Result<Json<Value>, Error> {
-    let actor = admin(&auth, &headers, true).await?;
+    admin(&auth, &headers, true).await?;
+    run_with_context(&auth, &headers, &id, input, None).await
+}
+pub(super) async fn run_with_context(
+    auth: &AuthState,
+    headers: &HeaderMap,
+    id: &str,
+    input: Run,
+    background: Option<Background<'_>>,
+) -> Result<Json<Value>, Error> {
+    let actor_id = if let Some(context) = background {
+        context.owner()
+    } else {
+        admin(auth, headers, true).await?.user.id
+    };
     let _slot = crate::extensions::runtime::try_acquire_execution(
-        &id,
-        crate::extensions::runtime::ExecutionClass::Interactive,
+        id,
+        if background.is_some() {
+            crate::extensions::runtime::ExecutionClass::Background
+        } else {
+            crate::extensions::runtime::ExecutionClass::Interactive
+        },
     )
     .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
     let resource: Option<adapters::WorkContext> =
@@ -195,20 +227,20 @@ pub(super) async fn run(
     let library = context.library_id.clone();
     let stored: Option<(String, String)> =
         query_as("SELECT package_json,generation FROM extensions WHERE id=?")
-            .bind(&id)
+            .bind(id)
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
     let (stored, generation) =
         stored.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
-    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+    if !worker_permitted(auth, headers, id, &library, &generation, background).await? {
         return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
     }
     let package: Package = serde_json::from_str(&stored)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     let settings_str: Option<String> =
         query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id=?")
-            .bind(&id)
+            .bind(id)
             .fetch_optional(auth.store.pool())
             .await
             .map_err(db)?;
@@ -219,7 +251,7 @@ pub(super) async fn run(
     if !settings.is_object() {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_settings"));
     }
-    let mut settings = resolve_effective_extension_settings(&id, settings);
+    let mut settings = resolve_effective_extension_settings(id, settings);
     // The work's library owns metadata language, including historical plugin settings.
     let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(&library)
@@ -284,10 +316,10 @@ pub(super) async fn run(
     let lease = run_ownership::Lease::begin(
         &auth.store,
         run_id.clone(),
-        &id,
+        id,
         &library,
         &input.work_id,
-        &actor.user.id,
+        &actor_id,
     )
     .await
     .map_err(db)?;
@@ -298,13 +330,13 @@ pub(super) async fn run(
     };
     let started = Instant::now();
     let result = invoke_worker_context(
-        &auth,
-        &headers,
-        &id,
+        auth,
+        headers,
+        id,
         &library,
         &generation,
         invocation,
-        None,
+        background,
         Some(&lease),
     )
     .await;
@@ -360,7 +392,7 @@ pub(super) async fn invoke_worker_context(
     library: &str,
     generation: &str,
     invocation: crate::extensions::runtime::Invocation,
-    background: Option<&crate::task_engine::Job>,
+    background: Option<Background<'_>>,
     lease: Option<&run_ownership::Lease>,
 ) -> Result<Value, Error> {
     let requested_operation = invocation.input.operation.clone();
@@ -399,7 +431,7 @@ pub(super) async fn invoke_worker_context(
     let payload = serde_json::to_vec(&invocation)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_input"))?;
     let user_id = if let Some(job) = background {
-        job.owner.clone()
+        job.owner()
     } else {
         auth.authenticate(headers)
             .await
@@ -480,7 +512,7 @@ pub(super) async fn invoke_worker_context(
                     .as_i64()
                     .unwrap_or(60)
                     .clamp(1, 86400);
-                if let Some(job) = background {
+                if let Some(Background::Task(job)) = background {
                     query("UPDATE automation_provider_limits SET next_allowed_at=CASE WHEN next_allowed_at>? THEN next_allowed_at ELSE ? END WHERE provider=(SELECT provider FROM automation_task_links WHERE task_id=?)")
                         .bind(now().saturating_add(delay)).bind(now().saturating_add(delay)).bind(&job.id)
                         .execute(auth.store.pool()).await.map_err(db)?;
@@ -637,10 +669,15 @@ pub(super) async fn worker_permitted(
     id: &str,
     library: &str,
     generation: &str,
-    background: Option<&crate::task_engine::Job>,
+    background: Option<Background<'_>>,
 ) -> Result<bool, Error> {
-    let Some(job) = background else {
-        return permitted(auth, headers, id, library, generation).await;
+    let job = match background {
+        None => return permitted(auth, headers, id, library, generation).await,
+        Some(Background::Artwork(job)) => {
+            return super::artwork_jobs::provider_permitted(auth, job, id, library, generation)
+                .await;
+        }
+        Some(Background::Task(job)) => job,
     };
     let valid: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks j JOIN users u ON u.id=j.owner JOIN extensions e ON e.id=? JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.id=? AND j.attempt=? AND j.status='running' AND j.lease_until>? AND u.role='administrator' AND u.disabled_at IS NULL AND NOT EXISTS(SELECT 1 FROM automation_policies policy WHERE policy.extension_id=e.id AND policy.library_id=l.id AND policy.mode='disabled') AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.id=? AND l.node_id=j.node_id AND l.enabled=1 AND n.status!='revoked' AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
         .bind(id).bind(&job.id).bind(job.attempt).bind(now()).bind(generation).bind(library)

@@ -416,6 +416,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("../migrations/artwork_webp.sql"))
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 

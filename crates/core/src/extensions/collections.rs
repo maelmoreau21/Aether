@@ -1,9 +1,6 @@
-//! Administrator-imported avatar collections. Only normalized images are stored;
-//! URLs are resolved by a bounded HTTPS broker, never by the browser or Wasm.
+//! Administrator-uploaded avatar collections. Only normalized images are stored.
 use super::*;
 
-use futures_util::{StreamExt, stream};
-use std::collections::BTreeMap;
 static IMPORTS: Semaphore = Semaphore::const_new(1);
 const IMAGE_MAX: usize = 2 * 1024 * 1024;
 
@@ -44,14 +41,7 @@ pub(super) fn router() -> Router<AuthState> {
             "/api/v1/admin/avatar-packs/upload",
             axum::routing::post(native_upload).layer(DefaultBodyLimit::max(65 * 1024 * 1024)),
         )
-        .route(
-            "/api/v1/admin/avatar-packs",
-            get(native_list).post(native_import),
-        )
-        .route(
-            "/api/v1/admin/avatar-packs/source",
-            axum::routing::post(native_source),
-        )
+        .route("/api/v1/admin/avatar-packs", get(native_list))
         .route(
             "/api/v1/admin/avatar-packs/{pack}",
             axum::routing::delete(native_remove).put(native_rename),
@@ -77,14 +67,7 @@ pub(super) fn router() -> Router<AuthState> {
             "/api/v1/admin/extensions/{id}/avatar-packs/upload",
             axum::routing::post(upload).layer(DefaultBodyLimit::max(65 * 1024 * 1024)),
         )
-        .route(
-            "/api/v1/admin/extensions/{id}/avatar-packs",
-            get(list).post(import),
-        )
-        .route(
-            "/api/v1/admin/extensions/{id}/avatar-packs/source",
-            axum::routing::post(source),
-        )
+        .route("/api/v1/admin/extensions/{id}/avatar-packs", get(list))
         .route(
             "/api/v1/admin/extensions/{id}/avatar-packs/{pack}",
             axum::routing::delete(remove).put(rename),
@@ -170,22 +153,6 @@ async fn native_list(state: State<AuthState>, headers: HeaderMap) -> Result<Json
     list(state, headers, Path(CollectionScope::Native)).await
 }
 
-async fn native_import(
-    state: State<AuthState>,
-    headers: HeaderMap,
-    body: Json<Import>,
-) -> Result<Json<Value>, Error> {
-    import(state, headers, Path(CollectionScope::Native), body).await
-}
-
-async fn native_source(
-    state: State<AuthState>,
-    headers: HeaderMap,
-    body: Json<Source>,
-) -> Result<Json<Value>, Error> {
-    source(state, headers, Path(CollectionScope::Native), body).await
-}
-
 async fn native_remove(
     state: State<AuthState>,
     headers: HeaderMap,
@@ -246,114 +213,6 @@ async fn check(auth: &AuthState, id: &CollectionScope) -> Result<(), Error> {
     .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     adapters::authorize_operation(&package.manifest, "avatars.list")
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Source {
-    url: String,
-}
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Import {
-    url: String,
-    folder: String,
-    name: String,
-}
-#[derive(Deserialize)]
-struct Tree {
-    sha: String,
-    truncated: bool,
-    tree: Vec<Entry>,
-}
-#[derive(Deserialize)]
-struct Entry {
-    path: String,
-    #[serde(rename = "type")]
-    kind: String,
-    size: Option<usize>,
-}
-fn repository(raw: &str) -> Result<(String, String, String), Error> {
-    let invalid = || err(StatusCode::BAD_REQUEST, "github_avatar_repository_required");
-    let url = reqwest::Url::parse(raw).map_err(|_| invalid())?;
-    if url.scheme() != "https"
-        || url.host_str() != Some("github.com")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.port().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(invalid());
-    }
-    let parts: Vec<_> = url.path().trim_matches('/').split('/').collect();
-    let valid = |s: &str| {
-        !s.is_empty()
-            && s.len() <= 100
-            && s != "."
-            && s != ".."
-            && s.bytes()
-                .all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
-    };
-    if parts.len() != 2 || !parts.iter().all(|s| valid(s)) {
-        return Err(invalid());
-    }
-    let owner = parts[0].to_string();
-    let repo = parts[1].trim_end_matches(".git").to_string();
-    if !valid(&repo) {
-        return Err(invalid());
-    }
-    Ok((
-        owner.clone(),
-        repo.clone(),
-        format!("https://api.github.com/repos/{owner}/{repo}/git/trees/HEAD?recursive=1"),
-    ))
-}
-async fn tree(raw: &str) -> Result<(String, String, Tree), Error> {
-    let (owner, repo, url) = repository(raw)?;
-    let bytes = repositories::fetch(&url, 2 * 1024 * 1024).await?;
-    let tree: Tree = serde_json::from_slice(&bytes)
-        .map_err(|_| err(StatusCode::BAD_GATEWAY, "invalid_avatar_source"))?;
-    if tree.truncated
-        || tree.tree.len() > 10000
-        || tree.sha.len() != 40
-        || !tree.sha.bytes().all(|c| c.is_ascii_hexdigit())
-    {
-        return Err(err(StatusCode::BAD_REQUEST, "avatar_source_too_large"));
-    }
-    Ok((owner, repo, tree))
-}
-fn image_entry(entry: &Entry) -> bool {
-    entry.kind == "blob"
-        && entry
-            .path
-            .split('/')
-            .all(|p| !p.is_empty() && p != "." && p != "..")
-        && entry.size.is_some_and(|s| s > 0 && s <= IMAGE_MAX)
-        && [".png", ".jpg", ".jpeg", ".webp"]
-            .iter()
-            .any(|e| entry.path.to_lowercase().ends_with(e))
-}
-async fn source(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-    Path(id): Path<CollectionScope>,
-    Json(input): Json<Source>,
-) -> Result<Json<Value>, Error> {
-    admin(&auth, &headers, true).await?;
-    check(&auth, &id).await?;
-    let (_, _, tree) = tree(&input.url).await?;
-    let mut folders = BTreeMap::<String, usize>::new();
-    for entry in tree.tree.iter().filter(|e| image_entry(e)) {
-        let folder = entry
-            .path
-            .rsplit_once('/')
-            .map(|(parent, _)| parent)
-            .unwrap_or("");
-        *folders.entry(folder.to_string()).or_default() += 1;
-    }
-    Ok(Json(
-        json!({"folders":folders.into_iter().map(|(folder,count)|json!({"folder":folder,"count":count})).collect::<Vec<_>>()}),
-    ))
-}
 async fn list(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -376,148 +235,6 @@ async fn list(
     Ok(Json(
         json!({"packs":rows.into_iter().map(|(id,name,source,count)|json!({"id":id,"name":name,"source":source,"count":count})).collect::<Vec<_>>()}),
     ))
-}
-async fn import(
-    State(auth): State<AuthState>,
-    headers: HeaderMap,
-    Path(id): Path<CollectionScope>,
-    Json(input): Json<Import>,
-) -> Result<Json<Value>, Error> {
-    let actor = admin(&auth, &headers, true).await?;
-    check(&auth, &id).await?;
-    if input.name.trim().is_empty()
-        || input.name.len() > 100
-        || input.name.chars().any(char::is_control)
-        || input.folder.len() > 500
-    {
-        return Err(err(StatusCode::BAD_REQUEST, "invalid_avatar_pack"));
-    }
-    let _slot = IMPORTS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::CONFLICT, "avatar_import_busy"))?;
-    tokio::time::timeout(Duration::from_secs(300), async {
-        let (owner, repo, tree) = tree(&input.url).await?;
-        let entries: Vec<_> = tree
-            .tree
-            .into_iter()
-            .filter(|entry| {
-                image_entry(entry)
-                    && entry.path.rsplit_once('/').map(|(p, _)| p).unwrap_or("") == input.folder
-            })
-            .collect();
-        if entries.is_empty()
-            || entries.len() > 500
-            || entries.iter().map(|e| e.size.unwrap_or(0)).sum::<usize>() > 64 * 1024 * 1024
-        {
-            return Err(err(StatusCode::BAD_REQUEST, "avatar_pack_size_limit"));
-        }
-        let sha = tree.sha;
-        let pack = uuid::Uuid::new_v4().to_string();
-        let mut total = 0usize;
-        let mut count = 0;
-        let mut staged = Vec::new();
-        let mut pending = stream::iter(entries.into_iter().map(|entry| {
-            let mut url = reqwest::Url::parse(&format!(
-                "https://raw.githubusercontent.com/{owner}/{repo}/{sha}/"
-            ))
-            .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_avatar_source"));
-            if let Ok(url) = &mut url
-                && let Ok(mut segments) = url.path_segments_mut()
-            {
-                segments.pop_if_empty();
-                for part in entry.path.split('/') {
-                    segments.push(part);
-                }
-            }
-            async move {
-                let bytes = repositories::fetch(url?.as_str(), IMAGE_MAX).await?;
-                let name = entry
-                    .path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or("Avatar")
-                    .to_string();
-                let bytes = tokio::task::spawn_blocking(move || {
-                    let format = image::guess_format(&bytes).map_err(|_| {
-                        err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_avatar_image")
-                    })?;
-                    let mime = match format {
-                        image::ImageFormat::Png => "image/png",
-                        image::ImageFormat::Jpeg => "image/jpeg",
-                        image::ImageFormat::WebP => "image/webp",
-                        _ => {
-                            return Err(err(
-                                StatusCode::UNSUPPORTED_MEDIA_TYPE,
-                                "invalid_avatar_image",
-                            ));
-                        }
-                    };
-                    crate::avatars::normalize(bytes.into(), mime)
-                        .map_err(|status| err(status, "invalid_avatar_image"))
-                })
-                .await
-                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "avatar_decode_failed"))??;
-                Ok::<_, Error>((name, bytes))
-            }
-        }))
-        .buffered(2);
-        while let Some(result) = pending.next().await {
-            let (name, bytes) = result?;
-            total += bytes.len();
-            if total > 32 * 1024 * 1024 {
-                return Err(err(StatusCode::BAD_REQUEST, "avatar_pack_size_limit"));
-            }
-            staged.push((name, bytes));
-            count += 1;
-        }
-        let mut stored_images = Vec::with_capacity(staged.len());
-        for (name, bytes) in staged {
-            let mime = crate::avatars::content_type(&bytes);
-            let meta = auth
-                .store
-                .assets
-                .put_bytes(&bytes, mime)
-                .await
-                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
-            stored_images.push((name, meta.sha256));
-        }
-        // Serialize only the final authorization check/commit with revocations and uninstall.
-        let _lock = MUTATIONS.lock().await;
-        check(&auth, &id).await?;
-        let mut tx = auth.store.pool().begin().await.map_err(db)?;
-        let packs: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_avatar_packs) + (SELECT COUNT(*) FROM avatar_packs)")
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(db)?;
-        if packs >= 32 {
-            return Err(err(StatusCode::CONFLICT, "avatar_pack_limit"));
-        }
-        let mut insert = query(if id.is_native() { "INSERT INTO avatar_packs(id,name,source) VALUES(?,?,?)" } else { "INSERT INTO extension_avatar_packs(id,extension_id,name,source) VALUES(?,?,?,?)" }).bind(&pack);
-        if !id.is_native() { insert = insert.bind(id.extension_id()); }
-        insert.bind(input.name.trim())
-            .bind(format!(
-                "https://github.com/{owner}/{repo}/tree/{sha}/{}",
-                input.folder
-            ))
-            .execute(&mut *tx)
-            .await
-            .map_err(db)?;
-        for (name, sha256) in stored_images {
-            query(if id.is_native() { "INSERT INTO avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" } else { "INSERT INTO extension_avatar_images(id,pack_id,name,sha256) VALUES(?,?,?,?)" })
-                .bind(uuid::Uuid::new_v4().to_string())
-                .bind(&pack)
-                .bind(name)
-                .bind(&sha256)
-                .execute(&mut *tx)
-                .await
-                .map_err(db)?;
-        }
-        audit(&mut tx, &actor.user.id, id.audit_id(), "avatars.pack.imported").await?;
-        tx.commit().await.map_err(db)?;
-        Ok(Json(json!({"id":pack,"count":count})))
-    })
-    .await
-    .map_err(|_| err(StatusCode::GATEWAY_TIMEOUT, "avatar_import_timeout"))?
 }
 async fn upload(
     State(auth): State<AuthState>,
@@ -581,7 +298,9 @@ async fn upload(
             }
             bytes.extend_from_slice(&chunk);
         }
+        let permit = crate::image_import::DECODERS.acquire().await.map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE,"image_import_busy"))?;
         let bytes = tokio::task::spawn_blocking(move || {
+            let _permit=permit;
             let format = image::guess_format(&bytes)
                 .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_avatar_image"))?;
             let mime = match format {
@@ -931,19 +650,6 @@ async fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn rejects_non_repository_sources() {
-        for value in [
-            "http://github.com/a/b",
-            "https://localhost/a/b",
-            "https://github.com/a/b/tree/main",
-            "https://github.com/a/../b",
-            "https://github.com/a/b?token=x",
-        ] {
-            assert!(repository(value).is_err(), "{value}");
-        }
-        assert!(repository("https://github.com/cedev-1/jellyfin-avatars").is_ok());
-    }
     #[tokio::test]
     async fn native_gallery_works_without_extensions() {
         use axum::{body::Body, http::Request};
@@ -994,6 +700,35 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        // Remote imports are retired in both native and extension scopes.
+        for endpoint in [
+            "/api/v1/admin/avatar-packs",
+            "/api/v1/admin/avatar-packs/source",
+            "/api/v1/admin/extensions/avatars/avatar-packs",
+            "/api/v1/admin/extensions/avatars/avatar-packs/source",
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(endpoint)
+                        .header(header::COOKIE, &cookie)
+                        .header("x-csrf-token", &csrf)
+                        .header("content-type", "application/json")
+                        .body(Body::from(
+                            r#"{"url":"https://github.com/example/avatars"}"#,
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::METHOD_NOT_ALLOWED,
+                "{endpoint}"
+            );
+        }
         let spoofed = app
             .clone()
             .oneshot(
@@ -1163,7 +898,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(image_response.status(), StatusCode::OK);
-        assert_eq!(image_response.headers()[header::CONTENT_TYPE], "image/png");
+        assert_eq!(image_response.headers()[header::CONTENT_TYPE], "image/webp");
         let image_bytes = image_response
             .into_body()
             .collect()
@@ -1394,540 +1129,5 @@ mod tests {
             .unwrap(),
             json!({"packs":0,"images":0})
         );
-    }
-    #[tokio::test]
-    async fn imports_normalized_collections_without_approval_and_enforces_activation() {
-        use axum::{body::Body, http::Request};
-        use http_body_util::BodyExt;
-        use ring::{
-            rand::SystemRandom,
-            signature::{Ed25519KeyPair, KeyPair},
-        };
-        use tower::ServiceExt;
-        async fn call(
-            app: &Router,
-            path: &str,
-            method: &str,
-            cookie: &str,
-            csrf: &str,
-            value: Value,
-        ) -> (StatusCode, Vec<u8>, HeaderMap) {
-            let response = app
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .method(method)
-                        .uri(path)
-                        .header(header::COOKIE, cookie)
-                        .header(header::ORIGIN, "http://localhost")
-                        .header("x-csrf-token", csrf)
-                        .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(value.to_string()))
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            let status = response.status();
-            let headers = response.headers().clone();
-            let bytes = response
-                .into_body()
-                .collect()
-                .await
-                .unwrap()
-                .to_bytes()
-                .to_vec();
-            (status, bytes, headers)
-        }
-        let root = tempfile::tempdir().unwrap();
-        let store = crate::identity::IdentityStore::open(&root.path().join("avatars.sqlite"))
-            .await
-            .unwrap();
-        store
-            .bootstrap(
-                "admin",
-                zeroize::Zeroizing::new("collection fixture password".into()),
-            )
-            .await
-            .unwrap();
-        let auth = AuthState::new(store.clone(), "http://localhost".into())
-            .await
-            .unwrap();
-        let app = crate::auth::router(auth.clone()).merge(super::super::router(auth.clone()));
-        let (status, body, headers) = call(
-            &app,
-            "/api/v1/auth/login",
-            "POST",
-            "",
-            "",
-            json!({"login":"admin","password":"collection fixture password"}),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK);
-        let cookie = headers[header::SET_COOKIE]
-            .to_str()
-            .unwrap()
-            .split(';')
-            .next()
-            .unwrap();
-        let login: Value = serde_json::from_slice(&body).unwrap();
-        let csrf = login["csrfToken"].as_str().unwrap();
-        let key = Ed25519KeyPair::from_pkcs8(
-            Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
-                .unwrap()
-                .as_ref(),
-        )
-        .unwrap();
-        let wasm=wat::parse_str("(module (memory (export \"memory\") 1 256) (func (export \"media_alloc\") (param i32) (result i32) i32.const 0) (func (export \"media_run\") (param i32 i32) (result i64) i64.const 0))").unwrap();
-        let mut package = Package {
-            manifest: Manifest {
-                api_version: 1,
-                id: "any-author-avatar".into(),
-                name: "Créateur indépendant".into(),
-                version: "1.0.0".into(),
-                description: "Collection de test".into(),
-                author: "Anyone".into(),
-                license: "MIT".into(),
-                repository: "https://example.org/plugin".into(),
-                permissions: vec!["avatars".into()],
-                ..Default::default()
-            },
-            publisher_id: "any-author".into(),
-            sha256: format!("{:x}", Sha256::digest(&wasm)),
-            wasm: STANDARD.encode(wasm),
-            signature: String::new(),
-        };
-        package.signature = STANDARD.encode(key.sign(&package.signing_bytes().unwrap()).as_ref());
-        let mut input = serde_json::to_value(package).unwrap();
-        input["publicKey"] = json!(STANDARD.encode(key.public_key().as_ref()));
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions",
-                "POST",
-                cookie,
-                csrf,
-                input
-            )
-            .await
-            .0,
-            StatusCode::CREATED
-        );
-        let source_url = "https://github.com/tests/avatar-fixture";
-        let tree_url =
-            "https://api.github.com/repos/tests/avatar-fixture/git/trees/HEAD?recursive=1";
-        let image_url = "https://raw.githubusercontent.com/tests/avatar-fixture/1111111111111111111111111111111111111111/pack/test.png";
-        let mut cursor = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::new_rgb8(32, 48)
-            .write_to(&mut cursor, image::ImageFormat::Png)
-            .unwrap();
-        let png = cursor.into_inner();
-        repositories::test_documents().lock().unwrap().insert(tree_url.into(),serde_json::to_vec(&json!({"sha":"1111111111111111111111111111111111111111","truncated":false,"tree":[{"type":"blob","path":"pack/test.png","size":png.len()}]})).unwrap());
-        repositories::test_documents()
-            .lock()
-            .unwrap()
-            .insert(image_url.into(), b"invalid image".to_vec());
-        let endpoint = "/api/v1/admin/extensions/any-author-avatar/avatar-packs";
-        let payload = json!({"url":source_url,"folder":"pack","name":"Mes avatars"});
-        assert_eq!(
-            call(&app, endpoint, "POST", "", "", payload.clone())
-                .await
-                .0,
-            StatusCode::UNAUTHORIZED
-        );
-        assert_eq!(
-            call(&app, endpoint, "POST", cookie, "", payload.clone())
-                .await
-                .0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            call(&app, endpoint, "POST", cookie, csrf, payload.clone())
-                .await
-                .0,
-            StatusCode::UNPROCESSABLE_ENTITY
-        );
-        assert_eq!(
-            query_scalar::<_, i64>("SELECT COUNT(*) FROM extension_avatar_packs")
-                .fetch_one(store.pool())
-                .await
-                .unwrap(),
-            0
-        );
-        repositories::test_documents()
-            .lock()
-            .unwrap()
-            .insert(image_url.into(), png);
-        let (status, body, _) = call(&app, endpoint, "POST", cookie, csrf, payload).await;
-        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let pack: Value = serde_json::from_slice(&body).unwrap();
-        let pack = pack["id"].as_str().unwrap();
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions/any-author-avatar",
-                "PUT",
-                cookie,
-                csrf,
-                json!({"enabled":false,"allLibraries":false})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        let (_, body, _) = call(
-            &app,
-            "/api/v1/account/avatar/collections",
-            "GET",
-            cookie,
-            "",
-            json!(null),
-        )
-        .await;
-        assert_eq!(
-            serde_json::from_slice::<Value>(&body).unwrap()["packs"],
-            json!([])
-        );
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions/any-author-avatar",
-                "PUT",
-                cookie,
-                csrf,
-                json!({"enabled":true,"allLibraries":true})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        let (_, body, _) = call(
-            &app,
-            &format!("/api/v1/account/avatar/collections/{pack}"),
-            "GET",
-            cookie,
-            "",
-            json!(null),
-        )
-        .await;
-        let images: Value = serde_json::from_slice(&body).unwrap();
-        let url = images["images"][0]["url"].as_str().unwrap();
-        assert_eq!(
-            call(&app, url, "GET", "", "", json!(null)).await.0,
-            StatusCode::UNAUTHORIZED
-        );
-        let (status, png, headers) = call(&app, url, "GET", cookie, "", json!(null)).await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(headers[header::CONTENT_TYPE], "image/png");
-        assert_eq!(image::load_from_memory(&png).unwrap().width(), 256);
-        assert_eq!(
-            call(&app, url, "POST", cookie, "", json!(null)).await.0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            call(&app, url, "POST", cookie, csrf, json!(null)).await.0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            query_scalar::<_, i64>("SELECT COUNT(*) FROM user_avatars")
-                .fetch_one(store.pool())
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions/any-author-avatar",
-                "PUT",
-                cookie,
-                csrf,
-                json!({"enabled":false})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            call(&app, url, "GET", cookie, "", json!(null)).await.0,
-            StatusCode::NOT_FOUND
-        );
-        assert_eq!(
-            call(
-                &app,
-                &format!("{endpoint}/{pack}"),
-                "DELETE",
-                cookie,
-                csrf,
-                json!(null)
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            query_scalar::<_, i64>("SELECT COUNT(*) FROM extension_avatar_images")
-                .fetch_one(store.pool())
-                .await
-                .unwrap(),
-            0
-        );
-
-        // Multipart upload exceeds the general 400 kB extension limit while remaining
-        // under its explicit image/upload bounds; all data is synthetic.
-        let mut seed = 17u32;
-        let noise: Vec<u8> = (0..400 * 400 * 3)
-            .map(|_| {
-                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-                (seed >> 24) as u8
-            })
-            .collect();
-        let rgb = image::RgbImage::from_raw(400, 400, noise).unwrap();
-        let mut output = std::io::Cursor::new(Vec::new());
-        image::DynamicImage::ImageRgb8(rgb)
-            .write_to(&mut output, image::ImageFormat::Png)
-            .unwrap();
-        let upload_png = output.into_inner();
-        assert!(upload_png.len() > 400000);
-        let boundary = "avatar-fixture-boundary";
-        let mut multipart=format!("--{boundary}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\nImages locales\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"images\"; filename=\"local.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
-        multipart.extend_from_slice(&upload_png);
-        multipart.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
-        for (session, token, expected) in [
-            ("", "", StatusCode::UNAUTHORIZED),
-            (cookie, "", StatusCode::FORBIDDEN),
-        ] {
-            let response = app
-                .clone()
-                .oneshot(
-                    Request::builder()
-                        .method("POST")
-                        .uri(format!("{endpoint}/upload"))
-                        .header(header::COOKIE, session)
-                        .header(header::ORIGIN, "http://localhost")
-                        .header("x-csrf-token", token)
-                        .header(
-                            header::CONTENT_TYPE,
-                            format!("multipart/form-data; boundary={boundary}"),
-                        )
-                        .body(Body::from(multipart.clone()))
-                        .unwrap(),
-                )
-                .await
-                .unwrap();
-            assert_eq!(response.status(), expected);
-        }
-        let uploaded = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri(format!("{endpoint}/upload"))
-                    .header(header::COOKIE, cookie)
-                    .header(header::ORIGIN, "http://localhost")
-                    .header("x-csrf-token", csrf)
-                    .header(
-                        header::CONTENT_TYPE,
-                        format!("multipart/form-data; boundary={boundary}"),
-                    )
-                    .body(Body::from(multipart))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let status = uploaded.status();
-        let body = uploaded.into_body().collect().await.unwrap().to_bytes();
-        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-        let uploaded: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(uploaded["count"], 1);
-        let pack = uploaded["id"].as_str().unwrap();
-        let sha: String =
-            query_scalar("SELECT sha256 FROM extension_avatar_images WHERE pack_id=?")
-                .bind(pack)
-                .fetch_one(store.pool())
-                .await
-                .unwrap();
-        let (_, data) = store.assets.read_all(&sha).await.unwrap();
-        assert_eq!(image::load_from_memory(&data).unwrap().width(), 256);
-        // The administrator can curate a disabled extension's gallery.
-        let image_list = format!("{endpoint}/{pack}/images");
-        assert_eq!(
-            call(&app, &image_list, "GET", "", "", json!(null)).await.0,
-            StatusCode::UNAUTHORIZED
-        );
-        let (status, body, _) = call(&app, &image_list, "GET", cookie, "", json!(null)).await;
-        assert_eq!(status, StatusCode::OK);
-        let listed: Value = serde_json::from_slice(&body).unwrap();
-        let gallery_url = listed["images"][0]["url"].as_str().unwrap();
-        assert_eq!(
-            call(&app, gallery_url, "GET", cookie, "", json!(null))
-                .await
-                .0,
-            StatusCode::OK
-        );
-        assert_eq!(
-            call(
-                &app,
-                &format!("{endpoint}/{pack}"),
-                "PUT",
-                cookie,
-                csrf,
-                json!({"name":"Renamed gallery"})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            call(
-                &app,
-                &format!("{endpoint}/{pack}"),
-                "PUT",
-                cookie,
-                csrf,
-                json!({"name":""})
-            )
-            .await
-            .0,
-            StatusCode::BAD_REQUEST
-        );
-        query("INSERT INTO users(id,role) VALUES('missing-avatar','user')")
-            .execute(store.pool())
-            .await
-            .unwrap();
-        let assign = "/api/v1/admin/extensions/any-author-avatar/avatars/assign-missing";
-        assert_eq!(
-            call(&app, assign, "POST", cookie, "", json!(null)).await.0,
-            StatusCode::FORBIDDEN
-        );
-        let (status, body, _) = call(&app, assign, "POST", cookie, csrf, json!(null)).await;
-        assert_eq!(status, StatusCode::OK);
-        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["count"], 1);
-        let (_, body, _) = call(&app, assign, "POST", cookie, csrf, json!(null)).await;
-        assert_eq!(serde_json::from_slice::<Value>(&body).unwrap()["count"], 0);
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/account/avatar/gravatar",
-                "POST",
-                cookie,
-                csrf,
-                json!({"email":"fixture@example.invalid"})
-            )
-            .await
-            .0,
-            StatusCode::GONE
-        );
-
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions/any-author-avatar",
-                "PUT",
-                cookie,
-                csrf,
-                json!({"enabled":true})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            call(
-                &app,
-                "/api/v1/admin/extensions/any-author-avatar/settings",
-                "PUT",
-                cookie,
-                csrf,
-                json!({"allow_gravatar":true})
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        query("INSERT INTO users(id,role) VALUES('automatic-avatar','user')")
-            .execute(store.pool())
-            .await
-            .unwrap();
-        assign_new_user(&auth, "automatic-avatar").await.unwrap();
-        assert_eq!(
-            query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM user_avatars WHERE user_id='automatic-avatar'"
-            )
-            .fetch_one(store.pool())
-            .await
-            .unwrap(),
-            0
-        );
-        query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,1,1,0)").execute(store.pool()).await.unwrap();
-        query("UPDATE avatar_policy SET allow_custom=0 WHERE singleton=1")
-            .execute(store.pool())
-            .await
-            .unwrap();
-        assert_eq!(
-            call(&app, gallery_url, "DELETE", cookie, "", json!(null))
-                .await
-                .0,
-            StatusCode::FORBIDDEN
-        );
-        assert_eq!(
-            call(&app, gallery_url, "DELETE", cookie, csrf, json!(null))
-                .await
-                .0,
-            StatusCode::NO_CONTENT
-        );
-        assert_eq!(
-            call(&app, gallery_url, "GET", cookie, "", json!(null))
-                .await
-                .0,
-            StatusCode::NOT_FOUND
-        );
-
-        assert_eq!(
-            call(
-                &app,
-                &format!("{endpoint}/{pack}"),
-                "DELETE",
-                cookie,
-                csrf,
-                json!(null)
-            )
-            .await
-            .0,
-            StatusCode::NO_CONTENT
-        );
-        if std::env::var("MEDIA_TEST_AVATAR_LIVE").as_deref() == Ok("1") {
-            let live = json!({"url":"https://github.com/cedev-1/jellyfin-avatars"});
-            let (status, body, _) = call(
-                &app,
-                &format!("{endpoint}/source"),
-                "POST",
-                cookie,
-                csrf,
-                live,
-            )
-            .await;
-            assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-            let value: Value = serde_json::from_slice(&body).unwrap();
-            let folder_count = value["folders"].as_array().unwrap().len();
-            let expected = value["folders"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|f| f["folder"] == "sonny")
-                .unwrap()["count"]
-                .as_u64()
-                .unwrap();
-            let(status,body,_)=call(&app,endpoint,"POST",cookie,csrf,json!({"url":"https://github.com/cedev-1/jellyfin-avatars","folder":"sonny","name":"Sonny - live fixture"})).await;
-            assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
-            let value: Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(value["count"].as_u64(), Some(expected));
-            println!(
-                "LIVE GitHub: {} folders discovered, {} normalized Sonny avatars imported into temporary SQLite",
-                folder_count, expected
-            );
-        }
-        for url in [tree_url, image_url] {
-            repositories::test_documents().lock().unwrap().remove(url);
-        }
     }
 }

@@ -374,3 +374,5 @@ mod tests {
         );
     }
 }
+
+pub mod image_encoding;

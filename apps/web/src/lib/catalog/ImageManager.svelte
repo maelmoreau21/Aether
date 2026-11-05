@@ -2,6 +2,7 @@
   import { providerErrorText } from './provider-errors';
   import { providerImagePreview } from './provider-image';
   import { preferences } from '../preferences';
+  import { artworkCategories } from './artwork-language';
   import Icon from '../ui/Icon.svelte';
   import { onMount } from 'svelte';
   import { session } from '../auth/session';
@@ -16,6 +17,9 @@
     height?: number | null;
     language?: string | null;
     provider?: string | null;
+    pinned?: boolean;
+    representationCount?: number;
+    originalReleaseVerified?: boolean;
   };
 
   type CandidateImage = {
@@ -61,6 +65,7 @@
   let error = $state(''), busy = $state(false), loading = $state(true), adding = $state(false);
   let fileInput = $state<HTMLInputElement>();
   let imageLanguages = $state(preferences().locale === 'en' ? 'en, fr' : 'fr, en'), includeNeutral = $state(true), collectionMessage = $state('');
+  let uploadLanguage = $state(''), originalLanguage = $state<string | null>(null);
   let similarityThreshold = $state(5), similarPairs = $state<{ first: string; second: string }[] | null>(null), uncompared = $state(0), similarVisible = $state(20), similarTruncated = $state(false);
 
   // Live visual search state (Jellyfin-style image picker)
@@ -91,7 +96,9 @@
     }
     const response = await fetch(base, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error('Images indisponibles.');
-    const incoming: Entry[] = (await response.json()).images;
+    const result = await response.json();
+    const incoming: Entry[] = result.images;
+    originalLanguage = result.originalLanguage ?? null;
     entries = incoming.map(entry => {
       const previous = entries.find(old => old.id === entry.id);
       return { ...entry, width: entry.width ?? previous?.width, height: entry.height ?? previous?.height };
@@ -124,7 +131,9 @@
     busy = true;
     error = '';
     try {
-      const response = await fetch(`${base}/${kind}${workId && replacing ? `?replace=${encodeURIComponent(replacing.id)}` : ''}`, {
+      const query = workId ? new URLSearchParams(replacing ? { replace: replacing.id } : { append: 'true' }) : new URLSearchParams();
+      if (workId && uploadLanguage.trim()) query.set('language', uploadLanguage.trim());
+      const response = await fetch(`${base}/${kind}?${query}`, {
         method: workId ? 'POST' : 'PUT',
         headers: { 'x-csrf-token': $session?.csrfToken ?? '', 'content-type': file.type },
         body: file,
@@ -166,6 +175,20 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function togglePin(entry: Entry) {
+    if (busy || !workId) return;
+    busy = true; error = '';
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(entry.id)}/pin`, {
+        method: 'PUT', headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' },
+        body: JSON.stringify({ pinned: !entry.pinned }), signal: AbortSignal.timeout(8000)
+      });
+      if (!response.ok) throw new Error('Épinglage non enregistré.');
+      await load(); await onchanged();
+    } catch (cause) { error = cause instanceof Error ? cause.message : 'Erreur'; }
+    finally { busy = false; }
   }
 
   async function move(entry: Entry, direction: number) {
@@ -435,6 +458,7 @@
             {#each kinds as type(type)}<option value={type}>{labels[type]}</option>{/each}
           </select>
           <label for="artwork-file">PNG, JPEG ou WebP · 2 Mio maximum</label>
+          {#if workId}<label>Langue de l’image (facultatif, ex. fr-CA)<input bind:value={uploadLanguage} maxlength="35" placeholder="Inconnue" /></label>{/if}
           <input id="artwork-file" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" onchange={upload} />
           <p>Les images sont conservées dans les données applicatives. Les fichiers de vos médias restent intacts.</p>
           <button type="button" onclick={() => adding = false}>Annuler</button>
@@ -479,12 +503,15 @@
               <div class="card-caption">
                 <h4>{labels[entry.kind]}</h4>
                 <p>{provenance(entry)}</p>
+                {#if workId}<p>{artworkCategories(entry.language, originalLanguage).join(' · ')}{entry.pinned ? ' · Épinglée' : ''}</p>{/if}
+                {#if entry.representationCount}<p>{entry.representationCount} représentations</p>{/if}
                 {#if entry.width && entry.height}<p class="res-tag">{entry.width} × {entry.height}</p>{/if}
                 <div class="card-actions">
                   <button type="button" aria-label={`Agrandir ${labels[entry.kind]}`} title="Agrandir" onclick={() => { selected = entry; preview.showModal(); }}>
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
                   </button>
                   {#if workId && $session?.user.role === 'administrator'}
+                    <button type="button" disabled={busy} aria-label={entry.pinned ? 'Désépingler cette image' : 'Épingler cette image'} title={entry.pinned ? 'Désépingler' : 'Épingler pour tous les utilisateurs'} onclick={() => togglePin(entry)}>{entry.pinned ? '◆' : '◇'}</button>
                     <button type="button" aria-label={`Rechercher des remplaçants pour ${labels[entry.kind]}`} title="Rechercher des images" onclick={() => openSearch(entry.kind)}>
                       <Icon name="search" size={18} />
                     </button>

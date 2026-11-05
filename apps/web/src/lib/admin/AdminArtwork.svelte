@@ -1,38 +1,20 @@
 <script lang="ts">
-  import { session } from '../auth/session';
+  import ArtworkCollection from './ArtworkCollection.svelte';
   import { invalidateCatalog } from '../catalog/page-cache';
   import ImageManager from '../catalog/ImageManager.svelte';
   import { onDestroy } from 'svelte';
   import type { Library } from './types';
 
   let { libraries }: { libraries: Library[] } = $props();
-  type CollectionResult = { downloaded?: number; duplicates?: number; skipped?: number; errors?: unknown[]; partial?: boolean };
-  type Item = { workId: string; title?: string; result?: CollectionResult; error?: { status: number; code: string } };
-  type Batch = { items: Item[]; nextCursor: string | null };
+  type Item = { workId: string; title?: string };
   type WorkPage = { items: { workId: string; title: string; posterCount: number }[]; nextCursor: string | null };
-  let libraryId = $state(''), languages = $state('fr, en'), includeNeutral = $state(true), maxImages = $state(12);
-  let busy = $state(false), stopRequested = $state(false), cursor = $state<string | null>(null), started = $state(false), finished = $state(false);
-  let processed = $state(0), downloaded = $state(0), duplicates = $state(0), skipped = $state(0), errors = $state(0), partial = $state(0), recent = $state<Item[]>([]), error = $state('');
-  let problems = $state<Item[]>([]), omittedProblems = $state(0);
+  let libraryId = $state('');
   let selected = $state<Item | null>(null);
   let page = $state<WorkPage | null>(null), pageLoading = $state(false), pageError = $state('');
   let pageCursor = $state<string | null>(null), previousCursors = $state<(string | null)[]>([]), pageGeneration = 0;
   let search = $state(''), posterFilter = $state('all'), appliedSearch = $state(''), appliedFilter = $state('all'), filterError = $state('');
-  let destroyed = false;
-  onDestroy(() => { destroyed = true; stopRequested = true; pageGeneration++; });
+  onDestroy(() => { pageGeneration++; });
   const videoLibraries = $derived(libraries.filter(library => library.kind !== 'music' && library.enabled));
-  function collectionError(error: { status: number; code: string }): string {
-    const messages: Record<string, string> = {
-      external_ids_required: 'Identifiants externes manquants',
-      unknown_work: 'Média introuvable',
-      work_denied: 'Accès au média refusé',
-      too_many_providers: 'Trop de fournisseurs configurés',
-      invalid_package: 'Paquet de fournisseur invalide',
-      invalid_output: 'Réponse de fournisseur invalide'
-    };
-    return messages[error.code] ?? `Collecte impossible (HTTP ${error.status})`;
-  }
-  function reset() { cursor = null; started = false; finished = false; processed = 0; downloaded = 0; duplicates = 0; skipped = 0; errors = 0; partial = 0; recent = []; problems = []; omittedProblems = 0; error = ''; }
   async function loadPage(after: string | null = null) {
     const generation = ++pageGeneration;
     pageLoading = true; pageError = '';
@@ -59,84 +41,23 @@
     filterError = ''; appliedSearch = query; appliedFilter = posterFilter; page = null; previousCursors = []; pageCursor = null; void loadPage();
   }
   function changeLibrary() {
-    reset(); page = null; pageCursor = null; previousCursors = []; pageError = ''; pageLoading = false; pageGeneration++;
+ page = null; pageCursor = null; previousCursors = []; pageError = ''; pageLoading = false; pageGeneration++;
     search = appliedSearch; posterFilter = appliedFilter; filterError = '';
     if (libraryId) void loadPage();
-  }
-  async function run() {
-    if (busy || !libraryId || finished) return;
-    const selectedLanguages = [...new Set(languages.split(',').map(value => value.trim().toLowerCase()).filter(Boolean))];
-    if (!selectedLanguages.length || selectedLanguages.length > 5 || selectedLanguages.some(value => !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(value))) {
-      error = 'Indiquez une à cinq langues valides, dans l’ordre de préférence (par exemple fr, en).'; return;
-    }
-    busy = true; stopRequested = false; error = '';
-    const actor = $session;
-    try {
-      do {
-        if (!actor || $session?.user.id !== actor.user.id || $session.csrfToken !== actor.csrfToken) throw new Error('La session a changé. Relancez la collecte après connexion.');
-        const response = await fetch('/api/v1/admin/artwork/collect-batch', {
-          method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(70000),
-          headers: { 'content-type': 'application/json', 'x-csrf-token': actor.csrfToken },
-          body: JSON.stringify({ libraryId, ...(cursor ? { after: cursor } : {}), limit: 1, languages: selectedLanguages, includeNeutral, maxImages })
-        });
-        if (!response.ok) {
-          const detail = await response.json().catch(() => null) as { error?: string } | null;
-          throw new Error(detail?.error ? `Collecte interrompue : ${detail.error} (HTTP ${response.status}).` : `Collecte interrompue (HTTP ${response.status}).`);
-        }
-        const batch = await response.json() as Batch;
-        if (!Array.isArray(batch.items) || (batch.nextCursor !== null && typeof batch.nextCursor !== 'string')) throw new Error('Réponse de collecte invalide.');
-        if (batch.nextCursor && batch.nextCursor === cursor) throw new Error('La collecte ne progresse plus. Réessayez plus tard.');
-        started = true; processed += batch.items.length;
-        for (const item of batch.items) {
-          downloaded += item.result?.downloaded ?? 0;
-          duplicates += item.result?.duplicates ?? 0;
-          skipped += item.result?.skipped ?? 0;
-          errors += (item.error ? 1 : 0) + (item.result?.errors?.length ?? 0);
-          if (item.result?.partial) partial += 1;
-          if (item.error || item.result?.partial || item.result?.errors?.length) {
-            if (problems.length < 100) problems = [...problems, item];
-            else omittedProblems += 1;
-          }
-        }
-        recent = [...batch.items, ...recent].slice(0, 10);
-        cursor = batch.nextCursor; finished = cursor === null;
-        invalidateCatalog(libraryId);
-      } while (!finished && !stopRequested);
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'La collecte a échoué.';
-    } finally { busy = false; if (!destroyed && started) void loadPage(pageCursor); }
   }
 </script>
 
 <section class="artwork-admin" aria-labelledby="artwork-admin-title">
   <header><h2 id="artwork-admin-title">Images des médiathèques</h2><p>Enrichissez les films et séries avec les images des fournisseurs activés. Les fichiers de vos médias restent inchangés.</p></header>
   <div class="panel">
-    <label>Bibliothèque<select bind:value={libraryId} disabled={busy || (started && !finished)} onchange={changeLibrary}><option value="">Choisir une bibliothèque</option>{#each videoLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
+    <label>Bibliothèque<select bind:value={libraryId} onchange={changeLibrary}><option value="">Choisir une bibliothèque</option>{#each videoLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
     {#if libraryId}<form class="filters" onsubmit={(event) => { event.preventDefault(); applyFilters(); }}><label>Rechercher un titre<input type="search" bind:value={search} maxlength="100" /></label><label>Variantes enregistrées<select bind:value={posterFilter}><option value="all">Toutes les œuvres</option><option value="with">Avec variante</option><option value="without">Sans variante</option></select></label><button type="submit" disabled={pageLoading}>Rechercher</button></form>{#if filterError}<p class="error" role="alert">{filterError}</p>{/if}<p>Pour certains titres, respectez la casse et les accents.</p>{/if}
     {#if pageLoading}<p role="status">Chargement des médias…</p>{/if}
     {#if pageError}<p class="error" role="alert">{pageError}</p><button type="button" onclick={() => void loadPage(pageCursor)}>Réessayer</button>{/if}
     {#if page && !pageError}<h3>Affiches disponibles</h3><p>Ouvrez un média pour consulter, ajouter ou retirer ses images. Le compteur indique les variantes enregistrées dans Aether ; les affiches locales ne sont pas comptées.</p><ul class="works">{#each page.items as item (item.workId)}<li><span><strong>{item.title}</strong><small>{item.posterCount} variante{item.posterCount > 1 ? 's' : ''} enregistrée{item.posterCount > 1 ? 's' : ''}</small></span><button type="button" onclick={() => selected = item}>Gérer les images</button></li>{:else}<li>Aucun média dans cette bibliothèque.</li>{/each}</ul><div class="actions"><button type="button" disabled={pageLoading || !previousCursors.length} onclick={() => void previousPage()}>Page précédente</button><button type="button" disabled={pageLoading || !page.nextCursor} onclick={() => void nextPage()}>Page suivante</button></div>{/if}
   </div>
-  <div class="panel">
-    <h3>Collecter les images</h3>
-    <p>La collecte parcourt les œuvres une par une à partir de leurs identifiants externes. Les images ajoutées manuellement restent prioritaires. Les fournisseurs, la détection des images similaires et les dimensions minimales se règlent dans les paramètres de la bibliothèque.</p>
-    <fieldset disabled={busy || (started && !finished)}>
-      <label>Langues par ordre de préférence<input bind:value={languages} placeholder="fr, en" maxlength="100" /></label>
-      <label>Maximum d’images par œuvre<input type="number" min="1" max="12" required bind:value={maxImages} /></label>
-      <label class="check"><input type="checkbox" bind:checked={includeNeutral} /> Inclure les images sans langue indiquée</label>
-    </fieldset>
-    <div class="actions">
-      {#if !busy && !finished}<button class="primary" type="button" disabled={!libraryId || maxImages < 1 || maxImages > 12} onclick={() => void run()}>{started ? 'Reprendre la collecte' : 'Lancer la collecte'}</button>{/if}
-      {#if busy}<button type="button" disabled={stopRequested} onclick={() => stopRequested = true}>{stopRequested ? 'Arrêt demandé…' : 'Arrêter après cette œuvre'}</button>{/if}
-      {#if started && !busy}<button type="button" onclick={reset}>Nouvelle collecte</button>{/if}
-    </div>
-    {#if busy}<p role="status">{stopRequested ? 'Fin de l’œuvre en cours…' : 'Collecte en cours. Vous pouvez demander un arrêt après l’œuvre en cours.'}</p>{/if}
-    {#if error}<p class="error" role="alert">{error}</p>{/if}
-    {#if started}<div class="results" aria-live="polite"><strong>{finished ? 'Parcours terminé' : busy ? 'Progression' : 'Collecte interrompue'}</strong><p>{processed} œuvre{processed > 1 ? 's' : ''} examinée{processed > 1 ? 's' : ''} · {downloaded} image{downloaded > 1 ? 's' : ''} ajoutée{downloaded > 1 ? 's' : ''} · {duplicates} image{duplicates > 1 ? 's' : ''} similaire{duplicates > 1 ? 's' : ''} écartée{duplicates > 1 ? 's' : ''} · {skipped} image{skipped > 1 ? 's' : ''} ignorée{skipped > 1 ? 's' : ''} · {errors} erreur{errors > 1 ? 's' : ''} · {partial} collecte{partial > 1 ? 's' : ''} partielle{partial > 1 ? 's' : ''}</p><p>Les images ignorées comprennent les adresses déjà connues, les ensembles pleins et les affiches trop petites. La progression reste dans cette page ; une collecte partielle peut être relancée depuis la fiche du média.</p></div>{/if}
-    {#if recent.length}<details><summary>Derniers résultats</summary><ul>{#each recent as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? collectionError(item.error) : `${item.result?.downloaded ?? 0} image(s) ajoutée(s)${item.result?.partial ? ' · résultat partiel' : ''}`} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
-    {#if problems.length}<details><summary>Œuvres à vérifier ({problems.length}{omittedProblems ? ` et ${omittedProblems} autres` : ''})</summary><p>Les résultats partiels ou en erreur peuvent être relancés individuellement dans « Gérer les images ».</p><ul>{#each problems as item (item.workId)}<li><strong>{item.title || item.workId}</strong> — {item.error ? collectionError(item.error) : item.result?.partial ? 'résultat partiel' : 'erreur de fournisseur'} <button type="button" onclick={() => selected = item}>Gérer les images</button></li>{/each}</ul></details>{/if}
-  </div>
-  <div class="panel"><h3>Affichage et gestion des affiches</h3><p>Chaque utilisateur choisit la rotation dans ses préférences d’affichage. Les affiches sont sélectionnées parmi les variantes disponibles ; la collecte ne modifie pas les images choisies manuellement.</p><p>Pour gérer les images d’un média à tout moment, ouvrez sa fiche dans le catalogue puis choisissez « Modifier les images » dans son menu.</p></div>
+  <div class="panel"><ArtworkCollection {libraryId} /></div>
+  <div class="panel"><h3>Affichage et gestion des affiches</h3><p>Chaque utilisateur choisit la rotation dans ses préférences d’affichage. Les affiches sont sélectionnées parmi les variantes disponibles ; les images explicitement épinglées restent prioritaires.</p><p>Pour gérer les images d’un média à tout moment, ouvrez sa fiche dans le catalogue puis choisissez « Modifier les images » dans son menu.</p></div>
 </section>
 {#if selected}<ImageManager title={selected.title || selected.workId} workId={selected.workId} onclose={() => selected = null} onchanged={async () => { invalidateCatalog(libraryId); await loadPage(pageCursor); }} />{/if}
 <style>
@@ -149,33 +70,20 @@
   .panel { min-width: 0; padding: 24px; border-radius: var(--r-md); background: var(--color-surface); }
   .panel > :first-child { margin-top: 0; }
   .panel > :last-child { margin-bottom: 0; }
-  fieldset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 20px; min-width: 0; margin: 20px 0; padding: 0; border: 0; }
   label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
   input:not([type='checkbox']), select { box-sizing: border-box; width: 100%; min-width: 0; height: 46px; min-height: 46px; padding: 0 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background-color: var(--color-surface); color: var(--tx); font: inherit; font-size: 15px; font-weight: 500; box-shadow: none; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
   select { padding-right: 40px; }
   input:not([type='checkbox']):hover, select:hover:not(:disabled) { background-color: var(--color-surface-hover); border-color: var(--color-line); }
   input:not([type='checkbox']):focus, select:focus, select:focus-visible { outline: none; border-color: var(--ac); background-color: var(--color-surface); }
-  .check { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; cursor: pointer; }
-  .check input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; }
   button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 1px solid var(--color-line); border-radius: var(--r-md); background: transparent; color: var(--tx); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color var(--t-fast) ease, opacity var(--t-fast) ease, transform var(--t-fast) var(--ease); }
   button:hover:not(:disabled) { background: var(--color-surface-hover); }
   button:active:not(:disabled) { transform: scale(0.98); }
   button:disabled { opacity: 0.45; cursor: not-allowed; }
-  button:focus-visible, summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
-  button.primary { min-height: 44px; padding: 0 22px; border-color: transparent; background: var(--btn); color: var(--btn-tx); box-shadow: none; }
-  button.primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   .error { color: var(--err); }
-  .results { display: grid; gap: 4px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--color-line-subtle); }
-  .results strong { font-size: 15px; font-weight: 700; }
-  .results p { margin: 4px 0 0; }
-  details { margin-top: 18px; border-top: 1px solid var(--color-line-subtle); }
-  summary { display: flex; align-items: center; min-height: 48px; font-size: 14px; font-weight: 700; cursor: pointer; }
-  details ul { margin: 0; padding: 0; list-style: none; }
   li { margin: 0; font-size: 14px; color: var(--mu); overflow-wrap: anywhere; }
   li strong { color: var(--tx); font-weight: 700; }
-  details li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 0; border-top: 1px solid var(--color-line-subtle); }
-  details li button { margin-left: auto; }
   .works { margin: 16px 0 20px; padding: 0; list-style: none; border-bottom: 1px solid var(--color-line-subtle); }
   .works li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 10px 0; border-top: 1px solid var(--color-line-subtle); transition: background-color var(--t-fast) ease; }
   .works li strong { font-size: 15px; }
@@ -186,11 +94,11 @@
   @media (max-width: 1023px) { .filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .filters button { grid-column: 1 / -1; justify-self: start; } }
   @media (max-width: 640px) {
     .panel { padding: 16px; border-radius: var(--r-md); }
-    fieldset, .filters { grid-template-columns: minmax(0, 1fr); }
+    .filters { grid-template-columns: minmax(0, 1fr); }
     .filters button { justify-self: stretch; }
     .actions button { width: 100%; }
     .works li { flex-wrap: wrap; }
-    .works li button, details li button { width: 100%; margin-left: 0; }
+    .works li button { width: 100%; margin-left: 0; }
     input:not([type='checkbox']), select { font-size: 16px; }
   }
   @media (prefers-reduced-motion: reduce) { button, input, select, .works li { transition: none; } }

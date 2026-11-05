@@ -3,8 +3,7 @@
   import { adminRequest } from './request';
   let {extensionId}:{extensionId?:string}=$props();
   type Pack={id:string;name:string;count:number};
-  let packs=$state<Pack[]>([]),folders=$state<{folder:string;count:number}[]>([]);
-  let url=$state('https://github.com/cedev-1/jellyfin-avatars'),folder=$state(''),name=$state('');
+  let packs=$state<Pack[]>([]);
   let busy=$state(false),error=$state(''),notice=$state('');
   let policy=$state({allowCustom:true,allowGravatar:false,assignOnCreate:false});
   let policyLoaded=$state(false);
@@ -25,8 +24,6 @@
   async function assignMissing(){busy=true;error='';notice='';try{const result=await adminRequest<{count:number}>(assignMissingEndpoint,{method:'POST'});notice=`${result.count} compte${result.count>1?'s':''} ${result.count>1?'ont':'a'} reçu un avatar.`;}catch(e){error=e instanceof Error?e.message:'Attribution impossible.';}finally{busy=false;}}
 
   onMount(()=>{void load().catch(()=>error='Collections indisponibles.');if(!extensionId){void loadPolicy().catch(()=>error='Politique indisponible.');void loadLegacy().catch(()=>error='État des anciennes collections indisponible.');}});
-  async function discover(){busy=true;error='';notice='';try{folders=(await adminRequest<{folders:typeof folders}>(endpoint+'/source',{method:'POST',body:JSON.stringify({url})})).folders;folder=folders[0]?.folder??'';name=folder||'Collection';if(!folders.length)notice='Aucune image PNG, JPEG ou WebP trouvée.';}catch(e){error=e instanceof Error?e.message:'Source indisponible.';}finally{busy=false;}}
-  async function importPack(){busy=true;error='';notice='';try{const result=await adminRequest<{count:number}>(endpoint,{method:'POST',body:JSON.stringify({url,folder,name})});await load();notice=`${result.count} avatars importés.`;}catch(e){error=e instanceof Error?e.message:'Import impossible.';}finally{busy=false;}}
   async function remove(id:string){if(!window.confirm('Supprimer cette collection de la galerie ? Les photos déjà choisies par les comptes sont conservées.'))return;busy=true;error='';try{await adminRequest(endpoint+'/'+encodeURIComponent(id),{method:'DELETE'});await load();notice='Collection retirée.';}catch(e){error=e instanceof Error?e.message:'Suppression impossible.';}finally{busy=false;}}
   async function upload(){
     if(!uploadFiles.length||uploadFiles.length>500||uploadFiles.some(file=>file.size>2*1024*1024)||uploadFiles.reduce((sum,file)=>sum+file.size,0)>64*1024*1024){error='Choisissez de 1 à 500 images de 2 Mo maximum, 64 Mo au total.';return;}
@@ -51,7 +48,7 @@
       <button type="button" class="primary" onclick={()=>void savePolicy()}>Enregistrer la politique</button>
     </fieldset>
   {/if}
-  <h3>Votre galerie d’avatars</h3><p>Ajoutez vos images ou importez une collection. Les utilisateurs choisissent ensuite leur avatar dans leur profil.</p>
+  <h3>Votre galerie d’avatars</h3><p>Ajoutez vos images et organisez-les en collections. Les utilisateurs choisissent ensuite leur avatar dans leur profil.</p>
   <button disabled={busy||!packs.some(pack=>pack.count>0)} onclick={()=>void assignMissing()}>Attribuer les avatars manquants maintenant</button>
   <details class="upload" open><summary>Ajouter des images</summary>
     <form onsubmit={event=>{event.preventDefault();void upload();}}>
@@ -61,17 +58,7 @@
       <button class="primary" disabled={busy||!uploadFiles.length}>Ajouter les avatars</button>
     </form><small>PNG, JPEG, WebP · 2 Mo par image · 64 Mo par import · 500 images par collection.</small>
   </details>
-  <details class="upload"><summary>Importer un pack depuis GitHub</summary>
-  <form onsubmit={event=>{event.preventDefault();void discover();}}>
-    <label>Lien GitHub de la collection<input type="url" required bind:value={url} disabled={busy} oninput={()=>folders=[]} /></label>
-    <button disabled={busy}>Parcourir les collections</button>
-  </form>
-  {#if folders.length}<form class="import-form" onsubmit={event=>{event.preventDefault();void importPack();}}>
-    <label>Collection<select aria-label="Collection" bind:value={folder} disabled={busy} onchange={()=>name=folder||'Collection'}>{#each folders as item (item.folder)}<option value={item.folder}>{item.folder||'Racine'} · {item.count} avatars</option>{/each}</select></label>
-    <label>Nom affiché<input required maxlength="100" bind:value={name} disabled={busy} /></label><button class="primary" disabled={busy}>Importer la collection</button>
-  </form>{/if}
-  </details>
-  {#if busy}<p role="status">Chargement… L’import peut prendre quelques minutes.</p>{/if}
+  {#if busy}<p role="status">Traitement en cours…</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}
   {#if packs.length}
     <label class="collection-picker">Collection<select disabled={busy} value={selected} onchange={event=>void showPack(event.currentTarget.value).catch(()=>error='Galerie indisponible.')}>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count} avatar{pack.count>1?'s':''}</option>{/each}</select></label>
@@ -80,7 +67,7 @@
       <button type="button" class="danger" disabled={busy} onclick={()=>void remove(selected)}>Supprimer la collection</button>
     </form>
     <div class="gallery">{#each images as avatar (avatar.id)}<article><img src={avatar.url} alt={avatar.name} loading="lazy" width="112" height="112" /><span>{avatar.name}</span><button class="danger" aria-label={`Supprimer ${avatar.name}`} disabled={busy} onclick={()=>{if(window.confirm(`Retirer « ${avatar.name} » de la galerie ? Les photos déjà choisies sont conservées.`))void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}/images/${encodeURIComponent(avatar.id)}`,{method:'DELETE'}),'Avatar supprimé de la galerie.');}}>Supprimer</button></article>{:else}<p>Cette collection est vide.</p>{/each}</div>
-  {:else}<p>Aucun avatar pour le moment. Ajoutez des images ou importez un pack.</p>{/if}
+  {:else}<p>Aucun avatar pour le moment. Ajoutez des images.</p>{/if}
 </section>
 <style>
   .avatar-collections { display: grid; gap: 16px; min-width: 0; margin-top: 8px; font-family: var(--font-sans); color: var(--color-text); }
@@ -113,7 +100,6 @@
   input[type='file'] { display: flex; align-items: center; height: auto; min-height: 42px; padding: 5px 8px; font-size: 13px; color: var(--color-muted); }
   input[type='file']::file-selector-button { height: 32px; margin-right: 12px; padding: 0 12px; border: 1px solid var(--color-line); border-radius: var(--radius-xs); background: transparent; color: var(--color-text); font: inherit; cursor: pointer; }
   input:not([type='checkbox']):focus-visible, select:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
-  .import-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-line-subtle); }
   .collection-picker { max-width: 520px; margin-top: 8px; }
   /* Boutons : primaire = action principale de la zone, le reste ghost */
   button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 18px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: transparent; color: var(--color-text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: background-color var(--transition-fast); }

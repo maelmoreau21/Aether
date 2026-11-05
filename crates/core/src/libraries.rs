@@ -488,14 +488,20 @@ async fn image(
     State(state): State<LibraryState>,
     Path((id, kind)): Path<(String, String)>,
     headers: HeaderMap,
+    Query(options): Query<crate::artwork::PreviewOptions>,
 ) -> Result<Response, StatusCode> {
     administrator(&state, &headers, false).await?;
     image_target(&state, &id, &kind).await?;
+    let width = options.width.unwrap_or(0);
+    if ![0, 320, 640, 1280].contains(&width) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let sha256: String = crate::database::query_scalar(
-        "SELECT sha256 FROM library_artwork WHERE library_id=? AND kind=?",
+        "SELECT COALESCE((SELECT sha256 FROM library_artwork_previews WHERE library_id=? AND kind=? AND width=?),sha256) FROM library_artwork WHERE library_id=? AND kind=?",
     )
-    .bind(id)
-    .bind(kind)
+    .bind(&id).bind(&kind).bind(i64::from(width))
+    .bind(&id)
+    .bind(&kind)
     .fetch_optional(&state.auth.store.pool)
     .await
     .map_err(database)?
@@ -513,7 +519,6 @@ async fn image(
     );
     Ok(response)
 }
-static IMAGE_WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 async fn upload_image(
     State(state): State<LibraryState>,
     Path((id, kind)): Path<(String, String)>,
@@ -527,24 +532,35 @@ async fn upload_image(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let permit = IMAGE_WORKERS
-        .try_acquire()
-        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
-    let normalized = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        crate::avatars::normalize_image(bytes, &content, true)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    let meta = state
-        .auth
-        .store
-        .assets
-        .put_bytes(&normalized, "image/png")
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let encoded = crate::artwork::prepare(bytes, content, kind.clone()).await?;
+    let mut stored = Vec::new();
+    let mut leases = Vec::new();
+    for (width, mime, data) in encoded.variants {
+        let meta = state
+            .auth
+            .store
+            .assets
+            .put_bytes(&data, mime)
+            .await
+            .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+        leases.push(
+            state
+                .auth
+                .store
+                .assets
+                .lease(&meta.sha256)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        );
+        stored.push((width, meta.sha256));
+    }
+    let mut tx = state.auth.store.pool.begin().await.map_err(database)?;
     crate::database::query("INSERT INTO library_artwork(library_id,kind,sha256,revision) VALUES(?,?,?,?) ON CONFLICT(library_id,kind) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
-        .bind(id).bind(kind).bind(&meta.sha256).bind(uuid::Uuid::new_v4().to_string()).execute(&state.auth.store.pool).await.map_err(database)?;
+        .bind(&id).bind(&kind).bind(&stored[0].1).bind(uuid::Uuid::new_v4().to_string()).execute(&mut *tx).await.map_err(database)?;
+    for (width, sha) in stored.iter().filter(|v| v.0 != 0) {
+        crate::database::query("INSERT INTO library_artwork_previews(library_id,kind,width,sha256) VALUES(?,?,?,?) ON CONFLICT(library_id,kind,width) DO UPDATE SET sha256=excluded.sha256")
+            .bind(&id).bind(&kind).bind(width).bind(sha).execute(&mut *tx).await.map_err(database)?;
+    }
+    tx.commit().await.map_err(database)?;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn remove_image(

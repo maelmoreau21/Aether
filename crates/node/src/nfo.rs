@@ -50,6 +50,23 @@ fn apply(
     match name {
         "title" => metadata.title = Some(text.into()),
         "originaltitle" => metadata.original_title = Some(text.into()),
+        "originallanguage" | "original_language" => {
+            // Explicit language metadata only; title/script/audio do not prove VO.
+            if text.len() <= 35
+                && text.split('-').enumerate().all(|(i, part)| {
+                    if i == 0 {
+                        (2..=8).contains(&part.len())
+                            && part.bytes().all(|b| b.is_ascii_alphabetic())
+                    } else {
+                        !part.is_empty()
+                            && part.len() <= 8
+                            && part.bytes().all(|b| b.is_ascii_alphanumeric())
+                    }
+                })
+            {
+                metadata.original_language = Some(text.to_ascii_lowercase());
+            }
+        }
         "plot" => metadata.plot = Some(text.into()),
         "outline" => metadata.outline = Some(text.into()),
         "mpaa" => metadata.mpaa = Some(text.into()),
@@ -484,6 +501,30 @@ async fn read_and_parse_nfo(root: &Path, relative: &Path, priority: u8) -> NfoOu
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reads_only_explicit_original_language_and_never_infers_it_from_title_or_audio() {
+        assert_eq!(
+            parse(br#"<movie><original_language>ja</original_language></movie>"#)
+                .unwrap()
+                .original_language
+                .as_deref(),
+            Some("ja")
+        );
+        assert_eq!(
+            parse(br#"<movie><originallanguage>en-US</originallanguage></movie>"#)
+                .unwrap()
+                .original_language
+                .as_deref(),
+            Some("en-us")
+        );
+        assert!(parse(br#"<movie><originaltitle>English title</originaltitle><language>fr</language></movie>"#).unwrap().original_language.is_none());
+        assert!(
+            parse(br#"<movie><originallanguage>fr--CA</originallanguage></movie>"#)
+                .unwrap()
+                .original_language
+                .is_none()
+        );
+    }
     #[test]
     fn parses_jellyfin_legacy_id_attributes_and_provider_aliases() {
         let m =

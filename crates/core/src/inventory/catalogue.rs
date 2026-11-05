@@ -74,6 +74,10 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
             &row.get::<String, _>("id"),
             metadata["actors"].as_array().map(Vec::as_slice).unwrap_or_default(),
         ),
+        "crewCredits": crate::extensions::person_images::decorate_credits(
+            &row.get::<String, _>("id"),
+            metadata["crewCredits"].as_array().map(Vec::as_slice).unwrap_or_default(),
+        ),
         "directors": metadata["directors"].as_array().cloned().unwrap_or_default(),
         "writers": metadata["writers"].as_array().cloned().unwrap_or_default(),
         "ratings": metadata["ratings"].as_array().cloned().unwrap_or_default(),
@@ -115,6 +119,7 @@ pub struct CatalogueFilter {
     pub quality: Option<i64>,
     pub codec: Option<String>,
     pub language: Option<String>,
+    pub person: Option<String>,
 }
 fn push_search_filter(
     builder: &mut sqlx::QueryBuilder<sqlx::Any>,
@@ -230,6 +235,20 @@ fn push_catalogue_filters(
     has_parental_policy: bool,
     fast_avail: bool,
 ) {
+    if let Some(person) = &filter.person {
+        // JSON string quoting prevents partial-name matches and handles quotes/backslashes.
+        // Manual fields override their corresponding provider fields independently.
+        let quoted = serde_json::to_string(person.trim()).unwrap_or_default();
+        builder.push(" AND (instr(COALESCE(json_extract(w.manual_json,'$.actors'),json_extract(w.editorial_json,'$.actors'),''), ")
+            .push_bind(format!("\"name\":{quoted}"))
+            .push(")>0 OR instr(COALESCE(json_extract(w.manual_json,'$.actors'),json_extract(w.editorial_json,'$.actors'),''), ")
+            .push_bind(format!("\"name\": {quoted}"))
+            .push(")>0 OR instr(COALESCE(json_extract(w.manual_json,'$.directors'),json_extract(w.editorial_json,'$.directors'),''), ")
+            .push_bind(quoted.clone())
+            .push(")>0 OR instr(COALESCE(json_extract(w.manual_json,'$.writers'),json_extract(w.editorial_json,'$.writers'),''), ")
+            .push_bind(quoted)
+            .push(")>0) ");
+    }
     if filter.hide_watched
         && let Some(user) = &filter.user_id
     {

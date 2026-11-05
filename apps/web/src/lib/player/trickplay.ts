@@ -68,7 +68,7 @@ export function clampHoverPosition(clientX: number, rect: { left: number; width:
 /** Valide la réponse `/trickplay` ; renvoie le manifeste s'il est prêt et cohérent pour cet asset. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function readyTrickplay(ok: boolean, value: any, assetId: string): TrickplayManifest | null {
-  if (ok && value.status === 'ready' &&
+  if (ok && value && (value.mime === undefined || ['image/jpeg', 'image/webp'].includes(value.mime)) && value.status === 'ready' &&
       value.intervalMs >= 1000 && value.width > 0 && value.height > 0 &&
       value.columns > 0 && value.rows > 0 && value.thumbnailCount > 0 &&
       value.sheetCount > 0 && typeof value.urlPrefix === 'string' &&

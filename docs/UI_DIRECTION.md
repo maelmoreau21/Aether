@@ -187,3 +187,29 @@ La portée des regroupements par page est explicite. Lecture principale visible,
 file/playlist/format en actions secondaires. Barre mobile compacte au-dessus de
 la navigation, file et paroles dans un dialogue natif avec transport fixe et
 options de lecture. État/contrats conservés ; [preuves et limites musique](archive/ux/UX_MUSIC_2026_10_29.md).
+
+
+## Profil et composition des fiches — 5 novembre 2026
+
+Dans Demandes, le bouton Rechercher reste cliquable avant saisie : la validation
+native du champ explique les recherches vides ou trop courtes (2 caractères).
+Le curseur d'attente apparaît seulement pendant une recherche effective ; un
+survol ne lance aucune requête. Le Core reste responsable de la recherche ARR.
+
+Les fiches film/série conservent l'image entière sur un fond flouté dès que le
+cadrage couperait plus de 8 % de sa surface. Les logos gardent leurs proportions
+et la largeur du titre suit l'espace disponible. L'illustration transparente
+supplémentaire n'est affichée qu'en l'absence de fond de scène, pour éviter de
+superposer deux compositions. Les logos ont une ombre de contraste.
+
+Les variantes de fonds sans langue sont préférées lorsqu'elles existent. Pour
+les logos, la langue de l'interface puis une variante neutre sont retenues ; si
+les seules variantes connues sont dans une autre langue, le titre texte localisé
+remplace le logo. Les choix manuels restent prioritaires. Sans métadonnées de
+langue ou sans autre image disponible, aucun texte incrusté dans les pixels
+n'est détecté ou traduit automatiquement.
+
+Validation : `scripts/browser-profile-artwork-fixes.cjs` teste le parcours de
+recherche, l'absence d'import GitHub et des images larges, carrées et verticales
+à 390/1920 px dans Chrome avec APIs synthétiques. Ce contrôle local ne valide
+pas les fournisseurs ARR ou les images d'un serveur déployé.

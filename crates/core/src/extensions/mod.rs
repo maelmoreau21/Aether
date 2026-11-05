@@ -14,6 +14,8 @@ use crate::{
     auth::AuthState,
     database::{query, query_as, query_scalar},
 };
+mod artwork_jobs;
+pub(crate) use artwork_jobs::tick as artwork_collection_tick;
 #[cfg(test)]
 use axum::http::HeaderValue;
 use axum::{

@@ -27,7 +27,22 @@ Les NFO locaux fournissent maintenant `actors` (nom/rôle, maximum 100), `direct
 
 ### Portraits « Distribution & équipe »
 
-Les portraits viennent des crédits fournis par une extension de métadonnées (TMDb : `profile_path`, taille `w185`) ou d'un `<thumb>` NFO en `https://`. Le navigateur ne charge jamais l'URL du fournisseur : le catalogue expose pour chaque crédit concerné un `imageUrl` servi par le Core ([contrat](API.md#portraits-de-la-distribution-4-novembre-2026)). Le premier affichage télécharge le portrait via un hôte déclaré par une extension autorisée pour la bibliothèque, le réencode en JPEG borné (400×600) et le met en cache dans le magasin d'assets, partagé entre les œuvres. Les cartes chargent les portraits en différé, avec dimensions fixées ; des initiales restent affichées pendant le chargement, sans portrait ou en cas d'échec. Les réalisateurs et scénaristes n'ont pas de portrait propre et réutilisent celui de la même personne dans la distribution. Les œuvres déjà identifiées avec TMDb ont déjà les URL nécessaires : aucune actualisation n'est requise. Les œuvres dont la distribution provient seulement d'un NFO doivent être rescannées (et leur NFO contenir des `<thumb>` en `https://`) ; une distribution importée sans portrait nécessite une nouvelle identification ou une actualisation des métadonnées. Les dossiers `.actors/` locaux de Kodi ne sont pas encore lus. Sans extension déclarant l'hôte du portrait (par exemple `image.tmdb.org`), les initiales sont conservées.
+Le catalogue accepte `GET /api/v1/catalog?person=<nom>&limit=24&offset=0`,
+avec les mêmes permissions de bibliothèques, restrictions parentales, tri et
+pagination que l'accueil. Le nom exact est comparé aux acteurs, réalisateurs et
+scénaristes de chaque œuvre, avant pagination. Les données historiques ne donnant
+pas toujours d'identifiant de personne, des homonymes peuvent être regroupés ;
+ce n'est pas une filmographie extérieure au serveur.
+
+TMDb peut transmettre les portraits et identifiants des membres d'équipe dans
+`crewCredits`, en conservant les anciennes listes `directors` et `writers`. Le
+Core expose ces portraits via le même proxy authentifié et borné que les acteurs,
+en vérifiant que le portrait appartient bien aux crédits de l'œuvre consultée.
+Ces nouveaux champs nécessitent le plugin TMDb mis à jour puis une actualisation
+des métadonnées des œuvres concernées. Si les données ou l'hôte autorisé sont
+absents, aucun portrait n'est attribué sur la seule base d'un nom homonyme.
+
+Les portraits viennent des crédits fournis par une extension de métadonnées (TMDb : `profile_path`, taille `w185`) ou d'un `<thumb>` NFO en `https://`. Le navigateur ne charge jamais l'URL du fournisseur : le catalogue expose pour chaque crédit concerné un `imageUrl` servi par le Core ([contrat](API.md#portraits-de-la-distribution-4-novembre-2026)). Le premier affichage télécharge le portrait via un hôte déclaré par une extension autorisée pour la bibliothèque, le réencode en WebP borné (400×600) et le met en cache dans le magasin d'assets, partagé entre les œuvres. Les cartes chargent les portraits en différé, avec dimensions fixées ; des initiales restent affichées pendant le chargement, sans portrait ou en cas d'échec. Les portraits des réalisateurs et scénaristes sont disponibles lorsque les crédits d'équipe les contiennent ; sans identifiant fiable, aucun portrait n'est attribué à partir du seul nom. Les œuvres déjà identifiées avec TMDb peuvent déjà contenir les URL des portraits d'acteurs ; les nouveaux portraits d'équipe nécessitent une actualisation après mise à jour de TMDb. Les œuvres dont la distribution provient seulement d'un NFO doivent être rescannées (et leur NFO contenir des `<thumb>` en `https://`) ; une distribution importée sans portrait nécessite une nouvelle identification ou une actualisation des métadonnées. Les dossiers `.actors/` locaux de Kodi ne sont pas encore lus. Sans extension déclarant l'hôte du portrait (par exemple `image.tmdb.org`), les initiales sont conservées.
 
 Les pistes audio affichent individuellement langue, codec, canaux et titre lorsqu'ils sont connus. Les sources préparées représentant une même piste interne ne la dupliquent plus. Les sources audio externes restent distinctes. Les sous-titres affichent la langue en français, un drapeau indicatif pour les langues prises en charge, le format et les marqueurs forcé/malentendants. Une langue absente est explicitement inconnue. La profondeur 10/12 bits n'est plus assimilée à du HDR.
 

@@ -218,6 +218,7 @@ pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -
             "columns": cached.columns,
             "rows": cached.rows,
             "sheetCount": cached.sheet_count,
+                "mime": cached.mime,
             "thumbnailCount": cached.thumbnail_count,
             "urlPrefix": format!("/api/v1/assets/{asset_id}/trickplay/")
         }))
@@ -235,6 +236,7 @@ pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -
             "columns": jellyfin.columns,
             "rows": jellyfin.rows,
             "sheetCount": jellyfin.sheet_count,
+                "mime": jellyfin.mime,
             "thumbnailCount": jellyfin.thumbnail_count,
             "urlPrefix": format!("/api/v1/assets/{asset_id}/trickplay/")
         }))
@@ -287,12 +289,12 @@ pub async fn tile(
         chapter_time: None,
     };
 
-    let opened = match mgr.open_sheet(&req, index).await {
+    let (opened, mime) = match mgr.open_sheet_with_mime(&req, index).await {
         Ok(f) => f,
         Err(_) => return crate::error(StatusCode::NOT_FOUND, "trickplay_tile_unavailable"),
     };
 
-    match media_node::serve_opened(opened, &request, "image/jpeg").await {
+    match media_node::serve_opened(opened, &request, &mime).await {
         Ok(response) => {
             let (mut parts, body) = response.into_parts();
             parts.headers.insert(

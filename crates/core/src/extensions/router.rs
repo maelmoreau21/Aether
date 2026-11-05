@@ -56,6 +56,14 @@ pub fn router(auth: AuthState) -> Router {
             axum::routing::post(artwork_rotation::rotate),
         )
         .route(
+            "/api/v1/admin/artwork/jobs",
+            get(super::artwork_jobs::list).post(super::artwork_jobs::create),
+        )
+        .route(
+            "/api/v1/admin/artwork/jobs/{id}",
+            axum::routing::put(super::artwork_jobs::control),
+        )
+        .route(
             "/api/v1/admin/artwork/collect-batch",
             axum::routing::post(image_collection::collect_batch),
         )

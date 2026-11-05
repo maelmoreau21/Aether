@@ -10,7 +10,7 @@ test('only Core-served portraits are loaded, never provider URLs', () => {
   expect(corePortraitUrl(null)).toBe('');
 });
 
-test('cast keeps portraits, crew reuses the cast portrait of the same person', () => {
+test('cast keeps portraits without assigning them to crew by name alone', () => {
   const people = creditPeople({
     actors: [
       { name: ' Greta Gerwig ', role: 'Herself', imageUrl: portrait, thumbUrl: 'https://image.tmdb.org/x.jpg' },
@@ -23,9 +23,9 @@ test('cast keeps portraits, crew reuses the cast portrait of the same person', (
   expect(people.map(p => [p.key, p.role, p.photoUrl])).toEqual([
     ['actor:greta gerwig', 'Herself', portrait],
     ['actor:no photo', 'Distribution', ''],
-    ['director:greta gerwig', 'Réalisateur', portrait],
+    ['director:greta gerwig', 'Réalisateur', ''],
     ['director:someone else', 'Réalisateur', ''],
-    ['writer:greta gerwig', 'Scénario', portrait]
+    ['writer:greta gerwig', 'Scénario', '']
   ]);
 });
 
@@ -34,4 +34,20 @@ test('initials fall back gracefully', () => {
   expect(initials('Mary Elizabeth Winstead')).toBe('MW');
   expect(initials('Zendaya')).toBe('Z');
   expect(initials('élodie bouchez')).toBe('ÉB');
+});
+
+test('crew uses only Core portraits and falls back to initials for remote URLs', () => {
+  const members = creditPeople({ directors: ['Director', 'Other'], crewCredits: [
+    { name: 'Director', role: 'Director', imageUrl: portrait },
+    { name: 'Other', role: 'Director', imageUrl: 'https://image.tmdb.org/a.jpg' }
+  ] });
+  expect(members.map(member => member.photoUrl)).toEqual([portrait, '']);
+});
+
+test('ambiguous same-name crew credits do not inherit a portrait', () => {
+  const members = creditPeople({ directors: ['Same Name'], crewCredits: [
+    { name: 'Same Name', role: 'Director', imageUrl: portrait },
+    { name: 'Same Name', role: 'Director', imageUrl: portrait }
+  ] });
+  expect(members[0].photoUrl).toBe('');
 });

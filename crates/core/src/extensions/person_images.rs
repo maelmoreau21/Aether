@@ -8,7 +8,7 @@
 use super::*;
 use crate::assets::AssetError;
 use axum::response::Response;
-use image::{ImageReader, Limits};
+#[cfg(test)]
 use std::io::Cursor;
 
 /// Longest accepted provider URL (TMDb portraits are about 60 bytes).
@@ -79,10 +79,11 @@ fn credits_of(editorial: &str, manual: Option<&str>) -> Vec<Value> {
     {
         object.extend(manual);
     }
-    metadata["actors"]
-        .as_array()
-        .map(|credits| credits.iter().take(MAX_CREDITS).cloned().collect())
-        .unwrap_or_default()
+    ["actors", "crewCredits"]
+        .into_iter()
+        .filter_map(|key| metadata[key].as_array())
+        .flat_map(|credits| credits.iter().take(MAX_CREDITS).cloned())
+        .collect()
 }
 
 /// Enabled, granted extension allowed to read metadata whose declared hosts include `host`.
@@ -117,33 +118,20 @@ struct Portrait {
 
 /// Decode with bounded allocation, then re-encode: provider bytes are never served verbatim.
 fn normalize(bytes: Vec<u8>, content: &str) -> Result<Portrait, &'static str> {
-    let mut reader = ImageReader::new(Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|_| "invalid_image")?;
-    let expected = match reader.format() {
-        Some(image::ImageFormat::Jpeg) => "image/jpeg",
-        Some(image::ImageFormat::Png) => "image/png",
-        Some(image::ImageFormat::WebP) => "image/webp",
-        _ => return Err("unsupported_image"),
-    };
-    if content != expected {
-        return Err("unsupported_image");
-    }
-    let mut limits = Limits::default();
-    limits.max_image_width = Some(4096);
-    limits.max_image_height = Some(4096);
-    limits.max_alloc = Some(32 * 1024 * 1024);
-    reader.limits(limits);
-    let decoded = reader.decode().map_err(|_| "invalid_image")?;
+    let decoded = crate::image_import::decode(&bytes, content).map_err(|status| {
+        if status == StatusCode::UNSUPPORTED_MEDIA_TYPE {
+            "unsupported_image"
+        } else {
+            "invalid_image"
+        }
+    })?;
     let resized = if decoded.width() > MAX_WIDTH || decoded.height() > MAX_HEIGHT {
         decoded.thumbnail(MAX_WIDTH, MAX_HEIGHT)
     } else {
         decoded
     };
     let rgb = image::DynamicImage::ImageRgb8(resized.to_rgb8());
-    let mut out = Vec::new();
-    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82)
-        .encode_image(&rgb)
+    let out = crate::image_import::encode(&resized, resized.color().has_alpha())
         .map_err(|_| "invalid_image")?;
     Ok(Portrait {
         bytes: out,
@@ -258,9 +246,16 @@ pub(super) async fn read(
             return Err(err(StatusCode::NOT_FOUND, "person_image_unavailable"));
         }
     };
-    let portrait = tokio::task::spawn_blocking(move || normalize(bytes, &content))
+    let permit = crate::image_import::DECODERS
+        .acquire()
         .await
-        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "person_image_failed"))?;
+        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "person_image_busy"))?;
+    let portrait = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        normalize(bytes, &content)
+    })
+    .await
+    .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "person_image_failed"))?;
     let portrait = match portrait {
         Ok(portrait) => portrait,
         Err(code) => {
@@ -271,7 +266,7 @@ pub(super) async fn read(
     let meta = auth
         .store
         .assets
-        .put_bytes(&portrait.bytes, "image/jpeg")
+        .put_bytes(&portrait.bytes, "image/webp")
         .await
         .map_err(|_| {
             err(
@@ -343,6 +338,30 @@ mod tests {
     }
 
     #[test]
+    fn crew_portraits_are_authorized_only_from_this_works_credits() {
+        let editorial = json!({"actors":[{"name":"Cast"}],"crewCredits":[{"name":"Director","role":"Director","thumbUrl":"https://image.example.org/director.jpg"}]}).to_string();
+        let credits = credits_of(&editorial, None);
+        assert_eq!(credits.len(), 2);
+        let decorated = decorate_credits("work-1", &credits);
+        let key = decorated[1]["imageUrl"]
+            .as_str()
+            .unwrap()
+            .split('/')
+            .nth(6)
+            .unwrap();
+        assert_eq!(
+            &source_hash(source_url(&credits[1]).unwrap())[..KEY_LEN],
+            key
+        );
+        assert!(
+            !credits_of("{}", None)
+                .iter()
+                .filter_map(source_url)
+                .any(|url| &source_hash(url)[..KEY_LEN] == key)
+        );
+    }
+
+    #[test]
     fn portraits_are_bounded_and_reencoded() {
         let mut png = Vec::new();
         image::DynamicImage::new_rgba8(800, 1200)
@@ -352,7 +371,7 @@ mod tests {
         assert_eq!((portrait.width, portrait.height), (400, 600));
         assert_eq!(
             image::guess_format(&portrait.bytes).unwrap(),
-            image::ImageFormat::Jpeg
+            image::ImageFormat::WebP
         );
         assert_eq!(
             normalize(png, "image/jpeg").err(),

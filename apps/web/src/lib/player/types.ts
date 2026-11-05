@@ -33,7 +33,7 @@ export interface Source {
 export interface Subtitle { id: string; reportTrackId?: string; language: string; label: string; url: string; assUrl?: string | null; forced?: boolean; sdh?: boolean; sourceFormat?: string }
 export interface Media {
   chapters?: { start: number; title: string }[];
-  trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string } | null;
+  trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string; mime?: 'image/jpeg' | 'image/webp' } | null;
   intro?: { start: number; end: number };
   credits?: { start: number; end: number };
   recap?: { start: number; end: number };

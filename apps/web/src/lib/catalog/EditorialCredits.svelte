@@ -3,6 +3,7 @@
   import type { Work } from './api';
   import { creditPeople, initials } from './credits';
   import Icon from '../ui/Icon.svelte';
+  import { resolve } from '$app/paths';
 
   let { work }: { work: Work } = $props();
 
@@ -71,7 +72,7 @@
 
     <div class="cast-carousel" bind:this={track} onscroll={updateScrollState}>
       {#each people as person (person.key)}
-        <article class="cast-card">
+        <a class="cast-card" href={resolve(`people/?name=${encodeURIComponent(person.name)}&work=${encodeURIComponent(work.id)}&credit=${encodeURIComponent(person.key)}` as 'people/')} aria-label={`Voir les œuvres de ${person.name}`}>
           <div class="portrait-card">
             <!-- Initials stay underneath: visible while the portrait loads, if it is missing or fails. -->
             <div class="portrait-fallback" aria-hidden="true">
@@ -102,7 +103,7 @@
               <span class="cast-role">{person.role}</span>
             {/if}
           </div>
-        </article>
+        </a>
       {/each}
     </div>
   </section>
@@ -207,6 +208,8 @@
   .cast-card:hover .portrait-card {
     transform: scale(1.03);
   }
+
+  .cast-card:focus-visible { outline: 2px solid var(--ac); outline-offset: 4px; border-radius: var(--r-md); }
 
   .portrait-img {
     position: absolute;

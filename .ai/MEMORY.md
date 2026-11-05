@@ -17,6 +17,28 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 5 novembre 2026 — Personnes et portraits
+
+- Distribution et équipe : liens vers une page personne paginée avec films et
+  séries accessibles, filtrés par nom. Les homonymes peuvent être regroupés.
+  Portraits d'équipe fournis par TMDb 0.1.4 et servis par le proxy Core autorisé ;
+  les anciennes métadonnées exigent une actualisation. Voir `docs/CATALOGUE_PRESENTATION.md`.
+- Tests locaux : crédits Web 5/5, parcours navigateur 390/1440 sur API simulée,
+  filtre Core avec parental/pagination 1/1 et portraits 5/5. Le fournisseur
+  externe réel et un déploiement NAS n'ont pas été vérifiés.
+
+## 5 novembre 2026 — Avatars, recherche Demandes et images des fiches
+
+- Import GitHub retiré de l'UI et des routes natives/extensions ; uploads locaux
+  et collections existantes conservés. Contrat : `docs/PLUGIN_SETTINGS_AND_COLLECTIONS.md`.
+- Recherche Demandes : validation native à la place d'un bouton désactivé dès
+  l'absence de saisie ; curseur d'attente réservé à la recherche en cours.
+- Fiches : cadrage plus conservateur, illustration sans superposition sur un fond
+  de scène, logos adaptés et sélection linguistique. Limites : `docs/UI_DIRECTION.md`.
+- Vérifié localement : check Svelte 0/0, lint, build Web, 21 tests Web ciblés,
+  2 tests Rust collections, Chrome sur fixtures à 390/1920 px (recherche, galerie,
+  trois ratios). Aucun déploiement ni recherche ARR réelle effectués.
+
 ## 5 novembre 2026 — Extensions et préférences d'affiches
 
 - Cartes d'extensions ouvrables en entier ; épinglage sur la fiche, versions du

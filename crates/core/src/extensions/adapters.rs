@@ -776,6 +776,14 @@ pub(crate) async fn import_image_direct(
     id: &str,
     input: ImportImage,
 ) -> Result<Json<Value>, Error> {
+    import_image_checked(store, id, input, None).await
+}
+async fn import_image_checked(
+    store: &IdentityStore,
+    id: &str,
+    input: ImportImage,
+    authorization: Option<(&AuthState, &HeaderMap, Option<super::run::Background<'_>>)>,
+) -> Result<Json<Value>, Error> {
     if !matches!(
         input.kind.as_str(),
         "poster" | "backdrop" | "logo" | "banner" | "thumb" | "illustration" | "disc" | "landscape"
@@ -801,7 +809,8 @@ pub(crate) async fn import_image_direct(
             .fetch_optional(store.pool())
             .await
             .map_err(db)?;
-    let (stored, _) = row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    let (stored, generation) =
+        row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
     let package: Package = serde_json::from_str(&stored)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
     for permission in ["images", "metadata.write"] {
@@ -811,6 +820,12 @@ pub(crate) async fn import_image_direct(
     }
     let bytes = download_provider_image(&package, &input.url).await?;
 
+    if let Some((auth, headers, background)) = authorization
+        && !super::run::worker_permitted(auth, headers, id, &_library, &generation, background)
+            .await?
+    {
+        return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+    }
     let (_, result) = crate::artwork::upload_internal(
         store,
         input.work_id,
@@ -838,6 +853,15 @@ pub(super) async fn import_image(
     Json(input): Json<ImportImage>,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
+    import_image_with_context(&auth, &headers, &id, input, None).await
+}
+pub(super) async fn import_image_with_context(
+    auth: &AuthState,
+    headers: &HeaderMap,
+    id: &str,
+    input: ImportImage,
+    background: Option<super::run::Background<'_>>,
+) -> Result<Json<Value>, Error> {
     let library: Option<String> = query_scalar("SELECT library_id FROM inventory_works WHERE id=?")
         .bind(&input.work_id)
         .fetch_optional(auth.store.pool())
@@ -845,20 +869,24 @@ pub(super) async fn import_image(
         .map_err(db)?;
     let library = library.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
     let generation: Option<String> = query_scalar("SELECT generation FROM extensions WHERE id=?")
-        .bind(&id)
+        .bind(id)
         .fetch_optional(auth.store.pool())
         .await
         .map_err(db)?;
     let generation = generation.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
-    if !permitted(&auth, &headers, &id, &library, &generation).await? {
+    if !super::run::worker_permitted(auth, headers, id, &library, &generation, background).await? {
         return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
     }
     let _slot = crate::extensions::runtime::try_acquire_execution(
-        &id,
-        crate::extensions::runtime::ExecutionClass::Interactive,
+        id,
+        if background.is_some() {
+            crate::extensions::runtime::ExecutionClass::Background
+        } else {
+            crate::extensions::runtime::ExecutionClass::Interactive
+        },
     )
     .ok_or_else(|| err(StatusCode::CONFLICT, "extension_busy"))?;
-    import_image_direct(&auth.store, &id, input).await
+    import_image_checked(&auth.store, id, input, Some((auth, headers, background))).await
 }
 
 #[cfg(test)]

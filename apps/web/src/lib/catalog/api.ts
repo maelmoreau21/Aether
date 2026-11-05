@@ -20,7 +20,7 @@ export interface Work {
   description: string; libraryId: string; synthetic: boolean; number?: number;
   posterUrl?: string | null;
   artwork?: Record<string, string | null>;
-  imageVariants?: { id: string; kind: string; url: string; origin: string; position: number; language?: string | null; provider?: string | null }[];
+  imageVariants?: { id: string; kind: string; url: string; origin: string; position: number; language?: string | null; provider?: string | null; pinned?: boolean; contentHash?: string | null }[];
   addedAt?: number | null;
   nodeId?: string;
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
@@ -28,6 +28,7 @@ export interface Work {
   originalLanguage?: string | null; originalTitle?: string | null; plot?: string | null; outline?: string | null;
   premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
   actors?: { name: string; role?: string; imageUrl?: string | null; thumbUrl?: string | null; thumb_url?: string | null }[]; directors?: string[]; writers?: string[];
+  crewCredits?: { name: string; role?: string; imageUrl?: string | null; providerId?: string | null }[];
   ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];

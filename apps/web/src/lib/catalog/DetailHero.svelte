@@ -23,7 +23,7 @@
   let failedLogo = $state('');
   let failedClearart = $state('');
   const hasBackdrop = $derived(Boolean(backdrop));
-  const hasClearart = $derived(Boolean(clearart) && failedClearart !== clearart);
+  const hasClearart = $derived((!hasBackdrop || ambient) && Boolean(clearart) && failedClearart !== clearart);
   const meaningful = (value?: string | null) => Boolean(value?.trim() && !['Média local indexé', 'Média local'].includes(value.trim()));
   const displayTitle = $derived(localizedTitle(work, $locale));
   const displayPlot = $derived(localizedPlot(work, $locale));
@@ -49,7 +49,7 @@
   <div class="stage" class:has-clearart={hasClearart}>
     <div class="hero" class:has-backdrop={hasBackdrop}>
       {#if hasBackdrop}
-        <img class="backdrop" class:ambient src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ threshold: ambient ? 1 : 0.3 }} onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+        <img class="backdrop" class:ambient src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ threshold: ambient ? 1 : 0.08 }} onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
         <div class="shade" aria-hidden="true"></div>
       {/if}
       <div class="cap">
@@ -241,18 +241,20 @@
     line-height: 0.95;
     letter-spacing: -0.035em;
     font-weight: 800;
-    max-width: 18ch;
+    width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .title-logo {
     display: block;
-    width: auto;
     height: auto;
-    max-width: min(100%, 520px);
+    max-width: 100%;
+    width: min(100%, 520px);
     max-height: 150px;
     object-fit: contain;
     object-position: left bottom;
-    filter: drop-shadow(0 4px 24px rgb(0 0 0 / 0.35));
+    filter: drop-shadow(0 0 1px rgb(255 255 255 / 0.8)) drop-shadow(0 4px 16px rgb(0 0 0 / 0.8));
   }
 
   .tagline {
@@ -269,7 +271,7 @@
     bottom: 0;
     z-index: 2;
     width: auto;
-    height: min(116%, 620px);
+    height: min(85%, 480px);
     max-width: 40%;
     object-fit: contain;
     object-position: bottom right;

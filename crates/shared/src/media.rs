@@ -46,6 +46,8 @@ pub struct ProviderRating {
 pub struct FilmMetadata {
     pub title: Option<String>,
     pub original_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_language: Option<String>,
     pub plot: Option<String>,
     pub outline: Option<String>,
     pub year: Option<u16>,

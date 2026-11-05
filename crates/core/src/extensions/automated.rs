@@ -35,7 +35,7 @@ pub(crate) async fn run_automated(
         extension_id,
         &job.library_id,
         generation,
-        Some(job),
+        Some(super::run::Background::Task(job)),
     )
     .await?
     {
@@ -377,7 +377,7 @@ pub(crate) async fn run_automated(
         &job.library_id,
         generation,
         invocation.clone(),
-        Some(job),
+        Some(super::run::Background::Task(job)),
         None,
     )
     .await?;
@@ -416,7 +416,7 @@ pub(crate) async fn run_automated(
             &job.library_id,
             generation,
             details,
-            Some(job),
+            Some(super::run::Background::Task(job)),
             None,
         )
         .await?;
@@ -458,7 +458,7 @@ pub(crate) async fn run_automated(
             &job.library_id,
             generation,
             details,
-            Some(job),
+            Some(super::run::Background::Task(job)),
             None,
         )
         .await?;

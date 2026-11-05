@@ -310,6 +310,12 @@ pub(super) async fn apply(
     if let Some(v) = proposal.get("actors").and_then(Value::as_array) {
         metadata_map.insert("actors".into(), json!(v));
     }
+    if let Some(v) = proposal.get("crewCredits").and_then(Value::as_array) {
+        metadata_map.insert(
+            "crewCredits".into(),
+            json!(v.iter().take(100).collect::<Vec<_>>()),
+        );
+    }
     if let Some(v) = proposal.get("ratings").and_then(Value::as_array) {
         metadata_map.insert("ratings".into(), json!(v));
     }

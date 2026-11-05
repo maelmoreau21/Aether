@@ -15,7 +15,6 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 type Error = StatusCode;
-static POSTER_WORKERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route("/api/v1/lists", get(lists).post(create_list))
@@ -494,26 +493,40 @@ async fn upload_poster(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let permit = POSTER_WORKERS
-        .try_acquire()
-        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
-    let image = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        crate::avatars::normalize_image(bytes, &content, true)
-    })
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
-    let meta = auth
+    let encoded = crate::artwork::prepare(bytes, content, "poster".into()).await?;
+    let mut stored = Vec::new();
+    let mut leases = Vec::new();
+    for (width, mime, data) in encoded.variants {
+        let meta = auth
+            .store
+            .assets
+            .put_bytes(&data, mime)
+            .await
+            .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+        leases.push(
+            auth.store
+                .assets
+                .lease(&meta.sha256)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        );
+        stored.push((width, meta.sha256));
+    }
+    let revision = uuid::Uuid::new_v4().to_string();
+    let mut tx = auth
         .store
-        .assets
-        .put_bytes(&image, "image/webp")
+        .pool
+        .begin()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     query("INSERT INTO work_posters(work_id,sha256,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
-        .bind(work)
-        .bind(&meta.sha256)
-        .bind(uuid::Uuid::new_v4().to_string())
-        .execute(&auth.store.pool)
+        .bind(&work).bind(&stored[0].1).bind(&revision).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    for (width, sha) in stored.iter().filter(|v| v.0 != 0) {
+        query("INSERT INTO poster_previews(work_id,width,revision,mime,sha256) VALUES(?,?,?,'image/webp',?) ON CONFLICT(work_id,width) DO UPDATE SET revision=excluded.revision,mime=excluded.mime,sha256=excluded.sha256")
+            .bind(&work).bind(width).bind(&revision).bind(sha).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    query("INSERT INTO image_migration_attempts(sha256,outcome) VALUES(?,'completed') ON CONFLICT(sha256) DO UPDATE SET outcome='completed'")
+        .bind(&stored[0].1).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     crate::inventory::invalidate_catalogue_cache();

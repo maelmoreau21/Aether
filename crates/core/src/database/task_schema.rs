@@ -103,7 +103,10 @@ mod tests {
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
-        sqlx::raw_sql(&legacy).execute(&mut conn).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*legacy))
+            .execute(&mut conn)
+            .await
+            .unwrap();
         sqlx::raw_sql("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('kept','Kept','films','local','/read-only',1); INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,available_at,error) VALUES('parent','kept','test','parent','local','scan','','',640,'{\"kept\":true}','full','running',321,2,1,7,43,99,1,2,1,NULL,900,3,'old warning'); INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,created_at,updated_at,available_at) VALUES('child','kept','test','child','local','analyze',4,5,6); INSERT INTO automation_dependencies(task_id,prerequisite_id) VALUES('child','parent'); CREATE INDEX preserved_task_index ON durable_tasks(owner,priority); CREATE TABLE task_probe(value TEXT); CREATE TRIGGER preserved_task_trigger AFTER UPDATE OF priority ON durable_tasks BEGIN INSERT INTO task_probe(value) VALUES(new.id); END;")
             .execute(&mut conn).await.unwrap();
         let before = snapshot(&mut conn).await;

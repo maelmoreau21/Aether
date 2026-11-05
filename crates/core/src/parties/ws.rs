@@ -241,6 +241,39 @@ pub(super) async fn handle_socket(
     send_task.abort();
 }
 
+/// Zero-leak: a title is only announced, queued or played when the actor and
+/// every current member may access it (library, media type and parental rules).
+async fn media_allowed_for_room(
+    hub: &WatchPartyHub,
+    room_arc: &Arc<RwLock<PartyRoom>>,
+    actor: &str,
+    media_id: &str,
+) -> bool {
+    let mut users: Vec<String> = room_arc
+        .read()
+        .await
+        .participants
+        .values()
+        .map(|p| p.user_id.clone())
+        .collect();
+    users.push(actor.to_owned());
+    users.sort();
+    users.dedup();
+    for user in users {
+        let role: Option<crate::identity::Role> =
+            query_scalar("SELECT role FROM users WHERE id = ?")
+                .bind(&user)
+                .fetch_optional(&hub.store.pool)
+                .await
+                .unwrap_or(None);
+        let Some(role) = role else { return false };
+        if !can_user_access_media(&hub.store, &user, &role, media_id).await {
+            return false;
+        }
+    }
+    true
+}
+
 pub(super) async fn handle_client_event(
     event: ClientMessage,
     room_arc: &Arc<RwLock<PartyRoom>>,
@@ -540,6 +573,15 @@ pub(super) async fn handle_client_event(
         }
 
         ClientMessage::ChangeMedia { media_id } => {
+            if !media_allowed_for_room(hub, room_arc, user_id, &media_id).await {
+                let _ = send_error(
+                    out_tx,
+                    "MEDIA_FORBIDDEN",
+                    "Média non autorisé pour ce groupe",
+                )
+                .await;
+                return;
+            }
             let mut room = room_arc.write().await;
             if !room.can_user_control(user_id) {
                 let _ = send_error(out_tx, "FORBIDDEN", "Contrôles non autorisés").await;
@@ -586,6 +628,15 @@ pub(super) async fn handle_client_event(
         }
 
         ClientMessage::AddToQueue { media_id } => {
+            if !media_allowed_for_room(hub, room_arc, user_id, &media_id).await {
+                let _ = send_error(
+                    out_tx,
+                    "MEDIA_FORBIDDEN",
+                    "Média non autorisé pour ce groupe",
+                )
+                .await;
+                return;
+            }
             let mut room = room_arc.write().await;
             if !room.can_user_control(user_id) {
                 let _ = send_error(out_tx, "FORBIDDEN", "Contrôles non autorisés").await;
@@ -685,6 +736,25 @@ pub(super) async fn handle_client_event(
         }
 
         ClientMessage::PlayQueueItem { queue_id } => {
+            // Rights may have changed since the item was queued.
+            let queued = room_arc
+                .read()
+                .await
+                .queue
+                .iter()
+                .find(|item| item.id == queue_id)
+                .map(|item| item.media_id.clone());
+            if let Some(media_id) = queued
+                && !media_allowed_for_room(hub, room_arc, user_id, &media_id).await
+            {
+                let _ = send_error(
+                    out_tx,
+                    "MEDIA_FORBIDDEN",
+                    "Média non autorisé pour ce groupe",
+                )
+                .await;
+                return;
+            }
             let mut room = room_arc.write().await;
             if !room.can_user_control(user_id) {
                 let _ = send_error(out_tx, "FORBIDDEN", "Contrôles non autorisés").await;

@@ -113,6 +113,9 @@ struct Input {
     is_default: bool,
     user_ids: Vec<String>,
     library_ids: Vec<String>,
+    /// Media types allowed to members; omitted keeps the current rule.
+    #[serde(default)]
+    allowed_kinds: Option<Vec<String>>,
 }
 async fn list(
     State(auth): State<AuthState>,
@@ -135,7 +138,15 @@ async fn list(
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
-    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|json!({"id":id,"name":name,"isDefault":bool::from(is_default),"systemRole":system_role(&id),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>() })).collect();
+    let denials: Vec<(String, String)> =
+        query_as("SELECT group_id,kind FROM group_media_kind_denials")
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(database)?;
+    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|{
+        let allowed: Vec<_> = crate::user_media_policy::MEDIA_KINDS.iter().filter(|kind| !denials.iter().any(|(group, denied)| group == &id && denied == *kind)).collect();
+        json!({"id":id,"name":name,"isDefault":bool::from(is_default),"systemRole":system_role(&id),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"allowedKinds":allowed })
+    }).collect();
     tx.commit().await.map_err(database)?;
     Ok(Json(json!({"groups":values})))
 }
@@ -175,6 +186,11 @@ async fn save(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let denied = input
+        .allowed_kinds
+        .as_deref()
+        .map(crate::user_media_policy::denied_kinds)
+        .transpose()?;
     let mut conn = auth.store.pool.acquire().await.map_err(database)?;
     let mut tx = crate::database::begin_write(&mut conn)
         .await
@@ -261,6 +277,26 @@ async fn save(
     for library in input.library_ids {
         query("INSERT INTO user_group_libraries(group_id,library_id) VALUES(?,?) ON CONFLICT DO NOTHING").bind(id).bind(library).execute(&mut *tx).await.map_err(database)?;
     }
+    if let Some(denied) = denied {
+        query("DELETE FROM group_media_kind_denials WHERE group_id=?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(database)?;
+        for kind in denied {
+            query("INSERT INTO group_media_kind_denials(group_id,kind) VALUES(?,?)")
+                .bind(id)
+                .bind(kind)
+                .execute(&mut *tx)
+                .await
+                .map_err(database)?;
+        }
+    }
+    // Library or type grants changed: per-user catalogue caches are stale.
+    query("UPDATE inventory_cache_generation SET gen=gen+1 WHERE id=1")
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
     tx.commit().await.map_err(database)?;
     Ok(())
 }

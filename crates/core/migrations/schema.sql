@@ -648,7 +648,7 @@ CREATE TABLE system_task_schedules (
 
 CREATE TABLE manual_timeline_markers (
     asset_id TEXT NOT NULL REFERENCES inventory_assets(id) ON DELETE CASCADE,
-    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits')),
+    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits','recap','preview')),
     start_seconds REAL,
     end_seconds REAL,
     enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
@@ -662,7 +662,7 @@ CREATE TABLE manual_timeline_markers (
 CREATE TABLE automatic_timeline_markers (
     asset_id TEXT NOT NULL REFERENCES inventory_assets(id) ON DELETE CASCADE,
     extension_id TEXT NOT NULL REFERENCES extensions(id) ON DELETE CASCADE,
-    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits')),
+    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits','recap','preview')),
     start_seconds REAL NOT NULL CHECK(start_seconds>=0),
     end_seconds REAL NOT NULL CHECK(end_seconds>start_seconds),
     confidence REAL NOT NULL CHECK(confidence>=0 AND confidence<=1),
@@ -1375,7 +1375,7 @@ CREATE TABLE automatic_timeline_markers (
     updated_at bigint NOT NULL,
     CONSTRAINT automatic_timeline_markers_check CHECK ((end_seconds > start_seconds)),
     CONSTRAINT automatic_timeline_markers_confidence_check CHECK (((confidence >= (0)::double precision) AND (confidence <= (1)::double precision))),
-    CONSTRAINT automatic_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text]))),
+    CONSTRAINT automatic_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text, 'recap'::text, 'preview'::text]))),
     CONSTRAINT automatic_timeline_markers_start_seconds_check CHECK ((start_seconds >= (0)::double precision))
 );
 
@@ -2030,7 +2030,7 @@ CREATE TABLE manual_timeline_markers (
     updated_at bigint NOT NULL,
     CONSTRAINT manual_timeline_markers_check CHECK ((((enabled = 0) AND (start_seconds IS NULL) AND (end_seconds IS NULL)) OR ((enabled = 1) AND (start_seconds >= (0)::double precision) AND (end_seconds > start_seconds)))),
     CONSTRAINT manual_timeline_markers_enabled_check CHECK ((enabled = ANY (ARRAY[0, 1]))),
-    CONSTRAINT manual_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text])))
+    CONSTRAINT manual_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text, 'recap'::text, 'preview'::text])))
 );
 
 

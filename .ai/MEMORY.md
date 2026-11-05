@@ -17,6 +17,27 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 5 novembre 2026 — Tâches post-scan, permissions par type, images et lecteur
+
+- Tâches non-scan (trickplay, chapitres, analyses) suivies par `active_task_runs`
+  (`migrations/task_runs.sql`) : elles ne réécrivent plus `scan_jobs`, ne bloquent
+  plus un rescan (409) ni le statut du scan. Résultats trickplay distants acceptés.
+  Images de chapitres préparées après scan si `chapterImagesDuringScan`.
+  `introDetectionEnabled` respecté ; le premier épisode d'une saison est réanalysé.
+- Migrations : FK suspendues autour de l'init SQLite ; marqueurs `recap`/`preview`
+  autorisés (SQLite reconstruit, PostgreSQL ALTER idempotent, non testé sur PG réel).
+- Droits : types de médias refusés par utilisateur/groupe (`media_kinds.sql`) intégrés
+  à la vue `effective_library_permissions` ; paliers d'âge, classifications normalisées
+  (FR:-16, FSK, TV-MA…) et héritées de la série ; SyncPlay vérifie chaque membre.
+  Non fait : contrôle parental par groupe.
+- Web : `fitArtwork` publie le ratio réel (`--artwork-ratio`), plus de fond flouté ;
+  aperçu trickplay mis à l'échelle sans rognage ; chapitres WebP ; bouton « Passer »
+  hors du dock masqué ; saut auto du récap ; sous-titre en échec non bloquant ;
+  reprise conservée au basculement.
+- Vérifié : tests Rust ciblés (unitaires, scanner, séries, sauvegarde, permissions,
+  SyncPlay, automation, tâches), suite complète avant derniers correctifs ; Web 345
+  tests, check, lint, build ; clippy core/node. Aucun commit ni navigateur réel.
+
 ## 5 novembre 2026 — Dossiers, extensions, groupes et réglages
 
 - Nouveau dossier de bibliothèque : le sélecteur ouvre la racine du Node (`/`

@@ -25,6 +25,8 @@
   let isDefault = $state(false);
   let userIds = $state<string[]>([]);
   let libraryIds = $state<string[]>([]);
+  const kindOptions = [{ id: 'films', label: 'Films' }, { id: 'series', label: 'Séries' }, { id: 'music', label: 'Musique' }] as const;
+  let allowedKinds = $state<string[]>(['films', 'series', 'music']);
   let editing = $state<string | null>(null);
   const systemRole = $derived(groups.find(group => group.id === editing)?.systemRole);
 
@@ -42,6 +44,7 @@
     editorOpen = false;
     name = '';
     isDefault = false;
+    allowedKinds = ['films', 'series', 'music'];
     userIds = [];
     libraryIds = [];
     activeTab = 'info';
@@ -58,6 +61,7 @@
     isDefault = !!group.isDefault;
     userIds = [...group.userIds];
     libraryIds = [...group.libraryIds];
+    allowedKinds = [...(group.allowedKinds ?? ['films', 'series', 'music'])];
     editorOpen = true;
     activeTab = 'info';
   }
@@ -77,7 +81,8 @@
             name: name.trim(),
             isDefault,
             userIds: systemRole ? [] : userIds,
-            libraryIds
+            libraryIds,
+            allowedKinds: kindOptions.map(option => option.id).filter(kind => allowedKinds.includes(kind))
           })
         }
       );
@@ -285,6 +290,15 @@
               {/if}
             </div>
           {:else if activeTab === 'permissions'}
+            <div class="dsm-form-section">
+              <h4 class="form-section-title">Types de médias autorisés</h4>
+              <p class="section-desc">Un type décoché est masqué et interdit à tous les membres, même si une bibliothèque de ce type leur est accordée ailleurs.</p>
+              <div class="kind-options">
+                {#each kindOptions as option (option.id)}
+                  <label><input type="checkbox" value={option.id} bind:group={allowedKinds} disabled={busy} /> {option.label}</label>
+                {/each}
+              </div>
+            </div>
             <div class="dsm-form-section">
               <h4 class="form-section-title">Permissions sur les bibliothèques</h4>
               <p class="section-desc">Cochez les bibliothèques accessibles par tous les membres de ce groupe :</p>
@@ -723,4 +737,6 @@
   @media (prefers-reduced-motion: reduce) {
     .btn, .dsm-tab, .btn-close, .dsm-table tbody tr, .search-box { transition: none; }
   }
+  .kind-options { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .kind-options label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; }
 </style>

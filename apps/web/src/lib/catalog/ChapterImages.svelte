@@ -22,7 +22,7 @@
         if (current.signal.aborted) return;
         for (let attempt = 0; attempt < 30; attempt++) {
           const image = await fetch(chapter.imageUrl, { method: 'HEAD', signal: current.signal, cache: 'no-store' });
-          if (image.status === 200 && image.headers.get('content-type')?.startsWith('image/jpeg')) {
+          if (image.status === 200 && ['image/jpeg', 'image/webp'].includes((image.headers.get('content-type') ?? '').split(';')[0].trim())) {
             chapter.image = chapter.imageUrl; chapter.state = ''; break;
           }
           if (image.status !== 202) { chapter.state = 'Indisponible ; réessayez après la lecture.'; break; }
@@ -69,7 +69,7 @@
   .chapter-images { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr)); gap: 16px; }
   figure { margin: 0; min-width: 0; }
   figure > p { display: grid; place-items: center; aspect-ratio: 16 / 9; margin: 0; padding: 12px; border-radius: var(--r-md); background: var(--pn); text-align: center; }
-  img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--r-md); background: var(--pn); }
+  img { display: block; width: 100%; height: auto; aspect-ratio: auto 16 / 9; object-fit: cover; border-radius: var(--r-md); background: var(--pn); }
   figcaption { margin-block: 8px 4px; font-size: 13px; font-weight: 600; color: var(--mu); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
   button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 16px; padding: 0 16px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--pn); color: var(--tx); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
   button:hover:not(:disabled) { background: var(--pn-2); }

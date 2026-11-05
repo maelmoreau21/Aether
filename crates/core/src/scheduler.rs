@@ -484,7 +484,7 @@ pub async fn dispatch_once(
     jobs.engine_busy
         .store(!leased.is_empty(), std::sync::atomic::Ordering::Relaxed);
     let statuses: Vec<(String,String,String)> = crate::database::query_as(
-        "SELECT r.scan_id,s.status,s.errors_json FROM active_scan_runs r JOIN scan_jobs s ON s.library_id=r.library_id WHERE EXISTS(SELECT 1 FROM durable_tasks j WHERE j.library_id=r.library_id AND j.lease_until IS NOT NULL)")
+        "SELECT r.scan_id,s.status,s.errors_json FROM active_scan_runs r JOIN scan_jobs s ON s.library_id=r.library_id WHERE EXISTS(SELECT 1 FROM durable_tasks j WHERE j.library_id=r.library_id AND j.lease_until IS NOT NULL) UNION ALL SELECT t.run_id,t.status,t.error FROM active_task_runs t")
         .fetch_all(&auth.store.pool).await?;
     let registry = auth.store.node_registry.snapshot_all();
     let expired: Vec<_> = leased
@@ -614,6 +614,9 @@ pub async fn dispatch_once(
         }
     }
     crate::task_engine::recover_expired(&auth.store, timestamp).await?;
+    // Task fences end with their lease: finished, recovered or cancelled runs.
+    crate::database::query("DELETE FROM active_task_runs WHERE NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE active_task_runs.run_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NOT NULL)")
+        .execute(&auth.store.pool).await?;
     for scan in expired {
         let _ = crate::inventory::clean_staging(&auth.store, &scan).await;
     }

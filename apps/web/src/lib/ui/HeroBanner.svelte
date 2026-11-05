@@ -130,7 +130,7 @@
             fetchpriority={index === 0 ? 'high' : 'low'}
             decoding="async"
             use:sampleTint={url}
-            use:fitArtwork={{ threshold: isAmbient(work) ? 1 : 0.3 }}
+            use:fitArtwork={{ adapt: false }}
             onerror={() => fail(url)}
           />
         {/if}
@@ -200,7 +200,7 @@
           onkeydown={event => onTabKeydown(event, index)}
         >
           {#if usable(thumb)}
-            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => fail(thumb)} />
+            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => fail(thumb)} />
             <span class="qi-shade" aria-hidden="true"></span>
           {/if}
           <span class="qi-title">{localizedTitle(work, $locale)}</span>

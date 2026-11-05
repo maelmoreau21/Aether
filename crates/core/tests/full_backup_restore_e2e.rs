@@ -77,6 +77,8 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
 
     // Create an asset in AssetStore
     let asset_bytes = b"VERIFIED_FULL_BACKUP_AVATAR_IMAGE_DATA_BYTES_PNG_OR_WEBP";
+    // The native avatar gallery seeds its own assets on a fresh database.
+    let seeded = store_a.assets().export_source().await.unwrap().items.len();
     let meta = store_a
         .assets()
         .put_bytes(asset_bytes, "image/png")
@@ -123,7 +125,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
         .unwrap();
 
     let asset_source = store_a.assets().export_source().await.unwrap();
-    assert_eq!(asset_source.items.len(), 1);
+    assert_eq!(asset_source.items.len(), seeded + 1);
 
     let archive_size = create_with_assets(
         &snapshot_db,
@@ -143,7 +145,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
     let extracted_dir = temp.path().join("extracted-recovery");
     let summary = extract(&backup_archive, &extracted_dir).await.unwrap();
     assert_eq!(summary.engine, "sqlite");
-    assert_eq!(summary.assets, 1);
+    assert_eq!(summary.assets as usize, seeded + 1);
     assert!(extracted_dir.join("database.sqlite3").exists());
     assert!(extracted_dir.join("assets.json").exists());
     assert!(extracted_dir.join("assets").join(&meta.sha256).exists());
@@ -159,7 +161,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
 
     // Before asset restore, the asset row exists in SQL but bytes are missing on disk
     let audit_before = store_b.assets().verify_all().await.unwrap();
-    assert_eq!(audit_before.missing.len(), 1);
+    assert_eq!(audit_before.missing.len(), seeded + 1);
 
     // Restore assets using restore_extracted
     let restore_report = store_b
@@ -167,7 +169,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
         .restore_extracted(&extracted_dir)
         .await
         .unwrap();
-    assert_eq!(restore_report.imported, 1);
+    assert_eq!(restore_report.imported as usize, seeded + 1);
     assert_eq!(restore_report.already_present, 0);
     assert!(restore_report.is_complete());
 
@@ -183,7 +185,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
 
     // Final audit
     let final_audit = store_b.assets().verify_all().await.unwrap();
-    assert_eq!(final_audit.checked, 1);
+    assert_eq!(final_audit.checked as usize, seeded + 1);
     assert_eq!(final_audit.missing.len(), 0);
     assert_eq!(final_audit.corrupt.len(), 0);
 

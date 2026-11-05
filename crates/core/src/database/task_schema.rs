@@ -1,6 +1,92 @@
 //! Widen existing task constraints without changing task identity or queue state.
 use sqlx::{Any, Transaction};
 
+/// Rebuild one SQLite table from the current schema definition, keeping rows,
+/// rowids, indexes and triggers. Callers run with foreign keys suspended.
+async fn rebuild_sqlite_table(
+    tx: &mut Transaction<'_, Any>,
+    schema: &str,
+    table: &str,
+) -> Result<(), sqlx::Error> {
+    let definitions: Vec<String> = sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE tbl_name=? AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name")
+        .bind(table)
+        .fetch_all(&mut **tx)
+        .await?;
+    let marker = format!("CREATE TABLE {table} (");
+    let created = schema
+        .split_once(marker.as_str())
+        .and_then(|(_, rest)| {
+            let (columns, tail) = rest.split_once("\n)")?;
+            let (suffix, _) = tail.split_once(';')?;
+            Some(format!(
+                "CREATE TABLE {table}_widened ({columns}\n){suffix};"
+            ))
+        })
+        .ok_or_else(|| sqlx::Error::Protocol(format!("Missing current {table} schema")))?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(&*created))
+        .execute(&mut **tx)
+        .await?;
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("INSERT INTO {table}_widened SELECT * FROM {table}; DROP TABLE {table}; ALTER TABLE {table}_widened RENAME TO {table};")))
+        .execute(&mut **tx)
+        .await?;
+    for definition in definitions {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*definition))
+            .execute(&mut **tx)
+            .await?;
+    }
+    // Only relations touching the rebuilt table are validated: unrelated
+    // historical orphans must not prevent the server from starting.
+    let violations = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&mut **tx)
+        .await?;
+    if violations.iter().any(|row| {
+        use sqlx::Row;
+        let child: String = row.try_get(0).unwrap_or_default();
+        let parent: String = row.try_get(2).unwrap_or_default();
+        child == table || parent == table
+    }) {
+        return Err(sqlx::Error::Protocol(format!(
+            "{table} constraint upgrade failed foreign key validation"
+        )));
+    }
+    Ok(())
+}
+
+/// Recap and preview markers from chapters/plugins were rejected by legacy CHECKs.
+pub(super) async fn allow_marker_kinds(
+    tx: &mut Transaction<'_, Any>,
+    sqlite: bool,
+    schema: &str,
+) -> Result<(), sqlx::Error> {
+    for table in ["manual_timeline_markers", "automatic_timeline_markers"] {
+        if sqlite {
+            let previous: Option<String> =
+                sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_optional(&mut **tx)
+                    .await?;
+            if previous.is_none_or(|sql| sql.contains("'recap'")) {
+                continue;
+            }
+            rebuild_sqlite_table(tx, schema, table).await?;
+        } else {
+            let constraint = format!("{table}_marker_type_check");
+            let current: Option<String> = sqlx::query_scalar("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid=$1::regclass AND conname=$2")
+                .bind(table)
+                .bind(&constraint)
+                .fetch_optional(&mut **tx)
+                .await?;
+            if current.is_some_and(|definition| definition.contains("recap")) {
+                continue;
+            }
+            sqlx::raw_sql(sqlx::AssertSqlSafe(format!("ALTER TABLE {table} DROP CONSTRAINT IF EXISTS {constraint}; ALTER TABLE {table} ADD CONSTRAINT {constraint} CHECK(marker_type IN ('intro','credits','recap','preview'));")))
+                .execute(&mut **tx)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn allow_trickplay(
     tx: &mut Transaction<'_, Any>,
     sqlite: bool,
@@ -26,33 +112,9 @@ pub(super) async fn allow_trickplay(
                     .into(),
             ));
         }
-        let definitions: Vec<String> = sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE tbl_name='durable_tasks' AND type IN ('index','trigger') AND sql IS NOT NULL ORDER BY type,name")
-            .fetch_all(&mut **tx).await?;
-        let table = schema
-            .split_once("CREATE TABLE durable_tasks (")
-            .and_then(|(_, rest)| rest.split_once("\n);"))
-            .map(|(columns, _)| format!("CREATE TABLE durable_tasks_trickplay ({columns}\n);"))
-            .ok_or_else(|| sqlx::Error::Protocol("Missing current task schema".into()))?;
-        sqlx::raw_sql(sqlx::AssertSqlSafe(&*table))
-            .execute(&mut **tx)
-            .await?;
-        sqlx::raw_sql("INSERT INTO durable_tasks_trickplay SELECT * FROM durable_tasks; DROP TABLE durable_tasks; ALTER TABLE durable_tasks_trickplay RENAME TO durable_tasks;")
-            .execute(&mut **tx).await?;
-        for definition in definitions {
-            sqlx::raw_sql(sqlx::AssertSqlSafe(&*definition))
-                .execute(&mut **tx)
-                .await?;
-        }
         // No media/catalogue tables are rewritten. Dependencies, automation links
         // and their FK targets keep the same table name and original task IDs.
-        let violations = sqlx::query("PRAGMA foreign_key_check")
-            .fetch_all(&mut **tx)
-            .await?;
-        if !violations.is_empty() {
-            return Err(sqlx::Error::Protocol(
-                "Task constraint upgrade failed foreign key validation".into(),
-            ));
-        }
+        rebuild_sqlite_table(tx, schema, "durable_tasks").await?;
     } else {
         let constraints: Vec<String> = sqlx::query_scalar("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='durable_tasks'::regclass AND conname IN ('durable_tasks_category_check','durable_tasks_width_check')")
             .fetch_all(&mut **tx).await?;
@@ -99,7 +161,7 @@ mod tests {
             .split_once("-- AETHER_SCHEMA_SQLITE_END")
             .unwrap()
             .0;
-        let legacy=schema.replace("'image','trickplay','system'","'image','system'").replace("CHECK((category='trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280))","CHECK(width IN (320,640,1280))");
+        let legacy=schema.replace("'image','trickplay','system'","'image','system'").replace("CHECK((category='trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280))","CHECK(width IN (320,640,1280))").replace("CHECK(marker_type IN ('intro','credits','recap','preview'))","CHECK(marker_type IN ('intro','credits'))");
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
@@ -114,9 +176,23 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(snapshot(&mut conn).await, before);
+        for table in ["manual_timeline_markers", "automatic_timeline_markers"] {
+            let sql: String =
+                sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table)
+                    .fetch_one(&mut conn)
+                    .await
+                    .unwrap();
+            assert!(
+                sql.contains("'recap'") && sql.contains("'preview'"),
+                "{table}"
+            );
+        }
         let dependencies:i64=sqlx::query_scalar("SELECT COUNT(*) FROM automation_dependencies WHERE task_id='child' AND prerequisite_id='parent'").fetch_one(&mut conn).await.unwrap();
         assert_eq!(dependencies, 1);
-        let schema_version: i64 = sqlx::query_scalar("PRAGMA schema_version")
+        // Shared views are recreated on every start; the rebuilt tables must not be.
+        let table_sql = "SELECT group_concat(sql,';') FROM (SELECT sql FROM sqlite_master WHERE tbl_name IN ('durable_tasks','manual_timeline_markers','automatic_timeline_markers') AND sql IS NOT NULL ORDER BY type,name)";
+        let schema_version: String = sqlx::query_scalar(table_sql)
             .fetch_one(&mut conn)
             .await
             .unwrap();
@@ -125,7 +201,7 @@ mod tests {
             .unwrap();
         assert_eq!(snapshot(&mut conn).await, before);
         assert_eq!(
-            sqlx::query_scalar::<_, i64>("PRAGMA schema_version")
+            sqlx::query_scalar::<_, String>(table_sql)
                 .fetch_one(&mut conn)
                 .await
                 .unwrap(),

@@ -50,6 +50,8 @@
   let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
   let autoSkipIntro = $state(preferences().autoSkipIntro === true);
   let autoSkipCredits = $state(preferences().autoSkipCredits === true);
+  let skipRecapEnabled = $state(preferences().skipRecapEnabled !== false);
+  let autoSkipRecap = $state(preferences().autoSkipRecap === true);
   let offsetsEdited = false;
   let playbackDefaults = $state(playbackPreferences(preferences()));
   let playbackEdited = false;
@@ -127,6 +129,8 @@
       skipCreditsEnabled = saved.skipCreditsEnabled !== false;
       autoSkipIntro = saved.autoSkipIntro === true;
       autoSkipCredits = saved.autoSkipCredits === true;
+      skipRecapEnabled = saved.skipRecapEnabled !== false;
+      autoSkipRecap = saved.autoSkipRecap === true;
       if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
     const sync = () => {
@@ -323,6 +327,8 @@
           <label class="checkbox-row"><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> {$t('suggest_skip_credits')}</label>
           <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> {$t('auto_skip_intro')}</label>
           <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> {$t('auto_skip_credits')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={skipRecapEnabled} onchange={() => savePreferences({ skipRecapEnabled })} /> {$t('suggest_skip_recap')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipRecap} onchange={() => savePreferences({ autoSkipRecap })} /> {$t('auto_skip_recap')}</label>
         </section>
 
         <form class="offsets" onsubmit={saveOffsets}>

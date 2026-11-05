@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade } from 'svelte/transition';
+  const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   import { tick } from 'svelte';
 
   import Icon from '../ui/Icon.svelte';
@@ -414,14 +416,6 @@
       {/if}
     </div>
   {/if}
-    {#if skipMarker}
-    <div class="skip-marker-overlay">
-      <button type="button" class="skip-marker-btn" onclick={() => { onSeek(skipMarker.end, skipMarker.kind); onWake(); }}>
-        <span>{skipMarker.label}</span>
-        <span class="skip-marker-arrow">&rsaquo;</span>
-      </button>
-    </div>
-  {/if}
   <!-- Barre de lecture : tronçons de chapitres séparés par un fin espace, aperçu au survol. -->
   <div
     class="timeline"
@@ -455,11 +449,15 @@
     {#if preview.hoverTime !== null && playback.duration > 0}
       <output class="seek-preview" aria-hidden="true" bind:offsetWidth={tooltipWidth} style:left={`${tooltipLeft}px`}>
         {#if previewFrame}
-          <span class="trickplay-frame" style:width={previewFrame.width + 'px'} style:height={previewFrame.height + 'px'}>
+          <!-- Vignette au ratio exact de la tuile, mise à l'échelle (jamais rognée) :
+               la planche est positionnée en pourcentages de la tuile affichée. -->
+          <span class="trickplay-frame"
+            style:aspect-ratio={`${previewFrame.width} / ${previewFrame.height}`}
+            style:width={`min(${previewFrame.width}px, var(--trickplay-max-w), calc(var(--trickplay-max-h) * ${previewFrame.width / previewFrame.height}))`}>
             <img src={previewFrame.url} alt="" draggable="false"
-              style:width={previewFrame.fullWidth + 'px'}
-              style:height={previewFrame.fullHeight + 'px'}
-              style:transform={`translate(-${previewFrame.x}px, -${previewFrame.y}px)`}
+              style:width={`${(previewFrame.fullWidth / previewFrame.width) * 100}%`}
+              style:left={`${(-previewFrame.x / previewFrame.width) * 100}%`}
+              style:top={`${(-previewFrame.y / previewFrame.height) * 100}%`}
               onerror={() => { if (previewFrame) preview.markHoveredSheetFailed(); }}
             />
           </span>
@@ -634,6 +632,15 @@
     </div>
   </div>
 </div>
+<!-- Hors du dock : le bouton reste visible et cliquable quand les commandes se masquent. -->
+{#if skipMarker}
+  <div class="skip-marker-overlay" class:raised={visible} transition:fade={{ duration: reducedMotion ? 0 : 200 }}>
+    <button type="button" class="skip-marker-btn" onclick={() => { if (skipMarker) onSeek(skipMarker.end, skipMarker.kind); onWake(); }}>
+      <span>{skipMarker.label}</span>
+      <span class="skip-marker-arrow">&rsaquo;</span>
+    </button>
+  </div>
+{/if}
 <style>
   /* ==========================================================================
      Commandes du lecteur (Halo, toujours sombre). Pas de dock vitré : un voile
@@ -844,16 +851,17 @@
     color: #fff;
   }
   .trickplay-frame {
+    --trickplay-max-w: min(70vw, 320px);
+    --trickplay-max-h: 180px;
     display: block;
     overflow: hidden;
     position: relative;
-    max-width: min(70vw, 320px);
-    max-height: 180px;
-    border: 2px solid rgb(255 255 255 / 0.9);
     border-radius: var(--r-sm);
-    box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+    background: #000;
+    /* Anneau extérieur : la bordure ne mange plus 4 px de l'image. */
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 10px 30px rgb(0 0 0 / 0.5);
   }
-  .trickplay-frame img { position: absolute; top: 0; left: 0; max-width: none; }
+  .trickplay-frame img { position: absolute; display: block; height: auto; max-width: none; max-height: none; }
   .preview-label {
     display: flex;
     flex-direction: column;
@@ -882,11 +890,13 @@
   /* ---------- Bouton « Passer… » ---------- */
   .skip-marker-overlay {
     position: absolute;
-    right: max(var(--pc-gutter), env(safe-area-inset-right));
-    bottom: calc(100% - 104px);
+    right: max(var(--gutter, 40px), env(safe-area-inset-right));
+    bottom: max(48px, calc(env(safe-area-inset-bottom) + 32px));
     z-index: 40;
     pointer-events: auto;
+    transition: bottom var(--t-slow) ease;
   }
+  .skip-marker-overlay.raised { bottom: 168px; }
   .skip-marker-btn {
     gap: 10px;
     min-height: 52px;
@@ -1068,10 +1078,11 @@
     .time { order: 1; margin-left: 4px; font-size: 13px; }
     .right-controls { order: 2; }
     .left-controls { order: 3; width: 100%; justify-content: center; }
-    .skip-marker-overlay { right: max(12px, env(safe-area-inset-right)); bottom: calc(100% - 60px); }
+    .skip-marker-overlay { right: max(12px, env(safe-area-inset-right)); bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px)); }
+    .skip-marker-overlay.raised { bottom: 132px; }
     .skip-marker-btn { min-height: 44px; padding: 0 18px; font-size: 14px; }
     .seek-preview { max-width: 70vw; }
-    .trickplay-frame { max-width: min(48vw, 200px); max-height: 120px; }
+    .trickplay-frame { --trickplay-max-w: min(48vw, 200px); --trickplay-max-h: 120px; }
   }
   @media (max-width: 768px) {
     .floating-menu {

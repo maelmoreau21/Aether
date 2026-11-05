@@ -174,6 +174,33 @@ pub async fn begin_write_serialized(
 /// Install the one current schema on an empty database. Existing databases are
 /// never rewritten here; incompatible older schemas fail explicitly.
 pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
+    // Widening legacy SQLite task constraints recreates `durable_tasks`. SQLite
+    // ignores `PRAGMA foreign_keys` inside a transaction and a DROP with
+    // enforcement enabled would cascade into dependent queue rows, so every
+    // caller gets enforcement suspended around the schema transaction only.
+    let sqlite = conn.backend_name() == "SQLite";
+    let enforced: i64 = if sqlite {
+        sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(&mut *conn)
+            .await?
+    } else {
+        0
+    };
+    if enforced != 0 {
+        sqlx::raw_sql("PRAGMA foreign_keys=OFF")
+            .execute(&mut *conn)
+            .await?;
+    }
+    let result = initialize_schema_transaction(conn).await;
+    if enforced != 0 {
+        sqlx::raw_sql("PRAGMA foreign_keys=ON")
+            .execute(&mut *conn)
+            .await?;
+    }
+    result
+}
+
+async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
     const SOURCE: &str = include_str!("../migrations/schema.sql");
     const SQLITE_START: &str = "-- AETHER_SCHEMA_SQLITE_BEGIN";
     const SQLITE_END: &str = "-- AETHER_SCHEMA_SQLITE_END";
@@ -382,6 +409,7 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
         sqlx::raw_sql(section).execute(&mut *tx).await?;
     }
     task_schema::allow_trickplay(&mut tx, sqlite, section).await?;
+    task_schema::allow_marker_kinds(&mut tx, sqlite, section).await?;
     sqlx::raw_sql(include_str!("../migrations/extension_update.sql"))
         .execute(&mut *tx)
         .await?;
@@ -415,6 +443,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     sqlx::raw_sql(include_str!("../migrations/application_scope.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("../migrations/task_runs.sql"))
+        .execute(&mut *tx)
+        .await?;
     sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
         .execute(&mut *tx)
         .await?;
@@ -422,6 +453,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
         .execute(&mut *tx)
         .await?;
     crate::groups::initialize_role_groups(&mut tx).await?;
+    sqlx::raw_sql(include_str!("../migrations/media_kinds.sql"))
+        .execute(&mut *tx)
+        .await?;
     sqlx::raw_sql(include_str!("../migrations/role_groups.sql"))
         .execute(&mut *tx)
         .await?;

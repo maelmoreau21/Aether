@@ -18,6 +18,7 @@ export type Preferences = {
   subtitleStyle?: SubtitleStyle;
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
   autoSkipIntro?: boolean; autoSkipCredits?: boolean;
+  skipRecapEnabled?: boolean; autoSkipRecap?: boolean;
   autoplayNextEpisode?: boolean; skipBackSeconds?: number; skipForwardSeconds?: number;
   artworkRotation?: ArtworkRotationPolicy;
 };

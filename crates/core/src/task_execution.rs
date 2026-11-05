@@ -57,9 +57,15 @@ pub(crate) async fn dispatch(
             .map_err(|_| sqlx::Error::Protocol("Invalid library trickplay options".into()))?;
         // The library policy is checked again at dispatch, so disabling a library
         // feature also stops work already waiting behind a scan or active playback.
-        if !options.trickplay_enabled
-            || (job.owner == "library-trickplay" && !options.trickplay_during_scan)
-        {
+        let chapters = job.component == "chapters";
+        let disabled = if chapters {
+            !options.chapter_images_enabled
+                || (job.owner == "library-chapter-images" && !options.chapter_images_during_scan)
+        } else {
+            !options.trickplay_enabled
+                || (job.owner == "library-trickplay" && !options.trickplay_during_scan)
+        };
+        if disabled {
             task_engine::finish(
                 &auth.store,
                 &job.id,
@@ -69,7 +75,8 @@ pub(crate) async fn dispatch(
                 None,
             )
             .await?;
-            query("UPDATE durable_tasks SET status='cancelled',error='library_trickplay_disabled' WHERE id=? AND attempt=? AND status='completed' AND lease_until IS NULL")
+            query("UPDATE durable_tasks SET status='cancelled',error=? WHERE id=? AND attempt=? AND status='completed' AND lease_until IS NULL")
+                .bind(if chapters { "library_chapter_images_disabled" } else { "library_trickplay_disabled" })
                 .bind(&job.id).bind(job.attempt).execute(auth.store.pool()).await?;
             return Ok(());
         }
@@ -88,10 +95,10 @@ pub(crate) async fn dispatch(
             .await
             .map_err(|_| sqlx::Error::Protocol("Local task root denied".into()))?;
     }
-    query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'running',0,0) ON CONFLICT(library_id) DO UPDATE SET status='running',errors_json='[]',errors_count=0,warnings_count=0")
-        .bind(&job.library_id).execute(auth.store.pool()).await?;
-    query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES(?,?,?) ON CONFLICT(library_id) DO UPDATE SET scan_id=excluded.scan_id,node_id=excluded.node_id")
-        .bind(&job.library_id).bind(&run).bind(&node).execute(auth.store.pool()).await?;
+    // Task runs are fenced by their own row: the library scan status and its
+    // active scan fence stay untouched by post-scan previews or analyses.
+    query("INSERT INTO active_task_runs(run_id,library_id,node_id,status,error) VALUES(?,?,?,'running','') ON CONFLICT(run_id) DO UPDATE SET library_id=excluded.library_id,node_id=excluded.node_id,status='running',error=''")
+        .bind(&run).bind(&job.library_id).bind(&node).execute(auth.store.pool()).await?;
     let cancel = Arc::new(AtomicBool::new(false));
     jobs.cancellations
         .lock()
@@ -138,7 +145,7 @@ pub(crate) async fn dispatch(
     let task = tokio::spawn(async move {
         if node != "local" {
             if let Err(error) = crate::nodes::dispatch_remote_task(&store, &request).await {
-                let _ = set_scan_result(&store, &job.library_id, &run, Some(&error)).await;
+                let _ = set_task_result(&store, &run, Some(&error)).await;
             }
         } else {
             let outcome=async {
@@ -155,7 +162,7 @@ pub(crate) async fn dispatch(
                 }}
             }.await;
             let _effects = task_engine::EFFECT_GATE.lock().await;
-            if crate::nodes::scan_run_authorized(&store, &job.library_id, &node, &run).await {
+            if crate::nodes::task_run_authorized(&store, &job.library_id, &node, &run).await {
                 let error = match outcome {
                     Ok(result) => match task_engine::record_result(
                         &store,
@@ -172,7 +179,7 @@ pub(crate) async fn dispatch(
                     },
                     Err(error) => Some(error),
                 };
-                let _ = set_scan_result(&store, &job.library_id, &run, error.as_deref()).await;
+                let _ = set_task_result(&store, &run, error.as_deref()).await;
             }
         }
         if let Ok(mut tokens) = jobs_task.cancellations.lock() {
@@ -184,17 +191,25 @@ pub(crate) async fn dispatch(
     Ok(())
 }
 
-pub(crate) async fn set_scan_result(
+pub(crate) async fn set_task_result(
     store: &crate::identity::IdentityStore,
-    library: &str,
     run: &str,
     error: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let errors = error
-        .map(|e| serde_json::json!([e]).to_string())
-        .unwrap_or_else(|| "[]".into());
-    query("UPDATE scan_jobs SET status=?,errors_json=?,errors_count=?,discovered=1,probed=1 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-        .bind(if error.is_some(){"error"}else{"completed"}).bind(errors).bind(i64::from(error.is_some())).bind(library).bind(run).execute(store.pool()).await?;
+    query("UPDATE active_task_runs SET status=?,error=? WHERE run_id=? AND status='running'")
+        .bind(if error.is_some() {
+            "error"
+        } else {
+            "completed"
+        })
+        .bind(
+            error
+                .map(|e| e.chars().take(1024).collect::<String>())
+                .unwrap_or_default(),
+        )
+        .bind(run)
+        .execute(store.pool())
+        .await?;
     Ok(())
 }
 

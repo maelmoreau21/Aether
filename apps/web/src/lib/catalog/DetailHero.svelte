@@ -49,7 +49,7 @@
   <div class="stage" class:has-clearart={hasClearart}>
     <div class="hero" class:has-backdrop={hasBackdrop}>
       {#if hasBackdrop}
-        <img class="backdrop" class:ambient src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ threshold: ambient ? 1 : 0.08 }} onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+        <img class="backdrop" class:ambient src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
         <div class="shade" aria-hidden="true"></div>
       {/if}
       <div class="cap">

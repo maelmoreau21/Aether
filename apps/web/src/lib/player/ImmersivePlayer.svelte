@@ -68,6 +68,7 @@
   let markerEditor = $state(false);
   let markerKind = $state<'intro' | 'credits' | 'recap' | 'preview'>('intro');
   let hasAutoSkippedIntro = false;
+  let hasAutoSkippedRecap = false;
   let hasAutoSkippedCredits = false;
   let markerEnabled = $state(true);
   let markerStart = $state(0);
@@ -108,6 +109,7 @@
   let scrollPosition = 0;
   let previousVolume = 1;
   let triedMediaIds = new SvelteSet<string>();
+  let resumeTarget = 0;
   let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;
@@ -175,6 +177,17 @@
     const dur = playback.duration;
     if (!opened || busy || paused || dur <= 0 || syncClient) return;
     const prefs = preferences();
+    if (prefs.autoSkipRecap && active?.recap && !hasAutoSkippedRecap) {
+      if (pos >= active.recap.start && pos < active.recap.end - 1.0) {
+        hasAutoSkippedRecap = true;
+        // Récap suivi d'une intro elle aussi sautée : un seul saut, sans double seek.
+        const chained = prefs.autoSkipIntro && active.intro && Math.abs(active.intro.start - active.recap.end) <= 1.0;
+        if (chained) hasAutoSkippedIntro = true;
+        measuredSeek(chained && active.intro ? active.intro.end : active.recap.end, 'skip_recap', 'automatic');
+        notice = chained ? 'Récapitulatif et introduction sautés automatiquement' : 'Récapitulatif sauté automatiquement';
+        return;
+      }
+    }
     if (prefs.autoSkipIntro && active?.intro && !hasAutoSkippedIntro) {
       if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
         hasAutoSkippedIntro = true;
@@ -210,15 +223,18 @@
     failoverInProgress = true;
     try {
       const snapshot = engine.state();
-      const savedPosition = Math.max(playback.position, snapshot.position || 0, video?.currentTime || 0);
+      const observed = Math.max(playback.position, snapshot.position || 0, video?.currentTime || 0);
+      // A failure before the resume seek must not restart at 0 nor overwrite the
+      // saved progress: fall back to the loaded resume point.
+      const savedPosition = Number.isFinite(observed) && observed > 0 ? observed : resumeTarget;
       const restoreState: PlaybackState = {
-        position: Number.isFinite(savedPosition) ? savedPosition : 0,
+        position: savedPosition,
         duration: playback.duration,
         paused: false,
         volume: playback.volume,
         speed: playback.speed
       };
-      progressTracker?.save(restoreState, true);
+      if (observed > 0) progressTracker?.save(restoreState, true);
       loadStage = 'Basculement automatique vers un nœud disponible…';
       let fallbackMedia: Media | undefined;
       try {
@@ -275,6 +291,7 @@
       if (tracker) progressTracker = tracker;
       else progressTracker?.setCreditsStart(detectedCreditsStart);
       const resume = tracker?.load();
+      if (tracker) { resumeTarget = 0; void resume?.then(position => { if (current === generation && Number.isFinite(position)) resumeTarget = position; }, () => undefined); }
       // Preferences are optional: an outage must not prevent authorized playback.
       // preferences() is cleared by session generation changes.
       let preferenceNotice = '';
@@ -312,13 +329,14 @@
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
       hasAutoSkippedIntro = false;
+      hasAutoSkippedRecap = false;
       hasAutoSkippedCredits = false;
       const skipPreferences = preferences();
       active = {
         ...media,
         intro: skipPreferences.skipIntroEnabled === false ? undefined : media.intro,
         credits: skipPreferences.skipCreditsEnabled === false ? undefined : media.credits,
-        recap: media.recap,
+        recap: skipPreferences.skipRecapEnabled === false ? undefined : media.recap,
         preview: media.preview
       };
       presence?.stop();presence=undefined;
@@ -383,7 +401,7 @@
           ...fresh,
           intro: preferences().skipIntroEnabled === false ? undefined : fresh.intro,
           credits: preferences().skipCreditsEnabled === false ? undefined : fresh.credits,
-          recap: fresh.recap,
+          recap: preferences().skipRecapEnabled === false ? undefined : fresh.recap,
           preview: fresh.preview
         };
       } else {
@@ -558,7 +576,13 @@
     const current = generation;
     const accountGeneration = getSessionGeneration();
     void action(async player => {
-    await player.selectSubtitle(id);
+    // Un sous-titre indisponible (préparation occupée, WebVTT illisible) ne doit
+    // jamais interrompre ni basculer la lecture : on prévient et on continue.
+    try { await player.selectSubtitle(id); }
+    catch {
+      if (current === generation) notice = 'Sous-titres indisponibles pour le moment. La lecture continue.';
+      return;
+    }
     if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
     subtitle = id;
     trackSubtitle(id, 'manual');

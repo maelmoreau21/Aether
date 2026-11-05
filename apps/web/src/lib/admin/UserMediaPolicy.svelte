@@ -1,12 +1,14 @@
 <script lang="ts">
   import { session } from '../auth/session';
   let { userId }: { userId: string } = $props();
+  const kindOptions = [{ id: 'films', label: 'Films' }, { id: 'series', label: 'Séries' }, { id: 'music', label: 'Musique' }] as const;
+  let kinds = $state<string[]>(['films', 'series', 'music']), effective = $state<string[]>([]);
   let allow = $state(false), loaded = $state(false), busy = $state(false), error = $state(''), notice = $state('');
   $effect(() => {
     const id = userId, controller = new AbortController(); loaded = false; error = ''; notice = '';
     fetch(`/api/v1/admin/users/${encodeURIComponent(id)}/media-policy`, { signal: controller.signal, cache: 'no-store' })
       .then(async response => { if (!response.ok) throw new Error('Permissions indisponibles.'); return response.json(); })
-      .then(value => { if (!controller.signal.aborted) { allow = value.allowMediaDownload; loaded = true; } })
+      .then(value => { if (!controller.signal.aborted) { allow = value.allowMediaDownload; kinds = Array.isArray(value.allowedKinds) ? value.allowedKinds : ['films', 'series', 'music']; effective = Array.isArray(value.effectiveKinds) ? value.effectiveKinds : kinds; loaded = true; } })
       .catch(cause => { if (!controller.signal.aborted) error = cause.message; });
     return () => controller.abort();
   });
@@ -14,14 +16,20 @@
     event.preventDefault(); if (busy || !loaded) return;
     busy = true; error = ''; notice = ''; const id = userId;
     try {
-      const response = await fetch(`/api/v1/admin/users/${encodeURIComponent(id)}/media-policy`, { method:'PUT', headers:{'content-type':'application/json','x-csrf-token':$session?.csrfToken ?? ''}, body:JSON.stringify({allowMediaDownload:allow}) });
+      const response = await fetch(`/api/v1/admin/users/${encodeURIComponent(id)}/media-policy`, { method:'PUT', headers:{'content-type':'application/json','x-csrf-token':$session?.csrfToken ?? ''}, body:JSON.stringify({allowMediaDownload:allow, allowedKinds:kindOptions.map(option => option.id).filter(kind => kinds.includes(kind))}) });
       if (!response.ok) throw new Error('Permissions non enregistrées.');
-      if (id === userId) notice = 'Permissions enregistrées.';
+      if (id === userId) { notice = 'Permissions enregistrées.'; effective = effective.filter(kind => kinds.includes(kind)); }
     } catch (cause) { if (id === userId) error = cause instanceof Error ? cause.message : 'Erreur'; }
     finally { busy = false; }
   }
 </script>
-<form onsubmit={save}><fieldset disabled={busy || !loaded}><legend>Téléchargement et synchronisation</legend>
+<form onsubmit={save}><fieldset disabled={busy || !loaded}><legend>Types de médias autorisés</legend>
+  {#each kindOptions as option (option.id)}
+    <label><input type="checkbox" value={option.id} bind:group={kinds} />{option.label}</label>
+  {/each}
+  <p>Un type décoché disparaît du menu, des étagères, de la recherche, des listes et de la lecture pour ce compte, quelles que soient ses bibliothèques. Les règles des groupes s’ajoutent : la plus restrictive l’emporte.</p>
+  {#if loaded && effective.length < 3}<p>Types réellement accessibles avec les groupes : {effective.length ? kindOptions.filter(option => effective.includes(option.id)).map(option => option.label).join(', ') : 'aucun'}.</p>{/if}
+</fieldset><fieldset disabled={busy || !loaded}><legend>Téléchargement et synchronisation</legend>
   <label><input type="checkbox" bind:checked={allow} />Autoriser le téléchargement des fichiers originaux et les nouvelles copies hors ligne</label>
   <p>Ce droit contrôle le téléchargement proposé par l’application. Un client autorisé à lire reçoit les octets du média et peut les enregistrer. Une copie déjà téléchargée reste sur l’appareil.</p>
   <button>Enregistrer les permissions</button>

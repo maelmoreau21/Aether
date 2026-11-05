@@ -2,6 +2,8 @@
   import { session } from '../auth/session';
   type Window = { day: number; startMinute: number; endMinute: number };
   let { userId }: { userId: string } = $props();
+  // Paliers comparables aux classifications normalisées (FR:-16, TV-MA, PG-13…).
+  const ageTiers = [{ value: 0, label: 'Tous publics uniquement' }, { value: 10, label: '10 ans (-10)' }, { value: 12, label: '12 ans (-12)' }, { value: 16, label: '16 ans (-16)' }, { value: 18, label: '18 ans (-18)' }, { value: 21, label: 'Sans limite d’âge' }];
   let enabled = $state(false), maximumAge = $state(12), allowUnrated = $state(false);
   let tags = $state(''), windows = $state<Window[]>([]);
   let error = $state(''), notice = $state(''), busy = $state(false), loaded = $state(false);
@@ -31,7 +33,10 @@
 <form onsubmit={save}><fieldset disabled={busy || !loaded}><legend>Restrictions parentales</legend>
   <label><input type="checkbox" bind:checked={enabled} />Limiter ce compte</label>
   {#if enabled}
-    <label>Âge maximal autorisé<input type="number" min="0" max="21" required bind:value={maximumAge} /></label>
+    <label>Âge maximal autorisé<select bind:value={maximumAge}>
+      {#each ageTiers as tier (tier.value)}<option value={tier.value}>{tier.label}</option>{/each}
+      {#if !ageTiers.some(tier => tier.value === maximumAge)}<option value={maximumAge}>{maximumAge} ans (réglage existant)</option>{/if}
+    </select></label>
     <label><input type="checkbox" bind:checked={allowUnrated} />Autoriser les médias sans classification connue</label>
     <label>Tags bloqués, séparés par des virgules<input bind:value={tags} maxlength="6400" placeholder="horreur, adulte" /></label>
     <p>Correspondance exacte des tags NFO ou manuels, sans distinction de casse. Les tags d’une série s’appliquent à ses épisodes.</p>

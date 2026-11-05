@@ -225,7 +225,7 @@
 
   .card-thumb {
     position: relative;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--artwork-ratio, 16 / 9);
     overflow: hidden;
     border-radius: 14px;
     background: var(--bg-2);

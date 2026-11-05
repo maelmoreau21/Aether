@@ -170,6 +170,9 @@ pub async fn router(
     crate::database::query("DELETE FROM active_scan_runs")
         .execute(&auth.store.pool)
         .await?;
+    crate::database::query("DELETE FROM active_task_runs")
+        .execute(&auth.store.pool)
+        .await?;
     crate::database::query("DELETE FROM scan_staging_files")
         .execute(&auth.store.pool)
         .await?;
@@ -221,7 +224,7 @@ async fn status(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let pending: Option<String> = crate::database::query_scalar(
-        "SELECT status FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND status IN ('running','queued','paused') ORDER BY CASE status WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END LIMIT 1"
+        "SELECT status FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND category='scan' AND status IN ('running','queued','paused') ORDER BY CASE status WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END LIMIT 1"
     )
     .bind(&id)
     .bind(&id)
@@ -325,7 +328,9 @@ async fn enqueue_for_owner(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     scopes.push(id.clone());
-    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND status IN ('queued','running','paused')")
+    // Only another scan conflicts: queued previews, chapter images or analyses
+    // must never block a rescan of the library.
+    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND category='scan' AND status IN ('queued','running','paused')")
         .bind(&id).bind(&id).fetch_one(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     if active != 0 {
         return Err(StatusCode::CONFLICT);

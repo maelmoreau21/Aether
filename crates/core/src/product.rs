@@ -691,8 +691,41 @@ async fn reset_parental(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Normalizes a provider/NFO classification (TMDb, TVDB, IMDb, OMDb, Kodi NFO)
+/// into a comparable minimum age: `FR:-16`, `-16 ans`, `FSK 16`, `GB:15`,
+/// `US:PG-13`, `Rated R`, `TV-MA`, `Tous publics`, `U`... Unknown labels stay NULL
+/// and follow the policy's `allow_unrated` choice.
+macro_rules! rating_age_sql {
+    ($expr:literal) => {
+        concat!(
+            "CASE replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(trim(",
+            $expr,
+            ")),'FR:',''),'FR-',''),'US:',''),'GB:',''),'UK:',''),'DE:',''),'CA:',''),'BE:',''),'CH:',''),'FSK ',''),'FSK',''),'BBFC ',''),'RATED ',''),' ANS',''),'ANS',''),' ','') ",
+            "WHEN 'G' THEN 0 WHEN 'TV-G' THEN 0 WHEN 'TV-Y' THEN 0 WHEN 'U' THEN 0 WHEN 'TOUSPUBLICS' THEN 0 WHEN 'TP' THEN 0 WHEN 'ALL' THEN 0 WHEN 'AL' THEN 0 WHEN '0' THEN 0 ",
+            "WHEN '6' THEN 6 WHEN 'TV-Y7' THEN 7 WHEN '7' THEN 7 ",
+            "WHEN 'PG' THEN 10 WHEN 'TV-PG' THEN 10 WHEN '10' THEN 10 WHEN '-10' THEN 10 ",
+            "WHEN '12' THEN 12 WHEN '-12' THEN 12 WHEN '12A' THEN 12 WHEN 'PG-12' THEN 12 ",
+            "WHEN 'PG-13' THEN 13 WHEN 'TV-14' THEN 14 WHEN '14' THEN 14 WHEN '15' THEN 15 WHEN 'MA15+' THEN 15 ",
+            "WHEN '16' THEN 16 WHEN '-16' THEN 16 WHEN 'R' THEN 17 ",
+            "WHEN '18' THEN 18 WHEN '-18' THEN 18 WHEN 'NC-17' THEN 18 WHEN 'TV-MA' THEN 18 WHEN 'R18' THEN 18 WHEN 'X' THEN 18 ELSE NULL END"
+        )
+    };
+}
+
 // The same expression is used before catalogue pagination and on every derived resource.
-pub const AGE_SQL: &str = "COALESCE(w.minimum_age,(SELECT parent.minimum_age FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id),CASE upper(COALESCE(json_extract(w.manual_json,'$.mpaa'),json_extract(w.editorial_json,'$.mpaa'))) WHEN 'G' THEN 0 WHEN 'TV-G' THEN 0 WHEN 'PG' THEN 10 WHEN 'PG-13' THEN 13 WHEN 'TV-14' THEN 14 WHEN 'R' THEN 17 WHEN 'NC-17' THEN 18 WHEN 'TV-MA' THEN 18 WHEN '-10' THEN 10 WHEN 'FR-10' THEN 10 WHEN '-12' THEN 12 WHEN 'FR-12' THEN 12 WHEN '-16' THEN 16 WHEN 'FR-16' THEN 16 WHEN '-18' THEN 18 WHEN 'FR-18' THEN 18 WHEN 'TOUS PUBLICS' THEN 0 ELSE NULL END)";
+// Episodes inherit their series' manual age and provider classification, since
+// providers and NFO files classify the series rather than each episode.
+pub const AGE_SQL: &str = concat!(
+    "COALESCE(w.minimum_age,(SELECT parent.minimum_age FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id),",
+    rating_age_sql!(
+        "COALESCE(json_extract(w.manual_json,'$.mpaa'),json_extract(w.editorial_json,'$.mpaa'))"
+    ),
+    ",(SELECT ",
+    rating_age_sql!(
+        "COALESCE(json_extract(parent.manual_json,'$.mpaa'),json_extract(parent.editorial_json,'$.mpaa'))"
+    ),
+    " FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id))"
+);
 pub fn policy_sql() -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND (({AGE_SQL})>policy.maximum_age OR (({AGE_SQL}) IS NULL AND policy.allow_unrated=0) OR {BLOCKED_TAGS_SQL}))"

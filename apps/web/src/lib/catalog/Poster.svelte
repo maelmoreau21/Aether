@@ -145,7 +145,7 @@
   }
 
   .poster {
-    aspect-ratio: 2 / 3;
+    aspect-ratio: var(--artwork-ratio, 2 / 3);
     position: relative;
     overflow: hidden;
     background: var(--pn-2);
@@ -153,7 +153,7 @@
     transition: transform var(--t-slow) var(--ease), box-shadow var(--t-slow) ease;
   }
 
-  .landscape .poster { aspect-ratio: 16 / 9; }
+  .landscape .poster { aspect-ratio: var(--artwork-ratio, 16 / 9); }
 
   .poster img {
     position: absolute;

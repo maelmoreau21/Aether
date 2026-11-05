@@ -234,7 +234,7 @@
   .episodes-list { display: grid; gap: 4px; }
   .episode { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); align-items: start; gap: 20px; padding: 14px 12px; border-radius: var(--r-lg); transition: background-color var(--t-fast) ease; }
   .episode:hover { background: var(--pn); }
-  .episode-artwork { aspect-ratio: 16 / 9; position: relative; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .episode-artwork { aspect-ratio: var(--artwork-ratio, 16 / 9); position: relative; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
   .episode-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
   .episode-artwork progress { position: absolute; left: 8px; right: 8px; bottom: 8px; width: calc(100% - 16px); height: 4px; border: 0; border-radius: 4px; accent-color: var(--ac); }
   .episode-content { min-width: 0; display: flex; flex-direction: column; align-items: start; gap: 8px; overflow-wrap: anywhere; }

@@ -27,7 +27,9 @@ pub(crate) async fn queue_scanned_assets(
     options: &LibraryOptions,
 ) -> Result<u64, sqlx::Error> {
     use sha2::{Digest, Sha256};
-    if !options.trickplay_enabled || !options.trickplay_during_scan {
+    let previews = options.trickplay_enabled && options.trickplay_during_scan;
+    let chapters = options.chapter_images_enabled && options.chapter_images_during_scan;
+    if !previews && !chapters {
         return Ok(0);
     }
     // Share admission's cross-Core capacity lock only for this final queue step.
@@ -60,9 +62,11 @@ pub(crate) async fn queue_scanned_assets(
             break;
         }
         last_asset = assets.last().map(|row| row.0.clone()).unwrap_or_default();
-        let candidates: Vec<_> = assets
-            .into_iter()
-            .map(|(asset, size, modified, node)| {
+        let mut candidates = Vec::with_capacity(assets.len() * 2);
+        for (asset, size, modified, node) in assets {
+            // Chapter images reuse the on-demand profile (width/quality, no
+            // interval) so the player hits the prepared cache directly.
+            if previews {
                 let key = format!(
                     "trickplay:{:x}",
                     Sha256::digest(format!(
@@ -72,27 +76,37 @@ pub(crate) async fn queue_scanned_assets(
                         options.trickplay_quality
                     ))
                 );
-                (asset, node, key)
-            })
-            .collect();
+                candidates.push((asset.clone(), node.clone(), key, "library-trickplay", ""));
+            }
+            if chapters {
+                let key = format!(
+                    "chapters:{:x}",
+                    Sha256::digest(format!(
+                        "{asset}:{size}:{modified}:{}:{}",
+                        options.trickplay_width, options.trickplay_quality
+                    ))
+                );
+                candidates.push((asset, node, key, "library-chapter-images", "chapters"));
+            }
+        }
         let placeholders = vec!["?"; candidates.len()].join(",");
         let statement = format!(
-            "SELECT idempotency_key FROM durable_tasks WHERE owner='library-trickplay' AND error!='library_trickplay_disabled' AND idempotency_key IN ({placeholders})"
+            "SELECT idempotency_key FROM durable_tasks WHERE owner IN ('library-trickplay','library-chapter-images') AND error NOT IN ('library_trickplay_disabled','library_chapter_images_disabled') AND idempotency_key IN ({placeholders})"
         );
         let mut lookup =
             crate::database::query_scalar::<sqlx::Any, String>(sqlx::AssertSqlSafe(statement));
-        for (_, _, key) in &candidates {
+        for (_, _, key, _, _) in &candidates {
             lookup = lookup.bind(key);
         }
         let existing: std::collections::HashSet<String> =
             lookup.fetch_all(&mut **tx).await?.into_iter().collect();
-        for (asset, node, key) in candidates {
+        for (asset, node, key, owner, component) in candidates {
             if existing.contains(&key) {
                 continue;
             }
-            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,width) VALUES(?,?,'library-trickplay',?,?,1,?,?,?,'trickplay',?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL WHERE durable_tasks.error='library_trickplay_disabled' AND durable_tasks.lease_until IS NULL")
-                .bind(uuid::Uuid::new_v4().to_string()).bind(library).bind(key).bind(node)
-                .bind(now).bind(now).bind(now).bind(asset).bind(i64::from(options.trickplay_width))
+            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,1,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL WHERE durable_tasks.error IN ('library_trickplay_disabled','library_chapter_images_disabled') AND durable_tasks.lease_until IS NULL")
+                .bind(uuid::Uuid::new_v4().to_string()).bind(library).bind(owner).bind(key).bind(node)
+                .bind(now).bind(now).bind(now).bind(asset).bind(component).bind(i64::from(options.trickplay_width))
                 .execute(&mut **tx).await?.rows_affected();
             if inserted >= capacity as u64 {
                 return Ok(inserted);

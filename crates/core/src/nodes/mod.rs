@@ -30,7 +30,9 @@ pub use registry::{
     load_admin_nodes, load_node, load_node_entry, refresh_node_in_registry, score_node_entry,
 };
 pub use scans::{build_library_inventory_sync, dispatch_remote_scan, sync_all_libraries_for_node};
-pub(crate) use scans::{cancel_remote_scan, dispatch_remote_task, scan_run_authorized};
+pub(crate) use scans::{
+    cancel_remote_scan, dispatch_remote_task, scan_run_authorized, task_run_authorized,
+};
 use scans::{
     receive_music_track, receive_scan_batch, receive_scan_complete, receive_scan_fail,
     receive_task_complete,

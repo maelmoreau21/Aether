@@ -47,7 +47,7 @@
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- detailUrl() returns a resolved URL. -->
           <a class="tile" class:has-image={hasImage} href={detailUrl(work)}>
             {#if hasImage}
-              <img src={image} alt="" width={feature ? 1280 : 640} height={feature ? 720 : 960} loading="lazy" decoding="async" use:fitArtwork onerror={() => (failedImages = [...failedImages, image])} />
+              <img src={image} alt="" width={feature ? 1280 : 640} height={feature ? 720 : 960} loading="lazy" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => (failedImages = [...failedImages, image])} />
               <span class="shade" aria-hidden="true"></span>
             {/if}
             <span class="kind">{work.kind === 'series' ? 'Série' : 'Film'}</span>

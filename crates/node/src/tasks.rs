@@ -215,6 +215,9 @@ pub async fn run_task_on_grant(
     .await
 }
 
+/// Chapter preparation is bounded like the visible chapter list in the player.
+const MAX_PREPARED_CHAPTERS: usize = 100;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_task_with_trickplay_options(
     category: &str,
@@ -329,6 +332,42 @@ pub async fn run_task_with_trickplay_options(
                 fallback = crate::trickplay::global_manager();
                 &fallback
             };
+            if component == Some("chapters") {
+                // Same profile and boundaries as the on-demand chapter route,
+                // so the player is served from this cache afterwards.
+                let mut times: Vec<f64> = probe
+                    .chapters
+                    .iter()
+                    .take(1000)
+                    .filter_map(|chapter| chapter["start_time"].as_str()?.parse::<f64>().ok())
+                    .filter(|start| start.is_finite() && *start >= 0.0 && *start < duration)
+                    .collect();
+                times.sort_by(f64::total_cmp);
+                times.dedup();
+                let mut prepared = 0_u64;
+                for time in times.into_iter().take(MAX_PREPARED_CHAPTERS) {
+                    let req = crate::trickplay::TrickplayRequest {
+                        asset_id: asset_id.as_str().to_owned(),
+                        media_root: root.to_path_buf(),
+                        relative_path: relative.to_path_buf(),
+                        duration,
+                        size: opened.size(),
+                        modified_ns: opened.modified_ns().to_owned(),
+                        interval_ms: None,
+                        width,
+                        quality: trickplay.map(|options| options.quality),
+                        chapter_time: Some(time),
+                    };
+                    if mgr.check_native_cache(&req).await.is_none() {
+                        let key = mgr.fingerprint(&req);
+                        mgr.generate_background(&req, &key)
+                            .await
+                            .map_err(io::Error::other)?;
+                    }
+                    prepared += 1;
+                }
+                return Ok(json!({"assetId": asset_id.as_str(), "chapterImages": prepared}));
+            }
             let req = crate::trickplay::TrickplayRequest {
                 asset_id: asset_id.as_str().to_owned(),
                 media_root: root.to_path_buf(),

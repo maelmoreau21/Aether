@@ -471,6 +471,9 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             let library_options: crate::library_options::LibraryOptions =
                 serde_json::from_value(options.clone())
                     .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+            if marker_plugin && !library_options.intro_detection_enabled {
+                continue;
+            }
             let providers = if marker_plugin {
                 &library_options.segment_providers
             } else if c.operation == "metadata.images" {
@@ -728,7 +731,7 @@ async fn persist_timeline_markers(
         for marker in markers {
             let Some(kind) = marker["markerType"]
                 .as_str()
-                .filter(|kind| matches!(*kind, "intro" | "credits"))
+                .filter(|kind| matches!(*kind, "intro" | "credits" | "recap" | "preview"))
             else {
                 continue;
             };
@@ -1351,7 +1354,17 @@ pub(crate) async fn complete_with_marker_sources(
                     .bind(&job.target_id)
                     .fetch_optional(&mut *tx)
                     .await?;
-            if let Some(source) = source {
+            let intro_enabled =
+                query_scalar::<_, String>("SELECT options_json FROM libraries WHERE id=?")
+                    .bind(&job.library_id)
+                    .fetch_optional(&mut *tx)
+                    .await?
+                    .and_then(|encoded| {
+                        serde_json::from_str::<crate::library_options::LibraryOptions>(&encoded)
+                            .ok()
+                    })
+                    .is_none_or(|options| options.intro_detection_enabled);
+            if let Some(source) = source.filter(|_| intro_enabled) {
                 let key = format!("fp:{}", hash(&(&job.target_id, &source, "chromaprint-v1"))?);
                 query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'fingerprint',20,?,?,?) ON CONFLICT(owner,idempotency_key) DO NOTHING")
                     .bind(uuid::Uuid::new_v4().to_string()).bind(&job.library_id).bind(&job.owner).bind(key).bind(&job.node_id).bind(&job.target_id).bind(now).bind(now).bind(now).execute(&mut *tx).await?;
@@ -1492,6 +1505,28 @@ async fn pump_triggers(
             now,
         )
         .await?;
+        if stale {
+            continue;
+        }
+        // Episodes fingerprinted before any season peer were skipped by
+        // intro.detect. Re-offer them now; task-link fingerprints deduplicate.
+        let peers:Vec<(String,String,String)>=query_as("SELECT DISTINCT fp.id,peer_asset.id,obs.fingerprint FROM inventory_assets current_asset JOIN inventory_sources current_source ON current_source.id=current_asset.source_id JOIN inventory_versions current_version ON current_version.id=current_source.version_id JOIN inventory_editions current_edition ON current_edition.id=current_version.edition_id JOIN inventory_episodes current_ep ON current_ep.work_id=current_edition.work_id JOIN inventory_episodes peer ON peer.season_id=current_ep.season_id AND peer.work_id!=current_ep.work_id JOIN inventory_editions peer_edition ON peer_edition.work_id=peer.work_id JOIN inventory_versions peer_version ON peer_version.edition_id=peer_edition.id JOIN inventory_sources peer_source ON peer_source.version_id=peer_version.id JOIN inventory_assets peer_asset ON peer_asset.source_id=peer_source.id JOIN durable_tasks fp ON fp.target_id=peer_asset.id AND fp.category='analyze' AND fp.component='fingerprint' AND fp.status='completed' JOIN automation_observations obs ON obs.asset_id=peer_asset.id WHERE current_asset.id=? AND peer_asset.available=1 AND peer_asset.library_id=? AND NOT EXISTS(SELECT 1 FROM automation_task_links link JOIN durable_tasks detect ON detect.id=link.task_id WHERE link.operation='intro.detect' AND detect.target_id=peer_asset.id) ORDER BY fp.id LIMIT 8")
+            .bind(&asset).bind(&library).fetch_all(&mut **tx).await?;
+        for (peer_task, peer_asset, peer_source) in peers {
+            emit(
+                tx,
+                &EventInput {
+                    key: &format!("fingerprint-peer:{peer_task}:{task}"),
+                    kind: "analysis.completed",
+                    library_id: &library,
+                    asset_id: &peer_asset,
+                    fingerprint: &peer_source,
+                    payload: &serde_json::json!({"fingerprintTaskId":peer_task,"stale":false}),
+                },
+                now,
+            )
+            .await?;
+        }
     }
     let due:Vec<(String,String,i64,i64)>=query_as("SELECT extension_id,library_id,interval_seconds,next_run_at FROM automation_policies WHERE mode='scheduled' AND next_run_at<=? ORDER BY next_run_at,extension_id,library_id LIMIT ?").bind(now).bind(limit).fetch_all(&mut **tx).await?;
     for (extension, library, interval, due) in due {

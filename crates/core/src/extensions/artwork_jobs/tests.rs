@@ -65,6 +65,11 @@ async fn durable_collection_resumes_an_expired_lease_and_revokes_cancelled_or_di
         .execute(store.pool())
         .await
         .unwrap();
+    // The native avatar gallery seeds its own assets: only new artwork counts.
+    let seeded: i64 = query_scalar("SELECT COUNT(*) FROM assets")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
     tick(&auth).await.unwrap();
     assert_eq!(load().await.unwrap().status, "completed");
     assert_eq!(
@@ -72,6 +77,6 @@ async fn durable_collection_resumes_an_expired_lease_and_revokes_cancelled_or_di
             .fetch_one(store.pool())
             .await
             .unwrap(),
-        0
+        seeded
     );
 }

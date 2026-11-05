@@ -17,7 +17,6 @@
   import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
   import { fetchServerConfig, type AppServerConfig } from '../config/brand';
   import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
-  import { accessibleLibraries, loadLibraries } from './libraries';
   import { playbackPreferences, trackPreferences, SKIP_SECONDS } from '../player/playback-preferences';
   import { invalidateLatestCatalog } from './page-cache';
 
@@ -68,6 +67,8 @@
   }
   let artworkRotation = $state<ArtworkRotationPolicy>({ ...defaultArtworkRotationPolicy, ...preferences().artworkRotation });
   let artworkEdited = false;
+  let artworkError = $state('');
+  let artworkSaving = $state(false);
 
   let subtitleStyle = $state<Required<SubtitleStyle>>({
     ...DEFAULT_SUBTITLE_STYLE,
@@ -92,7 +93,6 @@
   onMount(() => {
     tvMode = getTvMode();
     let disposed = false;
-    void loadLibraries();
     void fetchServerConfig().then(cfg => { if (!disposed) serverConfig = cfg; }).catch(() => {});
     void ensurePreferences().then(saved => {
       if (disposed || !saved) return;
@@ -128,12 +128,16 @@
       savePreferences({ offsets: { audio: audioOffset, subtitle: subtitleOffset } });
     }
   }
-  function saveArtworkRotation(event: SubmitEvent) {
+  async function saveArtworkRotation(event: SubmitEvent) {
     event.preventDefault();
-    artworkEdited = true;
+    if (artworkSaving) return;
+    artworkEdited = true; artworkError = ''; artworkSaving = true;
     const value = { ...artworkRotation };
-    savePreferences({ artworkRotation: value });
-    setArtworkRotationPolicy(value);
+    try {
+      if (await savePreferences({ artworkRotation: value })) setArtworkRotationPolicy(value);
+      else artworkError = 'Impossible d’enregistrer vos préférences. Réessayez.';
+    } catch { artworkError = 'Impossible d’enregistrer vos préférences. Réessayez.'; }
+    finally { artworkSaving = false; }
   }
 </script>
 
@@ -239,46 +243,19 @@
           <p class="muted">La rotation utilise les affiches déjà présentes en local. Les images choisies manuellement restent prioritaires.</p>
           <label><span>Activer la rotation automatique</span><input type="checkbox" bind:checked={artworkRotation.enabled} onchange={() => artworkEdited = true} /></label>
 
-          <fieldset class="library-filter-fieldset">
-            <legend>Bibliothèques concernées</legend>
-            <p class="hint">Cochez les bibliothèques sur lesquelles activer la rotation des affiches.</p>
-            <div class="library-checks">
-              {#each ($accessibleLibraries.filter(l => l.kind !== 'music')) as lib (lib.id)}
-                <label class="lib-checkbox-label">
-                  <input type="checkbox"
-                    checked={artworkRotation.enabledLibraries ? artworkRotation.enabledLibraries.includes(lib.id) : (lib.kind === 'films' ? artworkRotation.enableMovies !== false : artworkRotation.enableSeries !== false)}
-                    onchange={(e) => {
-                      artworkEdited = true;
-                      const defaults = $accessibleLibraries.filter(l => l.kind !== 'music' && (l.kind === 'films' ? artworkRotation.enableMovies !== false : artworkRotation.enableSeries !== false)).map(l => l.id);
-                      let curr = artworkRotation.enabledLibraries ? [...artworkRotation.enabledLibraries] : defaults;
-                      if (e.currentTarget.checked) {
-                        if (!curr.includes(lib.id)) curr.push(lib.id);
-                      } else {
-                        curr = curr.filter(id => id !== lib.id);
-                      }
-                      artworkRotation.enabledLibraries = curr;
-                    }}
-                  />
-                  <span><strong>{lib.name}</strong> <small>({lib.kind === 'films' ? 'Films' : 'Séries'})</small></span>
-                </label>
-              {:else}
-                <p class="muted">Aucune bibliothèque vidéo disponible.</p>
-              {/each}
-            </div>
-          </fieldset>
-
-          <label>Ordre de rotation<select bind:value={artworkRotation.rotationMode} onchange={() => artworkEdited = true}><option value="random">Aléatoire</option><option value="sequential">Séquentiel</option></select></label>
-          <label>Intervalle minimal en heures (0 : nouvelle visite)<input type="number" min="0" max="720" step="1" required bind:value={artworkRotation.minHoursBetweenSwitches} oninput={() => artworkEdited = true} /></label>
-          <label>Nombre maximal d'affiches en réserve<input type="number" min="1" max="24" step="1" required bind:value={artworkRotation.poolSize} oninput={() => artworkEdited = true} /></label>
-          <label>Langue préférée des affiches<input type="text" pattern="[A-Za-z0-9-]+" minlength="2" maxlength="35" required bind:value={artworkRotation.preferredLanguage} oninput={() => artworkEdited = true} /></label>
-          <label>Langue de repli<input type="text" pattern="[A-Za-z0-9-]+" minlength="2" maxlength="35" required bind:value={artworkRotation.fallbackLanguage} oninput={() => artworkEdited = true} /></label>
-          <label><span>Inclure les affiches sans langue taguée</span><input type="checkbox" bind:checked={artworkRotation.includeUnknownLanguage} onchange={() => artworkEdited = true} /></label>
-          <label><span>Accepter les autres langues en repli si indisponible</span><input type="checkbox" bind:checked={artworkRotation.allowAnyLanguageFallback} onchange={() => artworkEdited = true} /></label>
-          <button type="submit">Enregistrer l'affichage</button>
+          <label>Langue des affiches
+            <select bind:value={artworkRotation.languageMode} onchange={() => artworkEdited = true}>
+              <option value="interface">Langue de l’interface</option>
+              <option value="original">Langue originale de l’œuvre</option>
+            </select>
+          </label>
+          <p class="muted">Si la langue originale ou une affiche correspondante est inconnue, la langue de l’interface sert de repli.</p>
+          <button type="submit" disabled={artworkSaving}>{artworkSaving ? 'Enregistrement…' : "Enregistrer l’affichage"}</button>
+          {#if artworkError}<p role="alert">{artworkError}</p>{/if}
         </form>
       </div>
       <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
-      <div hidden={current !== 'devices'}><section class="card"><h2>Appareils</h2><AccountSecurity mode="devices" /></section></div>
+      <div hidden={current !== 'devices'}><section class="card"><h2>Appareils et sessions</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">Lecture</h2><p class="muted">Ces préférences s’appliquent à votre compte.</p>
       <div class="pref-fields">
         <label>
@@ -531,7 +508,6 @@
   .val { font-weight: 600; }
   .val code { overflow-wrap: anywhere; font-family: var(--font-mono); font-size: 13px; }
   .muted { color: var(--mu); font-size: 14px; line-height: 1.6; }
-  .hint { color: var(--mu); font-size: 13px; margin: 4px 0 10px; }
   .pref-fields, .offsets { display: grid; gap: 20px; margin-top: 8px; }
   label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; }
   .checkbox-row { display: flex; align-items: center; gap: 12px; min-height: 44px; font-weight: 600; }
@@ -572,11 +548,6 @@
   button:active { transform: scale(0.98); }
   .offsets { padding-top: 0; }
   .offsets p { margin: 0; }
-  .library-filter-fieldset { margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); }
-  .library-filter-fieldset legend { padding: 0 6px; font-size: 14px; font-weight: 700; }
-  .library-checks { display: grid; gap: 4px; }
-  .lib-checkbox-label { display: flex; align-items: center; gap: 12px; min-height: 40px; font-weight: 600; }
-  .lib-checkbox-label small { color: var(--mu); font-weight: 500; }
   .subtitles-appearance { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
   .subtitles-appearance h3 { margin-bottom: 8px; }
   /* Aperçu des sous-titres : posé sur une image sombre neutre, comme dans le lecteur */

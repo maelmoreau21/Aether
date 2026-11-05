@@ -2,8 +2,6 @@
   import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
-  import AutomationTasks from './AutomationTasks.svelte';
-  import DistributedTasks from './DistributedTasks.svelte';
   import { adminRequest } from './request';
   import type { AdminNode, Library, Scan } from './types';
   import { scanLabels } from './types';
@@ -46,7 +44,6 @@
   let frequency = $state(24);
   let unit = $state(60);
   let triggerEnabled = $state(true);
-  let queueOpen = $state(false);
   let refreshPromise: Promise<void> | undefined;
 
   const tasks = $derived<Task[]>([
@@ -411,8 +408,6 @@
       </div>
     {/each}
     </details>
-    <details class="queue-section" bind:open={queueOpen}><summary>File d’exécution et opérations en cours</summary><DistributedTasks active={active && queueOpen} {libraries} {nodes} /></details>
-    <details class="automation-section"><summary>Automatisation des métadonnées</summary><AutomationTasks {active} {libraries} /></details>
   {/if}
   {#if scanError}<p class="feedback error" role="alert">{scanError}</p>{/if}
   {#if backupError}<p class="feedback error" role="alert">{backupError}</p>{/if}
@@ -451,12 +446,12 @@
   .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
 
   /* Groupes repliables : surface plate */
-  .plans-section, .automation-section, .queue-section { margin-top: 24px; padding: 0 20px; background: var(--color-surface); border-radius: var(--radius-md); }
-  .plans-section[open], .automation-section[open], .queue-section[open] { padding-bottom: 20px; }
-  .plans-section > summary, .automation-section > summary, .queue-section > summary { display: flex; align-items: center; gap: 10px; min-height: 56px; box-sizing: border-box; cursor: pointer; font-size: 16px; font-weight: 600; color: var(--color-text); list-style: none; }
-  .plans-section > summary::-webkit-details-marker, .automation-section > summary::-webkit-details-marker, .queue-section > summary::-webkit-details-marker { display: none; }
-  .plans-section > summary::after, .automation-section > summary::after, .queue-section > summary::after { content: ''; width: 7px; height: 7px; margin-left: auto; border-right: 2px solid var(--color-muted); border-bottom: 2px solid var(--color-muted); transform: rotate(45deg); transition: transform var(--transition-normal); }
-  .plans-section[open] > summary::after, .automation-section[open] > summary::after, .queue-section[open] > summary::after { transform: rotate(-135deg); }
+  .plans-section { margin-top: 24px; padding: 0 20px; background: var(--color-surface); border-radius: var(--radius-md); }
+  .plans-section[open] { padding-bottom: 20px; }
+  .plans-section > summary { display: flex; align-items: center; gap: 10px; min-height: 56px; box-sizing: border-box; cursor: pointer; font-size: 16px; font-weight: 600; color: var(--color-text); list-style: none; }
+  .plans-section > summary::-webkit-details-marker { display: none; }
+  .plans-section > summary::after { content: ''; width: 7px; height: 7px; margin-left: auto; border-right: 2px solid var(--color-muted); border-bottom: 2px solid var(--color-muted); transform: rotate(45deg); transition: transform var(--transition-normal); }
+  .plans-section[open] > summary::after { transform: rotate(-135deg); }
   summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-xs); }
   .section-intro { margin: 0 0 12px; max-width: 75ch; color: var(--color-muted); font-size: 14px; line-height: 1.5; }
 
@@ -539,8 +534,8 @@
 
   @media (max-width: 640px) {
     .list-header { flex-wrap: wrap; }
-    .plans-section, .automation-section, .queue-section { padding: 0 14px; }
-    .plans-section[open], .automation-section[open], .queue-section[open] { padding-bottom: 14px; }
+    .plans-section { padding: 0 14px; }
+    .plans-section[open] { padding-bottom: 14px; }
     .task-link { gap: 10px; padding: 10px 4px; }
     .task-title { font-size: 14px; }
     dialog { width: 100vw; max-width: 100vw; margin: auto 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px)); border-radius: var(--radius-xl) var(--radius-xl) 0 0; }

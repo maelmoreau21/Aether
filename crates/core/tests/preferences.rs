@@ -159,6 +159,7 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         json!({"minHoursBetweenSwitches":721}),
         json!({"rotationMode":"unexpected"}),
         json!({"preferredLanguage":"../../"}),
+        json!({"languageMode":"unknown"}),
     ] {
         let mut value = rotation.clone();
         for (key, field) in invalid.as_object().unwrap() {
@@ -189,6 +190,22 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         body(request(&app, "GET", &sessions[1].0, "", json!(null)).await).await,
         json!({})
     );
+    let mut original = rotation.clone();
+    original["languageMode"] = json!("original");
+    assert_eq!(
+        request(
+            &app,
+            "PUT",
+            cookie,
+            csrf,
+            json!({"artworkRotation":original})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let saved = body(request(&app, "GET", cookie, "", json!(null)).await).await;
+    assert_eq!(saved["artworkRotation"]["languageMode"], "original");
     let mut excluded = rotation.clone();
     excluded["enabledLibraries"] = json!([]);
     assert_eq!(

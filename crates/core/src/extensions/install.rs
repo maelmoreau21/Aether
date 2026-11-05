@@ -83,6 +83,22 @@ pub(super) async fn upgrade_with_key(
     package: Package,
     public_key: String,
 ) -> Result<(StatusCode, Json<Value>), Error> {
+    change_version_with_key(auth, headers, id, package, public_key, None).await
+}
+
+pub(super) struct DowngradeGuard {
+    pub expected_version: String,
+    pub expected_sha256: String,
+}
+
+pub(super) async fn change_version_with_key(
+    auth: AuthState,
+    headers: HeaderMap,
+    id: String,
+    package: Package,
+    public_key: String,
+    downgrade: Option<DowngradeGuard>,
+) -> Result<(StatusCode, Json<Value>), Error> {
     let actor = admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     if package.manifest.id != id {
@@ -117,7 +133,35 @@ pub(super) async fn upgrade_with_key(
         .ok_or_else(|| err(StatusCode::CONFLICT, "installed_package_invalid"))?;
     let target_version = version(&package.manifest.version)
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_manifest"))?;
-    if target_version <= installed_version {
+    if let Some(ref guard) = downgrade {
+        if installed.manifest.version != guard.expected_version
+            || installed.sha256 != guard.expected_sha256
+        {
+            return Err(err(StatusCode::CONFLICT, "extension_changed"));
+        }
+        if target_version >= installed_version {
+            return Err(err(StatusCode::CONFLICT, "extension_version_not_older"));
+        }
+        if installed
+            .manifest
+            .permissions
+            .iter()
+            .any(|p| p == "storage.private")
+            || package
+                .manifest
+                .permissions
+                .iter()
+                .any(|p| p == "storage.private")
+            || package.manifest.storage_migration.is_some()
+            || serde_json::to_value(&installed.manifest.config_schema).ok()
+                != serde_json::to_value(&package.manifest.config_schema).ok()
+        {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "extension_downgrade_incompatible",
+            ));
+        }
+    } else if target_version <= installed_version {
         return Err(err(StatusCode::CONFLICT, "extension_version_not_newer"));
     }
     if !repositories::compatible(&package.manifest) {
@@ -142,6 +186,12 @@ pub(super) async fn upgrade_with_key(
     }
     let private_rows: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_data WHERE extension_id=?) + (SELECT COUNT(*) FROM extension_objects WHERE extension_id=?)")
         .bind(&id).bind(&id).fetch_one(auth.store.pool()).await.map_err(db)?;
+    if downgrade.is_some() && private_rows != 0 {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "extension_downgrade_incompatible",
+        ));
+    }
     let needs_migration = private_rows != 0
         || installed
             .manifest
@@ -215,14 +265,39 @@ pub(super) async fn upgrade_with_key(
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_package"))?;
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
+    // Repeat the private-data check under the write lock: a worker may have written
+    // after the earlier read. Downgrades never reinterpret private data.
+    if downgrade.is_some() {
+        let snapshots: i64 =
+            query_scalar("SELECT COUNT(*) FROM extension_update_revisions WHERE extension_id=?")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(db)?;
+        if snapshots != 0 {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "extension_downgrade_snapshot_exists",
+            ));
+        }
+        let rows: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_data WHERE extension_id=?) + (SELECT COUNT(*) FROM extension_objects WHERE extension_id=?)")
+            .bind(&id).bind(&id).fetch_one(&mut *tx).await.map_err(db)?;
+        if rows != 0 {
+            return Err(err(
+                StatusCode::CONFLICT,
+                "extension_downgrade_incompatible",
+            ));
+        }
+    }
     // The database write lock fences storage operations from old generations.
     // Snapshot and all declarative migration operations share the package commit.
     updates::snapshot(&mut tx, &id, &existing_package, &package.sha256).await?;
     updates::migrate(&mut tx, &id, package.manifest.storage_migration.as_ref()).await?;
     let changed =
-        query("UPDATE extensions SET package_json=?,generation=? WHERE id=? AND package_json=?")
+        query("UPDATE extensions SET package_json=?,generation=?,enabled=CASE WHEN ?=1 THEN 0 ELSE enabled END WHERE id=? AND package_json=?")
             .bind(bytes)
             .bind(uuid::Uuid::new_v4().to_string())
+            .bind(i64::from(downgrade.is_some()))
             .bind(&id)
             .bind(existing_package)
             .execute(&mut *tx)
@@ -231,7 +306,17 @@ pub(super) async fn upgrade_with_key(
     if changed.rows_affected() != 1 {
         return Err(err(StatusCode::CONFLICT, "extension_changed"));
     }
-    audit(&mut tx, &actor.user.id, &id, "package.upgraded").await?;
+    audit(
+        &mut tx,
+        &actor.user.id,
+        &id,
+        if downgrade.is_some() {
+            "package.downgraded"
+        } else {
+            "package.upgraded"
+        },
+    )
+    .await?;
     tx.commit().await.map_err(db)?;
     if let Err(error) = crate::extensions::storage::persist_upgrade(&auth.store, &package).await {
         eprintln!("Plugin '{id}' cache synchronization pending: {error}");

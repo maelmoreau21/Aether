@@ -17,6 +17,35 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 5 novembre 2026 — Extensions et préférences d'affiches
+
+- Cartes d'extensions ouvrables en entier ; épinglage sur la fiche, versions du
+  catalogue et instantané de restauration réunis dans la liste. Rétrogradation
+  explicite bornée, paquet signé, sans données privées ni changement de schéma ;
+  un instantané existant est préservé. Voir `docs/PLUGIN_UPDATE_LIFECYCLE.md`.
+- Affiches : deux choix personnels, rotation active par défaut et langue de
+  l'interface ou originale ; TMDb transmet désormais `originalLanguage`, repli
+  interface si absent. Publication du plugin et enrichissement des œuvres
+  existantes non effectués. Voir `docs/ARTWORK_ROTATION.md`.
+- Pages utilisateurs et groupes allégées ; filtres compacts. Validation ciblée
+  Web, Core et plugin sur fixtures ; aucun déploiement ni fournisseur réel validé.
+
+## 5 novembre 2026 — Connexion QR, accueil et sauvegardes
+
+- Connexion d'un appareil par QR ou code, avec confirmation explicite par une
+  session locale ou SSO ; secrets distincts, expiration et consommation unique.
+  Contrat et limites : `docs/LOCAL_SESSIONS.md` et `docs/API.md`.
+- Accueil : recommandations actives par défaut, après Pour ce soir ; choix de
+  désactivation existant conservé. Sélecteur d'accent et lien Demandes du header
+  retirés. Sessions redessinées ; voir `docs/UI_DIRECTION.md`.
+- NAS : volume de sauvegardes privé de nouveau possédé par 10001:10001 alors que
+  Core tourne sous 1039:65539. Propriétaire du seul dossier corrigé, lecture et
+  sonde privée réussies. Cause de récidive non établie ; risque de copie Docker
+  sur volume vide et prévention documentés dans `docs/ADMIN_BACKUPS.md`.
+- Contrôles ciblés : tests QR et recommandations SQLite, frontend et Chrome avec
+  APIs synthétiques ; décodage QR généré avec ZXing. Aucun fournisseur SSO réel,
+  appareil physique, PostgreSQL ou archive NAS complète validé ; code non déployé.
+
 ## 5 novembre 2026 — Administration, profil et sauvegardes
 
 - Administration pleine largeur ; rubrique Extensions, épingles Demandes/Signalements

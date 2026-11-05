@@ -9,6 +9,7 @@
 
 mod config;
 mod http;
+mod quick_connect;
 mod state;
 mod touch;
 mod util;

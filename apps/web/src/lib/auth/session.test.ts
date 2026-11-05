@@ -7,6 +7,7 @@ import {
   login,
   logout,
   onSessionGenerationChange,
+  pollDeviceConnection,
   readSession,
   session,
   type Session
@@ -21,6 +22,62 @@ afterEach(() => {
 });
 
 describe('cookie based authentication client', () => {
+  it('keeps device polling anonymous until approval and skips an aborted request', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ status: 'pending' }))
+      .mockResolvedValueOnce(Response.json({ ...secondUser, status: 'authenticated' }));
+    vi.stubGlobal('fetch', fetchMock);
+    const cancelled = new AbortController();
+    cancelled.abort();
+    expect(await pollDeviceConnection('requester-secret', cancelled.signal)).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+    const controller = new AbortController();
+    expect(await pollDeviceConnection('requester-secret', controller.signal)).toBe(false);
+    expect(get(session)).toBeNull();
+    expect(await pollDeviceConnection('requester-secret', controller.signal)).toBe(true);
+    expect(get(session)).toEqual(secondUser);
+  });
+
+  it('ignores a delayed device approval when the requesting screen was cancelled or account changed', async () => {
+    for (const action of ['abort', 'switch']) {
+      session.set(null);
+      let resolvePoll!: (response: Response) => void;
+      const fetchMock = vi.fn().mockImplementation(() => new Promise<Response>(resolve => { resolvePoll = resolve; }));
+      vi.stubGlobal('fetch', fetchMock);
+      const controller = new AbortController();
+      const polling = pollDeviceConnection('requester-secret', controller.signal);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      if (action === 'abort') controller.abort();
+      else session.set(current);
+      resolvePoll(Response.json({ ...secondUser, status: 'authenticated' }));
+      expect(await polling).toBe(false);
+      expect(get(session)).toEqual(action === 'switch' ? current : null);
+    }
+  });
+
+  it('serializes a password login after an in-flight device approval so its cookie wins', async () => {
+    let resolvePoll!: (response: Response) => void;
+    const events: string[] = [];
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('/device/poll')) {
+        events.push('device-request');
+        return new Promise<Response>(resolve => { resolvePoll = resolve; });
+      }
+      if (url.endsWith('/auth/login')) {
+        events.push('login-request');
+        return Promise.resolve(Response.json(current));
+      }
+      throw new Error('unexpected request');
+    }));
+    const polling = pollDeviceConnection('requester-secret', new AbortController().signal);
+    const passwordLogin = login('operator', 'secret');
+    await vi.waitFor(() => expect(events).toEqual(['device-request']));
+    resolvePoll(Response.json({ ...secondUser, status: 'authenticated' }));
+    await Promise.all([polling, passwordLogin]);
+    expect(events).toEqual(['device-request', 'login-request']);
+    expect(get(session)).toEqual(current);
+  });
+
   it('recovers identity from Core and clears it when the session expires', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json(current)).mockResolvedValueOnce(new Response(null, { status: 401 })));
     expect(await readSession()).toEqual(current);

@@ -86,6 +86,24 @@ Les nouvelles tables sont ajoutées sans réécriture des tables médias.
 Ce mécanisme n'est pas une sauvegarde générale du serveur ni un historique
 illimité des versions.
 
+## Versions depuis le catalogue et rétrogradation
+
+La fiche présente la version active, les versions réellement annoncées par les
+catalogues et la version restaurable du snapshot même si elle n’est plus publiée.
+La date d’actualisation du dépôt ne prouve pas la date de publication d’une version.
+
+Une version antérieure publiée peut être installée après confirmation explicite
+via la route d’installation du dépôt avec `upgrade:true`, `confirmDowngrade:true`,
+`expectedVersion` et `expectedSha256`. Le paquet reste signé, vérifié, compatible,
+et lié au même éditeur et à la même clé ; aucun nouveau droit n’est accordé.
+Le Core refuse une rétrogradation si un snapshot existe déjà, si une des versions
+utilise le stockage privé ou si des données privées subsistent, si une migration
+est déclarée ou si les schémas de paramètres ne sont pas identiques. La vérification
+du snapshot et des données est répétée sous verrou de transaction. L’ancienne
+version installée et les paramètres sont sauvegardés atomiquement pour un retour ;
+la version choisie reste désactivée. Sans publication historique et sans snapshot,
+aucune ancienne version n’est inventée.
+
 ## Installation réelle : constat en lecture seule
 
 Le 2 novembre 2026, SSH et requêtes PostgreSQL `BEGIN READ ONLY` sur le NAS

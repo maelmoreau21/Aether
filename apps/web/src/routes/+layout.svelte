@@ -16,6 +16,7 @@
   import { preloadCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
   import StatisticsNotice from '../lib/statistics/StatisticsNotice.svelte';
+  import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
 
   onMount(() => {
     initTheme();
@@ -35,14 +36,25 @@
   let error = $state('');
   const isLogin = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/login'));
   const isDownloads = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/downloads'));
+  const isConnect = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/connect'));
   $effect(() => {
     const loginPage = isLogin;
+    const connectPage = isConnect;
     let cancelled = false;
     verified = false; error = '';
     if (isDownloads) { verified=true; return; }
     readSession().then(async current => {
       if (cancelled) return;
-      if (!current && !loginPage) { void goto(resolve('login/'), { replaceState: true }); return; }
+      if (!current && !loginPage) {
+        if (connectPage) {
+          const code = normalizeDeviceCode(window.location.hash.slice(1));
+          if (code) sessionStorage.setItem(PENDING_DEVICE_CODE, code);
+        }
+        void goto(resolve('login/'), { replaceState: true }); return;
+      }
+      if (current && !connectPage && normalizeDeviceCode(sessionStorage.getItem(PENDING_DEVICE_CODE) ?? '')) {
+        void goto(resolve('connect/'), { replaceState: true }); return;
+      }
       if (current && loginPage) { void goto(resolve('/'), { replaceState: true }); return; }
       if (current) {
         const generation = getSessionGeneration();

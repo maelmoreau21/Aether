@@ -17,7 +17,7 @@
   import ProfileMenu from './ProfileMenu.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { serverPresentation } from '../config/presentation';
-  import { features, loadFeatures } from '../applications/api';
+  import { loadFeatures } from '../applications/api';
 
   type Kind = AccessibleLibrary['kind'];
 
@@ -126,7 +126,6 @@
         <a href={kindHref(kind)} aria-current={section === kind ? 'page' : undefined} onpointerenter={() => preloadKind(kind)} onfocus={() => preloadKind(kind)}>{kindLabels[kind]}</a>
       {/each}
       <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>Mes listes</a>
-      {#if $features.requests}<a href={resolve('requests/')} aria-current={section === 'requests' ? 'page' : undefined}>Demandes</a>{/if}
     </nav>
 
     <div class="header-actions">

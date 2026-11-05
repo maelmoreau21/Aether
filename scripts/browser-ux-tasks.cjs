@@ -1,34 +1,82 @@
-// Built production UI, synthetic intercepted APIs. No Core/Node execution proof.
-const {chromium}=require('../apps/web/node_modules/playwright');
-const {setup}=require('./browser-ux-admin.cjs');
-const fs=require('node:fs'),assert=require('node:assert/strict');
-const base=process.env.MEDIA_UI_URL||'http://127.0.0.1:5182/app/';
-const out=process.env.MEDIA_REPORT_DIR||'target/ux-tasks';fs.mkdirSync(out,{recursive:true});
-const stamp=1793200000;
-const job={libraryId:'lib-film',owner:'synthetic-core',nodeId:'local',category:'scan',priority:100,attempt:1,failureCount:0,maxAttempts:3,progress:0,createdAt:stamp,updatedAt:stamp,startedAt:stamp,finishedAt:null,leaseUntil:null,error:''};
-const jobs=[
- {...job,id:'running',status:'running',processedItems:123},
- {...job,id:'error',status:'error',failureCount:3,error:'Le serveur ne peut pas lire le dossier /synthetic/archives/'+ 'chemin-long-'.repeat(12)+'. Vérifiez son montage et ses droits.',finishedAt:stamp+70},
- {...job,id:'paused',status:'paused'},
- {...job,id:'stopping',status:'paused',leaseUntil:stamp+30},
- {...job,id:'queued',status:'queued',startedAt:null},
- {...job,id:'completed',status:'completed',category:'image',progress:100,finishedAt:stamp+10,targetId:'synthetic-image'},
- {...job,id:'cancelled',status:'cancelled',finishedAt:stamp+5}
-];
-async function fixture(browser,width,theme,mode='normal',height=900){const state=await setup(browser,width,theme,'normal',height);let data=structuredClone(jobs),fail=mode==='error',actionFail=false,detailFail=true;const writes=[];
- await state.page.route('**/api/v1/admin/tasks/jobs**',async route=>{const req=route.request(),url=new URL(req.url());if(req.method()==='GET'&&url.pathname.endsWith('/jobs')){if(mode==='loading')await new Promise(r=>setTimeout(r,700));if(fail){fail=false;return route.fulfill({status:503,json:{error:'synthetic_queue_unavailable'}});}const offset=Number(url.searchParams.get('offset')||0);return route.fulfill({json:{jobs:mode==='empty'?[]:mode==='volume'?(offset===0?Array.from({length:50},(_,i)=>({...jobs[0],id:'volume-'+i})):[]):data,limit:50,offset}});}
- if(req.method()==='GET'){if(detailFail){detailFail=false;return route.fulfill({status:503,json:{error:'synthetic_result_unavailable'}});}return route.fulfill({json:{...jobs[5],resultJson:JSON.stringify({synthetic:true,description:'result-'.repeat(200)})}});}
- writes.push({path:url.pathname,body:req.postDataJSON()});if(actionFail){actionFail=false;return route.fulfill({status:503,json:{error:'synthetic_action_failed'}});}const id=url.pathname.split('/').at(-2),action=url.pathname.split('/').at(-1);if(['pause','resume','cancel'].includes(action))data=data.map(item=>item.id===id?{...item,status:action==='pause'?'paused':action==='resume'?'queued':'cancelled',leaseUntil:null}:item);return route.fulfill({json:job});
- });return {...state,writes,failAction(){actionFail=true;}};}
-async function shot(page,name){if(name.startsWith('automation-'))return page.locator('.automation-section').screenshot({path:`${out}/${name}.png`});await page.screenshot({path:`${out}/${name}.png`,fullPage:!name.startsWith('landscape')});}
-async function bounds(page){assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'document overflow');const clipped=await page.locator('.jobs article,.queue-tools').evaluateAll(nodes=>nodes.filter(n=>{const r=n.getBoundingClientRect();return r.left<0||r.right>innerWidth+1;}).map(n=>n.className));assert.deepEqual(clipped,[]);}
-async function open(page){await page.goto(base+'admin/libraries/#tasks-section');await page.locator('.queue-section > summary').click();await page.locator('.jobs').waitFor();}
-async function run(){const browser=await chromium.launch({channel:'chrome',headless:true});const report={scope:'Synthetic APIs, built frontend',browser:browser.version(),scenarios:[]};try{
- if(process.env.MEDIA_UI_CAPTURE_BEFORE==='1'){for(const width of[390,1440]){const{page,context}=await fixture(browser,width,'dark');await open(page);await shot(page,`before-dark-${width}`);await context.close();}return;}
- for(const theme of['dark','light'])for(const width of[320,360,390,430,768,1024,1440,1920]){const{page,context,errors,writes}=await fixture(browser,width,theme);await open(page);await bounds(page);await shot(page,`${theme}-${width}-queue`);const filter=page.getByRole('combobox',{name:'État des tâches',exact:true});await filter.selectOption('error');assert.equal(await page.locator('.jobs article').count(),1);await page.getByText(jobs[1].error,{exact:true}).waitFor();assert.equal(await page.locator('.jobs article button').count(),0);await shot(page,`${theme}-${width}-error`);await filter.selectOption('paused');assert(await page.getByRole('button',{name:'Arrêt en cours…',exact:true}).isDisabled());await page.locator('article[aria-label="Tâche paused"]').getByRole('button',{name:'Reprendre',exact:true}).click();assert(writes.some(w=>w.path.endsWith('/paused/resume')));await filter.selectOption('running');const running=page.locator('article[aria-label="Tâche running"]');assert.equal(await running.locator('progress').count(),0);await running.getByRole('button',{name:'Suspendre',exact:true}).click();assert(writes.some(w=>w.path.endsWith('/running/pause')));await filter.selectOption('all');await page.locator('article[aria-label="Tâche queued"]').getByRole('button',{name:'Annuler',exact:true}).click();assert(writes.some(w=>w.path.endsWith('/queued/cancel')));await page.locator('.plans-section > summary').focus();await page.keyboard.press('Enter');await page.keyboard.press('Enter');await page.getByRole('link',{name:'Configurer Indexer Films de voyage — Bibliothèque personnelle',exact:true}).click();await page.getByRole('heading',{name:'Indexer Films de voyage — Bibliothèque personnelle',exact:true}).waitFor();await page.getByRole('button',{name:'Ajouter un intervalle',exact:true}).click();await page.getByRole('dialog',{name:'Déclencheur périodique'}).waitFor();await page.keyboard.press('Escape');await bounds(page);assert.deepEqual(errors,[]);report.scenarios.push({theme,width,filter:true,pauseResumeCancel:true,leaseGuard:true,keyboard:true,deepLink:true,overflow:false});await context.close();console.log('PASS',theme,width);}
- for(const mode of['empty','error','loading','volume']){const{page,context,errors}=await fixture(browser,390,'light',mode);await page.goto(base+'admin/libraries/#tasks-section');await page.locator('.queue-section > summary').click();if(mode==='loading')await page.getByText('Chargement des tâches…',{exact:true}).waitFor();if(mode==='error'){await page.locator('.queue-load-error').waitFor();await shot(page,'state-error');await page.getByRole('button',{name:'Réessayer le chargement',exact:true}).click();}await page.locator('.jobs').waitFor();if(mode==='empty')await page.getByText('Aucune tâche sur cette page.',{exact:true}).waitFor();if(mode==='volume'){await page.waitForFunction(()=>document.querySelectorAll('.jobs article').length===50);await page.getByRole('button',{name:'Suivant',exact:true}).click();await page.getByText('Page 2',{exact:true}).waitFor();assert.equal(await page.locator('.jobs article').count(),0);await page.getByRole('button',{name:'Précédent',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('.jobs article').length===50);}await bounds(page);await shot(page,'state-'+mode);assert.deepEqual(errors,[]);report.scenarios.push({mode,pass:true});await context.close();}
- for(const width of[320,1440]){const{page,context,errors}=await fixture(browser,width,'light');await page.route('**/api/v1/admin/tasks/automation/history',route=>route.fulfill({json:{tasks:[{id:'history',extensionId:'extension-'+ 'longue-'.repeat(15),libraryId:'lib-film',status:'error',operation:'metadata.propose',priority:100,attempt:3,durationSeconds:5,error:'Erreur synthétique '+ 'explication '.repeat(25)}],quotas:[],sources:[]}}));await open(page);await page.locator('.automation-section > summary').click();await page.getByRole('region',{name:'Derniers traitements des métadonnées',exact:true}).waitFor();await bounds(page);await shot(page,`automation-${width}`);assert.deepEqual(errors,[]);report.scenarios.push({automation:width,boundedHistory:true});await context.close();}
- const{page,context,errors,writes,failAction}=await fixture(browser,844,'dark','normal',390);await open(page);await page.getByRole('combobox',{name:'État des tâches',exact:true}).selectOption('completed');const result=page.locator('article[aria-label="Tâche completed"]');await result.getByText('Résultat du traitement',{exact:true}).click();await result.getByRole('button',{name:'Réessayer',exact:true}).click();await result.locator('pre').waitFor();await bounds(page);await shot(page,'landscape-result');await page.getByText('Ajouter une tâche',{exact:true}).click();await page.getByRole('combobox',{name:'Bibliothèque cible',exact:true}).selectOption('lib-film');await page.getByRole('combobox',{name:'Type de tâche',exact:true}).selectOption('prepare');await page.getByRole('textbox',{name:'Identifiant cible',exact:true}).fill('asset-synthetic');await page.getByRole('textbox',{name:'Composant à préparer',exact:true}).fill('audio-2');failAction();await page.getByRole('button',{name:'Planifier la tâche',exact:true}).click();await page.locator('.queue-action-error').waitFor();await page.getByRole('button',{name:'Actualiser la file',exact:true}).click();assert(await page.locator('.queue-action-error').isVisible());await page.getByRole('button',{name:'Planifier la tâche',exact:true}).click();const admissions=writes.filter(w=>w.path.endsWith('/jobs'));assert.equal(admissions.length,2);assert.equal(admissions[0].body.idempotencyKey,admissions[1].body.idempotencyKey);assert.equal(admissions[1].body.component,'audio-2');await bounds(page);assert.deepEqual(errors,[]);report.scenarios.push({landscape:true,resultRetry:true,enqueue:true,idempotency:true,actionErrorSurvivesRefresh:true});await context.close();
- }finally{if(process.env.MEDIA_UI_CAPTURE_BEFORE!=='1')fs.writeFileSync(`${out}/report.json`,JSON.stringify(report,null,2));await browser.close();}console.log('Completed',report.scenarios.length,'task scenarios');}
-if(require.main===module)run().catch(e=>{console.error(e);process.exitCode=1;});
-module.exports={fixture};
+// Real Svelte UI with synthetic APIs; no Core/Node execution or NAS proof.
+const { chromium } = require('../apps/web/node_modules/playwright');
+const { setup } = require('./browser-ux-admin.cjs');
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const base = process.env.MEDIA_UI_URL || 'http://127.0.0.1:5182/app/';
+const out = process.env.MEDIA_REPORT_DIR || 'output/playwright/ux-tasks';
+fs.mkdirSync(out, { recursive: true });
+
+async function run() {
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const report = { scope: 'Synthetic APIs, real frontend', browser: browser.version(), scenarios: [] };
+  try {
+    for (const theme of ['dark', 'light']) for (const width of [390, 1440]) {
+      const { page, context, errors, requests } = await setup(browser, width, theme);
+      let trims = 0;
+      const memory = {
+        core: { rssBytes: 10485760, peakRssBytes: 20971520, anonBytes: 5242880, fileBytes: 5242880 },
+        childrenTotalRssBytes: 0, children: [], host: { linuxReclaimableCacheBytes: 52428800 },
+        summary: { diagnosis: 'Diagnostic synthétique du cache de pages Linux', reclaimableAdvice: 'Conseil synthétique à masquer' }
+      };
+      await page.route('**/api/v1/admin/system/memory**', route => {
+        if (route.request().method() === 'POST') {
+          trims++;
+          assert.equal(route.request().headers()['x-csrf-token'], 'synthetic-test');
+        }
+        return route.fulfill({ json: memory });
+      });
+      await page.goto(base + 'admin/libraries/#tasks-section');
+      await page.getByRole('heading', { name: 'Tâches et indexations', exact: true }).waitFor();
+      const scan = page.getByRole('link', { name: 'Configurer Indexer Films de voyage — Bibliothèque personnelle', exact: true });
+      await scan.waitFor();
+      assert.equal(await page.getByText('File d’exécution et opérations en cours', { exact: true }).count(), 0);
+      assert.equal(await page.getByText('Automatisation des métadonnées', { exact: true }).count(), 0);
+      assert.equal(await page.locator('.queue-section,.automation-section').count(), 0);
+      assert.equal(requests.some(url => /\/tasks\/(jobs|automation)\b/.test(url)), false, 'Removed panels must not fetch their APIs');
+      const summary = page.locator('.plans-section > summary');
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      assert.equal(await page.locator('.plans-section').getAttribute('open'), null);
+      await page.keyboard.press('Enter');
+      await scan.click();
+      await page.getByRole('heading', { name: 'Indexer Films de voyage — Bibliothèque personnelle', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Ajouter un intervalle', exact: true }).click();
+      await page.getByRole('dialog', { name: 'Déclencheur périodique', exact: true }).waitFor();
+      await page.keyboard.press('Escape');
+      await page.goto(base + 'admin/libraries/#tasks-section');
+      await scan.waitFor();
+      await page.evaluate(() => { document.activeElement?.blur(); window.scrollTo(0, 0); });
+      await page.screenshot({ path: `${out}/${theme}-${width}-plans.png`, fullPage: true });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+
+      await page.goto(base + 'admin/libraries/#backups-section');
+      const panel = page.locator('#backups-section');
+      const trim = panel.getByRole('button', { name: 'Libérer la mémoire (Trim)', exact: true });
+      await trim.waitFor();
+      assert.equal(await panel.getByText('Core Aether (RSS)', { exact: true }).count(), 1);
+      assert.equal(await panel.getByText('Cache disque Linux (OS)', { exact: true }).count(), 1);
+      assert.equal(await panel.getByText('Diagnostic :', { exact: true }).count(), 0);
+      assert.equal(await panel.getByText(memory.summary.diagnosis, { exact: true }).count(), 0);
+      assert.equal(await panel.getByText(memory.summary.reclaimableAdvice, { exact: true }).count(), 0);
+      await trim.click();
+      await panel.getByText('Caches purgés et mémoire restituée au système d’exploitation.', { exact: true }).waitFor();
+      assert.equal(trims, 1);
+      await page.evaluate(() => { document.activeElement?.blur(); window.scrollTo(0, 0); });
+      await page.screenshot({ path: `${out}/${theme}-${width}-memory.png`, fullPage: true });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      assert.deepEqual(errors, []);
+      report.scenarios.push({ theme, width, removedPanels: true, noQueuePolling: true, schedulingAccessible: true, keyboard: true, memoryMessageHidden: true, metricsKept: true, trimWorks: true, overflow: false });
+      await context.close();
+    }
+    report.passed = true;
+  } catch (error) {
+    report.failure = String(error.stack || error);
+    throw error;
+  } finally {
+    fs.writeFileSync(`${out}/report.json`, JSON.stringify(report, null, 2));
+    await browser.close();
+    console.log(JSON.stringify(report));
+  }
+}
+if (require.main === module) run().catch(error => { console.error(error); process.exitCode = 1; });

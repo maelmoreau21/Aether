@@ -140,3 +140,17 @@ test('an explicitly empty library selection disables rotation for every library'
   selectArtwork(item, current);
   expect(localStorage.getItem('media_artwork_choices_viewer')).not.toBeNull();
 });
+
+
+test('poster language follows interface or the known original language, with interface fallback', () => {
+  const images = [variant('fr', 'poster', 'fr'), variant('ja', 'poster', 'ja'), variant('en', 'poster', 'en')];
+  const item = { ...work, originalLanguage: 'ja', imageVariants: images };
+  setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: 'interface' });
+  expect(selectArtwork(item, current, ['fr', 'en']).poster).toBe('/images/fr');
+  setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: 'original' });
+  expect(selectArtwork(item, current, ['fr', 'en']).poster).toBe('/images/ja');
+  expect(selectArtwork({ ...item, originalLanguage: null }, current, ['fr', 'en']).poster).toBe('/images/fr');
+  expect(selectArtwork({ ...item, originalLanguage: 'de' }, current, ['fr', 'en']).poster).toBe('/images/fr');
+  setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'original' });
+  expect(selectArtwork(item, current, ['fr', 'en']).poster).toBe('/images/ja');
+});

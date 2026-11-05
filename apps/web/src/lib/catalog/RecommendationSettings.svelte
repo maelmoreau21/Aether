@@ -1,14 +1,14 @@
 <script lang="ts">
   import { session } from '../auth/session';
   type Options = { enabled: boolean; excludeWatched: boolean; historyDays: number };
-  let options = $state<Options>({ enabled: false, excludeWatched: true, historyDays: 180 });
+  let options = $state<Options>({ enabled: true, excludeWatched: true, historyDays: 180 });
   let loading = $state(true);
   let saving = $state(false);
   let error = $state('');
   let notice = $state('');
   $effect(() => {
     const owner = $session?.user.id;
-    options = { enabled: false, excludeWatched: true, historyDays: 180 };
+    options = { enabled: true, excludeWatched: true, historyDays: 180 };
     error = ''; notice = ''; loading = true;
     const controller = new AbortController();
     if (!owner) { loading = false; return; }

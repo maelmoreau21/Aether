@@ -223,19 +223,7 @@
   }
 </script>
 
-<section id="users-section" class="dsm-container" aria-labelledby="users-heading">
-  <!-- DSM Header -->
-  <div class="dsm-header">
-    <div class="dsm-title-group">
-      <div class="dsm-icon-badge">
-        <Icon name="users" size={22} />
-      </div>
-      <div>
-        <h2 id="users-heading">{$t('users_heading')}</h2>
-        <p class="dsm-subtitle">Gérez les comptes d'accès locaux et attribuez leurs privilèges de médiathèque.</p>
-      </div>
-    </div>
-  </div>
+<section id="users-section" class="dsm-container" aria-label={$t('users_heading')}>
 
   {#if message}
     <div class="dsm-alert" class:alert-error={failed} class:alert-success={!failed} role="status">
@@ -566,18 +554,18 @@
     <div class="toolbar-right">
       <div class="search-box">
         <Icon name="search" size={16} />
-        <input type="search" bind:value={search} placeholder="Rechercher…" />
+        <input type="search" bind:value={search} placeholder="Rechercher…" aria-label="Rechercher un utilisateur" />
       </div>
 
       <select bind:value={roleFilter} class="filter-select" aria-label="Filtrer par rôle">
         <option value="all">Tous les rôles</option>
         <option value="administrator">Administrateurs</option>
-        <option value="user">Utilisateurs standard</option>
+        <option value="user">Utilisateurs</option>
       </select>
 
       <select bind:value={statusFilter} class="filter-select" aria-label="Filtrer par statut">
         <option value="all">Tous les statuts</option>
-        <option value="active">Actifs uniquement</option>
+        <option value="active">Actifs</option>
         <option value="disabled">Désactivés</option>
       </select>
     </div>
@@ -696,11 +684,6 @@
 .dsm-container { display: flex; flex-direction: column; gap: 16px; margin-bottom: 40px; font-family: var(--font-sans); color: var(--color-text); }
 
   /* En-tête de section */
-  .dsm-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .dsm-title-group { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .dsm-icon-badge { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-raised); color: var(--color-text); }
-  h2 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
-  .dsm-subtitle { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--color-muted); }
 
   /* Barre d'outils */
   .dsm-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -753,6 +736,8 @@
   .search-box input { width: 180px; min-width: 0; height: 100%; min-height: 0; box-shadow: none; padding: 0; border: 0; background: transparent; color: var(--color-text); font: inherit; font-size: 14px; outline: none; }
   .search-box input::placeholder { color: var(--color-subtle); }
   .filter-select {
+    width: auto;
+    min-width: 0;
     height: 44px;
     padding: 0 36px 0 14px;
     border: 1px solid transparent;
@@ -948,12 +933,11 @@
   @media (max-width: 820px) {
     .dsm-toolbar { align-items: stretch; flex-direction: column; }
     .toolbar-right { width: 100%; }
-    .search-box { flex: 1 1 220px; }
+    .search-box { flex: 1 1 100%; }
     .search-box input { width: 100%; }
-    .filter-select { flex: 1 1 160px; }
+    .filter-select { flex: 1 1 calc(50% - 4px); }
   }
   @media (max-width: 640px) {
-    .dsm-icon-badge { display: none; }
     .toolbar-left .btn { flex: 1 1 auto; }
     .btn-group { flex: 1 1 100%; }
     .btn-group .btn { flex: 1; }

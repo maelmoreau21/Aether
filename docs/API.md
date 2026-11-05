@@ -1,5 +1,16 @@
 > Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
 
+> Connexion d’appareils par QR code (5 novembre 2026) : voir [sessions](LOCAL_SESSIONS.md#connexion-par-qr-code--5-novembre-2026).
+> `POST /api/v1/auth/device/start` crée une demande de cinq minutes et renvoie
+> `{secret,code,expiresIn,url,qrWidth,qrModules}` (modules booléens du QR, sans bordure).
+> `POST .../poll` avec `{secret}` renvoie `{status:"pending"}` ou
+> `{status:"authenticated",user,csrfToken}` et un cookie de session HttpOnly.
+> `POST .../inspect` avec `{code}` renvoie `{device}` ; `POST .../approve` avec
+> `{code}` confirme explicitement et renvoie `204`. Ces deux routes exigent session
+> locale **ou SSO** et CSRF ; toutes exigent une origine autorisée. Erreurs : `400`
+> entrée invalide, `401/403` session/CSRF/origine/droits, `404` code invalide ou déjà
+> approuvé, `410` demande expirée ou consommée, `429` quota. Aucun secret dans l’URL.
+
 > Parcours du 3 novembre 2026 : [sous-titres manuels](OPENSUBTITLES.md),
 > [images de chapitres](CHAPTER_IMAGES.md), [recommandations personnelles](RECOMMENDATIONS.md)
 > et [notifications](NOTIFICATIONS.md). Chaque contrat précise ses routes,

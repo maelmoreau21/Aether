@@ -38,7 +38,7 @@ struct Preferences {
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             exclude_watched: true,
             history_days: 180,
         }
@@ -409,8 +409,8 @@ mod tests {
         assert_eq!(ranked.len(), 4);
     }
     #[test]
-    fn preferences_are_opt_in_and_history_window_is_bounded() {
-        assert!(!Preferences::default().enabled);
+    fn preferences_are_enabled_by_default_and_history_window_is_bounded() {
+        assert!(Preferences::default().enabled);
         for days in [0, 3651] {
             assert!(
                 !Preferences {

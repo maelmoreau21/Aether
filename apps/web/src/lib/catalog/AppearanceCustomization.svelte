@@ -19,11 +19,6 @@
   <h2 id="customization-title">Personnaliser l’affichage</h2>
   <p>Ces choix suivent votre compte sur vos appareils. Une page déjà ouverte les recharge quand vous y revenez.</p>
   <div class="choices">
-    <label>Couleur d’accent
-      <select value={$preferenceState.accentColor ?? 'orange'} onchange={event => void save({ accentColor: event.currentTarget.value as 'orange' | 'blue' | 'violet' | 'green' })}>
-        <option value="orange">Orange</option><option value="blue">Bleu</option><option value="violet">Violet</option><option value="green">Vert</option>
-      </select>
-    </label>
     <label>Taille des affiches
       <select value={$preferenceState.cardSize ?? 'medium'} onchange={event => void save({ cardSize: event.currentTarget.value as 'small' | 'medium' | 'large' })}>
         <option value="small">Petite</option><option value="medium">Moyenne</option><option value="large">Grande</option>
@@ -48,7 +43,7 @@
   {#each DEFAULT_HOME_SECTIONS.filter(section => !sections.includes(section)) as section (section)}
     <button class="restore" type="button" onclick={() => toggle(section)}>Afficher : {names[section]}</button>
   {/each}
-  <button type="button" onclick={() => void save({ homeSections: [...DEFAULT_HOME_SECTIONS], cardSize: 'medium', cardDensity: 'comfortable', accentColor: 'orange' })}>Rétablir l’affichage par défaut</button>
+  <button type="button" onclick={() => void save({ homeSections: [...DEFAULT_HOME_SECTIONS], cardSize: 'medium', cardDensity: 'comfortable' })}>Rétablir l’affichage par défaut</button>
   {#if saveError}<p role="alert">{saveError}</p>{/if}
 </section>
 <style>

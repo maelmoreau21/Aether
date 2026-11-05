@@ -276,6 +276,12 @@ pub(super) async fn apply(
     if let Some(v) = proposal.get("originalTitle").and_then(Value::as_str) {
         metadata_map.insert("original_title".into(), json!(v));
     }
+    if let Some(v) = proposal.get("originalLanguage").and_then(Value::as_str)
+        && (2..=35).contains(&v.len())
+        && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    {
+        metadata_map.insert("original_language".into(), json!(v));
+    }
     if let Some(v) = proposal.get("tagline").and_then(Value::as_str) {
         metadata_map.insert("tagline".into(), json!(v));
         metadata_map.insert("outline".into(), json!(v));

@@ -8,6 +8,7 @@ default-run = "aether-core"
 
 [dependencies]
 quick-xml = "=0.42.0"
+qrcode = { version = "=0.14.1", default-features = false }
 image = { version = "=0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 media-contracts = { path = "../shared" }
 media-extension-sdk = { path = "../extension-sdk" }

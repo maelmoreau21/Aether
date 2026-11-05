@@ -61,7 +61,46 @@ et refus de chemin), ainsi que `cargo fmt --check` et `git diff --check`.
 Le scénario ajouté de permissions Unix puis rétablissement attend une exécution
 sous Unix ; il est exclu de la compilation Windows.
 
+Un nouveau contrôle SSH le 5 novembre a retrouvé le même refus après recréation
+du conteneur : `/backups` en `10001:10001`, mode 0700, pour un Core `1039:65539`.
+Le volume porte toujours sa date de création du 19 octobre ; sa recréation
+n'est donc pas établie. Le dossier était vide. La propagation Docker vers un
+volume vide préexistant peut aussi réappliquer les attributs du dossier fourni
+par l'image lors de la création du conteneur. Ce mécanisme est compatible avec
+la récidive observée ; l'opération exacte ayant changé le propriétaire n'a pas
+été retracée. Voir les [règles des volumes Docker](https://docs.docker.com/engine/storage/volumes/).
+La correction non récursive du seul dossier vers `1039:65539` a rétabli la
+lecture de la liste et l'écriture/relecture d'une sonde privée 0600 sous le Core ;
+la sonde a été supprimée, sans redémarrage ni modification d'archive ou de média.
+
+Pour un déploiement utilisant un UID/GID personnalisé, préparer d'abord le volume
+privé pour cet utilisateur puis désactiver la propagation sur ce seul montage :
+
+```yaml
+services:
+  aether:
+    volumes:
+      - type: volume
+        source: aether_backups
+        target: /backups
+        volume:
+          nocopy: true
+```
+
+Ce bloc remplace le montage court de `/backups` dans le Compose de déploiement.
+Il suppose que le volume existe déjà et que son propriétaire a été préparé ;
+un volume neuf avec `nocopy` peut appartenir à root et doit être initialisé avant
+de lancer le Core. Le Compose générique et le Compose NAS n'ont pas été modifiés
+lors de ce contrôle. Un bind mount privé préparé pour l'UID/GID effectif évite
+également la propagation. Revérifier le propriétaire et la lecture sous
+l'utilisateur du service après chaque recréation de conteneur.
+
 ## Récupération et vérifications
+
+Depuis le 5 novembre 2026, le panneau mémoire conserve ses mesures et l’action
+« Libérer la mémoire (Trim) », mais n’affiche plus le message de diagnostic
+ni le conseil sur le cache de pages Linux. Le contrat de diagnostic API reste
+inchangé.
 
 Arrêter le Core ; extraire vers un nouvel emplacement privé ; restaurer la base via `media-restore` (SQLite destination nouvelle, PostgreSQL base vide), puis rétablir la configuration extraite et vérifier le redémarrage. La restauration de la base active depuis HTTP reste exclue.
 

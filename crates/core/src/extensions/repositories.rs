@@ -54,6 +54,10 @@ struct InstallInput {
     version: String,
     #[serde(default)]
     upgrade: bool,
+    #[serde(default)]
+    confirm_downgrade: bool,
+    expected_version: Option<String>,
+    expected_sha256: Option<String>,
 }
 
 pub(super) fn router() -> Router<AuthState> {
@@ -412,7 +416,37 @@ async fn install(
     if current.as_deref() != Some(snapshot.as_str()) {
         return Err(err(StatusCode::CONFLICT, "repository_changed"));
     }
-    if input.upgrade {
+    if input.confirm_downgrade {
+        if !input.upgrade {
+            return Err(err(
+                StatusCode::BAD_REQUEST,
+                "extension_downgrade_confirmation_required",
+            ));
+        }
+        let guard = super::DowngradeGuard {
+            expected_version: input.expected_version.ok_or_else(|| {
+                err(
+                    StatusCode::BAD_REQUEST,
+                    "extension_downgrade_confirmation_required",
+                )
+            })?,
+            expected_sha256: input.expected_sha256.ok_or_else(|| {
+                err(
+                    StatusCode::BAD_REQUEST,
+                    "extension_downgrade_confirmation_required",
+                )
+            })?,
+        };
+        super::change_version_with_key(
+            auth,
+            headers,
+            input.extension_id,
+            package,
+            entry.public_key,
+            Some(guard),
+        )
+        .await
+    } else if input.upgrade {
         super::upgrade_with_key(auth, headers, input.extension_id, package, entry.public_key).await
     } else {
         super::install_with_key(auth, headers, package, entry.public_key).await
@@ -870,6 +904,97 @@ mod tests {
             .execute(store.pool())
             .await
             .unwrap();
+
+        // Downgrade is explicit, guarded by the current revision and preserves a snapshot.
+        test_documents()
+            .lock()
+            .unwrap()
+            .insert(package_url.clone(), serde_json::to_vec(&package).unwrap());
+        let downgrade = json!({"extensionId":"repo.fixture","version":"1.0.0","upgrade":true,"confirmDowngrade":true,"expectedVersion":"1.0.1","expectedSha256":newer.sha256});
+        assert_eq!(
+            request(
+                &app,
+                &endpoint,
+                "POST",
+                &cookie,
+                &csrf,
+                json!({"extensionId":"repo.fixture","version":"1.0.0","upgrade":true})
+            )
+            .await
+            .status(),
+            StatusCode::CONFLICT
+        );
+        let mut stale = downgrade.clone();
+        stale["expectedVersion"] = json!("1.0.0");
+        assert_eq!(
+            request(&app, &endpoint, "POST", &cookie, &csrf, stale)
+                .await
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            request(&app, &endpoint, "POST", &cookie, "", downgrade.clone())
+                .await
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        // A currently installed extension with private storage cannot be downgraded
+        // without a verified inverse migration, even when its namespace is empty.
+        let mut private_installed = newer.clone();
+        private_installed
+            .manifest
+            .permissions
+            .push("storage.private".into());
+        query("UPDATE extensions SET package_json=? WHERE id='repo.fixture'")
+            .bind(serde_json::to_string(&private_installed).unwrap())
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let unsafe_attempt =
+            request(&app, &endpoint, "POST", &cookie, &csrf, downgrade.clone()).await;
+        assert_eq!(unsafe_attempt.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            body(unsafe_attempt).await["error"],
+            "extension_downgrade_incompatible"
+        );
+        query("UPDATE extensions SET package_json=? WHERE id='repo.fixture'")
+            .bind(serde_json::to_string(&newer).unwrap())
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let rejected = request(&app, &endpoint, "POST", &cookie, &csrf, downgrade.clone()).await;
+        assert_eq!(rejected.status(), StatusCode::CONFLICT);
+        assert_eq!(
+            body(rejected).await["error"],
+            "extension_downgrade_snapshot_exists"
+        );
+        let mut conn = store.pool().acquire().await.unwrap();
+        super::super::updates::clear_snapshot(&mut conn, "repo.fixture")
+            .await
+            .unwrap();
+        drop(conn);
+        assert_eq!(
+            request(&app, &endpoint, "POST", &cookie, &csrf, downgrade)
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+        let restored = body(
+            request(
+                &app,
+                "/api/v1/admin/extensions",
+                "GET",
+                &cookie,
+                "",
+                json!(null),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(restored["extensions"][0]["manifest"]["version"], "1.0.0");
+        assert_eq!(restored["extensions"][0]["enabled"], false);
+        assert_eq!(restored["extensions"][0]["rollbackVersion"], "1.0.1");
+        assert_eq!(request(&app, "/api/v1/admin/extensions/repo.fixture/rollback", "POST", &cookie, &csrf, json!({"expectedSha256":package.sha256,"expectedVersion":"1.0.0","confirmDataRestore":true})).await.status(), StatusCode::OK);
 
         assert_eq!(
             request(

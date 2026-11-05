@@ -1,0 +1,166 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import Icon from '../ui/Icon.svelte';
+  import { session } from './session';
+
+  interface Device { id: string; device: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean }
+  let devices = $state<Device[]>([]);
+  let loading = $state(true);
+  let loaded = $state(false);
+  let busy = $state<string | null>(null);
+  let error = $state('');
+  let notice = $state('');
+  let confirmAll = $state(false);
+  let controller: AbortController | undefined;
+  const ordered = $derived([...devices].sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeenAt - a.lastSeenAt));
+
+  function deviceName(raw: string): string {
+    const browser = /Edg\//i.test(raw) ? 'Edge' : /Firefox\//i.test(raw) ? 'Firefox' : /(?:Chrome|CriOS)\//i.test(raw) ? 'Chrome' : /Safari\//i.test(raw) ? 'Safari' : '';
+    const system = /iPad/i.test(raw) ? 'iPad' : /iPhone/i.test(raw) ? 'iPhone' : /Android/i.test(raw) ? 'Android' : /Windows/i.test(raw) ? 'Windows' : /Macintosh|Mac OS X/i.test(raw) ? 'Mac' : /Linux/i.test(raw) ? 'Linux' : '';
+    return [browser, system].filter(Boolean).join(' · ') || raw || 'Navigateur';
+  }
+  function date(value: number): string {
+    return new Date(value * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  }
+  async function load() {
+    controller?.abort();
+    const current = new AbortController();
+    controller = current;
+    loading = true;
+    error = '';
+    try {
+      const response = await fetch('/api/v1/account/sessions', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(10000)]) });
+      if (!response.ok) throw new Error('Impossible de charger vos sessions. Réessayez.');
+      const data = await response.json();
+      if (!Array.isArray(data.sessions)) throw new Error('Impossible de charger vos sessions. Réessayez.');
+      if (!current.signal.aborted) { devices = data.sessions; loaded = true; }
+    } catch (cause) {
+      if (!current.signal.aborted) error = cause instanceof Error && cause.name === 'TimeoutError' ? 'Le serveur met trop de temps à répondre. Réessayez.' : 'Impossible de charger vos sessions. Réessayez.';
+    } finally {
+      if (!current.signal.aborted) loading = false;
+    }
+  }
+  onMount(() => { void load(); return () => controller?.abort(); });
+
+  async function revoke(device?: Device) {
+    if (busy || loading) return;
+    busy = device?.id ?? 'all';
+    error = ''; notice = '';
+    try {
+      const response = await fetch('/api/v1/account/sessions' + (device ? '/' + encodeURIComponent(device.id) : ''), {
+        method: 'DELETE', credentials: 'same-origin', cache: 'no-store',
+        headers: { 'x-csrf-token': $session?.csrfToken ?? '' }, signal: AbortSignal.timeout(10000)
+      });
+      if (!response.ok && !(device && response.status === 404)) throw new Error('Impossible de déconnecter cette session. Réessayez.');
+      if (!device || device.current) { window.location.reload(); return; }
+      devices = devices.filter(item => item.id !== device.id);
+      notice = 'La session a été déconnectée.';
+      await load();
+    } catch (cause) {
+      error = cause instanceof Error && cause.name === 'TimeoutError' ? 'Le serveur met trop de temps à répondre. Réessayez.' : 'Impossible de déconnecter cette session. Réessayez.';
+    } finally { busy = null; confirmAll = false; }
+  }
+</script>
+
+<section class="sessions" aria-labelledby="sessions-title" aria-busy={loading}>
+  <header class="sessions-header">
+    <div><h3 id="sessions-title">Vos sessions <span class="session-count">{loaded ? devices.length : '…'}</span></h3><p>Retrouvez vos connexions et gardez le contrôle de votre compte.</p></div>
+    <button class="refresh" disabled={!!busy || loading} onclick={() => void load()}><Icon name="refresh" size={17} />{loading ? 'Actualisation…' : 'Actualiser'}</button>
+  </header>
+
+  {#if error}<p class="message error" role="alert"><Icon name="alert" size={18} />{error}</p>{/if}
+  {#if notice}<p class="message notice" role="status"><Icon name="check" size={18} />{notice}</p>{/if}
+  {#if loading && !loaded}
+    <div class="empty" role="status"><Icon name="refresh" size={28} /><p>Chargement de vos sessions…</p></div>
+  {:else if loaded && devices.length === 0}
+    <div class="empty"><Icon name="shield" size={28} /><strong>Aucune session à afficher</strong><p>Actualisez la liste pour vérifier vos connexions.</p></div>
+  {/if}
+
+  <div class="session-list">
+    {#each ordered as device (device.id)}
+      <article class:current={device.current} aria-label={deviceName(device.device)}>
+        <div class="session-top">
+          <div class="device-icon"><Icon name={device.current ? 'globe' : 'tv'} size={25} /></div>
+          <div class="device-heading"><strong>{deviceName(device.device)}</strong>{#if device.current}<span class="current-badge"><span></span>Cet appareil</span>{:else}<span class="other-label">Autre session</span>{/if}</div>
+          <button class="disconnect" disabled={!!busy || loading} aria-label={'Déconnecter ' + (device.current ? 'cette session' : deviceName(device.device))} onclick={() => void revoke(device)}>{busy === device.id ? 'Déconnexion…' : 'Déconnecter'}</button>
+        </div>
+        <dl>
+          <div><dt>Dernière activité</dt><dd>{date(device.lastSeenAt)}</dd></div>
+          <div><dt>Connecté depuis le</dt><dd>{date(device.createdAt)}</dd></div>
+          <div><dt>Expiration au plus tard</dt><dd>{date(device.expiresAt)}</dd></div>
+        </dl>
+        <details><summary>Détails du navigateur</summary><p>{device.device || 'Navigateur non renseigné'}</p></details>
+      </article>
+    {/each}
+  </div>
+
+  <div class="session-info"><Icon name="shield" size={19} /><p>Une session expire après 7 jours sans activité, et au plus tard 30 jours après la connexion. Plusieurs sessions peuvent appartenir au même appareil.</p></div>
+  {#if devices.length > 0}
+    <footer>
+      <div><strong>Déconnexion générale</strong><p>Fermez toutes les sessions de votre compte, y compris celle-ci.</p></div>
+      {#if !confirmAll}<button class="danger" disabled={!!busy || loading} onclick={() => confirmAll = true}>Déconnecter tous les appareils</button>{/if}
+    </footer>
+    {#if confirmAll}
+      <div class="confirmation" role="group" aria-label="Confirmer la déconnexion générale"><p>Vous devrez vous reconnecter sur chaque appareil pour continuer.</p><div><button disabled={!!busy} onclick={() => confirmAll = false}>Annuler</button><button class="danger" disabled={!!busy || loading} onclick={() => void revoke()}>{busy === 'all' ? 'Déconnexion…' : 'Confirmer la déconnexion'}</button></div></div>
+    {/if}
+  {/if}
+</section>
+
+<style>
+  .sessions { display: grid; gap: 22px; min-width: 0; margin-top: 20px; }
+  .sessions-header { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+  h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 7px; color: var(--tx); font-size: 18px; font-weight: 700; }
+  p { margin: 0; color: var(--mu); font-size: 13px; line-height: 1.65; }
+  .session-count { display: inline-flex; align-items: center; justify-content: center; min-width: 25px; height: 25px; padding: 0 7px; box-sizing: border-box; border-radius: var(--r-pill); background: var(--pn-2); color: var(--mu); font-size: 12px; }
+  button { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 8px; min-height: 44px; padding: 10px 16px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; transition: background-color var(--t-fast) ease; }
+  button:hover:not(:disabled) { background: var(--pn-2); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, summary:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .session-list { display: grid; gap: 12px; }
+  article { display: grid; gap: 19px; min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--pn); }
+  article.current { border-color: var(--ac); }
+  .session-top { display: flex; align-items: center; gap: 14px; }
+  .device-icon { display: grid; flex: 0 0 48px; place-items: center; height: 48px; border-radius: var(--r-md); background: var(--pn-2); color: var(--mu); }
+  .current .device-icon { background: var(--ac-soft); color: var(--ac); }
+  .device-heading { display: grid; justify-items: start; min-width: 0; gap: 6px; flex: 1; }
+  strong { color: var(--tx); font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+  .device-heading > strong { font-size: 15px; }
+  .current-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 650; color: var(--ac); }
+  .current-badge span { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .other-label { color: var(--mu); font-size: 12px; }
+  .disconnect { background: transparent; }
+  dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 0; }
+  dt { color: var(--mu); font-size: 11px; font-weight: 600; }
+  dd { margin: 5px 0 0; color: var(--tx); font-size: 12px; line-height: 1.55; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  details { padding-top: 12px; border-top: 1px solid var(--line); }
+  summary { width: fit-content; color: var(--mu); font-size: 12px; cursor: pointer; }
+  details p { margin-top: 9px; font-size: 12px; overflow-wrap: anywhere; }
+  .session-info { display: flex; align-items: start; gap: 10px; color: var(--mu); }
+  .session-info :global(svg), .message :global(svg) { flex-shrink: 0; margin-top: 2px; }
+  footer { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 22px; border-top: 1px solid var(--line); }
+  footer p { margin-top: 5px; }
+  .danger { border-color: transparent; background: var(--err-soft); color: var(--err); }
+  .danger:hover:not(:disabled) { background: var(--err-soft); opacity: .85; }
+  .confirmation { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-md); }
+  .confirmation > div { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
+  .message { display: flex; align-items: start; gap: 9px; padding: 12px 14px; border-radius: var(--r-sm); }
+  .error { color: var(--err); background: var(--err-soft); }
+  .notice { color: var(--ac); background: var(--ac-soft); }
+  .empty { display: grid; justify-items: center; gap: 10px; padding: 30px 16px; text-align: center; border: 1px dashed var(--line); border-radius: var(--r-lg); color: var(--mu); }
+  @media (max-width: 650px) {
+    .sessions-header { flex-wrap: wrap; gap: 12px; }
+    .refresh { min-height: 40px; padding: 8px 12px; }
+    article { padding: 16px; gap: 16px; }
+    .session-top { flex-wrap: wrap; gap: 12px; }
+    .device-icon { flex-basis: 42px; height: 42px; }
+    .device-heading { flex-basis: calc(100% - 54px); }
+    .disconnect { width: 100%; }
+    dl { grid-template-columns: 1fr; gap: 12px; }
+    dl > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    dt { flex-shrink: 0; }
+    dd { margin: 0; text-align: right; }
+    footer { align-items: start; flex-direction: column; gap: 14px; }
+    footer button { width: 100%; }
+    .confirmation > div { display: grid; grid-template-columns: 1fr; }
+  }
+</style>

@@ -1,22 +1,16 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { session } from './session';
+  import DeviceSessions from './DeviceSessions.svelte';
+  import QuickConnectApprove from './QuickConnectApprove.svelte';
   let { mode = 'security' }: { mode?: 'security' | 'devices' } = $props();
-  interface Device { id: string; device: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean }
   let canCreate=$state(false),login=$state('');
-  let devices = $state<Device[]>([]);
   let currentPassword = $state('');
   let newPassword = $state('');
   let confirmation = $state('');
   let error = $state('');
   let busy = $state(false);
-  let loading = $state(true);
-  async function load() {
-    const response = await fetch('/api/v1/account/sessions', { cache: 'no-store' });
-    if (!response.ok) throw new Error('Impossible de charger les appareils.');
-    devices = (await response.json()).sessions;
-  }
-  onMount(() => { if (mode !== 'devices') { loading = false; void fetch('/api/v1/account/local-credentials',{cache:'no-store'}).then(r=>r.ok?r.json():{canCreate:false}).then(v=>canCreate=v.canCreate).catch(()=>{}); return; } void load().catch(cause => error = cause.message).finally(() => loading = false); });
+  onMount(() => { if (mode !== 'security') return; void fetch('/api/v1/account/local-credentials',{cache:'no-store'}).then(r=>r.ok?r.json():{canCreate:false}).then(v=>canCreate=v.canCreate).catch(()=>{}); });
   async function mutate(path: string, method: string, body?: unknown) {
     error = ''; busy = true;
     try {
@@ -34,11 +28,6 @@
     if (newPassword !== confirmation) { error = 'Les deux nouveaux mots de passe doivent être identiques.'; return; }
     if (await mutate($session?.user.sso ? '/api/v1/account/local-credentials' : '/api/v1/account/password', $session?.user.sso ? 'POST' : 'PUT', $session?.user.sso ? {login,password:newPassword} : { currentPassword, newPassword })) window.location.reload();
   }
-  async function revoke(device?: Device) {
-    if (!await mutate('/api/v1/account/sessions' + (device ? '/' + device.id : ''), 'DELETE')) return;
-    if (!device || device.current) window.location.reload();
-    else await load().catch(cause => error = cause.message);
-  }
 </script>
 <section>
 {#if mode === 'security'}<h3>Connexion par mot de passe</h3>
@@ -52,9 +41,7 @@
   <label>Confirmer le nouveau mot de passe<input type="password" autocomplete="new-password" required minlength="15" maxlength="128" bind:value={confirmation} disabled={busy} /></label>
   {#if !$session?.user.sso}<p>Toutes vos sessions seront déconnectées après le changement.</p>{/if}<button disabled={busy}>{$session?.user.sso ? 'Créer mes identifiants locaux' : 'Changer le mot de passe'}</button>
 </form>{/if}
-{:else}<h3>Vos sessions</h3><p>Votre connexion reste active pendant 7 jours sans activité, dans la limite de 30 jours après la connexion.</p><button disabled={busy || loading} onclick={() => { void load().catch(cause => error = cause.message); }}>Actualiser la liste</button>{#if loading}<p role="status">Chargement des appareils…</p>{/if}<p>Chaque entrée représente une session du navigateur, pas une identification matérielle vérifiée.</p>
-{#each devices as device (device.id)}<article><strong>{device.device}</strong>{#if device.current}<span class="current-device">Session actuelle</span>{/if}<dl><div><dt>Connexion</dt><dd>{new Date(device.createdAt * 1000).toLocaleString()}</dd></div><div><dt>Dernière activité</dt><dd>{new Date(device.lastSeenAt * 1000).toLocaleString()}</dd></div><div><dt>Expiration</dt><dd>{new Date(device.expiresAt * 1000).toLocaleString()}</dd></div></dl><button disabled={busy} onclick={() => revoke(device)}>Déconnecter{device.current ? ' cette session' : ''}</button></article>{/each}
-<button disabled={busy || devices.length === 0} onclick={() => revoke()}>Déconnecter tous les appareils</button>
+{:else}<QuickConnectApprove /><DeviceSessions />
 {/if}
 {#if error}<p role="alert">{error}</p>{/if}</section>
 <style>
@@ -74,15 +61,5 @@
   button:focus-visible, input:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   form button { height: 48px; padding: 0 22px; background: var(--btn); color: var(--btn-tx); }
   form button:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
-  article button, section > button:last-of-type:not(:first-of-type) { background: var(--err-soft); color: var(--err); }
-  article button:hover:not(:disabled), section > button:last-of-type:not(:first-of-type):hover:not(:disabled) { background: var(--err-soft); opacity: 0.85; }
-  article { display: grid; gap: 8px; margin: 0; padding: 16px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
-  article strong { font-size: 15px; font-weight: 700; color: var(--tx); }
-  article + button { margin-top: 4px; }
-  .current-device { justify-self: start; display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--ac-soft); color: var(--ac); font-size: 12px; font-weight: 700; }
-  dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 16px; margin: 4px 0; }
-  dt { color: var(--mu); font-size: 13px; font-weight: 600; }
-  dd { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--tx); font-variant-numeric: tabular-nums; }
   [role='alert'] { padding: 12px 14px; border-radius: var(--r-sm); background: var(--err-soft); color: var(--err); font-weight: 600; }
-  [role='status'] { color: var(--mu); }
 </style>

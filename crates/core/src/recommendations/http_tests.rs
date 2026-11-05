@@ -93,7 +93,7 @@ async fn fixture(store: &crate::identity::IdentityStore) {
 }
 
 #[tokio::test]
-async fn account_http_recommendations_are_opt_in_private_fresh_and_persistent() {
+async fn account_http_recommendations_default_on_and_respect_private_persistent_preferences() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("recommendations.sqlite");
     let store = crate::identity::IdentityStore::open(&path).await.unwrap();
@@ -109,8 +109,14 @@ async fn account_http_recommendations_are_opt_in_private_fresh_and_persistent() 
         StatusCode::UNAUTHORIZED
     );
     let (_, default) = call(&app, "GET", endpoint, &cookie, "", Value::Null).await;
-    assert_eq!(default["enabled"], false);
-    assert!(default["items"].as_array().unwrap().is_empty());
+    assert_eq!(default["enabled"], true);
+    assert_eq!(default["mode"], "discovery");
+    assert!(!default["items"].as_array().unwrap().is_empty());
+    let (_, defaults) = call(&app, "GET", prefs, &cookie, "", Value::Null).await;
+    assert_eq!(
+        defaults,
+        json!({"enabled":true,"excludeWatched":true,"historyDays":180})
+    );
     let enabled = json!({"enabled":true,"excludeWatched":true,"historyDays":30});
     assert_eq!(
         call(&app, "PUT", prefs, &cookie, "", enabled.clone())
@@ -194,6 +200,19 @@ async fn account_http_recommendations_are_opt_in_private_fresh_and_persistent() 
             .iter()
             .any(|i| i["id"] == "seed")
     );
+    assert_eq!(
+        call(
+            &app,
+            "PUT",
+            prefs,
+            &other_cookie,
+            &other_csrf,
+            json!({"enabled":false,"excludeWatched":true,"historyDays":30})
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
     // Catalogue edits must invalidate affinity/explanations, not only the shelf's cards.
     query("UPDATE inventory_works SET editorial_json=? WHERE id='near'")
         .bind(json!({"genres":["Comedy"],"directors":["Other director"]}).to_string())
@@ -271,6 +290,11 @@ async fn account_http_recommendations_are_opt_in_private_fresh_and_persistent() 
         .await
         .unwrap();
     let app = router(auth);
+    // An existing opt-out survives reopening; the new default applies only to absent preferences.
+    let (_, other_stored) = call(&app, "GET", prefs, &other_cookie, "", Value::Null).await;
+    assert_eq!(other_stored["enabled"], false);
+    let (_, other_disabled) = call(&app, "GET", endpoint, &other_cookie, "", Value::Null).await;
+    assert_eq!(other_disabled["mode"], "disabled");
     let (_, stored) = call(&app, "GET", prefs, &cookie, "", Value::Null).await;
     assert_eq!(
         stored,

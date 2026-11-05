@@ -90,6 +90,36 @@ strictement isolé par une génération de session monotone (`sessionGeneration`
   au survol/focus ; chaque lancement de lecture (`revalidateMediaDescriptor`) revalide les
   droits auprès du serveur avant d'ouvrir le lecteur vidéo.
 
+## Connexion par QR code — 5 novembre 2026
+
+La page `/app/login/` propose « Afficher le QR code », y compris quand la connexion
+locale est désactivée. Sur un téléphone déjà connecté, scanner ce QR ouvre
+`/app/connect/` ; on peut aussi saisir le code dans Paramètres → Appareils et sessions.
+L’utilisateur vérifie le navigateur demandeur et confirme « Autoriser la connexion ».
+Le scan seul n’autorise rien. Les comptes SSO sans mot de passe local utilisent
+leur session Core existante, sans créer d’identifiants locaux ni transférer de jeton OIDC.
+Si le téléphone doit se reconnecter, seul le code public est conservé en sessionStorage
+pour reprendre la confirmation après la connexion locale ou le retour SSO.
+
+Chaque demande expire après cinq minutes. Le code public de huit caractères
+hexadécimaux sert uniquement à autoriser ; le secret aléatoire de 64 caractères
+reste en mémoire du navigateur demandeur et dans le corps des requêtes, jamais
+dans le QR, une URL ou localStorage. La base ne contient que leurs SHA-256.
+Le code public est dans le fragment du lien, absent des URLs HTTP et Referer.
+Les quatre opérations exigent une origine autorisée ; inspecter et approuver
+exigent aussi une session vivante et un jeton CSRF. Création : dix demandes par
+minute/client, plafond global de 256 ; inspection/approbation : dix essais par
+minute/session, compteurs persistants. La consommation est transactionnelle et
+à usage unique, avec revalidation de la session approbatrice, du compte actif et
+des restrictions d’accès. Sa révocation annule les approbations non consommées.
+Le nouvel appareil obtient sa propre session révocable et les expirations usuelles.
+
+La nouvelle table idempotente est créée sur bases neuves et existantes SQLite et
+PostgreSQL. Les tests ciblés couvrent SQLite et un compte SSO synthétique ; cela
+ne prouve ni un échange avec un fournisseur OIDC réel ni un scan sur téléphone
+physique. Le téléphone et le nouvel appareil doivent atteindre la même URL
+publique configurée (une URL loopback n’est pas accessible depuis un téléphone).
+
 ## Permissions et isolation P0
 
 Le constructeur `secure_app` du binaire impose une session puis le droit de
@@ -147,4 +177,14 @@ Les fixtures et les bases réelles de l'opérateur ne sont pas modifiées.
 
 ## Appareils personnels
 
-Paramètres > Sécurité et appareils : sessions du navigateur, dates de connexion, activité et expiration absolue, session courante, révocation individuelle ou globale. GET /api/v1/account/sessions liste uniquement les sessions du compte. DELETE sur cette route ou /api/v1/account/sessions/{id} exige propriétaire et CSRF. Une reconnexion est nécessaire pour obtenir la nouvelle expiration absolue.
+Paramètres > Appareils et sessions présente les connexions sous forme de cartes,
+avec la session actuelle en premier, un nom lisible du navigateur et du système,
+les dates de connexion, d’activité et d’expiration. Le User-Agent complet reste
+consultable dans les détails ; il ne constitue pas une identification matérielle.
+La liste propose une actualisation, une révocation individuelle et une déconnexion
+générale avec confirmation, incluant la session courante. Les erreurs gardent la
+liste connue visible et permettent de réessayer.
+
+`GET /api/v1/account/sessions` liste uniquement les sessions du compte.
+`DELETE` sur cette route ou `/api/v1/account/sessions/{id}` exige propriétaire et
+CSRF. Une reconnexion est nécessaire pour obtenir la nouvelle expiration absolue.

@@ -97,21 +97,27 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
       selected[kind] = manual[0].url;
       continue;
     }
-    const isLibraryAllowed = policy.enabledLibraries !== undefined
+    const isLibraryAllowed = policy.languageMode ? (work.kind === 'film' || work.kind === 'series') : policy.enabledLibraries !== undefined
       ? policy.enabledLibraries.includes(work.libraryId)
       : ((work.kind === 'film' && (policy.enableMovies ?? true)) || (work.kind === 'series' && (policy.enableSeries ?? true)));
     const rotation = kind === 'poster' && policy.enabled && isLibraryAllowed;
-    if (kind === 'poster' && !rotation) {
+    if (kind === 'poster' && !rotation && !policy.languageMode) {
       const serverChoice = candidates.find(image => image.origin === 'provider' && image.position < 0);
       if (serverChoice) {
         selected[kind] = serverChoice.url;
         continue;
       }
     }
-    const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
+    const interfaceLanguage = languages[0] || 'fr';
+    const original = work.originalLanguage?.trim();
+    const selectionLanguages = kind === 'poster' && policy.languageMode
+      ? policy.languageMode === 'original' && original && /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(original)
+        ? [original, interfaceLanguage] : [interfaceLanguage]
+      : rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {
       candidates = candidates.filter(image => {
         const language = image.language?.toLowerCase();
+        if (policy.languageMode) return true;
         if (!language || language === 'und' || language === 'xx') return policy.includeUnknownLanguage;
         return policy.allowAnyLanguageFallback || selectionLanguages.some(choice => language === choice || language.split('-')[0] === choice.split('-')[0]);
       });

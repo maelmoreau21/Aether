@@ -455,6 +455,7 @@ pub(super) fn catalogue_metadata(metadata: Value) -> Result<serde_json::Map<Stri
         ("summary", "plot"),
         ("synopsis", "plot"),
         ("originalTitle", "original_title"),
+        ("originalLanguage", "original_language"),
         ("externalIds", "external_ids"),
         ("releaseDate", "premiered"),
     ] {
@@ -1024,9 +1025,10 @@ mod tests {
             json!({"error":"extension_error","pluginError":"missing_api_key"})
         );
         assert!(validate_result("metadata.search", json!({"title":"wrong shape"})).is_err());
-        let value=catalogue_metadata(json!({"title":"Film","synopsis":"Plot","originalTitle":"Original","externalIds":{"external":"id"},"posters":[{"url":"https://example.invalid"}],"posterUrl":"https://example.invalid","genres":[]})).unwrap();
+        let value=catalogue_metadata(json!({"title":"Film","synopsis":"Plot","originalTitle":"Original","originalLanguage":"ja","externalIds":{"external":"id"},"posters":[{"url":"https://example.invalid"}],"posterUrl":"https://example.invalid","genres":[]})).unwrap();
         assert_eq!(value["plot"], "Plot");
         assert_eq!(value["original_title"], "Original");
+        assert_eq!(value["original_language"], "ja");
         assert_eq!(value["external_ids"]["external"], "id");
         assert!(!value.contains_key("posters"));
         assert!(!value.contains_key("genres"));

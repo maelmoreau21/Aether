@@ -254,6 +254,8 @@ pub struct StructuredMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tagline: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub synopsis: Option<String>,

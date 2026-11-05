@@ -43,6 +43,7 @@ struct IdentityResponse {
 
 pub fn router(state: AuthState) -> Router {
     Router::new()
+        .merge(super::quick_connect::router())
         .route("/api/v1/auth/bootstrap/status", get(bootstrap_status))
         .route("/api/v1/auth/bootstrap", post(bootstrap))
         .route("/api/v1/auth/login", post(login))

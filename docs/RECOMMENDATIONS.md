@@ -8,15 +8,18 @@ goût persistant n'est requis.
 ## Parcours
 
 Les réglages personnels proposent l'activation, l'exclusion des contenus déjà
-vus et une fenêtre d'historique de 1 à 3 650 jours. L'activation est désactivée
-par défaut. Les valeurs sont validées et conservées dans
+vus et une fenêtre d'historique de 1 à 3 650 jours. Les recommandations sont activées
+par défaut pour les comptes sans préférence enregistrée ; un choix explicite de
+désactivation est conservé. Les valeurs sont validées et conservées dans
 `recommendation_preferences`, avec un enregistrement par compte et suppression
 en cascade lorsque ce compte est supprimé. La fenêtre limite les signaux de
 lecture utilisés dans le calcul ; elle ne supprime pas l'historique réel.
 Les favoris et évaluations actuels restent utilisables indépendamment de cette
 fenêtre. La désactivation vide la section au prochain rafraîchissement.
 
-L'accueil charge les propositions du compte par
+Le rayon apparaît immédiatement sous « Pour ce soir ». Si cette section est masquée,
+il suit les autres sections de l'accueil ; si toutes les sections sont masquées,
+le rayon est également masqué. L'accueil charge les propositions du compte par
 `GET /api/v1/account/recommendations`. Le frontend actualise au retour du focus
 et après modification des réglages. La réponse est privée, sans cache HTTP ni
 cache de résultats calculés côté Core. L'API de préférences est

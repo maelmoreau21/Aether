@@ -20,6 +20,7 @@ fn test_structured_metadata_roundtrip() {
         external_ids: ext_ids,
         title: Some("Fight Club".into()),
         original_title: Some("Fight Club".into()),
+        original_language: Some("en".into()),
         tagline: Some("Mischief. Mayhem. Soap.".into()),
         synopsis: Some("An insomniac office worker...".into()),
         year: Some(1999),

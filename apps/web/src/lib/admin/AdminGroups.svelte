@@ -156,19 +156,7 @@
   }
 </script>
 
-<section id="groups-section" class="dsm-container" aria-labelledby="groups-heading">
-  <!-- DSM Header -->
-  <div class="dsm-header">
-    <div class="dsm-title-group">
-      <div class="dsm-icon-badge">
-        <Icon name="users" size={22} />
-      </div>
-      <div>
-        <h2 id="groups-heading">Groupes d’utilisateurs</h2>
-        <p class="dsm-subtitle">Organisez vos utilisateurs et assignez des droits d'accès collectifs aux médiathèques.</p>
-      </div>
-    </div>
-  </div>
+<section id="groups-section" class="dsm-container" aria-label="Groupes d’utilisateurs">
 
   {#if error || notice}
     <div class="dsm-alert" class:alert-error={error} class:alert-success={!error && notice} role="status">
@@ -489,11 +477,6 @@
 .dsm-container { display: flex; flex-direction: column; gap: 16px; margin-bottom: 40px; font-family: var(--font-sans); color: var(--color-text); }
 
   /* En-tête de section */
-  .dsm-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-  .dsm-title-group { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .dsm-icon-badge { display: grid; place-items: center; flex: none; width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-raised); color: var(--color-text); }
-  h2 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
-  .dsm-subtitle { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--color-muted); }
 
   /* Barre d'outils */
   .dsm-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -713,7 +696,6 @@
     .search-box input { width: 100%; }
   }
   @media (max-width: 640px) {
-    .dsm-icon-badge { display: none; }
     .toolbar-left .btn { flex: 1 1 calc(50% - 4px); }
     .dsm-modal-backdrop { place-items: end stretch; padding: 0; }
     .dsm-modal { max-width: none; max-height: 92dvh; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }

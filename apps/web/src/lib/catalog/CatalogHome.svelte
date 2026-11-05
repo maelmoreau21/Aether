@@ -46,7 +46,6 @@
     <!-- Couche d'ambiance unique : teinte de l'œuvre à l'affiche (aucun formulaire sur l'accueil). -->
     <div class="ambient" aria-hidden="true" style:--ambient-tint={heroTint ?? 'transparent'}></div>
   {/if}
-  <RecommendationShelf />
   {#each sections as section (section)}
     {#if section === 'hero'}
       <HeroBanner featured={activeFeatured} candidates={heroCandidates} {onPlay} onTint={color => (heroTint = color)} />
@@ -67,7 +66,9 @@
         {#each topRated as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
       </MediaShelf>
     {/if}
+    {#if section === 'tonight'}<RecommendationShelf />{/if}
   {/each}
+  {#if sections.length && !sections.includes('tonight')}<RecommendationShelf />{/if}
   {#if allWorks.length}
     <DiscoverFeed {films} {series} exclude={shownAbove} {library} {detailUrl} />
   {/if}

@@ -31,14 +31,7 @@
       linuxSreclaimableBytes: number;
       linuxReclaimableCacheBytes: number;
     } | null;
-    summary: {
-      coreRssBytes: number;
-      childrenRssBytes: number;
-      totalAetherRssBytes: number;
-      linuxPageCacheBytes: number;
-      diagnosis: string;
-      reclaimableAdvice: string;
-    };
+
   }
 
   let listing = $state<Listing | null>(null);
@@ -193,11 +186,6 @@
         {/if}
       </div>
 
-      <div class="notice">
-        <strong>Diagnostic :</strong>
-        <p>{memoryReport.summary.diagnosis}</p>
-        <p class="advice">{memoryReport.summary.reclaimableAdvice}</p>
-      </div>
     </article>
   {/if}
 
@@ -245,7 +233,6 @@
   .notice { min-width: 0; padding: 14px 16px; border-radius: var(--radius-sm); background: var(--color-warning-soft); font-size: 14px; }
   .notice strong { font-weight: 600; color: var(--color-text); }
   .notice p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--color-muted); }
-  .notice .advice { margin-top: 8px; }
 
   /* Panneaux plats */
   article { display: grid; gap: 10px; min-width: 0; padding: 20px; border-radius: var(--radius-md); background: var(--color-surface); }

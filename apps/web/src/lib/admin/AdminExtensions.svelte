@@ -81,6 +81,7 @@
   let error = $state('');
   let notice = $state('');
   let rollbackConfirmedFor = $state('');
+  let downgradeConfirmedFor = $state('');
   let filter = $state('all');
   let search = $state('');
   const visibleExtensions = $derived(installed.filter(extension =>
@@ -218,7 +219,7 @@
 
   let openRevisions = $state<Record<string, boolean>>({});
 
-  function getRevisions(extensionId: string, currentManifest?: Manifest) {
+  function getRevisions(extensionId: string, currentManifest?: Manifest, rollbackVersion?: string | null) {
     const matchingEntries = catalogue.filter(e => e.manifest.id === extensionId);
     const versionMap = new SvelteMap<string, CatalogueEntry>();
     for (const entry of matchingEntries) {
@@ -233,21 +234,17 @@
       versions.push(currentVersion);
     }
 
+    if (rollbackVersion && !versions.includes(rollbackVersion)) versions.push(rollbackVersion);
     versions.sort((a, b) => compareVersions(b, a));
 
     return versions.map(v => {
       const entry = versionMap.get(v) ?? null;
-      const manifest = entry ? entry.manifest : currentManifest!;
+      const manifest = entry ? entry.manifest : v === currentVersion ? currentManifest! : { ...currentManifest!, version: v, description: '', changelog: undefined, releaseDate: undefined };
       const cmp = currentVersion ? compareVersions(v, currentVersion) : 0;
 
       let dateStr: string | null = null;
       if (manifest.releaseDate) {
         dateStr = manifest.releaseDate;
-      } else if (entry) {
-        const repo = repositories.find(r => r.id === entry.repositoryId);
-        if (repo?.refreshedAt) {
-          dateStr = new Date(repo.refreshedAt * 1000).toLocaleString();
-        }
       }
 
       return {
@@ -259,6 +256,7 @@
         isCurrent: cmp === 0,
         isNewer: cmp > 0,
         isOlder: cmp < 0,
+        isRollback: v === rollbackVersion,
         compatible: entry ? entry.compatible : true
       };
     });
@@ -286,6 +284,17 @@
     } else {
       await action();
     }
+  }
+
+  async function downgrade(entry: CatalogueEntry, extension: Installed) {
+    if (downgradeConfirmedFor !== entry.manifest.version) return;
+    await perform(async () => {
+      await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`, {
+        method: 'POST', body: JSON.stringify({ extensionId: extension.manifest.id, version: entry.manifest.version, upgrade: true, confirmDowngrade: true, expectedVersion: extension.manifest.version, expectedSha256: extension.sha256 })
+      });
+      delete editingSettings[extension.manifest.id];
+      downgradeConfirmedFor = '';
+    }, `Version ${entry.manifest.version} installée et désactivée. Vérifiez ses paramètres avant de la réactiver.`);
   }
 
   async function updateAllExtensions() {
@@ -411,7 +420,7 @@
 
           <div class="revisions-section">
             <div class="revisions-heading">
-              <h3>Historique des révisions</h3>
+              <h3>Versions</h3>
               {#if getUpdateEntry(extension)}
                 {@const upd = getUpdateEntry(extension)!}
                 <span class="badge update-badge">
@@ -421,14 +430,7 @@
             </div>
 
             <div class="revisions-list">
-              {#if extension.rollbackVersion}
-                <div class="revision-item">
-                  <p>Revenir à v{extension.rollbackVersion} restaure les paramètres et les données privées sauvegardés avant la dernière mise à jour. Les changements ultérieurs seront perdus et l’extension sera désactivée.</p>
-                  <label><input type="checkbox" checked={rollbackConfirmedFor === extension.manifest.id} onchange={(event) => rollbackConfirmedFor = event.currentTarget.checked ? extension.manifest.id : ''} /> Je confirme la restauration des données précédentes.</label>
-                  <button type="button" disabled={busy || rollbackConfirmedFor !== extension.manifest.id} onclick={() => void rollback(extension)}>Restaurer v{extension.rollbackVersion}</button>
-                </div>
-              {/if}
-              {#each getRevisions(extension.manifest.id, extension.manifest) as rev (rev.version)}
+              {#each getRevisions(extension.manifest.id, extension.manifest, extension.rollbackVersion) as rev (rev.version)}
                 {@const isOpen = openRevisions[rev.version] ?? (rev.isCurrent || rev.isNewer)}
                 <div class="revision-item" class:current={rev.isCurrent} class:has-update={rev.isNewer}>
                   <button
@@ -444,6 +446,8 @@
                       {/if}
                       {#if rev.isCurrent}
                         <span class="badge success">Installée</span>
+                      {:else if rev.isRollback}
+                        <span class="badge">Restauration disponible</span>
                       {:else if rev.isNewer}
                         <span class="badge update">Mise à jour</span>
                       {/if}
@@ -488,6 +492,19 @@
                           <span class="installed-tag">
                             <Icon name="check" size={16} /> Version actuelle installée
                           </span>
+                        {:else if rev.isRollback}
+                          <div class="restore-action"><p>La restauration remet les données et paramètres sauvegardés avant la dernière mise à jour. Les changements suivants seront perdus et l’extension sera désactivée.</p>
+                            <label><input type="checkbox" checked={rollbackConfirmedFor === extension.manifest.id} onchange={(event) => rollbackConfirmedFor = event.currentTarget.checked ? extension.manifest.id : ''} /> Je confirme la restauration des données précédentes.</label>
+                            <button type="button" disabled={busy || rollbackConfirmedFor !== extension.manifest.id} onclick={() => void rollback(extension)}>Restaurer v{rev.version}</button>
+                          </div>
+                        {:else if rev.isOlder && rev.entry}
+                          <div class="restore-action"><p>Installer une ancienne version désactive l’extension. La version actuelle est sauvegardée pour permettre un retour. Les extensions utilisant un stockage privé ou des paramètres incompatibles ne peuvent pas être rétrogradées.</p>
+                            <label><input type="checkbox" checked={downgradeConfirmedFor === rev.version} onchange={(event) => downgradeConfirmedFor = event.currentTarget.checked ? rev.version : ''} /> Je confirme l’installation de cette ancienne version.</label>
+                            {#if extension.rollbackVersion}<p>Une sauvegarde de la version {extension.rollbackVersion} existe déjà. Restaurez-la avant d’installer une autre version.</p>{/if}
+                            <button disabled={busy || !rev.compatible || !!extension.rollbackVersion || downgradeConfirmedFor !== rev.version} onclick={() => void downgrade(rev.entry!, extension)}>Installer v{rev.version}</button>
+                          </div>
+                        {:else if rev.isOlder}
+                          <span class="local-only-text">Cette version ne dispose pas d’une sauvegarde restaurable.</span>
                         {:else if rev.entry}
                           <button
                             type="button"
@@ -526,6 +543,10 @@
               <Icon name="settings" size={18} />
               Paramètres
             </button>
+            {#if isPinnableExtension(extension.manifest.id)}
+              <button aria-pressed={$extensionPins.includes(extension.manifest.id)} disabled={busy || (!extension.enabled && !$extensionPins.includes(extension.manifest.id))} onclick={() => toggleExtensionPin(extension.manifest.id)}><Icon name="star" size={16} />{$extensionPins.includes(extension.manifest.id) ? 'Désépingler du menu' : 'Épingler dans le menu'}</button>
+              {#if extension.enabled}<a class="button-link" href={`#${extension.manifest.id === 'media-requests' ? 'requests' : 'reports'}-section`}>Ouvrir {displayName(extension.manifest.name)}</a>{/if}
+            {/if}
             <button class="btn-detail-uninstall" disabled={busy} onclick={()=>void perform(async()=>{await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`,{method:'DELETE',body:JSON.stringify({deleteData:false})});managedId=null;},'Extension désinstallée.')}>
               <Icon name="trash" size={18} />
               Désinstaller
@@ -570,19 +591,11 @@
     </div>
   {/if}
   <div class="installed-filters"><label>Rechercher<input type="search" bind:value={search} /></label><label>État<select bind:value={filter}><option value="all">Toutes</option><option value="enabled">Activées</option><option value="disabled">Désactivées</option></select></label></div>
-  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}<article class="card plugin-card installed-card"><button class="artwork-button" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={()=>managedId=extension.manifest.id}>{@render artwork(extension.manifest)}</button><div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars')?'profile':'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled?'Activée':'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">Mise à jour</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p>
-        <div class="installed-card-actions">
-          {#if getUpdateEntry(extension)}
-            <button class="primary btn-card-update" disabled={busy} onclick={() => switchVersion(getUpdateEntry(extension)!)}>
-              <Icon name="download" size={14} /> Mettre à jour v{getUpdateEntry(extension)!.manifest.version}
-            </button>
-          {/if}
-          <button disabled={busy} onclick={()=>{managedId=extension.manifest.id;settingsOpen=true;}}>Paramètres de {displayName(extension.manifest.name)}</button>
-          {#if isPinnableExtension(extension.manifest.id)}
-            <button aria-pressed={$extensionPins.includes(extension.manifest.id)} disabled={busy || !extension.enabled} onclick={() => toggleExtensionPin(extension.manifest.id)}><Icon name="star" size={14} />{$extensionPins.includes(extension.manifest.id) ? 'Désépingler' : 'Épingler dans le menu'}</button>
-            {#if extension.enabled}<a class="button-link" href={`#${extension.manifest.id === 'media-requests' ? 'requests' : 'reports'}-section`}>Ouvrir {displayName(extension.manifest.name)}</a>{/if}
-          {/if}
-        </div></div></article>{:else}<p>Aucune extension installée.</p>{/each}</div>
+  <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}
+    <button type="button" class="card plugin-card installed-card" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={() => { managedId = extension.manifest.id; settingsOpen = false; }}>
+      {@render artwork(extension.manifest)}
+      <div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars') ? 'profile' : 'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled ? 'Activée' : 'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">Mise à jour</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p></div>
+    </button>{:else}<p>Aucune extension installée.</p>{/each}</div>
   {/if}
   {/if}
 </section>
@@ -734,9 +747,9 @@
   .plugin-title-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
   .installed-identity { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .installed-identity small { font-family: var(--font-mono); }
-  .installed-card-actions { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; }
-  .installed-card .plugin-header button, .installed-card .plugin-header .button-link { width: 100%; box-sizing: border-box; }
-  .btn-card-update { width: 100%; }
+  .installed-card { width: 100%; min-height: 0; padding: 0; border: 0; text-align: left; align-items: stretch; }
+  .restore-action { display: grid; gap: 10px; }
+  .restore-action label { display: flex; align-items: center; gap: 8px; }
 
   /* Fiche d'une extension */
   .extension-detail { margin-top: 4px; }
@@ -778,9 +791,6 @@
   .revisions-list { display: flex; flex-direction: column; }
   .revision-item { border-top: 1px solid var(--color-line-subtle); }
   .revision-item:first-child { border-top: 0; }
-  .revision-item > p { margin: 0; padding: 12px 4px 4px; font-size: 14px; }
-  .revision-item > label { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 4px; color: var(--color-text); font-size: 14px; }
-  .revision-item > label + button { margin: 4px 4px 16px; }
   .revision-header { justify-content: space-between; width: 100%; min-height: 48px; padding: 12px 4px; border: 0; border-radius: 0; background: transparent; color: var(--color-text); text-align: left; }
   .revision-header:hover:not(:disabled) { background: var(--color-surface); }
   .revision-header:focus-visible { outline-offset: -2px; }

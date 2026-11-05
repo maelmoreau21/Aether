@@ -65,6 +65,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
         "genres": metadata["genres"].as_array().cloned().unwrap_or_default(),
         "tags": metadata["tags"].as_array().cloned().unwrap_or_default(),
         "originalTitle": metadata["original_title"],
+        "originalLanguage": metadata["original_language"],
         "outline": metadata["outline"],
         "premiered": metadata["premiered"],
         "rating": metadata["rating"],

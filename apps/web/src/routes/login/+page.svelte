@@ -5,6 +5,7 @@
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login, bootstrapAdmin } from '../../lib/auth/session';
   import Icon from '../../lib/ui/Icon.svelte';
+  import QuickConnect from '../../lib/auth/QuickConnect.svelte';
 
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
@@ -424,10 +425,12 @@
           </form>
         {/if}
 
+        <QuickConnect />
+
         <footer class="card-footer">
           {#if !localLoginEnabled}
             <p class="help-text">
-              La connexion locale est désactivée sur ce serveur. L'authentification s'effectue exclusivement via votre fournisseur SSO ({ssoProvider}).
+              La connexion locale est désactivée. Utilisez votre fournisseur SSO ({ssoProvider}) ou autorisez la connexion depuis un appareil déjà connecté.
             </p>
           {:else if ssoEnabled}
             <p class="help-text">

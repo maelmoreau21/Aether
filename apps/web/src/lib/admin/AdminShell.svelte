@@ -7,7 +7,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t, locale } from '../i18n';
   import { adminNavigation, adminDestinationLabel, adminEntryFor, normalizeAdminSearch, searchAdmin, type AdminSearchResult } from './navigation';
-  import { extensionPins, toggleExtensionPin } from './extension-pins';
+  import { extensionPins } from './extension-pins';
   import { features, loadFeatures } from '../applications/api';
 
   let { title, currentHash, administrator, onnavigate, children }: {
@@ -160,9 +160,6 @@
     {#if administrator && currentEntry}
       <header class="section-title">
         <div class="section-heading"><h1>{adminDestinationLabel(currentEntry, $t, $locale === 'en')}</h1>
-          {#if currentEntry.extensionId && (currentEntry.extensionId === 'media-requests' ? $features.requests : $features.reports)}
-            <button class="pin-extension" aria-pressed={$extensionPins.includes(currentEntry.extensionId)} onclick={() => toggleExtensionPin(currentEntry.extensionId!)}><Icon name="star" size={17} />{$extensionPins.includes(currentEntry.extensionId) ? 'Désépingler' : 'Épingler'}</button>
-          {/if}
         </div>
         {#if currentEntry.tabs}
           <nav class="section-tabs" aria-label={`Sous-sections : ${adminDestinationLabel(currentEntry, $t, $locale === 'en')}`}>
@@ -197,7 +194,6 @@
   .admin-content-area:focus { outline: none; }
   .section-title { display: flex; flex-direction: column; gap: 14px; }
   .section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-  .pin-extension { display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 14px; border: 0; border-radius: var(--r-sm); background: var(--pn); color: var(--tx); font: inherit; cursor: pointer; }
   .section-title h1 { margin: 0; font-size: clamp(30px, 3.6vw, 44px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.02; }
   .section-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
   .section-tabs a { display: flex; align-items: center; height: 46px; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--mu); font-size: 14px; font-weight: 700; white-space: nowrap; transition: color var(--t-fast) ease; }

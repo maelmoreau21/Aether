@@ -2,14 +2,14 @@ import { getSessionGeneration, onSessionGenerationChange } from '../auth/session
 import { ensurePreferences } from '../preferences';
 
 export type ArtworkRotationPolicy = {
-  enabled: boolean; enableMovies?: boolean; enableSeries?: boolean; enabledLibraries?: string[];
+  enabled: boolean; languageMode?: 'interface' | 'original'; enableMovies?: boolean; enableSeries?: boolean; enabledLibraries?: string[];
   rotationMode: 'random' | 'sequential'; minHoursBetweenSwitches: number; poolSize: number;
   preferredLanguage: string; fallbackLanguage: string;
   includeUnknownLanguage: boolean; allowAnyLanguageFallback: boolean;
 };
 
 export const defaultArtworkRotationPolicy: ArtworkRotationPolicy = {
-  enabled: false, enableMovies: true, enableSeries: true,
+  enabled: true, languageMode: 'interface', enableMovies: true, enableSeries: true,
   rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4,
   preferredLanguage: 'fr', fallbackLanguage: 'en',
   includeUnknownLanguage: true, allowAnyLanguageFallback: true,
@@ -33,7 +33,7 @@ export async function loadArtworkRotationPolicy(signal?: AbortSignal): Promise<v
   try {
     const saved = await ensurePreferences();
     if (!signal?.aborted && generation === getSessionGeneration()) {
-      setArtworkRotationPolicy(saved?.artworkRotation ?? defaultArtworkRotationPolicy);
+      setArtworkRotationPolicy({ ...defaultArtworkRotationPolicy, ...saved?.artworkRotation });
     }
-  } catch { /* Keep artwork fixed if preferences are unavailable. */ }
+  } catch { /* Keep the default policy if preferences are unavailable. */ }
 }

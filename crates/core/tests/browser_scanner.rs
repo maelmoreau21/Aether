@@ -169,6 +169,8 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
         let mut cmd = tokio::process::Command::new("node");
         cmd.arg("scripts/browser-scanner.cjs")
             .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
+            // The editor no longer pre-fills a folder: the scenario types the real root.
+            .env("MEDIA_TEST_LIBRARY_ROOT", &library)
             .env("MEDIA_TEST_RESTART", if restart { "1" } else { "0" })
             .current_dir(&root);
         if let Ok(dir) = std::env::var("MEDIA_REPORT_DIR") {

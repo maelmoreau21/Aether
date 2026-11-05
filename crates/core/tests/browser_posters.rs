@@ -93,6 +93,8 @@ async fn browser_posters_persist_refresh_and_fallback_after_core_restart() {
         let result = tokio::process::Command::new("node")
             .arg("scripts/browser-posters.cjs")
             .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
+            // The editor no longer pre-fills a folder: the scenario types the real root.
+            .env("MEDIA_TEST_LIBRARY_ROOT", &library)
             .env("MEDIA_TEST_PHASE", phase)
             .current_dir(&root)
             .status()

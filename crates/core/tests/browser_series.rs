@@ -191,6 +191,8 @@ async fn browser_series_flow_and_playback() {
     cmd.arg("scripts/browser-series.cjs")
         .env("MEDIA_TEST_FILM_ROOT", &film_root)
         .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
+        // The editor no longer pre-fills a folder: the scenario types the real root.
+        .env("MEDIA_TEST_LIBRARY_ROOT", &library)
         .current_dir(&root);
     if let Ok(dir) = std::env::var("MEDIA_REPORT_DIR") {
         cmd.env("MEDIA_REPORT_DIR", dir);

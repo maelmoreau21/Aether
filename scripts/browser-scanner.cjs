@@ -42,6 +42,7 @@ fs.mkdirSync(out, {recursive: true});
       await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
       await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.locator('#library-root').fill(process.env.MEDIA_TEST_LIBRARY_ROOT || '');
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
       await page.getByRole('dialog').screenshot({path:`${out}/library-editor.png`});
       await page.setViewportSize({width:390,height:844});

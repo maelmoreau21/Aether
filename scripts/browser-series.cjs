@@ -48,6 +48,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
     await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.locator('#library-root').fill(process.env.MEDIA_TEST_LIBRARY_ROOT || '');
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     const libraryRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Gérer Séries Navigateur',exact:true})});

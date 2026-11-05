@@ -5,7 +5,7 @@
   import { DEFAULT_NAME } from '../config/brand';
   import ProfileMenu from '../ui/ProfileMenu.svelte';
   import Icon from '../ui/Icon.svelte';
-  import { t, locale } from '../i18n';
+  import { t } from '../i18n';
   import { adminNavigation, adminDestinationLabel, adminEntryFor, normalizeAdminSearch, searchAdmin, type AdminSearchResult } from './navigation';
   import { extensionPins } from './extension-pins';
   import { features, loadFeatures } from '../applications/api';

@@ -32,7 +32,7 @@
   import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
   import AdminArtwork from '../../../lib/admin/AdminArtwork.svelte';
   import type { UserGroup } from '../../../lib/admin/request';
-  import { t, locale } from '../../../lib/i18n';
+  import { t } from '../../../lib/i18n';
 
   let scans = $state<Record<string, Scan>>({});
   let pending = $state<string[]>([]);

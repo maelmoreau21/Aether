@@ -12,7 +12,7 @@ fs.mkdirSync(out, {recursive:true});
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(),os:require('node:os').release(),headless:true,phase,results:{}};
   try {
-    const context = await browser.newContext({viewport:{width:1440,height:900}});
+    const context = await browser.newContext({viewport:{width:1440,height:900},locale:'fr-FR'});
     const page = await context.newPage();
     const errors=[];
     page.on('pageerror',error=>errors.push(String(error)));

@@ -8,7 +8,7 @@ const out=process.env.MEDIA_REPORT_DIR||'target/playlists-browser';fs.mkdirSync(
   const browser=await chromium.launch({channel:'chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});
   const report={browser:browser.version(),scope:'Synthetic music and disposable Core/SQLite accounts; no remote provider or physical audio output proof'};
   let page;
-  async function context(token){const ctx=await browser.newContext({viewport:{width:1440,height:1000}});await ctx.addCookies([{name:'media_session',value:token.repeat(64),url:origin,httpOnly:true,sameSite:'Lax'}]);return ctx;}
+  async function context(token){const ctx=await browser.newContext({viewport:{width:1440,height:1000},locale:'fr-FR'});await ctx.addCookies([{name:'media_session',value:token.repeat(64),url:origin,httpOnly:true,sameSite:'Lax'}]);return ctx;}
   async function api(page,url,method='GET',body){return page.evaluate(async({url,method,body})=>{const me=await(await fetch('/api/v1/auth/me')).json();const response=await fetch(url,{method,headers:{'content-type':'application/json','x-csrf-token':me.csrfToken},body:body===undefined?undefined:JSON.stringify(body)});return {status:response.status,data:response.status===204?null:await response.json()};},{url,method,body});}
   try{
     const owner=await context('b');page=await owner.newPage();page.setDefaultTimeout(15000);
@@ -65,7 +65,7 @@ const out=process.env.MEDIA_REPORT_DIR||'target/playlists-browser';fs.mkdirSync(
     await shared.getByRole('heading',{name:'Mix browser',exact:true}).waitFor();
     assert.equal(await shared.locator('.entries li').count(),1);assert.equal(await shared.getByText('Synthetic Film',{exact:true}).count(),0);
     assert.equal(await shared.getByText('Nom et partage',{exact:true}).count(),0);report.sharingPreservesLibraryPermissions=true;
-    const guest=await browser.newContext();const anonymous=await guest.newPage();await anonymous.goto(`${origin}/app/lists/?id=${created.id}`);await anonymous.waitForURL('**/login/**');report.noAnonymousAccess=true;
+    const guest=await browser.newContext({locale:'fr-FR'});const anonymous=await guest.newPage();await anonymous.goto(`${origin}/app/lists/?id=${created.id}`);await anonymous.waitForURL('**/login/**');report.noAnonymousAccess=true;
     const admin=await context('a');const settings=await admin.newPage();await settings.goto(origin+'/app/admin/libraries/#general-section');
     await settings.getByRole('heading',{name:'Partage des playlists',exact:true}).waitFor();
     await settings.goto(origin+'/app/admin/libraries/#extensions-section');

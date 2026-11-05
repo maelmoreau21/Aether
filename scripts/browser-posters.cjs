@@ -12,7 +12,7 @@ fs.mkdirSync(out, {recursive:true});
   const browser = await chromium.launch({channel:'chrome', headless:true});
   const report = {browser:browser.version(),os:require('node:os').release(),headless:true,phase,results:{}};
   try {
-    const context = await browser.newContext({viewport:{width:1440,height:900}});
+    const context = await browser.newContext({viewport:{width:1440,height:900},locale:'fr-FR'});
     const page = await context.newPage();
     const errors=[];
     const decorativeRequests=[];
@@ -143,7 +143,7 @@ fs.mkdirSync(out, {recursive:true});
       assert.equal(response.headers()['x-content-type-options'],'nosniff');
       assert.match(response.headers()['cache-control'],/private, no-cache/);
       assert.equal((await context.request.head(origin+imageUrl)).status(),200);
-      const anonymous=await browser.newContext();
+      const anonymous=await browser.newContext({locale:'fr-FR'});
       assert.equal((await anonymous.request.get(origin+imageUrl)).status(),401);
       assert.equal((await anonymous.request.head(origin+imageUrl)).status(),401);
       await anonymous.close();

@@ -10,7 +10,7 @@ fs.mkdirSync(out, {recursive:true});
   const report = {browser:browser.version(),os:require('node:os').release(),headless:true,results:[]};
   try {
     for (const width of [390,1440]) {
-      const context = await browser.newContext({viewport:{width,height:900}});
+      const context = await browser.newContext({viewport:{width,height:900},locale:'fr-FR'});
       const page = await context.newPage();
       const errors=[];
       page.on('pageerror', e=>errors.push(String(e)));

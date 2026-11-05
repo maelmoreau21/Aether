@@ -5,6 +5,7 @@
   import { adminRequest } from './request';
   import type { AdminNode, Library, Scan } from './types';
   import { scanLabels } from './types';
+  import { t } from '../i18n';
 
   let { libraries, scans, pending, nodes = [], onscan, selectedId = null, active = false }: {
     libraries: Library[]; scans: Record<string, Scan>; pending: string[]; nodes?: AdminNode[];
@@ -149,21 +150,21 @@
       schedules = Object.fromEntries(plans.value.map(p => [p.libraryId, p]));
       scanError = '';
     } else {
-      scanError = 'Les planifications des bibliothèques sont indisponibles. Actualisez pour réessayer.';
+      scanError = $t('loading_impossible');
     }
 
     if (archives.status === 'fulfilled') {
       backup = archives.value;
       backupError = '';
     } else {
-      backupError = 'Les sauvegardes sont indisponibles. Actualisez pour réessayer.';
+      backupError = $t('backup_unavailable');
     }
 
     if (sys.status === 'fulfilled') {
       systemTasks = sys.value;
       systemTasksError = '';
     } else {
-      systemTasksError = 'Les tâches système planifiées sont indisponibles.';
+      systemTasksError = $t('loading_impossible');
     }
 
     loaded = true;
@@ -197,7 +198,7 @@
     const minutes = frequency * unit;
     const minAllowed = task.library || task.systemId ? 5 : 60;
     if (!Number.isInteger(minutes) || minutes < minAllowed || minutes > 10080) {
-      error = 'Intervalle invalide. Vérifiez les limites indiquées.';
+      error = $t('invalid_interval');
       return;
     }
     saving = true;
@@ -223,9 +224,9 @@
       }
       await refresh();
       editor?.close();
-      notice = triggerEnabled ? 'Intervalle activé et enregistré. La prochaine échéance part de cet enregistrement.' : 'Intervalle enregistré et désactivé. Le lancement manuel reste disponible.';
+      notice = triggerEnabled ? $t('interval_enabled') : $t('interval_disabled');
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Enregistrement impossible.';
+      error = cause instanceof Error ? cause.message : $t('operation_failed');
     } finally {
       saving = false;
     }
@@ -253,9 +254,9 @@
         });
       }
       await refresh();
-      notice = 'Intervalle désactivé. Les résultats sont conservés et le lancement manuel reste disponible.';
+      notice = $t('interval_removed');
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Suppression impossible.';
+      error = cause instanceof Error ? cause.message : $t('operation_failed');
     } finally {
       saving = false;
     }
@@ -274,10 +275,10 @@
       try {
         await refreshPromise;
         await adminRequest(`/api/v1/admin/tasks/system/${encodeURIComponent(task.systemId)}/run`, { method: 'POST' });
-        notice = `Tâche ${task.name} ajoutée à la file d’exécution.`;
+        notice = $t('task_queued', { name: task.name });
         await refresh();
       } catch (cause) {
-        error = cause instanceof Error ? cause.message : 'Démarrage de la tâche impossible.';
+        error = cause instanceof Error ? cause.message : $t('task_start_failed');
       } finally {
         runningSystemTasks[task.systemId] = false;
       }
@@ -289,7 +290,7 @@
     try {
       await refreshPromise;
       await adminRequest('/api/v1/admin/backups', { method: 'POST' });
-      notice = 'Sauvegarde créée.';
+      notice = $t('backup_created_short');
       await refresh();
     } catch (cause) {
       error = `${cause instanceof Error ? cause.message : 'Sauvegarde impossible.'} Actualisez son état avant de relancer : elle peut continuer côté serveur.`;
@@ -302,37 +303,37 @@
 <section id="tasks-section" aria-labelledby="tasks-heading">
   {#if selectedId}
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
-    <a class="back" href={taskHref()}><Icon name="back" size={24} /><span>Retour aux tâches</span></a>
+    <a class="back" href={taskHref()}><Icon name="back" size={24} /><span>{$t('tasks_back')}</span></a>
     {#if selected}
       <header class="detail-header">
         <h2 id="tasks-heading">{selected.name}</h2>
-        <button class="run" aria-label={`Exécuter ${selected.name}`} disabled={selected.running || !!selected.reason || !loaded} onclick={() => void run(selected)}>
+        <button class="run" aria-label={$t('run_task', { name: selected.name })} disabled={selected.running || !!selected.reason || !loaded} onclick={() => void run(selected)}>
           <Icon name="play" size={22} />
         </button>
       </header>
       <p class="description">{selected.description}</p>
-      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser l’état</button>
-      {#if selected.reason}<p class="reason">{selected.reason} {#if !selected.library && !selected.systemId}<a href={resolve('admin/libraries/#backups-section')}>Ouvrir les sauvegardes</a>{/if}</p>{/if}
+      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> {$t('refresh_state')}</button>
+      {#if selected.reason}<p class="reason">{selected.reason} {#if !selected.library && !selected.systemId}<a href={resolve('admin/libraries/#backups-section')}>{$t('open_backups')}</a>{/if}</p>{/if}
       <button class="primary" disabled={!loaded || saving || refreshing || !!(selected.library ? scanError : selected.systemId ? systemTasksError : backupError) || (selected.id === 'backup' && !backup?.available)} onclick={editTrigger}>
-        <span aria-hidden="true">+</span> {selected.plan ? 'Configurer l’intervalle' : 'Ajouter un intervalle'}
+        <span aria-hidden="true">+</span> {selected.plan ? $t('configure_interval') : $t('add_interval')}
       </button>
-      <div class="trigger-list" aria-label="Déclencheurs">
-        <h3>Intervalle</h3>
+      <div class="trigger-list" aria-label={$t('triggers')}>
+        <h3>{$t('interval')}</h3>
         {#if selected.plan?.enabled}
           <div class="trigger-row">
             <div>
               <p>{intervalLabel(selected.plan.interval)}</p>
-              <small>Prochaine échéance : {date(selected.plan.next)}</small>
+              <small>{$t('next_due', { date: date(selected.plan.next) })}</small>
             </div>
-            <button class="remove" disabled={saving || refreshing} aria-label="Désactiver l’intervalle" title="Désactiver l’intervalle" onclick={() => void removeTrigger()}>−</button>
+            <button class="remove" disabled={saving || refreshing} aria-label={$t('disable_interval')} title={$t('disable_interval')} onclick={() => void removeTrigger()}>−</button>
           </div>
         {:else}
-          <p class="no-trigger">Aucun déclencheur actif. Cette tâche peut être lancée manuellement.</p>
-          {#if selected.plan}<p>Intervalle conservé : {intervalLabel(selected.plan.interval)}.</p>{/if}
+          <p class="no-trigger">{$t('no_active_trigger')}</p>
+          {#if selected.plan}<p>{$t('preserved_interval', { value: intervalLabel(selected.plan.interval) })}</p>{/if}
         {/if}
       </div>
       <div class="results">
-        <h3>Dernier résultat</h3>
+        <h3>{$t('last_result')}</h3>
         <p>{lastRun(selected)}</p>
         <p>{executionLabel(selected)}</p>
         {#if selectedSystemTask?.lastMessage}
@@ -340,22 +341,22 @@
           {#if selectedSystemTask.lastErrorKind}<p>Type : {selectedSystemTask.lastErrorKind}{selectedSystemTask.lastErrorScope ? ` · ${selectedSystemTask.lastErrorScope}` : ''}</p>{/if}
         {/if}
         {#if selected.id === 'backup' && backup?.schedule.lastStartedAt && backup.schedule.lastCompletedAt && backup.schedule.lastCompletedAt >= backup.schedule.lastStartedAt}
-          <p>Durée : {backup.schedule.lastCompletedAt - backup.schedule.lastStartedAt} secondes</p>
+          <p>{$t('duration_seconds', { count: backup.schedule.lastCompletedAt - backup.schedule.lastStartedAt })}</p>
         {/if}
         {#if selectedSystemTask && selectedSystemTask.lastStartedAt && selectedSystemTask.lastCompletedAt && selectedSystemTask.lastCompletedAt >= selectedSystemTask.lastStartedAt}
-          <p>Durée : {selectedSystemTask.lastCompletedAt - selectedSystemTask.lastStartedAt} secondes</p>
+          <p>{$t('duration_seconds', { count: selectedSystemTask.lastCompletedAt - selectedSystemTask.lastStartedAt })}</p>
         {/if}
         {#if selectedScan}
-          <p>Dernier scan connu : {scanLabels[selectedScan.status]}</p>
+          <p>{$t('last_known_scan')} : {scanLabels[selectedScan.status]}</p>
           <dl>
-            <div><dt>Découverts</dt><dd>{selectedScan.discovered}</dd></div>
-            <div><dt>Analysés</dt><dd>{selectedScan.probed}</dd></div>
-            <div><dt>Réutilisés</dt><dd>{selectedScan.reused}</dd></div>
-            <div><dt>Erreurs</dt><dd>{selectedScan.errorsCount ?? selectedScan.errors.length}</dd></div>
+            <div><dt>{$t('discovered')}</dt><dd>{selectedScan.discovered}</dd></div>
+            <div><dt>{$t('analyzed')}</dt><dd>{selectedScan.probed}</dd></div>
+            <div><dt>{$t('reused')}</dt><dd>{selectedScan.reused}</dd></div>
+            <div><dt>{$t('errors')}</dt><dd>{selectedScan.errorsCount ?? selectedScan.errors.length}</dd></div>
           </dl>
           {#if selectedScan.errors.length}
             <details>
-              <summary>Consulter les anomalies</summary>
+              <summary>{$t('inspect_issues')}</summary>
               <ul>
                 {#each selectedScan.errors as issue, i (i)}
                   <li>{issue}</li>
@@ -366,20 +367,20 @@
         {/if}
       </div>
     {:else if !loaded}
-      <h2 id="tasks-heading">Chargement de la tâche…</h2>
-      <p role="status">Lecture des planifications du serveur.</p>
+      <h2 id="tasks-heading">{$t('loading_task')}</h2>
+      <p role="status">{$t('reading_schedules')}</p>
     {:else if selectedId.startsWith('system-') && systemTasksError}
-      <h2 id="tasks-heading">État de la tâche indisponible</h2>
-      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}>Réessayer</button>
+      <h2 id="tasks-heading">{$t('task_state_unavailable')}</h2>
+      <button class="refresh" disabled={refreshing} onclick={() => void refresh()}>{$t('retry_action')}</button>
     {:else}
-      <h2 id="tasks-heading">Tâche introuvable</h2>
-      <p>Cette tâche a peut-être été supprimée ou renommée.</p>
+      <h2 id="tasks-heading">{$t('task_not_found')}</h2>
+      <p>{$t('task_removed_renamed')}</p>
     {/if}
   {:else}
     <header class="list-header">
-      <h2 id="tasks-heading">Tâches et indexations</h2>
+      <h2 id="tasks-heading">{$t('tasks_title')}</h2>
     </header>
-    <details class="plans-section" open><summary>Planifications et lancement manuel</summary><p class="section-intro">Choisissez une opération pour régler son intervalle ou la lancer maintenant. L’état s’actualise toutes les 10 secondes tant que cette page est visible.</p><button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> Actualiser les planifications</button>
+    <details class="plans-section" open><summary>{$t('schedules_manual')}</summary><p class="section-intro">{$t('schedules_intro')}</p><button class="refresh" disabled={refreshing} onclick={() => void refresh()}><Icon name="refresh" size={18} /> {$t('refresh_schedules')}</button>
     {#each categories as category (category)}
       <div class="category">
         <h3>{category}</h3>
@@ -391,18 +392,18 @@
                 <span class="clock"><Icon name="clock" size={26} /></span>
                 <span class="task-copy">
                   <span class="task-title">{task.name}</span>
-                  <span class="task-subtitle">{task.plan?.enabled ? `${intervalLabel(task.plan.interval)} · prochaine échéance ${date(task.plan.next)}` : 'Lancement manuel · aucun intervalle actif'}</span>
+                  <span class="task-subtitle">{task.plan?.enabled ? `${intervalLabel(task.plan.interval)} · ${$t('next_due', { date: date(task.plan.next) })}` : $t('manual_no_interval')}</span>
                   <span class="task-subtitle task-status" data-outcome={task.running ? 'running' : task.plan?.outcome}>{executionLabel(task)}</span>
                   <span class="task-subtitle">{lastRun(task)}</span>
                   {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
                 </span>
               </a>
-              <button class="run" aria-label={`Exécuter ${task.name}`} title="Exécuter maintenant" disabled={task.running || !!task.reason || !loaded} onclick={() => void run(task)}>
+              <button class="run" aria-label={$t('run_task', { name: task.name })} title={$t('run_now')} disabled={task.running || !!task.reason || !loaded} onclick={() => void run(task)}>
                 <Icon name={task.running ? 'refresh' : 'play'} size={22} />
               </button>
             </div>
           {:else}
-            <p class="no-trigger">Aucune tâche disponible dans cette catégorie.</p>
+            <p class="no-trigger">{$t('no_tasks_category')}</p>
           {/each}
         </div>
       </div>
@@ -418,23 +419,23 @@
 
 <dialog bind:this={editor} aria-labelledby="trigger-title" oncancel={(event) => { if (saving) event.preventDefault(); }}>
   <form onsubmit={saveTrigger}>
-    <h2 id="trigger-title">Déclencheur périodique</h2>
+    <h2 id="trigger-title">{$t('periodic_trigger')}</h2>
     <p>{selected?.name}</p>
-    <label class="enabled"><input type="checkbox" bind:checked={triggerEnabled} disabled={saving} /> Activer cet intervalle</label>
-    <label>Toutes les<input type="number" min={Math.max(1, Math.ceil((selected?.library || selected?.systemId ? 5 : 60) / unit))} max={Math.floor(10080 / unit)} step="1" required bind:value={frequency} disabled={saving} /></label>
-    <label>Unité
-      <select aria-label="Unité" bind:value={unit} disabled={saving}>
-        <option value={1}>Minutes</option>
-        <option value={60}>Heures</option>
-        <option value={1440}>Jours</option>
+    <label class="enabled"><input type="checkbox" bind:checked={triggerEnabled} disabled={saving} /> {$t('enable_interval')}</label>
+    <label>{$t('every')}<input type="number" min={Math.max(1, Math.ceil((selected?.library || selected?.systemId ? 5 : 60) / unit))} max={Math.floor(10080 / unit)} step="1" required bind:value={frequency} disabled={saving} /></label>
+    <label>{$t('unit')}
+      <select aria-label={$t('unit')} bind:value={unit} disabled={saving}>
+        <option value={1}>{$t('minutes')}</option>
+        <option value={60}>{$t('hours')}</option>
+        <option value={1440}>{$t('days')}</option>
       </select>
     </label>
-    <p>De {selected?.library || selected?.systemId ? '5 minutes' : '1 heure'} à 7 jours. Un déclencheur périodique par tâche.</p>
-    <p>Après enregistrement, la prochaine échéance part de maintenant. Un intervalle de 24 heures ne fixe pas une heure quotidienne.</p>
+    <p>{$t('periodic_range', { minimum: selected?.library || selected?.systemId ? '5 minutes' : '1 heure' })}</p>
+    <p>{$t('schedule_from_now')}</p>
     {#if error}<p class="feedback error" role="alert">{error}</p>{/if}
     <div class="dialog-actions">
-      <button type="button" disabled={saving} onclick={() => editor?.close()}>Annuler</button>
-      <button class="primary" type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+      <button type="button" disabled={saving} onclick={() => editor?.close()}>{$t('cancel_action')}</button>
+      <button class="primary" type="submit" disabled={saving}>{saving ? $t('loading') : $t('save')}</button>
     </div>
   </form>
 </dialog>

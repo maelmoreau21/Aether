@@ -11,6 +11,7 @@
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
+  import { t } from '../i18n';
   import {
     audioSummary,
     codecLabel,
@@ -272,8 +273,8 @@
   >
     <summary
       class="tool-btn icon-btn"
-      aria-label="Ajouter à une playlist"
-      title="Ajouter à une playlist"
+      aria-label={$t('add_to_playlist')}
+      title={$t('add_to_playlist')}
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
         <path d="M12 4v16M4 12h16" />
@@ -283,7 +284,7 @@
     <div class="list-dropdown-menu">
       <div class="list-dropdown-header">
         <Icon name="sparkles" size={16} />
-        <strong>Ajouter à une playlist</strong>
+        <strong>{$t('add_to_playlist')}</strong>
       </div>
 
       <div class="playlists-grid">
@@ -301,7 +302,7 @@
             <Icon name="check" size={16} />
           </button>
         {:else}
-          <p class="empty-list-notice">Aucune playlist existante.</p>
+          <p class="empty-list-notice">{$t('no_playlists')}</p>
         {/each}
       </div>
 
@@ -312,7 +313,7 @@
           void createList();
         }}
       >
-        <label>Nouvelle liste<input required bind:value={listName} maxlength="100" placeholder="Nom de la liste" /></label>
+        <label>{$t('new_playlist')}<input required bind:value={listName} maxlength="100" placeholder={$t('new_playlist')} /></label>
         <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
           Créer et ajouter
         </button>
@@ -326,8 +327,8 @@
       type="button"
       class="tool-btn icon-btn more-btn"
       class:active={menuOpen}
-      aria-label="Plus d'actions et informations"
-      title="Options et informations du média"
+      aria-label={$t('more_actions')}
+      title={$t('media_options')}
       aria-haspopup="menu"
       aria-expanded={menuOpen}
       onclick={() => (menuOpen = !menuOpen)}
@@ -355,7 +356,7 @@
           }}
         >
           <Icon name="users" size={16} />
-          <span>Séance Watch Party</span>
+          <span>{$t('watch_party')}</span>
         </button>
 
         <button
@@ -368,7 +369,7 @@
           }}
         >
           <Icon name="info" size={16} />
-          <span>Informations média</span>
+          <span>{$t('media_information')}</span>
         </button>
 
         <button
@@ -387,7 +388,7 @@
 
         {#if isAdmin}
           <div class="menu-divider" role="separator"></div>
-          <div class="menu-section-header">Gestion du média · admin</div>
+          <div class="menu-section-header">{$t('media_management')}</div>
 
           {#if work.kind !== 'series' && !work.synthetic}
             <button
@@ -400,7 +401,7 @@
               }}
             >
               <Icon name="search" size={16} />
-              <span>Rechercher des sous-titres</span>
+              <span>{$t('search_subtitles')}</span>
             </button>
           {/if}
 
@@ -414,7 +415,7 @@
             }}
           >
             <Icon name="image" size={16} />
-            <span>Modifier les images</span>
+            <span>{$t('edit_artwork')}</span>
           </button>
 
           <button
@@ -427,7 +428,7 @@
             }}
           >
             <Icon name="search" size={16} />
-            <span>Identifier</span>
+            <span>{$t('identify_media')}</span>
           </button>
 
           <button
@@ -441,7 +442,7 @@
             }}
           >
             <Icon name="edit" size={16} />
-            <span>Modifier les métadonnées</span>
+            <span>{$t('edit_metadata')}</span>
           </button>
         {/if}
       </div>
@@ -466,7 +467,7 @@
       <div class="modal-header">
         <div class="modal-title-group">
           <Icon name="info" size={20} />
-          <h3 id="media-info-title">Informations média</h3>
+          <h3 id="media-info-title">{$t('media_information')}</h3>
         </div>
         <button
           type="button"
@@ -495,7 +496,7 @@
           <details class="version-card" open={id === (assetIds.includes(selectedMedia?.id ?? '') ? selectedMedia?.id : assetIds[0])}>
             <summary>
               <span class="version-title">{versionLabel(info, position)}</span>
-              {#if id === selectedMedia?.id && assetIds.length > 1}<span class="tag-status online">Sélectionnée</span>{/if}
+              {#if id === selectedMedia?.id && assetIds.length > 1}<span class="tag-status online">{$t('selected')}</span>{/if}
               {#if info}
                 {@const status = nodeStatusLabel(info.node.status)}
                 <span class="version-node"><Icon name="server" size={14} />{info.node.name}<span class="status-dot {status.tone}" role="img" aria-label={status.label}></span></span>
@@ -503,7 +504,7 @@
             </summary>
 
             {#if !entry || entry.status === 'loading'}
-              <p class="info-note" role="status">Chargement des informations du fichier…</p>
+              <p class="info-note" role="status">{$t('loading_file_information')}</p>
             {:else if entry.status === 'error'}
               <div class="info-error-row" role="alert">
                 <span>{entry.error}</span>
@@ -513,8 +514,8 @@
               {@const status = nodeStatusLabel(info.node.status)}
               {@const groups = groupTracks(info.tracks)}
               <div class="version-body">
-                <section class="info-section" aria-label="Emplacement du fichier">
-                  <h4>Emplacement du fichier</h4>
+                <section class="info-section" aria-label={$t('file_location')}>
+                  <h4>{$t('file_location')}</h4>
                   <dl class="info-grid">
                     <div class="info-item">
                       <dt class="info-label">Media Node</dt>
@@ -533,7 +534,7 @@
                         <dt class="info-label">Chemin sur le Media Node</dt>
                         <dd class="info-value path-row">
                           <code class="path">{info.file.absolutePath}</code>
-                          <button type="button" class="copy-btn" aria-label="Copier le chemin complet" onclick={() => copyText(`abs-${id}`, info.file.absolutePath ?? '')}>
+                          <button type="button" class="copy-btn" aria-label={$t('copy_full_path')} onclick={() => copyText(`abs-${id}`, info.file.absolutePath ?? '')}>
                             <Icon name={copiedKey === `abs-${id}` ? 'check' : 'copy'} size={14} />
                             <span>{copiedKey === `abs-${id}` ? 'Copié' : 'Copier'}</span>
                           </button>
@@ -543,7 +544,7 @@
                         <dt class="info-label">Chemin dans la bibliothèque</dt>
                         <dd class="info-value path-row">
                           <code class="path">{info.file.relativePath}</code>
-                          <button type="button" class="copy-btn" aria-label="Copier le chemin relatif" onclick={() => copyText(`rel-${id}`, info.file.relativePath ?? '')}>
+                          <button type="button" class="copy-btn" aria-label={$t('copy_relative_path')} onclick={() => copyText(`rel-${id}`, info.file.relativePath ?? '')}>
                             <Icon name={copiedKey === `rel-${id}` ? 'check' : 'copy'} size={14} />
                             <span>{copiedKey === `rel-${id}` ? 'Copié' : 'Copier'}</span>
                           </button>
@@ -553,16 +554,16 @@
                     {:else}
                       <div class="info-item full">
                         <dt class="info-label">Chemin</dt>
-                        <dd class="info-value muted">Visible uniquement par les administrateurs.</dd>
+                        <dd class="info-value muted">{$t('admin_only_path')}</dd>
                       </div>
                     {/if}
                     {#if !info.available}
-                      <div class="info-item full"><dd class="info-value info-error">Fichier signalé absent lors du dernier scan.</dd></div>
+                      <div class="info-item full"><dd class="info-value info-error">{$t('missing_file')}</dd></div>
                     {/if}
                   </dl>
                 </section>
 
-                <section class="info-section" aria-label="Pistes vidéo">
+                <section class="info-section" aria-label={$t('video_tracks')}>
                   <h4>Vidéo ({groups.video.length})</h4>
                   <ul class="track-list">
                     {#each groups.video as track (track.index)}
@@ -583,7 +584,7 @@
                   </ul>
                 </section>
 
-                <section class="info-section" aria-label="Pistes audio">
+                <section class="info-section" aria-label={$t('audio_tracks')}>
                   <h4>Audio ({groups.audio.length + info.externalAudio.length})</h4>
                   <ul class="track-list">
                     {#each groups.audio as track (track.index)}
@@ -621,7 +622,7 @@
                   </ul>
                 </section>
 
-                <section class="info-section" aria-label="Sous-titres">
+                <section class="info-section" aria-label={$t('subtitle_tracks_info')}>
                   <h4>Sous-titres ({groups.subtitle.length + info.externalSubtitles.length})</h4>
                   <ul class="track-list">
                     {#each groups.subtitle as track (track.index)}
@@ -662,7 +663,7 @@
                 </section>
 
                 {#if groups.other.length}
-                  <section class="info-section" aria-label="Autres flux">
+                  <section class="info-section" aria-label={$t('other_streams')}>
                     <h4>Autres flux ({groups.other.length})</h4>
                     <ul class="track-list">
                       {#each groups.other as track (track.index)}

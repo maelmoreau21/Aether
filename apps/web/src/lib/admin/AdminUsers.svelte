@@ -239,9 +239,9 @@
         <div class="dsm-modal-header">
           <div class="modal-title-wrap">
             <Icon name="profile" size={20} />
-            <h3 id="modal-user-title">{editing ? (editing.displayName || editing.login) : 'Créer un utilisateur'}</h3>
+            <h3 id="modal-user-title">{editing ? (editing.displayName || editing.login) : $t('create_user')}</h3>
           </div>
-          <button type="button" class="btn-close" aria-label="Fermer" onclick={() => { editorOpen = false; }}>
+          <button type="button" class="btn-close" aria-label={$t('close')} onclick={() => { editorOpen = false; }}>
             <Icon name="close" size={18} />
           </button>
         </div>
@@ -249,22 +249,22 @@
         {#if editing}
           <div class="dsm-tabs" role="tablist">
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'info'} onclick={() => activeTab = 'info'}>
-              <Icon name="info" size={15} /> Informations
+              <Icon name="info" size={15} /> {$t('information')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'groups'} onclick={() => activeTab = 'groups'}>
-              <Icon name="users" size={15} /> Groupes
+              <Icon name="users" size={15} /> {$t('groups')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'permissions'} onclick={() => activeTab = 'permissions'}>
-              <Icon name="film" size={15} /> Permissions
+              <Icon name="film" size={15} /> {$t('permissions')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'parental'} onclick={() => activeTab = 'parental'}>
-              <Icon name="shield" size={15} /> Contrôle parental
+              <Icon name="shield" size={15} /> {$t('parental_control')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'media'} onclick={() => activeTab = 'media'}>
-              <Icon name="settings" size={15} /> Téléchargement
+              <Icon name="settings" size={15} /> {$t('downloads')}
             </button>
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'password'} onclick={() => activeTab = 'password'}>
-              <Icon name="settings" size={15} /> Sécurité
+              <Icon name="settings" size={15} /> {$t('security')}
             </button>
           </div>
         {/if}
@@ -272,30 +272,30 @@
         <div class="dsm-modal-body">
           {#if activeTab === 'info' || !editing}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Informations de base</h4>
+              <h4 class="form-section-title">{$t('basic_information')}</h4>
               <div class="dsm-grid-form">
                 {#if !editing}
                   <label class="form-row">
-                    <span class="row-label">Nom d'utilisateur <abbr title="requis" class="required">*</abbr></span>
+                    <span class="row-label">{$t('username')} <abbr title={$t('required')} class="required">*</abbr></span>
                     <div class="row-field">
                       <input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" bind:value={login} placeholder="ex: jean.dupont" autocomplete="off" />
-                      <span class="field-hint">3 à 64 lettres minuscules, chiffres, tirets ou points.</span>
+                      <span class="field-hint">{$t('username_hint')}</span>
                     </div>
                   </label>
                 {:else}
                   <div class="form-row">
-                    <span class="row-label">Nom d'utilisateur</span>
+                    <span class="row-label">{$t('username')}</span>
                     <div class="row-field">
                       <strong class="user-static-login">{editing.login}</strong>
                       <span class="dsm-badge" class:badge-sso={editing.sso} class:badge-local={!editing.sso}>
-                        {editing.sso ? 'Fournisseur SSO' : 'Compte local'}
+                        {editing.sso ? $t('sso_provider') : $t('local_account')}
                       </span>
                     </div>
                   </div>
                 {/if}
 
                 <label class="form-row">
-                  <span class="row-label">Description / Nom affiché</span>
+                  <span class="row-label">{$t('description_display_name')}</span>
                   <div class="row-field">
                     <input maxlength="128" bind:value={displayName} placeholder="ex: Jean Dupont" />
                   </div>
@@ -303,36 +303,36 @@
 
                 {#if !editing}
                   <label class="form-row">
-                    <span class="row-label">Mot de passe <abbr title="requis" class="required">*</abbr></span>
+                    <span class="row-label">{$t('password')} <abbr title={$t('required')} class="required">*</abbr></span>
                     <div class="row-field">
-                      <input type="password" required minlength="15" maxlength="128" bind:value={password} autocomplete="new-password" placeholder="Minimum 15 caractères" />
-                      <span class="field-hint">Algorithme robuste Argon2id (15 à 128 caractères).</span>
+                      <input type="password" required minlength="15" maxlength="128" bind:value={password} autocomplete="new-password" placeholder={$t('password_minimum')} />
+                      <span class="field-hint">{$t('password_hint')}</span>
                     </div>
                   </label>
                 {/if}
 
                 <label class="form-row">
-                  <span class="row-label">Privilège</span>
+                  <span class="row-label">{$t('privilege')}</span>
                   <div class="row-field">
                     <select bind:value={role} disabled={editing?.id === currentUserId}>
-                      <option value="user">Utilisateur standard</option>
-                      <option value="administrator">Administrateur</option>
+                      <option value="user">{$t('standard_user')}</option>
+                      <option value="administrator">{$t('administrator')}</option>
                     </select>
                     {#if editing?.id === currentUserId}
-                      <span class="field-hint">Vous ne pouvez pas modifier votre propre rôle.</span>
+                      <span class="field-hint">{$t('cannot_change_own_role')}</span>
                     {/if}
                   </div>
                 </label>
 
                 {#if editing}
                   <div class="form-row">
-                    <span class="row-label">Statut du compte</span>
+                      <span class="row-label">{$t('account_status')}</span>
                     <div class="row-field">
                       <label class="dsm-checkbox-label">
                         <input type="checkbox" bind:checked={disabled} disabled={editing.id === currentUserId} />
-                        <span>Désactiver ce compte</span>
+                        <span>{$t('disable_account')}</span>
                       </label>
-                      <span class="field-hint">Un compte désactivé conserve ses préférences mais ne peut plus se connecter.</span>
+                      <span class="field-hint">{$t('disabled_account_hint')}</span>
                     </div>
                   </div>
                 {/if}
@@ -340,17 +340,17 @@
             </div>
           {:else if editing && activeTab === 'groups'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Appartenance aux groupes</h4>
-              <p class="section-desc">Sélectionnez les groupes d'utilisateurs auxquels ce compte doit être affecté :</p>
+              <h4 class="form-section-title">{$t('group_membership')}</h4>
+              <p class="section-desc">{$t('group_membership_hint')}</p>
 
               <div class="dsm-table-container">
                 <table class="dsm-table">
                   <thead>
                     <tr>
                       <th class="col-check"></th>
-                      <th>Groupe</th>
-                      <th>Type</th>
-                      <th>Bibliothèques accessibles</th>
+                      <th>{$t('group')}</th>
+                      <th>{$t('type')}</th>
+                      <th>{$t('accessible_libraries')}</th>
                     </tr>
                   </thead>
                   <tbody>

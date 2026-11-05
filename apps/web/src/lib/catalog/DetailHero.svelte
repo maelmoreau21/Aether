@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { type Work, localizedTitle, localizedPlot, localizedTagline } from './api';
-  import { locale } from '../i18n';
+  import { locale, t } from '../i18n';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
@@ -54,10 +54,10 @@
       {/if}
       <div class="cap">
         <div class="essential-meta">
-          <span class="badge">{work.kind === 'series' ? 'Série' : 'Film'}{work.synthetic ? ' · Démonstration' : ''}</span>
+          <span class="badge">{work.kind === 'series' ? $t('kind_series') : $t('kind_movie')}{work.synthetic ? ` · ${$t('demonstration')}` : ''}</span>
           {#if work.year}<span>{work.year}</span>{/if}
           {#if duration && Number.isFinite(duration) && duration > 0}<span>{Math.ceil(duration / 60)} min</span>{/if}
-          {#if work.kind === 'series' && work.seasonCount}<span>{work.seasonCount} {work.seasonCount > 1 ? 'saisons' : 'saison'}</span>{/if}
+          {#if work.kind === 'series' && work.seasonCount}<span>{work.seasonCount} {work.seasonCount > 1 ? $t('seasons') : $t('season')}</span>{/if}
           {#if work.genres?.length}<span>{work.genres.slice(0, 3).join(', ')}</span>{/if}
           {#if work.mpaa}<span class="badge">{work.mpaa}</span>{/if}
           {#if formattedRating}<span class="rating"><Icon name="star" size={13} /> {formattedRating} / 10</span>{/if}

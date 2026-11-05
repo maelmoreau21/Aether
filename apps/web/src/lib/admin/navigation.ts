@@ -1,47 +1,48 @@
 import type { IconName } from '../ui/Icon.svelte';
+import type { TranslationKey } from '../i18n';
 
-type LabelKey = 'admin_nav_overview' | 'admin_nav_libraries' | 'admin_nav_nodes' | 'admin_nav_users' | 'admin_nav_tasks';
-export interface AdminDestination { hash: string; label: string; englishLabel?: string; key?: LabelKey; icon: IconName }
+type LabelKey = TranslationKey;
+export interface AdminDestination { hash: string; label: string; labelKey: LabelKey; icon: IconName }
 /** A sidebar entry. Entries with tabs group related sections behind one destination. */
 export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[]; extensionId?: 'media-requests' | 'media-reports' }
 
 const artworkTabs: AdminDestination[] = [
-  { hash: '#artwork-section', label: 'Images', englishLabel: 'Artwork', icon: 'image' },
-  { hash: '#trickplay-section', label: 'Miniatures Trickplay', englishLabel: 'Trickplay thumbnails', icon: 'image' },
-  { hash: '#avatars-section', label: 'Avatars', icon: 'image' }
+  { hash: '#artwork-section', label: 'Images', labelKey: 'admin_artwork_tab', icon: 'image' },
+  { hash: '#trickplay-section', label: 'Miniatures Trickplay', labelKey: 'admin_trickplay_tab', icon: 'image' },
+  { hash: '#avatars-section', label: 'Avatars', labelKey: 'admin_avatars_tab', icon: 'image' }
 ];
 const serverTabs: AdminDestination[] = [
-  { hash: '#general-section', label: 'Général', englishLabel: 'General', icon: 'settings' },
-  { hash: '#network-section', label: 'Réseau', englishLabel: 'Network', icon: 'globe' }
+  { hash: '#general-section', label: 'Général', labelKey: 'admin_general', icon: 'settings' },
+  { hash: '#network-section', label: 'Réseau', labelKey: 'admin_network', icon: 'globe' }
 ];
 
-export const adminNavigation: { label: string; englishLabel: string; links: AdminEntry[] }[] = [
-  { label: 'Serveur', englishLabel: 'Server', links: [
-    { hash: '#overview', label: 'Vue d’ensemble', key: 'admin_nav_overview', icon: 'server' },
-    { hash: '#statistics-section', label: 'Statistiques', englishLabel: 'Statistics', icon: 'clock' }
+export const adminNavigation: { label: string; labelKey: LabelKey; links: AdminEntry[] }[] = [
+  { label: 'Serveur', labelKey: 'admin_group_server', links: [
+    { hash: '#overview', label: 'Vue d’ensemble', labelKey: 'admin_nav_overview', icon: 'server' },
+    { hash: '#statistics-section', label: 'Statistiques', labelKey: 'admin_statistics', icon: 'clock' }
   ] },
-  { label: 'Médiathèque', englishLabel: 'Media library', links: [
-    { hash: '#libraries-section', label: 'Bibliothèques', key: 'admin_nav_libraries', icon: 'film' },
-    { hash: '#nodes-section', label: 'Media Nodes', key: 'admin_nav_nodes', icon: 'server' },
-    { hash: '#artwork-section', label: 'Métadonnées et images', englishLabel: 'Metadata and artwork', icon: 'image', tabs: artworkTabs }
+  { label: 'Médiathèque', labelKey: 'admin_group_media', links: [
+    { hash: '#libraries-section', label: 'Bibliothèques', labelKey: 'admin_nav_libraries', icon: 'film' },
+    { hash: '#nodes-section', label: 'Media Nodes', labelKey: 'admin_nav_nodes', icon: 'server' },
+    { hash: '#artwork-section', label: 'Métadonnées et images', labelKey: 'admin_artwork', icon: 'image', tabs: artworkTabs }
   ] },
-  { label: 'Accès', englishLabel: 'Access', links: [
-    { hash: '#users-section', label: 'Utilisateurs', key: 'admin_nav_users', icon: 'users' },
-    { hash: '#groups-section', label: 'Groupes et permissions', englishLabel: 'Groups and permissions', icon: 'users' }
+  { label: 'Accès', labelKey: 'admin_group_access', links: [
+    { hash: '#users-section', label: 'Utilisateurs', labelKey: 'admin_nav_users', icon: 'users' },
+    { hash: '#groups-section', label: 'Groupes et permissions', labelKey: 'admin_groups', icon: 'users' }
   ] },
-  { label: 'Extensions', englishLabel: 'Extensions', links: [
-    { hash: '#extensions-section', label: 'Gérer les extensions', englishLabel: 'Manage extensions', icon: 'sparkles' },
-    { hash: '#requests-section', label: 'Demandes', englishLabel: 'Requests', icon: 'download', extensionId: 'media-requests', tabs: [
-      { hash: '#requests-section', label: 'Demandes', englishLabel: 'Requests', icon: 'download' },
-      { hash: '#acquisition-section', label: 'Acquisition et imports', englishLabel: 'Acquisition and imports', icon: 'server' }
+  { label: 'Extensions', labelKey: 'admin_group_extensions', links: [
+    { hash: '#extensions-section', label: 'Gérer les extensions', labelKey: 'admin_manage_extensions', icon: 'sparkles' },
+    { hash: '#requests-section', label: 'Demandes', labelKey: 'settings_requests', icon: 'download', extensionId: 'media-requests', tabs: [
+      { hash: '#requests-section', label: 'Demandes', labelKey: 'settings_requests', icon: 'download' },
+      { hash: '#acquisition-section', label: 'Acquisition et imports', labelKey: 'admin_acquisition', icon: 'server' }
     ] },
-    { hash: '#reports-section', label: 'Signalements', englishLabel: 'Reports', icon: 'alert', extensionId: 'media-reports' }
+    { hash: '#reports-section', label: 'Signalements', labelKey: 'settings_reports', icon: 'alert', extensionId: 'media-reports' }
   ] },
-  { label: 'Système', englishLabel: 'System', links: [
-    { hash: '#api-keys-section', label: 'Clés API', englishLabel: 'API keys', icon: 'shield' },
-    { hash: '#tasks-section', label: 'Tâches planifiées', key: 'admin_nav_tasks', icon: 'clock' },
-    { hash: '#backups-section', label: 'Sauvegardes', englishLabel: 'Backups', icon: 'server' },
-    { hash: '#general-section', label: 'Paramètres du serveur', englishLabel: 'Server settings', icon: 'settings', tabs: serverTabs }
+  { label: 'Système', labelKey: 'admin_group_system', links: [
+    { hash: '#api-keys-section', label: 'Clés API', labelKey: 'admin_api_keys', icon: 'shield' },
+    { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock' },
+    { hash: '#backups-section', label: 'Sauvegardes', labelKey: 'admin_backups', icon: 'server' },
+    { hash: '#general-section', label: 'Paramètres du serveur', labelKey: 'admin_server_settings', icon: 'settings', tabs: serverTabs }
   ] }
 ];
 export const adminEntries = adminNavigation.flatMap(group => group.links);
@@ -55,8 +56,8 @@ export function parseAdminHash(hash: string): { section: string; task: string | 
   const section = adminSectionHashes.has(candidate) ? candidate : '#overview';
   return { section, task: section === '#tasks-section' ? new URLSearchParams(query).get('task') || null : null };
 }
-export function adminDestinationLabel(link: AdminDestination, translate: (key: LabelKey) => string, english = false): string {
-  return link.key ? translate(link.key) : english ? link.englishLabel ?? link.label : link.label;
+export function adminDestinationLabel(link: AdminDestination, translate: (key: LabelKey) => string): string {
+  return translate(link.labelKey);
 }
 
 /**

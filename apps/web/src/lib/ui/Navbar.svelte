@@ -1,8 +1,8 @@
 <script module lang="ts">
   export const navLinks = [
-    { key: 'home', path: '/', label: 'Accueil', symbol: '⌂' },
-    { key: 'lists', path: 'lists/', label: 'Mes listes', symbol: '☷' },
-    { key: 'downloads', path: 'downloads/', label: 'Téléchargements', symbol: '↓' }
+    { key: 'home', path: '/', labelKey: 'home', symbol: '⌂' },
+    { key: 'lists', path: 'lists/', labelKey: 'lists', symbol: '☷' },
+    { key: 'downloads', path: 'downloads/', labelKey: 'downloads', symbol: '↓' }
   ] as const;
 </script>
 
@@ -18,6 +18,7 @@
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { serverPresentation } from '../config/presentation';
   import { loadFeatures } from '../applications/api';
+  import { t } from '../i18n';
 
   type Kind = AccessibleLibrary['kind'];
 
@@ -26,7 +27,7 @@
     name?: string;
   } = $props();
 
-  const kindLabels: Record<Kind, string> = { films: 'Films', series: 'Séries', music: 'Musique' };
+  const kindLabels: Record<Kind, 'films' | 'series' | 'music'> = { films: 'films', series: 'series', music: 'music' };
 
   let watchPartyOpen = $state(false);
   let pendingInvitesCount = $state(0);
@@ -111,7 +112,7 @@
 
 <header class="site-header" class:scrolled={isScrolled}>
   <div class="header-inner">
-    <a class="brand" href={resolve('/')} onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} aria-label={`${$serverPresentation.serverName || name}, accueil`}>
+    <a class="brand" href={resolve('/')} onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} aria-label={`${$serverPresentation.serverName || name}, ${$t('home').toLowerCase()}`}>
       <svg class="brand-mark" viewBox="0 0 256 256" width="28" height="28" aria-hidden="true">
         <defs><linearGradient id="halo-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="logo-stop-a" /><stop offset="1" class="logo-stop-b" /></linearGradient></defs>
         <path d="M64 192 V48 L216 128 L116 180" fill="none" stroke="url(#halo-brand)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
@@ -119,13 +120,13 @@
       <span>{$serverPresentation.serverName || name}</span>
     </a>
 
-    <nav class="desktop-nav" aria-label="Navigation principale">
-      <a href={resolve('/')} aria-current={section === 'home' ? 'page' : undefined}>Accueil</a>
+    <nav class="desktop-nav" aria-label={$t('main_navigation')}>
+      <a href={resolve('/')} aria-current={section === 'home' ? 'page' : undefined}>{$t('home')}</a>
       {#each kinds as kind (kind)}
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- kindHref() resolves the URL. -->
-        <a href={kindHref(kind)} aria-current={section === kind ? 'page' : undefined} onpointerenter={() => preloadKind(kind)} onfocus={() => preloadKind(kind)}>{kindLabels[kind]}</a>
+        <a href={kindHref(kind)} aria-current={section === kind ? 'page' : undefined} onpointerenter={() => preloadKind(kind)} onfocus={() => preloadKind(kind)}>{$t(kindLabels[kind])}</a>
       {/each}
-      <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>Mes listes</a>
+      <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>{$t('lists')}</a>
     </nav>
 
     <div class="header-actions">
@@ -136,8 +137,8 @@
             bind:this={headerSearchInput}
             type="search"
             bind:value={headerSearchQuery}
-            placeholder="Films, séries, artistes…"
-            aria-label="Recherche rapide"
+            placeholder={$t('search_placeholder')}
+              aria-label={$t('quick_search')}
             onkeydown={e => { if (e.key === 'Escape') searchExpanded = false; }}
             onblur={() => { if (!headerSearchQuery.trim()) searchExpanded = false; }}
           />
@@ -148,8 +149,8 @@
         class:active={section === 'search' || searchExpanded}
         href={resolve('search/')}
         onclick={toggleQuickSearch}
-        title="Rechercher"
-        aria-label="Rechercher"
+        title={$t('search_action')}
+        aria-label={$t('search_action')}
         aria-current={section === 'search' ? 'page' : undefined}
       >
         <Icon name="search" size={19} />
@@ -157,8 +158,8 @@
       <button
         type="button"
         class="icon-btn watch-party-btn"
-        title="Séances Watch Party"
-        aria-label="Séances Watch Party"
+        title={$t('watch_party_sessions')}
+        aria-label={$t('watch_party_sessions')}
         onclick={() => (watchPartyOpen = true)}
       >
         <Icon name="users" size={19} />
@@ -171,10 +172,10 @@
   </div>
 </header>
 
-<nav class="mobile-nav" aria-label="Navigation principale mobile">
+<nav class="mobile-nav" aria-label={$t('mobile_navigation')}>
   <a href={resolve('/')} aria-current={section === 'home' ? 'page' : undefined}>
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 11 12 4l8 7v9h-5v-6H9v6H4z" /></svg>
-    <span>Accueil</span>
+    <span>{$t('home')}</span>
   </a>
   {#each kinds as kind (kind)}
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- kindHref() resolves the URL. -->
@@ -186,12 +187,12 @@
       {:else}
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 18V6l11-2v12" /><circle cx="6.5" cy="18" r="2.5" /><circle cx="17.5" cy="16" r="2.5" /></svg>
       {/if}
-      <span>{kindLabels[kind]}</span>
+      <span>{$t(kindLabels[kind])}</span>
     </a>
   {/each}
   <a href={resolve('lists/')} aria-current={section === 'lists' ? 'page' : undefined}>
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 4h14v17l-7-4-7 4z" /></svg>
-    <span>Listes</span>
+    <span>{$t('lists')}</span>
   </a>
 </nav>
 

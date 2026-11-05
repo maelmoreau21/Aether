@@ -2,6 +2,7 @@
   import { adminRequest } from './request';
   import { serverPresentation } from '../config/presentation';
   import PlaylistPolicy from './PlaylistPolicy.svelte';
+  import { t } from '../i18n';
   let { section }: { section: string } = $props();
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let blockSsoLocalAccounts=$state(true);
@@ -21,9 +22,9 @@
     fingerprintNotice = '';
     try {
       const res = await adminRequest<{ cleared?: boolean; message?: string }>('/api/v1/admin/maintenance/clear-fingerprint-cache', { method: 'POST' });
-      fingerprintNotice = res.message ?? 'Cache des empreintes audio vidé avec succès.';
+      fingerprintNotice = res.message ?? $t('memory_released');
     } catch (cause) {
-      fingerprintNotice = cause instanceof Error ? cause.message : 'Échec du vidage du cache.';
+      fingerprintNotice = cause instanceof Error ? cause.message : $t('operation_failed');
     } finally {
       clearingFingerprints = false;
     }
@@ -55,7 +56,7 @@
         corsHosts = (data.corsHosts ?? []).join(', ');
       }
       else network = await adminRequest('/api/v1/admin/network');
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
     finally { loading = false; }
   }
   $effect(() => { if (['#general-section', '#trickplay-section', '#network-section'].includes(section)) void load(section); });
@@ -98,94 +99,94 @@
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
       corsHosts = (saved.corsHosts ?? []).join(', ');
       serverPresentation.set(saved);
-      notice = 'Paramètres enregistrés.';
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Enregistrement impossible.'; }
+      notice = $t('settings_saved');
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('operation_failed'); }
     finally { saving = false; }
   }
 </script>
 {#if section === '#general-section'}
-<section id="general-section" aria-labelledby="general-heading"><h2 id="general-heading">Général</h2>
-  <p class="lead">Nom du serveur, connexion SSO et réglages de lecture.</p>
+<section id="general-section" aria-labelledby="general-heading"><h2 id="general-heading">{$t('general')}</h2>
+  <p class="lead">{$t('general_settings_intro')}</p>
   <form onsubmit={save}><fieldset disabled={loading || saving}>
     <div class="settings-panel">
-    <label>Nom du serveur<input bind:value={name} required maxlength="80" autocomplete="off" /></label>
-    <label>Message d’accueil<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
-    <label>Texte du bouton de connexion SSO<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
-    <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />Empêcher les utilisateurs SSO de créer des identifiants locaux</label>
+    <label>{$t('server_name')}<input bind:value={name} required maxlength="80" autocomplete="off" /></label>
+    <label>{$t('welcome_message')}<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
+    <label>{$t('sso_button_label')}<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
+    <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />{$t('block_sso_local')}</label>
     </div>
 
     <details class="adv">
-      <summary>Reprise de lecture</summary>
+      <summary>{$t('playback_resume')}</summary>
       <fieldset class="trickplay-fieldset">
-        <p>Les nouvelles progressions sont enregistrées selon ces seuils pour tous les appareils. Avant le seuil de reprise ou sous la durée minimale, la lecture repart du début. Le seuil « vu » est prioritaire. Les progressions existantes sont conservées lors de l’enregistrement des paramètres.</p>
+        <p>{$t('playback_resume_note')}</p>
         <div class="trickplay-grid">
-          <label>Reprise dès (% de la durée)<input type="number" min="0" max="49" step="1" required bind:value={minResumePct} /></label>
-          <label>Considéré comme vu à (%)<input type="number" min="50" max="100" step="1" required bind:value={maxResumePct} /></label>
-          <label>Durée minimale pour reprendre (s)<input type="number" min="0" max="86400" step="1" required bind:value={minResumeDurationSeconds} /></label>
+          <label>{$t('resume_at')}<input type="number" min="0" max="49" step="1" required bind:value={minResumePct} /></label>
+          <label>{$t('watched_at')}<input type="number" min="50" max="100" step="1" required bind:value={maxResumePct} /></label>
+          <label>{$t('minimum_resume_duration')}<input type="number" min="0" max="86400" step="1" required bind:value={minResumeDurationSeconds} /></label>
         </div>
       </fieldset>
     </details>
     <details class="adv">
-      <summary>Métadonnées</summary>
+      <summary>{$t('metadata')}</summary>
       <fieldset class="trickplay-fieldset">
         <div class="trickplay-grid">
-          <label>Langue préférée (ex. fr, en, pt-BR)<input bind:value={metadataLanguage} required maxlength="6" pattern={'[a-z]{2,3}(-[A-Z]{2})?'} /></label>
-          <label>Pays (ex. FR, US)<input bind:value={metadataCountry} required maxlength="2" pattern={'[A-Z]{2}'} /></label>
+          <label>{$t('preferred_language_example')}<input bind:value={metadataLanguage} required maxlength="6" pattern={'[a-z]{2,3}(-[A-Z]{2})?'} /></label>
+          <label>{$t('country_example')}<input bind:value={metadataCountry} required maxlength="2" pattern={'[A-Z]{2}'} /></label>
         </div>
       </fieldset>
     </details>
     <details class="adv">
-      <summary>Empreintes audio des intros et génériques</summary>
+      <summary>{$t('audio_fingerprints')}</summary>
       <fieldset class="trickplay-fieldset">
-        <p>Les empreintes acoustiques Chromaprint sont conservées en cache sur chaque Media Node pour éviter les réextractions répétées lors des analyses.</p>
+        <p>{$t('audio_fingerprints_note')}</p>
         <button type="button" class="maintenance-btn" disabled={clearingFingerprints} onclick={clearFingerprintCache}>
-          {clearingFingerprints ? 'Nettoyage en cours...' : 'Vider le cache des empreintes audio'}
+          {clearingFingerprints ? $t('clearing') : $t('clear_fingerprint_cache')}
         </button>
         {#if fingerprintNotice}<p class="maintenance-notice">{fingerprintNotice}</p>{/if}
       </fieldset>
     </details>
     <details class="adv">
-      <summary>Journal des extensions et sécurité CORS</summary>
+      <summary>{$t('extension_log_cors')}</summary>
       <fieldset class="trickplay-fieldset">
-        <p>La tâche « Nettoyer le journal des extensions » supprime jusqu’à 500 événements anciens par exécution, chaque jour par défaut. Son calendrier et son lancement manuel se gèrent dans Tâches. Ce réglage ne modifie pas la durée des sessions ni l’historique de lecture.</p>
+        <p>{$t('extension_log_note')}</p>
         <div class="trickplay-grid">
-          <label>Conservation du journal des extensions (jours)<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
-          <label>Origines CORS autorisées (séparées par des virgules)<input bind:value={corsHosts} placeholder="https://app.example.com, http://localhost:3000" /></label>
+          <label>{$t('log_retention')}<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
+          <label>{$t('allowed_cors')}<input bind:value={corsHosts} placeholder="https://app.example.com, http://localhost:3000" /></label>
         </div>
       </fieldset>
     </details>
-    <div class="actions"><button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+    <div class="actions"><button type="submit">{saving ? $t('loading') : $t('save')}</button></div>
   </fieldset></form>
   <PlaylistPolicy />
 </section>
 {:else if section === '#trickplay-section'}
 <section id="trickplay-section" aria-labelledby="trickplay-heading">
-  <h2 id="trickplay-heading">Miniatures Trickplay</h2>
-  <p>Réglez les aperçus affichés lorsque vous parcourez la barre de lecture. Les miniatures sont générées sur le Media Node propriétaire du média.</p>
+  <h2 id="trickplay-heading">{$t('trickplay')}</h2>
+  <p>{$t('trickplay_intro')}</p>
   <form onsubmit={save}><fieldset disabled={loading || saving}>
     <fieldset class="trickplay-fieldset">
-      <legend>Miniatures Trickplay</legend>
-      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />Activer le système de miniatures Trickplay</label>
-      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />Génération automatique pendant l'analyse des bibliothèques</label>
+      <legend>{$t('trickplay')}</legend>
+      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />{$t('enable_trickplay')}</label>
+      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />{$t('trickplay_auto')}</label>
       <div class="trickplay-grid">
-        <label>Qualité JPEG (1–31)<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
-        <label>Largeur vignettes (px)<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
-        <label>Intervalle (secondes)<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
-        <label>Quota cache (Mo)<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
+        <label>{$t('jpeg_quality')}<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
+        <label>{$t('thumbnail_width')}<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
+        <label>{$t('thumbnail_interval')}<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
+        <label>{$t('cache_quota')}<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
       </div>
     </fieldset>
-    <div class="actions"><button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+    <div class="actions"><button type="submit">{saving ? $t('loading') : $t('save')}</button></div>
   </fieldset></form>
 </section>
 {:else if section === '#network-section'}
-<section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">Réseau</h2>
-  {#if network}<dl><div><dt>Adresse publique</dt><dd>{network.publicUrl}</dd></div><div><dt>Interface Web</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>Cookies de session sécurisés (HTTPS)</dt><dd>{network.secureCookies ? 'Activés' : 'Désactivés — HTTP local'}</dd></div></dl>{/if}
-  <details><summary>Modifier la connexion</summary><p>L’adresse publique est définie par <code>MEDIA_PUBLIC_URL</code> au démarrage. Les ports et l’accès depuis l’extérieur se règlent dans le déploiement et le proxy. Ces valeurs sont affichées ici en lecture seule.</p>
+<section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">{$t('network')}</h2>
+  {#if network}<dl><div><dt>{$t('public_address')}</dt><dd>{network.publicUrl}</dd></div><div><dt>{$t('web_interface')}</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>{$t('secure_session_cookies')}</dt><dd>{network.secureCookies ? $t('enabled') : $t('disabled_local_http')}</dd></div></dl>{/if}
+  <details><summary>{$t('edit_connection')}</summary><p>{$t('network_note')}</p>
   <p>Les adresses des Media Nodes se gèrent dans Nœuds de stockage.</p></details>
 </section>
 {/if}
 {#if ['#general-section','#trickplay-section','#network-section'].includes(section)}
-  {#if loading}<p role="status">Chargement…</p>{/if}{#if error}<p role="alert">{error}</p><button class="maintenance-btn" disabled={loading} onclick={() => void load(section)}>Réessayer</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
+  {#if loading}<p role="status">{$t('loading_settings_short')}</p>{/if}{#if error}<p role="alert">{error}</p><button class="maintenance-btn" disabled={loading} onclick={() => void load(section)}>{$t('retry_action')}</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 {/if}
 <style>
   section { display: grid; gap: 20px; min-width: 0; max-width: 760px; font-family: var(--font-sans); color: var(--color-text); }
@@ -236,7 +237,7 @@
   details:not(.adv) summary { display: flex; align-items: center; min-height: 52px; font-size: 14px; font-weight: 600; cursor: pointer; }
   details:not(.adv)[open] { padding-bottom: 16px; }
   details:not(.adv) p + p { margin-top: 8px; }
-  code { font-family: ui-monospace, monospace; font-size: 12px; color: var(--color-text); }
+  :global(code) { font-family: ui-monospace, monospace; font-size: 12px; color: var(--color-text); }
   @media (max-width: 640px) {
     dl div { grid-template-columns: minmax(0, 1fr); gap: 6px; }
     button { width: 100%; }

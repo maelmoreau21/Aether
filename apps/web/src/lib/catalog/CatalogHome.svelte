@@ -14,6 +14,7 @@
   import { pickTonight } from './tonight';
   import DiscoverFeed from './DiscoverFeed.svelte';
   import { page } from '$app/state';
+  import { t } from '../i18n';
 
   let { films = [], series = [], featured = null, onPlay, detailUrl }: {
     films: Work[];
@@ -54,15 +55,15 @@
     {:else if section === 'tonight' && tonight.length}
       <TonightMosaic works={tonight} {detailUrl} />
     {:else if section === 'films' && films.length}
-      <MediaShelf title="Films récemment ajoutés" viewAllHref={resolve('films/?sort=added-desc')}>
+      <MediaShelf title={$t('recently_added_movies')} viewAllHref={resolve('films/?sort=added-desc')}>
         {#each films.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
       </MediaShelf>
     {:else if section === 'series' && series.length}
-      <MediaShelf title="Séries récemment ajoutées" viewAllHref={resolve('series/?sort=added-desc')}>
+      <MediaShelf title={$t('recently_added_series')} viewAllHref={resolve('series/?sort=added-desc')}>
         {#each series.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
       </MediaShelf>
     {:else if section === 'rated' && topRated.length >= 4}
-      <MediaShelf title="Les mieux notés de votre médiathèque">
+      <MediaShelf title={$t('top_rated_library')}>
         {#each topRated as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
       </MediaShelf>
     {/if}
@@ -73,7 +74,7 @@
     <DiscoverFeed {films} {series} exclude={shownAbove} {library} {detailUrl} />
   {/if}
   {#if $preferenceState.homeSections?.length === 0}
-    <p>Les sections de l’accueil sont masquées. Vous pouvez les réactiver dans les <a href={resolve('settings/#display')}>paramètres d’affichage</a>.</p>
+    <p>{$t('home_sections_hidden')} <a href={resolve('settings/#display')}>{$t('settings_nav_display').toLowerCase()}</a>.</p>
   {/if}
 </div>
 

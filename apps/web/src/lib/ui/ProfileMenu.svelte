@@ -4,7 +4,7 @@
   import ProfileAvatar from './ProfileAvatar.svelte';
   import { goto } from '$app/navigation';
   import { session, logout } from '../auth/session';
-  import { t, locale, setLocale } from '../i18n';
+  import { t, locale, localeOptions, setLocale } from '../i18n';
   import { themeMode, setTheme } from '../theme';
 
   let panel: HTMLDivElement;
@@ -129,22 +129,9 @@
       <div class="lang-switch-section">
         <span class="lang-title"><Icon name="globe" size={15} /> {$t('language')}</span>
         <div class="lang-pills">
-          <button
-            type="button"
-            class="lang-pill"
-            class:active={$locale === 'fr'}
-            onclick={() => setLocale('fr')}
-          >
-            FR
-          </button>
-          <button
-            type="button"
-            class="lang-pill"
-            class:active={$locale === 'en'}
-            onclick={() => setLocale('en')}
-          >
-            EN
-          </button>
+          {#each localeOptions as option (option.code)}
+            <button type="button" class="lang-pill" class:active={$locale === option.code} onclick={() => setLocale(option.code)}>{option.label}</button>
+          {/each}
         </div>
       </div>
 

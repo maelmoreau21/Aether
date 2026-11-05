@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n';
   type Field={key:string;label:string;description?:string;fieldType:string;defaultValue?:string;required?:boolean;secret?:boolean;options?:{label:string;value:string}[]};
   let {fields,values=$bindable(),busy,onsave}:{fields:Field[];values:Record<string,string|number|boolean>;busy:boolean;onsave:()=>void}=$props();
 </script>
@@ -13,7 +14,7 @@
       {#if field.description}<small>{field.description}</small>{/if}</label>
     {/if}
   {/each}</div>
-  <div class="save-row"><button disabled={busy}>Enregistrer les paramètres</button></div>
+  <div class="save-row"><button disabled={busy}>{$t('save_extension_settings')}</button></div>
 </form>
 <style>
   .plugin-settings { max-width: 760px; margin: 0; color: var(--color-text); font-family: var(--font-sans); }

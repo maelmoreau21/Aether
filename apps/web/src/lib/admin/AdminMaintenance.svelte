@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { session } from '../auth/session';
+  import { t } from '../i18n';
   let { visible = true }: { visible?: boolean } = $props();
   interface Archive { id: string; size: number; createdAt: number }
   interface Schedule { enabled: boolean; intervalMinutes: number; nextDueAt: number; lastStartedAt: number | null; lastCompletedAt: number | null; lastOutcome: string }
@@ -89,10 +90,10 @@
       });
       if (response.ok && active) {
         memoryReport = await response.json();
-        success = 'Caches purgés et mémoire restituée au système d’exploitation.';
+        success = $t('memory_released');
       }
     } catch {
-      error = 'Impossible de libérer la mémoire.';
+      error = $t('memory_release_failed');
     } finally {
       if (active) memoryTrimming = false;
     }
@@ -111,9 +112,9 @@
           ? detail.message
           : response.status === 409 ? 'Une sauvegarde est déjà en cours ou le dossier serveur est refusé. Actualisez son état.' : `Sauvegarde impossible (HTTP ${response.status}).`);
       }
-      if (active) { success = 'Sauvegarde complète créée. Archive non chiffrée à protéger.'; await refresh(); }
+      if (active) { success = $t('backup_created'); await refresh(); }
     } catch (cause) {
-      if (active) error = cause instanceof Error && cause.name === 'TimeoutError' ? 'Délai dépassé. La sauvegarde peut continuer côté serveur : actualisez la liste avant de réessayer.' : cause instanceof Error ? cause.message : 'Sauvegarde impossible.';
+      if (active) error = cause instanceof Error && cause.name === 'TimeoutError' ? $t('timeout_backup') : cause instanceof Error ? cause.message : $t('backup_failed');
     } finally { if (active) creating = false; }
   }
 
@@ -126,9 +127,9 @@
     try {
       const response = await fetch('/api/v1/admin/backups/schedule', { method: 'PUT', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken }, body: JSON.stringify({ enabled: scheduleEnabled, intervalMinutes }), signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error(`Planification impossible (HTTP ${response.status}).`);
-      if (active) { await refresh(); success = 'Planification enregistrée.'; }
+      if (active) { await refresh(); success = $t('schedule_saved'); }
     } catch (cause) {
-      if (active) error = cause instanceof Error ? cause.message : 'Planification impossible.';
+      if (active) error = cause instanceof Error ? cause.message : $t('schedule_failed');
     } finally { if (active) saving = false; }
   }
 
@@ -139,8 +140,8 @@
 </script>
 
 <section id="backups-section" class="maintenance" aria-labelledby="maintenance-heading">
-  <header><p class="eyebrow">MAINTENANCE</p><h2 id="maintenance-heading">Sauvegardes et base de données</h2><p>Sauvegardez la base complète et la configuration du serveur dans une archive non chiffrée. Réservez son accès à l'administrateur. Sur un serveur Windows, vérifiez les ACL du dossier de sauvegarde et de ses copies : Aether hérite des autorisations du dossier et ne les contrôle pas.</p></header>
-  <div class="actions"><button class="primary" onclick={create} disabled={loading || creating || !listing?.available || listing?.running}>{creating || listing?.running ? 'Sauvegarde en cours…' : 'Créer une sauvegarde'}</button><button onclick={refresh} disabled={loading}>Actualiser</button></div>
+  <header><p class="eyebrow">{$t('maintenance')}</p><h2 id="maintenance-heading">{$t('backups_database')}</h2><p>{$t('backup_intro')}</p></header>
+  <div class="actions"><button class="primary" onclick={create} disabled={loading || creating || !listing?.available || listing?.running}>{creating || listing?.running ? $t('backup_in_progress') : $t('create_backup')}</button><button onclick={refresh} disabled={loading}>{$t('refresh')}</button></div>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   {#if success}<p role="status">{success}</p>{/if}
 
@@ -148,8 +149,8 @@
     <article class="memory-card">
       <div class="memory-header">
         <div>
-          <h3>Consommation mémoire réelle & cache Linux</h3>
-          <p>Distingue la RAM allouée par le Core, les processus enfants (Wasm) et le cache disque du noyau Linux.</p>
+          <h3>{$t('memory_cache')}</h3>
+          <p>{$t('memory_cache_note')}</p>
         </div>
         <button onclick={trimMemory} disabled={memoryTrimming || memoryLoading}>
           {memoryTrimming ? 'Libération en cours…' : 'Libérer la mémoire (Trim)'}
@@ -189,22 +190,22 @@
     </article>
   {/if}
 
-  {#if loading}<p role="status">Chargement des archives…</p>{:else if listing}
-    {#if !listing.available}<div class="notice"><strong>Sauvegarde indisponible</strong><p>{listing.reason ?? "Le service de sauvegarde n'est pas disponible actuellement."}</p></div>{:else}
-      <article><h3>Planification automatique</h3>
+  {#if loading}<p role="status">{$t('loading_archives')}</p>{:else if listing}
+    {#if !listing.available}<div class="notice"><strong>{$t('backup_unavailable')}</strong><p>{listing.reason ?? $t('backup_service_unavailable')}</p></div>{:else}
+      <article><h3>{$t('automatic_schedule')}</h3>
         <form onsubmit={saveSchedule}>
           <label class="check-row"><input type="checkbox" bind:checked={scheduleEnabled} disabled={saving} /> Activer les sauvegardes automatiques</label>
-          <label class="interval-field">Intervalle en minutes <input type="number" min="60" max="10080" step="1" required bind:value={intervalMinutes} disabled={saving} /></label>
+          <label class="interval-field">{$t('interval_minutes')} <input type="number" min="60" max="10080" step="1" required bind:value={intervalMinutes} disabled={saving} /></label>
           <button type="submit" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer la planification'}</button>
         </form>
-        <p>De 1 heure à 7 jours. Le Core doit être démarré. Aucune suppression automatique des archives.</p>
+        <p>{$t('schedule_range_note')}</p>
         {#if listing.schedule.enabled}<p>Prochaine tentative : {new Date(listing.schedule.nextDueAt * 1000).toLocaleString()}</p>{/if}
         <p>Dernier résultat : {outcomeLabels[listing.schedule.lastOutcome] ?? listing.schedule.lastOutcome}</p>
         {#if listing.schedule.lastCompletedAt}<p>Dernière fin : {new Date(listing.schedule.lastCompletedAt * 1000).toLocaleString()}</p>{/if}
       </article>
-      <article><h3>Archives</h3><p>Les archives sont conservées dans le dossier du serveur. Téléchargez une copie et conservez-la en lieu sûr.</p>
-      {#if listing.archives.length === 0}<p>Aucune sauvegarde disponible.</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
-<a href={`/api/v1/admin/backups/${archive.id}/download`} download>Télécharger</a></li>{/each}</ul>{/if}</article>
+      <article><h3>{$t('archives')}</h3><p>{$t('archives_note')}</p>
+      {#if listing.archives.length === 0}<p>{$t('no_backup_available')}</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
+    <a href={`/api/v1/admin/backups/${archive.id}/download`} download>{$t('download')}</a></li>{/each}</ul>{/if}</article>
     {/if}
   {/if}
 </section>

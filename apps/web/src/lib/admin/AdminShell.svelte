@@ -26,11 +26,10 @@
 
   /** Section shown after the matched setting; skipped when it would only repeat the match. */
   function resultContext(result: AdminSearchResult): string {
-    const english = $locale === 'en';
     const match = normalizeAdminSearch(result.match);
-    const section = adminDestinationLabel(result.entry, $t, english);
+    const section = adminDestinationLabel(result.entry, $t);
     if (match !== normalizeAdminSearch(result.entry.label) && match !== normalizeAdminSearch(section)) return section;
-    return result.destination !== result.entry && match !== normalizeAdminSearch(result.destination.label) ? adminDestinationLabel(result.destination, $t, english) : '';
+    return result.destination !== result.entry && match !== normalizeAdminSearch(result.destination.label) ? adminDestinationLabel(result.destination, $t) : '';
   }
   function searchKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape' || !query) return;
@@ -85,15 +84,15 @@
 
 {#snippet navigation(place: 'side' | 'menu')}
   <div class="settings-search" role="search">
-    <label class="h-sr" for={`admin-settings-search-${place}`}>Rechercher un réglage</label>
+    <label class="h-sr" for={`admin-settings-search-${place}`}>{$t('admin_search_label')}</label>
     <div class="search-field">
       <Icon name="search" size={18} />
-      <input id={`admin-settings-search-${place}`} type="search" placeholder="Rechercher un réglage…" autocomplete="off" spellcheck="false" bind:value={query} onkeydown={searchKeydown} aria-controls={searching ? `admin-settings-results-${place}` : undefined} />
+      <input id={`admin-settings-search-${place}`} type="search" placeholder={$t('admin_search_placeholder')} autocomplete="off" spellcheck="false" bind:value={query} onkeydown={searchKeydown} aria-controls={searching ? `admin-settings-results-${place}` : undefined} />
     </div>
-    <p class="h-sr" aria-live="polite">{searching ? (results.length ? `${results.length} ${results.length > 1 ? 'réglages trouvés' : 'réglage trouvé'}` : 'Aucun réglage ne correspond.') : ''}</p>
+    <p class="h-sr" aria-live="polite">{searching ? (results.length ? $t('settings_found', { count: results.length }) : $t('no_matching_setting')) : ''}</p>
   </div>
   {#if searching}
-    <nav class="sidebar-sections search-results" id={`admin-settings-results-${place}`} aria-label="Résultats de la recherche de réglages">
+    <nav class="sidebar-sections search-results" id={`admin-settings-results-${place}`} aria-label={$t('settings_search_results')}>
       {#if results.length}
         <ul>
           {#each results as result (`${result.hash}:${result.match}`)}
@@ -106,18 +105,18 @@
           {/each}
         </ul>
       {:else}
-        <p class="search-empty">Aucun réglage ne correspond.</p>
+        <p class="search-empty">{$t('no_matching_setting')}</p>
       {/if}
     </nav>
   {:else}
-  <nav class="sidebar-sections" aria-label="Sections d’administration">
+  <nav class="sidebar-sections" aria-label={$t('admin_sections')}>
     {#each adminNavigation as group (group.label)}
-      <div class="sidebar-group"><p class="group-label">{$locale === 'en' ? group.englishLabel : group.label}</p>
+      <div class="sidebar-group"><p class="group-label">{$t(group.labelKey)}</p>
         {#each group.links as link (link.hash)}
           {#if !link.extensionId || ($extensionPins.includes(link.extensionId) && (link.extensionId === 'media-requests' ? $features.requests : $features.reports))}
           {@const active = currentEntry?.hash === link.hash}
           <a class="sidebar-nav-item" class:active href={resolve(`admin/libraries/#${link.hash.slice(1)}`)} aria-current={active ? 'page' : undefined} onclick={event => choose(event, link.hash)}>
-            <Icon name={link.icon} size={18} /><span>{adminDestinationLabel(link, $t, $locale === 'en')}</span>
+            <Icon name={link.icon} size={18} /><span>{adminDestinationLabel(link, $t)}</span>
           </a>
           {/if}
         {/each}
@@ -127,7 +126,7 @@
   {/if}
 {/snippet}
 
-<a class="skip-admin" href="#admin-main-content" onclick={event => { event.preventDefault(); content?.focus(); }}>Aller au contenu administratif</a>
+<a class="skip-admin" href="#admin-main-content" onclick={event => { event.preventDefault(); content?.focus(); }}>{$t('administrative_content')}</a>
 <header class="admin-header">
   <div class="header-left">
     <a class="admin-brand" href={resolve('/')} aria-label={`${$serverPresentation.serverName || DEFAULT_NAME}, accueil`}>
@@ -137,21 +136,21 @@
       </svg>
       <span>{$serverPresentation.serverName || DEFAULT_NAME}</span>
     </a>
-    <span class="header-context">Administration</span>
-    {#if administrator}<button class="mobile-menu-toggle" bind:this={menuButton} type="button" aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls="admin-navigation" onclick={openMenu}><Icon name="menu" size={18} /><span>{currentEntry ? adminDestinationLabel(currentEntry, $t, $locale === 'en') : 'Menu'}</span></button>{/if}
+    <span class="header-context">{$t('administration')}</span>
+    {#if administrator}<button class="mobile-menu-toggle" bind:this={menuButton} type="button" aria-haspopup="dialog" aria-expanded={menuOpen} aria-controls="admin-navigation" onclick={openMenu}><Icon name="menu" size={18} /><span>{currentEntry ? adminDestinationLabel(currentEntry, $t) : $t('admin_menu')}</span></button>{/if}
   </div>
-  <div class="header-right"><a class="back-link" href={resolve('/')} aria-label="Retour à la médiathèque"><Icon name="back" size={18} /><span>Médiathèque</span></a><ProfileMenu /></div>
+  <div class="header-right"><a class="back-link" href={resolve('/')} aria-label={$t('back_to_library')}><Icon name="back" size={18} /><span>{$t('library')}</span></a><ProfileMenu /></div>
 </header>
 
 <div class="admin-dashboard-container" class:with-sidebar={administrator && wide}>
   {#if administrator}
     {#if wide}
-      <aside class="admin-sidebar desktop-sidebar" aria-label="Navigation d’administration" bind:this={sidebar}>
+      <aside class="admin-sidebar desktop-sidebar" aria-label={$t('admin_navigation')} bind:this={sidebar}>
         {@render navigation('side')}
       </aside>
     {:else}
-      <dialog class="admin-nav-dialog admin-sidebar" id="admin-navigation" bind:this={navigationDialog} aria-label="Menu d’administration" onclose={() => { menuOpen = false; if (!wide && navigationDialog?.contains(document.activeElement)) menuButton?.focus(); }} onpointerdown={event => { if (event.target === event.currentTarget) { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX > bounds.right || event.clientX < bounds.left) closeMenu(); } }}>
-        <div class="drawer-heading"><strong>Administration</strong><button aria-label="Fermer le menu" onclick={() => closeMenu()}><Icon name="close" size={20} /></button></div>
+      <dialog class="admin-nav-dialog admin-sidebar" id="admin-navigation" bind:this={navigationDialog} aria-label={$t('admin_menu_label')} onclose={() => { menuOpen = false; if (!wide && navigationDialog?.contains(document.activeElement)) menuButton?.focus(); }} onpointerdown={event => { if (event.target === event.currentTarget) { const bounds = event.currentTarget.getBoundingClientRect(); if (event.clientX > bounds.right || event.clientX < bounds.left) closeMenu(); } }}>
+        <div class="drawer-heading"><strong>{$t('administration')}</strong><button aria-label={$t('close_menu')} onclick={() => closeMenu()}><Icon name="close" size={20} /></button></div>
         {@render navigation('menu')}
       </dialog>
     {/if}
@@ -159,12 +158,12 @@
   <main id="admin-main-content" class="admin-content-area" tabindex="-1" bind:this={content}>
     {#if administrator && currentEntry}
       <header class="section-title">
-        <div class="section-heading"><h1>{adminDestinationLabel(currentEntry, $t, $locale === 'en')}</h1>
+        <div class="section-heading"><h1>{adminDestinationLabel(currentEntry, $t)}</h1>
         </div>
         {#if currentEntry.tabs}
-          <nav class="section-tabs" aria-label={`Sous-sections : ${adminDestinationLabel(currentEntry, $t, $locale === 'en')}`}>
+          <nav class="section-tabs" aria-label={`Sous-sections : ${adminDestinationLabel(currentEntry, $t)}`}>
             {#each currentEntry.tabs as tab (tab.hash)}
-              <a href={resolve(`admin/libraries/#${tab.hash.slice(1)}`)} aria-current={currentHash === tab.hash ? 'page' : undefined} onclick={event => choose(event, tab.hash)}>{adminDestinationLabel(tab, $t, $locale === 'en')}</a>
+              <a href={resolve(`admin/libraries/#${tab.hash.slice(1)}`)} aria-current={currentHash === tab.hash ? 'page' : undefined} onclick={event => choose(event, tab.hash)}>{adminDestinationLabel(tab, $t)}</a>
             {/each}
           </nav>
         {/if}

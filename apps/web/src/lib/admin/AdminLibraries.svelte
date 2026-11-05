@@ -7,6 +7,7 @@
   import PathPickerModal from './PathPickerModal.svelte';
   import { scanLabels } from './types';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
   let { libraries, nodes, scans, pending, saving, editing, error,
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
@@ -94,7 +95,7 @@
       return;
     }
     if (!folders.length) {
-      formError = 'Ajoutez au moins un dossier dans Sources et dossiers.';
+      formError = $t('no_folder_added');
       chooseEditorSection('sources');
       await tick(); editor?.querySelector<HTMLInputElement>('#library-root')?.focus();
       return;
@@ -111,13 +112,13 @@
   }
 </script>
 <section id="libraries-section" aria-labelledby="libraries-heading">
-  <h2 id="libraries-heading">Bibliothèques</h2>
+  <h2 id="libraries-heading">{$t('libraries')}</h2>
   <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> Ajouter une bibliothèque</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> Actualiser toutes les bibliothèques</button></div>
   {#if libraries.length}
   <div class="library-table-panel">
     <table class="library-table">
-      <caption class="h-sr">Bibliothèques configurées</caption>
-      <thead><tr><th scope="col">Nom</th><th scope="col">Type</th><th scope="col">Media Node</th><th scope="col" class="numeric">Dossiers</th><th scope="col">Dernière analyse</th><th scope="col"><span class="h-sr">Actions</span></th></tr></thead>
+      <caption class="h-sr">{$t('configured_libraries')}</caption>
+      <thead><tr><th scope="col">{$t('name')}</th><th scope="col">{$t('content_type')}</th><th scope="col">{$t('media_node')}</th><th scope="col" class="numeric">{$t('folders')}</th><th scope="col">{$t('last_scan')}</th><th scope="col"><span class="h-sr">{$t('actions')}</span></th></tr></thead>
       <tbody>
     {#each libraries as library (library.id)}
       {@const folderCount = library.folders?.length ?? 1}
@@ -134,7 +135,7 @@
             <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : ' · Désactivée'} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
           </button>
         </th>
-        <td class="type-cell">{kindLabel}{#if !library.enabled}<span class="badge">Désactivée</span>{/if}</td>
+        <td class="type-cell">{kindLabel}{#if !library.enabled}<span class="badge">{$t('disabled')}</span>{/if}</td>
         <td class="node-cell">{serverNames.join(', ')}</td>
         <td class="folders-cell numeric">{folderCount}<span class="h-sr"> {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.length} {serverNames.length > 1 ? 'serveurs' : 'serveur'}</span></td>
         <td class="status-cell">
@@ -156,7 +157,7 @@
               <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
               <button disabled={unavailable} onclick={(event) => { closeMenu(event); target = library; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
               <button disabled={unavailable} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la bibliothèque</button>
-              <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>Planifier l’actualisation</a>
+              <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>{$t('schedule_refresh')}</a>
             </div></details>
           </div>
         </td>
@@ -165,7 +166,7 @@
       </tbody>
     </table>
   </div>
-  {:else}<p class="empty-libraries">Ajoutez votre première bibliothèque de films ou de séries.</p>{/if}
+  {:else}<p class="empty-libraries">{$t('first_library_hint')}</p>{/if}
 </section>
 <dialog class="library-editor" bind:this={editor} aria-labelledby="library-form" oncancel={event => { if (saving) event.preventDefault(); }}>
   <header class="editor-header"><div><p class="eyebrow">{editing ? name : 'Nouvelle bibliothèque'}</p><h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2></div><button type="button" disabled={saving} aria-label="Fermer les réglages de la bibliothèque" onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
@@ -175,25 +176,25 @@
         <div class="editor-tabs" role="tablist" aria-label="Réglages de la bibliothèque" aria-orientation="vertical">
           {#each editorSections as section, index (section.id)}<button type="button" id={`library-tab-${section.id}`} role="tab" aria-selected={activeSection === section.id} aria-controls={`library-panel-${section.id}`} tabindex={activeSection === section.id ? 0 : -1} onclick={() => chooseEditorSection(section.id)} onkeydown={event => tabKeydown(event, index)}>{section.label}</button>{/each}
         </div>
-        <label class="editor-select">Rubrique<select aria-label="Rubrique des réglages" value={activeSection} onchange={event => chooseEditorSection(event.currentTarget.value as EditorSection)}>{#each editorSections as section (section.id)}<option value={section.id}>{section.label}</option>{/each}</select></label>
+        <label class="editor-select">{$t('settings_section')}<select aria-label={$t('settings_section')} value={activeSection} onchange={event => chooseEditorSection(event.currentTarget.value as EditorSection)}>{#each editorSections as section (section.id)}<option value={section.id}>{section.label}</option>{/each}</select></label>
       </div>
       <div class="editor-content" bind:this={editorContent}>
         <div id="library-panel-general" role="tabpanel" aria-labelledby="library-tab-general" data-editor-panel="general" hidden={activeSection !== 'general'} tabindex="0">
-          <h3>Général</h3><p class="panel-description">Donnez un nom à la bibliothèque et choisissez le type de médias.</p>
-          <div class="identity-fields"><div><label for="library-name">Nom de la bibliothèque</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">Type de contenu</label><select id="library-kind" bind:value={kind}><option value="films">Films</option><option value="series">Séries</option><option value="music">Musique</option></select></div></div>
-          <label class="check"><input type="checkbox" bind:checked={enabled} /> Bibliothèque active</label><p class="field-hint">Une bibliothèque désactivée est masquée du catalogue et ne peut pas être lue.</p>
+          <h3>{$t('library_general')}</h3><p class="panel-description">{$t('library_general_note')}</p>
+          <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" bind:value={kind}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="music">{$t('music')}</option></select></div></div>
+          <label class="check"><input type="checkbox" bind:checked={enabled} /> {$t('active_library')}</label><p class="field-hint">{$t('disabled_library_hint')}</p>
           <div class="source-summary"><strong>{folders.length} {folders.length > 1 ? 'dossiers configurés' : 'dossier configuré'}</strong><p>{folders.length ? 'Les médias restent en lecture seule.' : 'Ajoutez un dossier pour pouvoir enregistrer cette bibliothèque.'}</p><button type="button" onclick={() => chooseEditorSection('sources')}>{folders.length ? 'Consulter les dossiers' : 'Configurer les dossiers'}</button></div>
         </div>
         <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
-          <div class="section-heading"><h3>Sources et dossiers</h3><span>{folders.length} / 32</span></div><p class="panel-description">Choisissez les dossiers sur les serveurs qui les hébergent. Aucun fichier d’origine n’est modifié.</p>
-          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`Retirer ${folder.root}`} onclick={() => folders = folders.filter(item => item !== folder)}>Retirer</button></li>{:else}<li class="empty-folders">Aucun dossier ajouté.</li>{/each}</ul>
-          <label for="library-node">Serveur du dossier</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">Node local</option>{#each activeNodes.filter(node => node.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
-          <label for="library-root">Dossier</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />Parcourir…</button></div>
-          <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> Ajouter ce dossier</button>
+          <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / 32</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
+          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`${$t('remove')} ${folder.root}`} onclick={() => folders = folders.filter(item => item !== folder)}>{$t('remove')}</button></li>{:else}<li class="empty-folders">{$t('no_folder_added')}</li>{/each}</ul>
+          <label for="library-node">{$t('folder_server')}</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">{$t('local_node')}</option>{#each activeNodes.filter(node => node.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
+          <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
+          <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
         </div>
         <div id="library-panel-metadata" role="tabpanel" aria-labelledby="library-tab-metadata" data-editor-panel="metadata" hidden={activeSection !== 'metadata'} tabindex="0"><LibraryOptionsForm bind:options {kind} section="metadata" /></div>
         <div id="library-panel-indexing" role="tabpanel" aria-labelledby="library-tab-indexing" data-editor-panel="indexing" hidden={activeSection !== 'indexing'} tabindex="0">
-          <h3>Indexation</h3><p class="panel-description">Choisissez les fichiers à ignorer et les règles d’import.</p>
+          <h3>{$t('indexing')}</h3><p class="panel-description">{$t('indexing_note')}</p>
           <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" /><p class="field-hint">Séparez les motifs par des virgules. Les dossiers système (#recycle, @eaDir, dossiers cachés), .nomedia et .ignore sont déjà exclus automatiquement.</p>
           <LibraryOptionsForm bind:options {kind} section="indexing" />
         </div>

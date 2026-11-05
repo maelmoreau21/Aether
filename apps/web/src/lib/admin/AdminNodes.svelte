@@ -2,6 +2,7 @@
   import type { AdminNode, EnrollmentToken } from './types';
   import { nodeStatusLabels, connectionModeLabels } from './types';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   interface Props {
     nodes: AdminNode[];
@@ -112,7 +113,7 @@
         <Icon name="server" size={18} />
       </div>
       <div>
-        <h2 id="nodes-heading" class="section-title">Gestion des Media Nodes</h2>
+        <h2 id="nodes-heading" class="section-title">{$t('manage_nodes')}</h2>
         <p class="section-subtitle">
           Supervisez vos nœuds multimédias distants (connexions sortantes NAT-proof) et locaux.
         </p>
@@ -121,7 +122,7 @@
     {#if ongeneratetoken}
       <button class="primary add-node-btn" onclick={handleOpenAddNode}>
         <Icon name="server" size={14} />
-        <span>Ajouter un Node</span>
+        <span>{$t('add_node')}</span>
       </button>
     {/if}
   </div>
@@ -135,8 +136,8 @@
               <Icon name="shield" size={16} />
             </div>
             <div>
-              <h3 id="enroll-title" class="modal-title">Ajouter un Media Node</h3>
-              <p class="modal-desc">Appairage automatique par connexion sortante initiée par le Node (compatible NAT / sans port ouvert)</p>
+              <h3 id="enroll-title" class="modal-title">{$t('add_media_node')}</h3>
+              <p class="modal-desc">{$t('automatic_pairing')}</p>
             </div>
           </div>
           <button class="icon-close-btn" onclick={() => (showEnrollModal = false)} aria-label="Fermer">✕</button>
@@ -146,7 +147,7 @@
           <div class="info-callout">
             <Icon name="info" size={16} />
             <span>
-              Le Media Node contacte lui-même le Core en HTTPS. Aucun port entrant n'a besoin d'être ouvert sur la machine distante. Le jeton d'invitation est <strong>unique, temporaire et à usage unique</strong>.
+              {$t('node_https_note')} Le jeton d'invitation est <strong>unique, temporaire et à usage unique</strong>.
             </span>
           </div>
 
@@ -155,7 +156,7 @@
           {/if}
 
           {#if generatingToken}
-            <div class="token-loading">Génération du jeton sécurisé…</div>
+            <div class="token-loading">{$t('secure_token_generating')}</div>
           {:else if activeToken}
             <div class="token-section">
               <label for="enroll-token-display">Jeton d'invitation (valide jusqu'à {formatTimestamp(activeToken.expiresAt)}) :</label>
@@ -211,10 +212,10 @@
         <div class="modal-footer">
           <button class="action-btn" onclick={generateNewToken} disabled={generatingToken}>
             <Icon name="refresh" size={12} />
-            <span>Générer un autre jeton</span>
+                <span>{$t('generate_another_token')}</span>
           </button>
           <button class="primary" onclick={() => (showEnrollModal = false)}>
-            <span>Terminé</span>
+                <span>{$t('done')}</span>
           </button>
         </div>
       </div>
@@ -232,7 +233,7 @@
       </div>
 
       {#if nodes.length === 0}
-        <p class="muted">Aucun Media Node enregistré.</p>
+        <p class="muted">{$t('no_nodes')}</p>
       {/if}
 
       <div class="items-list">
@@ -296,7 +297,7 @@
                     aria-label={`Reconnecter ${node.name}`}
                   >
                     <Icon name="refresh" size={12} />
-                    <span>Reconnecter</span>
+                    <span>{$t('reconnect')}</span>
                   </button>
                   <button
                     class="action-btn"
@@ -305,7 +306,7 @@
                     aria-label={`Renouveler le secret de ${node.name}`}
                   >
                     <Icon name="shield" size={12} />
-                    <span>Renouveler secret</span>
+                    <span>{$t('renew_secret')}</span>
                   </button>
                   <button
                     class="action-btn danger-btn"
@@ -313,7 +314,7 @@
                     onclick={() => onnodeaction(node, 'revoke')}
                     aria-label={`Révoquer ${node.name}`}
                   >
-                    <span>Révoquer</span>
+                    <span>{$t('revoke')}</span>
                   </button>
                 {/if}
               </div>
@@ -326,7 +327,7 @@
     <!-- Legacy Inbound Pairing (Collapsible / Backward-Compatible) -->
     <section class="card" aria-labelledby="node-legacy-form">
       <div class="card-header">
-        <h3 id="node-legacy-form">Appairage direct entrant (Legacy)</h3>
+        <h3 id="node-legacy-form">{$t('direct_pairing_legacy')}</h3>
         <Icon name="shield" size={16} />
       </div>
 
@@ -336,7 +337,7 @@
 
       <form onsubmit={onpair}>
         <fieldset disabled={pairing}>
-          <label for="pair-node-name">Nom du Media Node</label>
+          <label for="pair-node-name">{$t('node_name')}</label>
           <input
             id="pair-node-name"
             bind:value={pairName}
@@ -346,7 +347,7 @@
             autocomplete="off"
           />
 
-          <label for="pair-node-base-url">URL interne du Node (Core → Node)</label>
+          <label for="pair-node-base-url">{$t('internal_node_url')}</label>
           <input
             id="pair-node-base-url"
             bind:value={pairBaseUrl}
@@ -355,7 +356,7 @@
             autocomplete="off"
           />
 
-          <label for="pair-node-public-url">URL publique de streaming direct (Optionnel)</label>
+          <label for="pair-node-public-url">{$t('public_stream_url')}</label>
           <input
             id="pair-node-public-url"
             bind:value={pairPublicUrl}
@@ -363,7 +364,7 @@
             autocomplete="off"
           />
 
-          <label for="pair-node-token">Jeton d’amorçage statique (MEDIA_NODE_BOOTSTRAP_TOKEN)</label>
+          <label for="pair-node-token">{$t('bootstrap_token')}</label>
           <input
             id="pair-node-token"
             type="password"

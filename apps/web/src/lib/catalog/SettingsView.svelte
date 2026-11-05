@@ -12,7 +12,8 @@
   import OidcSettings from '../auth/OidcSettings.svelte';
   import AccountSecurity from '../auth/AccountSecurity.svelte';
   import Icon from '../ui/Icon.svelte';
-  import { t, locale, setLocale } from '../i18n';
+  import type { IconName } from '../ui/Icon.svelte';
+  import { t, locale, localeOptions, setLocale, type TranslationKey, type SupportedLocale } from '../i18n';
   import { themeMode, setTheme, getTvMode, setTvMode, type ThemeMode, type TvMode } from '../theme';
   import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
   import { fetchServerConfig, type AppServerConfig } from '../config/brand';
@@ -80,15 +81,15 @@
     subtitleStyle = { ...subtitleStyle, [key]: value };
     savePreferences({ subtitleStyle: { ...subtitleStyle } });
   }
-  const pages = [
-    { id: 'account', label: 'Profil', icon: 'profile', group: 'Moi' },
-    { id: 'playback', label: 'Lecture et sous-titres', icon: 'play', group: 'Expérience' },
-    { id: 'display', label: 'Apparence et accueil', icon: 'image', group: 'Expérience' },
-    { id: 'security', label: 'Mot de passe et SSO', icon: 'shield', group: 'Sécurité' },
-    { id: 'devices', label: 'Appareils et sessions', icon: 'server', group: 'Sécurité' },
-    { id: 'about', label: 'À propos', icon: 'info', group: 'Sécurité' }
+  const pages: readonly { id: string; labelKey: TranslationKey; icon: IconName; groupKey: TranslationKey }[] = [
+    { id: 'account', labelKey: 'settings_nav_profile', icon: 'profile', groupKey: 'settings_group_me' },
+    { id: 'playback', labelKey: 'settings_nav_playback', icon: 'play', groupKey: 'settings_group_experience' },
+    { id: 'display', labelKey: 'settings_nav_display', icon: 'image', groupKey: 'settings_group_experience' },
+    { id: 'security', labelKey: 'settings_nav_security', icon: 'shield', groupKey: 'settings_group_security' },
+    { id: 'devices', labelKey: 'settings_nav_devices', icon: 'server', groupKey: 'settings_group_security' },
+    { id: 'about', labelKey: 'settings_nav_about', icon: 'info', groupKey: 'settings_group_security' }
   ] as const;
-  const pageGroups = ['Moi', 'Expérience', 'Sécurité'] as const;
+  const pageGroups: readonly TranslationKey[] = ['settings_group_me', 'settings_group_experience', 'settings_group_security'];
   let tvMode = $state<TvMode>('auto');
   onMount(() => {
     tvMode = getTvMode();
@@ -135,29 +136,29 @@
     const value = { ...artworkRotation };
     try {
       if (await savePreferences({ artworkRotation: value })) setArtworkRotationPolicy(value);
-      else artworkError = 'Impossible d’enregistrer vos préférences. Réessayez.';
-    } catch { artworkError = 'Impossible d’enregistrer vos préférences. Réessayez.'; }
+      else artworkError = $t('save_preferences_failed');
+    } catch { artworkError = $t('save_preferences_failed'); }
     finally { artworkSaving = false; }
   }
 </script>
 
 <div class="settings-view">
-  <h1>Paramètres</h1>
+  <h1>{$t('settings_title')}</h1>
   <div class="settings-layout">
-    <nav class="settings-nav" aria-label="Paramètres personnels">
+    <nav class="settings-nav" aria-label={$t('settings_title')}>
       {#each pageGroups as group (group)}
-        <p class="nav-group">{group}</p>
-        {#each pages.filter(page => page.group === group) as page (page.id)}
-          <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{page.label}</a>
+        <p class="nav-group">{$t(group)}</p>
+        {#each pages.filter(page => page.groupKey === group) as page (page.id)}
+          <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{$t(page.labelKey)}</a>
         {/each}
-        {#if group === 'Moi'}
-          {#if $features.requests}<a href={resolve('requests/')}><Icon name="download" size={18} />Demandes</a>{/if}
-          {#if $features.reports}<a href={resolve('reports/')}><Icon name="alert" size={18} />Signalements</a>{/if}
-          <a href={resolve('statistics/')}><Icon name="clock" size={18} />Mes statistiques</a>
-          <a href={resolve('downloads/')}><Icon name="download" size={18} />Téléchargements</a>
+        {#if group === 'settings_group_me'}
+          {#if $features.requests}<a href={resolve('requests/')}><Icon name="download" size={18} />{$t('settings_requests')}</a>{/if}
+          {#if $features.reports}<a href={resolve('reports/')}><Icon name="alert" size={18} />{$t('settings_reports')}</a>{/if}
+          <a href={resolve('statistics/')}><Icon name="clock" size={18} />{$t('settings_statistics')}</a>
+          <a href={resolve('downloads/')}><Icon name="download" size={18} />{$t('downloads')}</a>
         {/if}
       {/each}
-      {#if $session?.user.role === 'administrator'}<a class="server-link" href={resolve('admin/libraries/#overview')}><Icon name="server" size={20} />Administration du serveur</a>{/if}
+      {#if $session?.user.role === 'administrator'}<a class="server-link" href={resolve('admin/libraries/#overview')}><Icon name="server" size={20} />{$t('settings_server_admin')}</a>{/if}
     </nav>
     <div class="settings-content">
       <div hidden={current !== 'account'}>
@@ -180,7 +181,7 @@
 
 
     </section>
-<section class="card"><h2>Préférences de l’interface</h2>      <div class="pref-fields">
+<section class="card"><h2>{$t('interface_preferences')}</h2>      <div class="pref-fields">
         <label>
           <span><Icon name="sun" size={14} /> {$t('theme')}</span>
           <select
@@ -197,19 +198,18 @@
           <span><Icon name="globe" size={14} /> {$t('language')}</span>
           <select
             value={$locale}
-            onchange={(e) => setLocale(e.currentTarget.value as 'fr' | 'en')}
+            onchange={(e) => setLocale(e.currentTarget.value as SupportedLocale)}
           >
-            <option value="fr">{$t('language_fr')}</option>
-            <option value="en">{$t('language_en')}</option>
+            {#each localeOptions as option (option.code)}<option value={option.code}>{option.label}</option>{/each}
           </select>
         </label>
 
         <label>
-          <span><Icon name="tv" size={14} /> Mode TV sur cet appareil</span>
+          <span><Icon name="tv" size={14} /> {$t('tv_mode')}</span>
           <select value={tvMode} onchange={(e) => { tvMode = e.currentTarget.value as TvMode; setTvMode(tvMode); }}>
-            <option value="auto">Automatique (téléviseurs détectés)</option>
-            <option value="on">Activé</option>
-            <option value="off">Désactivé</option>
+            <option value="auto">{$t('tv_mode_auto')}</option>
+            <option value="on">{$t('tv_mode_on')}</option>
+            <option value="off">{$t('tv_mode_off')}</option>
           </select>
         </label>
 
@@ -220,12 +220,12 @@
         <div class="profile-info-list">
           <div class="info-row">
             <span class="label">{$t('settings_unique_id')}</span>
-            <span class="val"><code>{$session?.user.id ?? 'Inconnu'}</code></span>
+            <span class="val"><code>{$session?.user.id ?? $t('unknown_value')}</code></span>
           </div>
           <div class="info-row">
             <span class="label">{$t('settings_auth_type')}</span>
             <span class="val">
-              {$session?.user.sso === true ? $t('sso_account') : $session?.user.sso === false ? $t('auth_local_sub') : 'Non communiqué'}
+              {$session?.user.sso === true ? $t('sso_account') : $session?.user.sso === false ? $t('auth_local_sub') : $t('not_communicated')}
             </span>
           </div>
         </div>
@@ -235,28 +235,28 @@
         <AppearanceCustomization />
         <RecommendationSettings />
         <section class="card" aria-labelledby="home-preferences-heading">
-          <h2 id="home-preferences-heading">Accueil</h2>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> Masquer les contenus vus dans les nouveautés</label>
+          <h2 id="home-preferences-heading">{$t('home_preferences')}</h2>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> {$t('hide_watched_new')}</label>
         </section>
         <form class="card offsets" onsubmit={saveArtworkRotation}>
-          <h2>Rotation des affiches</h2>
-          <p class="muted">La rotation utilise les affiches déjà présentes en local. Les images choisies manuellement restent prioritaires.</p>
-          <label><span>Activer la rotation automatique</span><input type="checkbox" bind:checked={artworkRotation.enabled} onchange={() => artworkEdited = true} /></label>
+          <h2>{$t('artwork_rotation')}</h2>
+          <p class="muted">{$t('artwork_rotation_note')}</p>
+          <label><span>{$t('enable_artwork_rotation')}</span><input type="checkbox" bind:checked={artworkRotation.enabled} onchange={() => artworkEdited = true} /></label>
 
-          <label>Langue des affiches
+          <label>{$t('artwork_language')}
             <select bind:value={artworkRotation.languageMode} onchange={() => artworkEdited = true}>
-              <option value="interface">Langue de l’interface</option>
-              <option value="original">Langue originale de l’œuvre</option>
+              <option value="interface">{$t('interface_language')}</option>
+              <option value="original">{$t('original_work_language')}</option>
             </select>
           </label>
-          <p class="muted">Si la langue originale ou une affiche correspondante est inconnue, la langue de l’interface sert de repli.</p>
-          <button type="submit" disabled={artworkSaving}>{artworkSaving ? 'Enregistrement…' : "Enregistrer l’affichage"}</button>
+          <p class="muted">{$t('artwork_fallback_note')}</p>
+          <button type="submit" disabled={artworkSaving}>{artworkSaving ? $t('loading') : $t('save_display')}</button>
           {#if artworkError}<p role="alert">{artworkError}</p>{/if}
         </form>
       </div>
-      <div hidden={current !== 'security'}><section class="card"><h2>Sécurité</h2><AccountSecurity mode="security" /><h3>Connexion SSO</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
-      <div hidden={current !== 'devices'}><section class="card"><h2>Appareils et sessions</h2><AccountSecurity mode="devices" /></section></div>
-      <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">Lecture</h2><p class="muted">Ces préférences s’appliquent à votre compte.</p>
+      <div hidden={current !== 'security'}><section class="card"><h2>{$t('security')}</h2><AccountSecurity mode="security" /><h3>{$t('sso_connection')}</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
+      <div hidden={current !== 'devices'}><section class="card"><h2>{$t('settings_nav_devices')}</h2><AccountSecurity mode="devices" /></section></div>
+      <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">{$t('playback')}</h2><p class="muted">{$t('playback_account_note')}</p>
       <div class="pref-fields">
         <label>
           <span>{$t('settings_pref_audio')}</span>
@@ -264,9 +264,9 @@
             bind:value={prefAudio}
             onchange={() => onSavePreference('media_pref_audio', prefAudio)}
           >
-            <option value="fr">Français (par défaut)</option>
-            <option value="original">Version originale (si disponible)</option>
-            <option value="en">English</option>
+            <option value="fr">{$t('audio_default')}</option>
+            <option value="original">{$t('original_version')}</option>
+            <option value="en">{$t('language_en')}</option>
           </select>
         </label>
 
@@ -284,42 +284,42 @@
       </div>
 
 
-        <section class="offsets" aria-label="Choix des pistes">
-          <h3>Choix des pistes</h3>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={playDefaultAudioTrack} onchange={saveTrackDefaults} /> Privilégier la piste audio par défaut du fichier</label>
-          <p class="muted">Si aucune piste par défaut n’est déclarée et sélectionnable, votre langue préférée reste utilisée.</p>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={rememberAudioSelections} onchange={saveTrackDefaults} /> Mémoriser mes choix audio</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={rememberSubtitleSelections} onchange={saveTrackDefaults} /> Mémoriser mes choix de sous-titres</label>
-          <p class="muted">Vos choix manuels restent prioritaires pendant la séance. Sans mémorisation, les nouvelles séances utilisent vos réglages audio et sous-titres ci-dessus. Aucun ancien choix n’est effacé.</p>
+        <section class="offsets" aria-label={$t('track_selection')}>
+          <h3>{$t('track_selection')}</h3>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={playDefaultAudioTrack} onchange={saveTrackDefaults} /> {$t('prefer_default_audio')}</label>
+          <p class="muted">{$t('default_track_note')}</p>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={rememberAudioSelections} onchange={saveTrackDefaults} /> {$t('remember_audio')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={rememberSubtitleSelections} onchange={saveTrackDefaults} /> {$t('remember_subtitles')}</label>
+          <p class="muted">{$t('manual_choices_note')}</p>
         </section>
 
-        <section class="offsets" aria-label="Commandes de lecture">
-          <h3>Commandes de lecture</h3>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={playbackDefaults.autoplayNextEpisode} onchange={savePlaybackDefaults} /> Enchaîner automatiquement l’épisode suivant</label>
-          <p class="muted">S’applique aux épisodes disposant d’un suivant. Les séances synchronisées conservent leurs commandes communes.</p>
-          <label>Reculer de<select bind:value={playbackDefaults.skipBackSeconds} onchange={savePlaybackDefaults}>{#each SKIP_SECONDS as seconds (seconds)}<option value={seconds}>{seconds} secondes</option>{/each}</select></label>
-          <label>Avancer de<select bind:value={playbackDefaults.skipForwardSeconds} onchange={savePlaybackDefaults}>{#each SKIP_SECONDS as seconds (seconds)}<option value={seconds}>{seconds} secondes</option>{/each}</select></label>
-          <p class="muted">Les boutons du lecteur et les flèches gauche/droite utilisent ces durées.</p>
+        <section class="offsets" aria-label={$t('playback_controls')}>
+          <h3>{$t('playback_controls')}</h3>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={playbackDefaults.autoplayNextEpisode} onchange={savePlaybackDefaults} /> {$t('autoplay_next')}</label>
+          <p class="muted">{$t('autoplay_note')}</p>
+          <label>{$t('back_by')}<select bind:value={playbackDefaults.skipBackSeconds} onchange={savePlaybackDefaults}>{#each SKIP_SECONDS as seconds (seconds)}<option value={seconds}>{seconds} {$t('seconds')}</option>{/each}</select></label>
+          <label>{$t('forward_by')}<select bind:value={playbackDefaults.skipForwardSeconds} onchange={savePlaybackDefaults}>{#each SKIP_SECONDS as seconds (seconds)}<option value={seconds}>{seconds} {$t('seconds')}</option>{/each}</select></label>
+          <p class="muted">{$t('player_duration_note')}</p>
         </section>
 
-        <section class="offsets" aria-label="Sauts des génériques">
-          <h3>Intros et génériques</h3>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> Proposer « Passer l'intro »</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> Proposer « Passer le générique »</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> Sauter automatiquement l'introduction</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> Sauter automatiquement le générique de fin</label>
+        <section class="offsets" aria-label={$t('intros_credits')}>
+          <h3>{$t('intros_credits')}</h3>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> {$t('suggest_skip_intro')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> {$t('suggest_skip_credits')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> {$t('auto_skip_intro')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> {$t('auto_skip_credits')}</label>
         </section>
 
         <form class="offsets" onsubmit={saveOffsets}>
-          <h3>Synchronisation</h3><p class="muted">Décalages par défaut, de −30 à +30 secondes. Un décalage positif retarde la piste. Le décalage audio concerne les pistes externes.</p>
-          <label>Décalage audio (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={audioOffset} oninput={() => { offsetsEdited = true; }} /></label>
-          <label>Décalage des sous-titres (secondes)<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} oninput={() => { offsetsEdited = true; }} /></label>
-          <button type="submit">Enregistrer les décalages</button>
+          <h3>{$t('synchronization')}</h3><p class="muted">{$t('offset_note')}</p>
+          <label>{$t('audio_offset_seconds_label')}<input type="number" min="-30" max="30" step="0.1" required bind:value={audioOffset} oninput={() => { offsetsEdited = true; }} /></label>
+          <label>{$t('subtitle_offset_seconds_label')}<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} oninput={() => { offsetsEdited = true; }} /></label>
+          <button type="submit">{$t('save_offsets')}</button>
         </form>
 
         <section class="subtitles-appearance" aria-labelledby="subtitles-style-heading">
-          <h3 id="subtitles-style-heading">Style des sous-titres</h3>
-          <p class="muted">Personnalisez l’affichage des sous-titres dans le lecteur vidéo.</p>
+          <h3 id="subtitles-style-heading">{$t('subtitle_style')}</h3>
+          <p class="muted">{$t('subtitle_style_note')}</p>
 
           <div class="subtitle-preview-box" aria-hidden="true">
             <span
@@ -330,38 +330,38 @@
               style:background-color={previewSubtitleCss.backgroundColor}
               style:text-shadow={previewSubtitleCss.textShadow}
             >
-              Exemple de sous-titre affiché
+              {$t('subtitle_example')}
             </span>
           </div>
 
           <div class="pref-fields">
             <label>
-              <span>Taille de la police</span>
+              <span>{$t('font_size')}</span>
               <select
                 value={subtitleStyle.fontSize}
                 onchange={(e) => updateSubtitleStyle('fontSize', e.currentTarget.value as 'small' | 'medium' | 'large')}
               >
-                <option value="small">Petite</option>
-                <option value="medium">Moyenne (par défaut)</option>
-                <option value="large">Grande</option>
+                <option value="small">{$t('small')}</option>
+                <option value="medium">{$t('medium_default')}</option>
+                <option value="large">{$t('large')}</option>
               </select>
             </label>
 
             <label>
-              <span>Police d’écriture</span>
+              <span>{$t('font_family')}</span>
               <select
                 value={subtitleStyle.fontFamily}
                 onchange={(e) => updateSubtitleStyle('fontFamily', e.currentTarget.value as 'sans-serif' | 'serif' | 'monospace')}
               >
-                <option value="sans-serif">Sans empattement (Moderne / Sans-serif)</option>
-                <option value="serif">Avec empattement (Classique / Serif)</option>
-                <option value="monospace">Chasse fixe (Monospace)</option>
+                <option value="sans-serif">{$t('sans_serif')}</option>
+                <option value="serif">{$t('serif')}</option>
+                <option value="monospace">{$t('monospace')}</option>
               </select>
             </label>
 
             <div class="color-row">
               <label>
-                <span>Couleur du texte</span>
+                <span>{$t('text_color')}</span>
                 <div class="color-picker-wrap">
                   <input
                     type="color"
@@ -373,7 +373,7 @@
               </label>
 
               <label>
-                <span>Couleur d’arrière-plan</span>
+                <span>{$t('background_color')}</span>
                 <div class="color-picker-wrap">
                   <input
                     type="color"
@@ -386,7 +386,7 @@
             </div>
 
             <label>
-              <span>Opacité de l’arrière-plan ({subtitleStyle.backgroundOpacity} %)</span>
+              <span>{$t('background_opacity', { value: subtitleStyle.backgroundOpacity })}</span>
               <div class="slider-wrap">
                 <input
                   type="range"
@@ -397,18 +397,18 @@
                   oninput={(e) => updateSubtitleStyle('backgroundOpacity', Number(e.currentTarget.value))}
                 />
               </div>
-              <small class="muted">À 0 %, aucun fond opaque ne vient masquer la vidéo.</small>
+              <small class="muted">{$t('no_opaque_background')}</small>
             </label>
 
             <label>
-              <span>Contour et ombre du texte</span>
+              <span>{$t('text_outline_shadow')}</span>
               <select
                 value={subtitleStyle.textShadow}
                 onchange={(e) => updateSubtitleStyle('textShadow', e.currentTarget.value as 'none' | 'outline' | 'drop-shadow')}
               >
-                <option value="drop-shadow">Ombre portée nette (par défaut)</option>
-                <option value="outline">Contour noir renforcé</option>
-                <option value="none">Aucun contour / ombre</option>
+                <option value="drop-shadow">{$t('drop_shadow_default')}</option>
+                <option value="outline">{$t('strong_black_outline')}</option>
+                <option value="none">{$t('no_outline_shadow')}</option>
               </select>
             </label>
           </div>

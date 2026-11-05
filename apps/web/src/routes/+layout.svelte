@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { loadServerPresentation } from '../lib/config/presentation';
   import { initTheme, setTheme } from '../lib/theme';
-  import { setLocale } from '../lib/i18n';
+  import { detectLocale, setLocale } from '../lib/i18n';
   import { hydratePreferences, preferenceSyncError, preferenceState } from '../lib/preferences';
   import { getSessionGeneration } from '../lib/auth/session';
   import { page } from '$app/state';
@@ -66,7 +66,7 @@
         void loadingPreferences.then(saved => {
           if (cancelled || generation !== getSessionGeneration() || !saved) return;
           setTheme(saved.theme ?? 'system', false);
-          setLocale(saved.locale ?? (navigator.language.toLowerCase().startsWith('en') ? 'en' : 'fr'), false);
+          setLocale(saved.locale ?? detectLocale(navigator.language), false);
         }).catch(() => {
           if (!cancelled && generation === getSessionGeneration()) preferenceSyncError.set('Vos préférences sont temporairement indisponibles.');
         });

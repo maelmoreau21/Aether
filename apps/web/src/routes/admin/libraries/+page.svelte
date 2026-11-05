@@ -339,7 +339,7 @@
 
   let selectedTaskId = $state<string | null>(null);
   let currentHash = $state('#overview');
-  const sectionTitle = $derived(adminDestinationLabel(adminDestinations.find(link => link.hash === currentHash) ?? adminDestinations[0], $t, $locale === 'en'));
+  const sectionTitle = $derived(adminDestinationLabel(adminDestinations.find(link => link.hash === currentHash) ?? adminDestinations[0], $t));
   function chooseSection(hash: string) { currentHash = hash; selectedTaskId = null; }
   function syncSection() {
     const selected = parseAdminHash(window.location.hash);

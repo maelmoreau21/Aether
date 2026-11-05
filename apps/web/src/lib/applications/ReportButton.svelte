@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import { applicationRequest, categoryLabels, features, loadFeatures, reportPayload, type ReportContext } from './api';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
   let { workId, trackId, assetId, title = 'ce média', positionSeconds, context = {} }: {
     workId?: string; trackId?: string; assetId?: string; title?: string; positionSeconds?: number; context?: ReportContext | (() => ReportContext);
   } = $props();
@@ -32,27 +33,27 @@
     try {
       const payload = reportPayload({ workId: captured.workId, trackId: captured.trackId, assetId: captured.assetId, context: captured.context, category, description, positionSeconds: position, endSeconds: end });
       await applicationRequest('/api/v1/reports', { method: 'POST', body: JSON.stringify(payload) });
-      message = 'Signalement envoyé. Retrouvez son suivi dans Signalements.';
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Le signalement n’a pas pu être envoyé.'; }
+      message = $t('report_sent');
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('report_send_failed'); }
     finally { busy = false; }
   }
 </script>
 {#if $features.reports && (workId || trackId)}
-  <button type="button" class="report-trigger" onclick={open} title="Signaler un problème"><Icon name="alert" size={16} /><span>Signaler</span></button>
+  <button type="button" class="report-trigger" onclick={open} title={$t('report_problem')}><Icon name="alert" size={16} /><span>{$t('report_problem')}</span></button>
 {/if}
 <dialog bind:this={dialog} class="report-dialog" aria-labelledby={titleId} onclose={() => opener?.focus()}>
-  <header><div><p>Signaler un problème</p><h2 id={titleId}>{captured.title}</h2></div><button type="button" aria-label="Fermer le signalement" onclick={() => dialog.close()}><Icon name="close" /></button></header>
-  {#if message}<p class="success" role="status">{message}</p><button type="button" onclick={() => dialog.close()}>Fermer</button>
+  <header><div><p>{$t('report_problem')}</p><h2 id={titleId}>{captured.title}</h2></div><button type="button" aria-label={$t('close')} onclick={() => dialog.close()}><Icon name="close" /></button></header>
+  {#if message}<p class="success" role="status">{message}</p><button type="button" onclick={() => dialog.close()}>{$t('close')}</button>
   {:else}
     <form onsubmit={submit}>
-      <label>Type de problème<select bind:value={category}>{#each Object.entries(categoryLabels) as [value, label] (value)}<option {value}>{label}</option>{/each}</select></label>
-      <label>Description<textarea bind:value={description} minlength="3" maxlength="8000" required rows="5" placeholder="Que se passe-t-il ? Quel résultat attendiez-vous ?"></textarea></label>
-      <div class="positions"><label>Début (secondes, facultatif)<input type="number" bind:value={position} min="0" step="0.1" /></label><label>Fin (secondes, facultatif)<input type="number" bind:value={end} min={position ?? 0} step="0.1" /></label></div>
+      <label>{$t('problem_type')}<select bind:value={category}>{#each Object.entries(categoryLabels) as [value, label] (value)}<option {value}>{label}</option>{/each}</select></label>
+      <label>{$t('description')}<textarea bind:value={description} minlength="3" maxlength="8000" required rows="5" placeholder={$t('report_description_placeholder')}></textarea></label>
+      <div class="positions"><label>{$t('start_optional')}<input type="number" bind:value={position} min="0" step="0.1" /></label><label>{$t('end_optional')}<input type="number" bind:value={end} min={position ?? 0} step="0.1" /></label></div>
       {#if captured.context.engine || captured.context.audioTrackId || captured.context.subtitleTrackId || captured.context.errorCode}
-        <details><summary>Contexte joint au signalement</summary><dl>{#each Object.entries(captured.context).filter(([, value]) => value) as [key, value] (key)}<dt>{key === 'engine' ? 'Lecture' : key === 'audioTrackId' ? 'Piste audio' : key === 'subtitleTrackId' ? 'Sous-titres' : 'Code d’erreur'}</dt><dd>{value}</dd>{/each}</dl></details>
+        <details><summary>{$t('attached_context')}</summary><dl>{#each Object.entries(captured.context).filter(([, value]) => value) as [key, value] (key)}<dt>{key === 'engine' ? $t('playback') : key === 'audioTrackId' ? $t('audio') : key === 'subtitleTrackId' ? $t('subtitles') : $t('error_code')}</dt><dd>{value}</dd>{/each}</dl></details>
       {/if}
       {#if error}<p class="error" role="alert">{error}</p>{/if}
-      <footer><button type="button" disabled={busy} onclick={() => dialog.close()}>Annuler</button><button class="primary" type="submit" disabled={busy || !description.trim()}>{busy ? 'Envoi…' : 'Envoyer le signalement'}</button></footer>
+      <footer><button type="button" disabled={busy} onclick={() => dialog.close()}>{$t('cancel')}</button><button class="primary" type="submit" disabled={busy || !description.trim()}>{busy ? $t('submitting') : $t('send_report')}</button></footer>
     </form>
   {/if}
 </dialog>

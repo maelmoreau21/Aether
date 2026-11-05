@@ -29,6 +29,7 @@
   } from './api';
   import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
+  import { t } from '../i18n';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
   let name = $state(DEFAULT_NAME);
@@ -111,7 +112,7 @@
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== versionId && getCachedMedia(m.id) !== undefined);
-        mediaError = err instanceof Error ? err.message : 'Chargement de l’épisode impossible.';
+        mediaError = err instanceof Error ? err.message : $t('episode_load_failed');
         // Revalidation failed (e.g. HTTP 403): do not leave the player open on an unusable source.
         immersive?.close();
       }
@@ -167,14 +168,14 @@
   const offset = $derived(Math.max(0, Number(page.url.searchParams.get('offset')) || 0));
   const title = $derived(
     library?.name ?? (section === 'settings'
-      ? 'Paramètres'
+      ? $t('settings_title')
       : section === 'films'
-        ? 'Films'
+        ? $t('films')
         : section === 'series'
-          ? 'Séries'
+          ? $t('series')
           : section === 'search'
-            ? 'Recherche'
-            : 'Accueil')
+            ? $t('search')
+            : $t('home'))
   );
   const allowedIds = $derived(detail ? playbackIds(detail) : []);
   const playableMedia = $derived(media.filter(item => allowedIds.includes(item.id)));
@@ -218,7 +219,7 @@
     const next = nextEpisode;
     const id = playbackIds(next)[0];
     if (!id) {
-      mediaError = 'Épisode suivant sans source disponible.';
+      mediaError = $t('next_episode_unavailable');
       return;
     }
     void launchEpisode(next, id);
@@ -249,7 +250,7 @@
       media = [...media.filter(m => m.id !== item.id), item];
       selected = item.id;
     } catch (err) {
-      mediaError = err instanceof Error ? err.message : 'Impossible de rejoindre la séance.';
+      mediaError = err instanceof Error ? err.message : $t('party_join_failed');
       immersive?.close();
     } finally {
       launching = false;
@@ -288,7 +289,7 @@
     } catch (err) {
       if (!controller.signal.aborted && launchGen === getSessionGeneration()) {
         media = media.filter(m => m.id !== targetId && getCachedMedia(m.id) !== undefined);
-        mediaError = err instanceof Error ? err.message : 'Chargement des sources impossible.';
+        mediaError = err instanceof Error ? err.message : $t('sources_load_failed');
         immersive?.close();
       }
     } finally {
@@ -334,7 +335,7 @@
       })
       .catch(() => {
         if (!controller.signal.aborted) {
-          mediaError = 'La lecture est temporairement indisponible. Rechargez la page pour réessayer.';
+          mediaError = $t('source_unavailable');
         }
       });
 
@@ -424,7 +425,7 @@
         if (currentSection === 'settings') return;
         if (id) {
           if (currentSection !== 'films' && currentSection !== 'series') {
-            throw new Error('Ouvrez ce média depuis sa bibliothèque Films ou Séries.');
+            throw new Error($t('open_media_from_library'));
           }
           void loadPlayer().catch(() => { /* A playback attempt reports the import error and can retry. */ });
           const work = await request<Work>(`/api/v1/catalog/${encodeURIComponent(id)}?episodeLimit=24&episodeOffset=0`, controller.signal);
@@ -433,7 +434,7 @@
             (currentSection === 'films' && work.kind !== 'film') ||
             (currentSection === 'series' && work.kind !== 'series')
           ) {
-            throw new Error('Ce média appartient à une autre bibliothèque.');
+            throw new Error($t('wrong_library_media'));
           }
           detail = work;
           busy = false;
@@ -451,7 +452,7 @@
               }
             } catch (failure) {
               if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
-                mediaError = failure instanceof Error ? failure.message : 'Chargement des sources impossible.';
+                mediaError = failure instanceof Error ? failure.message : $t('sources_load_failed');
               }
             }
           } else {
@@ -490,12 +491,12 @@
           if (failure?.status === 'rejected') {
             if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
             if (completedKinds === 0 && cachedKinds === 0) throw failure.reason;
-            partialCatalogError = 'Une partie du catalogue est indisponible. Rechargez la page pour réessayer.';
+            partialCatalogError = $t('partial_catalog_unavailable');
           }
         }
       } catch (e) {
         if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
-          error = e instanceof Error ? e.message : 'Connexion au catalogue impossible.';
+          error = e instanceof Error ? e.message : $t('catalog_connection_failed');
         }
       } finally {
         if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) {
@@ -520,30 +521,30 @@
   <meta name="description" content="Films et séries en haute fidélité. Bibliothèques locales et lecture directe." />
 </svelte:head>
 
-<a class="skip-link" href="#main-content">Aller au contenu</a>
+<a class="skip-link" href="#main-content">{$t('skip_to_content')}</a>
 
 <Navbar {section} {name} />
 
 <main id="main-content" tabindex="-1">
-  {#if launching}<p role="status">Connexion à la source… <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>Annuler</button></p>{/if}
-  {#if !busy && pendingCatalogKinds > 0}<p role="status">Chargement du reste du catalogue…</p>{/if}
+  {#if launching}<p role="status">{$t('connecting_source')} <button onclick={()=>{episodeLaunchController?.abort();episodeLaunchController=null;launching=false;}}>{$t('cancel')}</button></p>{/if}
+  {#if !busy && pendingCatalogKinds > 0}<p role="status">{$t('loading_catalog_remainder')}</p>{/if}
   {#if partialCatalogError}<p role="alert">{partialCatalogError}</p>{/if}
   {#if section === 'home' && $serverPresentation.welcomeMessage}<p class="server-welcome">{$serverPresentation.welcomeMessage}</p>{/if}
   {#if section === 'settings'}
     {#await import('./SettingsView.svelte')}
-      <CatalogSkeleton label="Chargement des paramètres…" />
+      <CatalogSkeleton label={$t('loading_settings')} />
     {:then { default: SettingsView }}
     <SettingsView
       bind:prefAudio
       bind:prefSubtitles
       onSavePreference={savePreference}
     />
-    {:catch}<p role="alert">Chargement des paramètres impossible. Rechargez la page pour réessayer.</p>{/await}
+    {:catch}<p role="alert">{$t('settings_load_failed')}</p>{/await}
 
   {:else if busy}
     <div class="page-heading">
       <span class="eyebrow">{title}</span>
-      <h1>Votre médiathèque</h1>
+      <h1>{$t('all_media_library')}</h1>
     </div>
     <CatalogSkeleton />
 
@@ -553,7 +554,7 @@
     </div>
     <div class="empty error" role="alert">
       <Icon name="alert" size={32} />
-      <h2>Le catalogue ne répond pas</h2>
+      <h2>{$t('catalog_unavailable')}</h2>
       <p>{error}</p>
       <a
         class="retry-action-btn"
@@ -568,14 +569,14 @@
         )}
         data-sveltekit-reload
       >
-        Réessayer
+        {$t('retry')}
       </a>
     </div>
 
   {:else if detail}
     {#if detail.kind === 'film'}
       {#await import('./FilmDetail.svelte')}
-        <CatalogSkeleton label="Chargement du film…" />
+        <CatalogSkeleton label={$t('loading_movie')} />
       {:then { default: FilmDetail }}
       <FilmDetail
         work={detail}
@@ -586,10 +587,10 @@
         similarCandidates={films}
         onPlay={openPlayer}
       />
-      {:catch}<p role="alert">Chargement du film impossible. Rechargez la page pour réessayer.</p>{/await}
+      {:catch}<p role="alert">{$t('movie_load_failed')}</p>{/await}
     {:else}
       {#await import('./SeriesDetail.svelte')}
-        <CatalogSkeleton label="Chargement des épisodes…" />
+        <CatalogSkeleton label={$t('loading_episodes')} />
       {:then { default: SeriesDetail }}
       <SeriesDetail
         work={detail}
@@ -602,7 +603,7 @@
         onLaunchEpisode={launchEpisode}
         onSelectEpisode={episode => (playingEpisode = episode)}
       />
-      {:catch}<p role="alert">Chargement des épisodes impossible. Rechargez la page pour réessayer.</p>{/await}
+      {:catch}<p role="alert">{$t('episodes_load_failed')}</p>{/await}
     {/if}
 
   {:else if section === 'home'}

@@ -16,6 +16,7 @@
   import { clampHoverPosition } from './trickplay';
   import { TrickplayPreview } from './trickplay.svelte';
   import { focusMenuItem, menuItems, nextMenuIndex } from './menu-navigation';
+  import { t } from '../i18n';
 
   export type Menu = ControlsMenu;
 
@@ -100,10 +101,10 @@
   const hoverIndex = $derived(preview.hoverTime === null ? -1 : segmentIndexAt(segments, preview.hoverTime));
   const hoverSegment = $derived(hoverIndex >= 0 ? segments[hoverIndex] : undefined);
   const markerRanges = $derived([
-    { kind: 'recap', label: 'Résumé', range: media.recap },
-    { kind: 'intro', label: 'Introduction', range: media.intro },
-    { kind: 'credits', label: 'Générique de fin', range: media.credits },
-    { kind: 'preview', label: 'Aperçu', range: media.preview }
+    { kind: 'recap', label: $t('skip_recap'), range: media.recap },
+    { kind: 'intro', label: $t('skip_intro'), range: media.intro },
+    { kind: 'credits', label: $t('skip_credits'), range: media.credits },
+    { kind: 'preview', label: $t('skip_preview'), range: media.preview }
   ].filter(marker => marker.range));
   const hoverMarker = $derived(preview.hoverTime === null ? undefined : markerRanges.find(marker => inRange(marker.range, preview.hoverTime!)));
 
@@ -143,10 +144,10 @@
 
   // Un seul bouton « passer » à la fois, par ordre de priorité : résumé, introduction, générique, aperçu.
   const skipMarker = $derived.by(() => {
-    if (inRange(media?.recap, playback.position)) return { label: 'Passer le résumé', end: media.recap!.end, kind: 'skip_recap' as const };
-    if (inRange(media?.intro, playback.position)) return { label: "Passer l'introduction", end: media.intro!.end, kind: 'skip_intro' as const };
-    if (!hideCreditsSkip && inRange(media?.credits, playback.position)) return { label: 'Passer le générique', end: media.credits!.end, kind: 'skip_credits' as const };
-    if (inRange(media?.preview, playback.position)) return { label: "Passer l'aperçu", end: media.preview!.end, kind: 'skip_preview' as const };
+    if (inRange(media?.recap, playback.position)) return { label: $t('skip_recap'), end: media.recap!.end, kind: 'skip_recap' as const };
+    if (inRange(media?.intro, playback.position)) return { label: $t('skip_intro'), end: media.intro!.end, kind: 'skip_intro' as const };
+    if (!hideCreditsSkip && inRange(media?.credits, playback.position)) return { label: $t('skip_credits'), end: media.credits!.end, kind: 'skip_credits' as const };
+    if (inRange(media?.preview, playback.position)) return { label: $t('skip_preview'), end: media.preview!.end, kind: 'skip_preview' as const };
     return null;
   });
 
@@ -172,14 +173,14 @@
     if (target !== null) onSeek(target);
   }
 
-  const title = $derived(menuTitle(menu));
+  const title = $derived(menu === 'audio' ? $t('audio') : menu === 'subtitles' ? $t('subtitles') : menu === 'video' ? $t('version') : menu === 'speed' ? $t('speed') : menu === 'settings' ? $t('player_settings') : menuTitle(menu));
 
   const menuTabs = $derived(([
-    ...(selectableAudio.length > 1 ? [{ id: 'audio', label: 'Audio' }] : []),
-    { id: 'subtitles', label: 'Sous-titres' },
-    { id: 'video', label: 'Version' },
-    { id: 'speed', label: 'Vitesse' },
-    { id: 'settings', label: 'Réglages' }
+    ...(selectableAudio.length > 1 ? [{ id: 'audio', label: $t('audio') }] : []),
+    { id: 'subtitles', label: $t('subtitles') },
+    { id: 'video', label: $t('version') },
+    { id: 'speed', label: $t('speed') },
+    { id: 'settings', label: $t('player_settings') }
   ]) as { id: Exclude<Menu, null>; label: string }[]);
 
   export function closeMenu() {
@@ -242,21 +243,21 @@
     >
       <div class="menu-heading" role="none">
         {#if menu === 'speed'}
-          <button type="button" class="menu-back" aria-label="Retour aux paramètres" tabindex="-1" onclick={() => menu = 'settings'}>
+          <button type="button" class="menu-back" aria-label={$t('return_to_settings')} tabindex="-1" onclick={() => menu = 'settings'}>
             <Icon name="back" size={18} />
           </button>
         {/if}
         <span>{title}</span>
-        <button type="button" class="menu-close" aria-label="Fermer le menu" tabindex="-1" onclick={closeMenu}>×</button>
+        <button type="button" class="menu-close" aria-label={$t('close_menu')} tabindex="-1" onclick={closeMenu}>×</button>
       </div>
       <!-- Halo : le panneau garde toutes les sections à portée, une par onglet. -->
-      <div class="menu-tabs" role="group" aria-label="Sections du panneau de lecture">
+      <div class="menu-tabs" role="group" aria-label={$t('player_panel_sections')}>
         {#each menuTabs as tab (tab.id)}
           <button type="button" role="menuitem" tabindex="-1" aria-current={menu === tab.id ? 'true' : undefined} onclick={() => { if (menu !== tab.id) void toggleMenu(tab.id); }}>{tab.label}</button>
         {/each}
       </div>
       {#if menu === 'audio'}
-        <div role="group" aria-label="Langues audio">
+        <div role="group" aria-label={$t('audio_languages')}>
           {#each selectableAudio as item (item.id)}
             <button
               data-audio-id={item.audioTrackId}
@@ -273,13 +274,13 @@
             </button>
           {/each}
         </div>
-        <button role="menuitem" tabindex="-1" disabled={busy || !source?.externalAudioUrl} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>Régler le décalage audio</button>
-        <label class="offset-control">Décalage audio (s)
-          <input aria-label="Décalage audio en secondes" type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} onchange={(e) => onAudioOffset?.(e.currentTarget.valueAsNumber)} />
+        <button role="menuitem" tabindex="-1" disabled={busy || !source?.externalAudioUrl} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>{$t('audio_offset_action')}</button>
+        <label class="offset-control">{$t('audio_offset')}
+          <input aria-label={$t('audio_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} onchange={(e) => onAudioOffset?.(e.currentTarget.valueAsNumber)} />
         </label>
-        <p class="menu-note">Positif : retarder. Appliqué aux pistes préparées et externes.</p>
+        <p class="menu-note">{$t('positive_delays')}</p>
       {:else if menu === 'subtitles'}
-        <div role="group" aria-label="Pistes de sous-titres">
+        <div role="group" aria-label={$t('subtitle_tracks')}>
           <button
             data-subtitle-id="off"
             role="menuitemradio"
@@ -288,7 +289,7 @@
             disabled={busy}
             onclick={() => choose(() => onSubtitle(null))}
           >
-            <span>Désactivés</span>
+            <span>{$t('subtitles_off')}</span>
             {#if subtitle === null}
               <Icon name="check" size={18} />
             {/if}
@@ -309,13 +310,13 @@
             </button>
           {/each}
         </div>
-        <button role="menuitem" tabindex="-1" disabled={busy} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>Régler le décalage des sous-titres</button>
-        <label class="offset-control">Décalage sous-titres (s)
-          <input aria-label="Décalage sous-titres en secondes" type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
+        <button role="menuitem" tabindex="-1" disabled={busy} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>{$t('subtitle_offset_action')}</button>
+        <label class="offset-control">{$t('subtitle_offset')}
+          <input aria-label={$t('subtitle_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
         </label>
       {:else if menu === 'video'}
-        <div role="group" aria-label="Piste vidéo de la source active">
-          <p class="menu-section" role="presentation">Piste vidéo active</p>
+        <div role="group" aria-label={$t('active_video_source')}>
+          <p class="menu-section" role="presentation">{$t('active_video_track')}</p>
           {#each videoTracks as track, index (track.index ?? index)}
             <div class="track-info" role="note">
               <Icon name="film" size={17} />
@@ -333,8 +334,8 @@
         </div>
         {#if selectableVersions.length > 1}
         <div role="separator" class="menu-separator"></div>
-        <div role="group" aria-label="Sources de démonstration">
-          <p class="menu-section" role="presentation">Versions / Sources disponibles</p>
+        <div role="group" aria-label={$t('demo_sources')}>
+          <p class="menu-section" role="presentation">{$t('available_versions')}</p>
           {#each selectableVersions as item (item.id)}
             <button
               data-source-id={item.id}
@@ -344,7 +345,7 @@
               disabled={busy}
               onclick={() => choose(() => onSource(item.id))}
             >
-              <span>{item.title}<small>{item.synthetic ? 'Source préparée · même mire synthétique' : 'Fichier local indexé'}</small></span>
+              <span>{item.title}<small>{item.synthetic ? $t('prepared_source') : $t('indexed_local_file')}</small></span>
               {#if item.id === media.id}
                 <Icon name="check" size={18} />
               {/if}
@@ -353,7 +354,7 @@
         </div>
         {/if}
       {:else if menu === 'speed'}
-        <div role="group" aria-label="Vitesses de lecture">
+        <div role="group" aria-label={$t('playback_speeds')}>
           {#each SPEEDS as speed (speed)}
             <button
               data-speed={speed}
@@ -371,7 +372,7 @@
           {/each}
         </div>
       {:else if menu === 'settings'}
-        <div role="group" aria-label="Paramètres du lecteur">
+        <div role="group" aria-label={$t('player_settings_group')}>
           <button
             type="button"
             role="menuitem"
@@ -379,7 +380,7 @@
               onAspectRatio?.(nextAspectRatio(aspectRatio));
             }}
           >
-            <span>Format d'image</span>
+            <span>{$t('aspect_ratio')}</span>
             <span class="setting-value">{aspectRatioLabel(aspectRatio)}</span>
           </button>
           <button
@@ -387,7 +388,7 @@
             role="menuitem"
             onclick={() => menu = 'speed'}
           >
-            <span>Vitesse de lecture</span>
+            <span>{$t('playback_speed')}</span>
             <span class="setting-value">{speedSettingLabel(playback.speed)}</span>
           </button>
           <button
@@ -395,8 +396,8 @@
             role="menuitem"
             onclick={() => onRepeat?.(!repeat)}
           >
-            <span>Mode de répétition</span>
-            <span class="setting-value">{repeat ? 'Répéter' : 'Aucun'}</span>
+            <span>{$t('repeat_mode')}</span>
+            <span class="setting-value">{repeat ? $t('repeat') : $t('none')}</span>
           </button>
           <button
             type="button"
@@ -406,7 +407,7 @@
               onStats?.();
             }}
           >
-            <span>Données de lecture</span>
+            <span>{$t('playback_data')}</span>
             <span class="setting-arrow">›</span>
           </button>
         </div>
@@ -471,7 +472,7 @@
     {/if}
     <input
       class="seek"
-      aria-label="Position"
+      aria-label={$t('position')}
       aria-valuetext={`${clock(shownPosition)} sur ${clock(playback.duration)}${activeSegment?.title ? ' · ' + activeSegment.title : ''}`}
       type="range"
       min="0"
@@ -517,8 +518,8 @@
     <div class="left-controls">
       <button
         class="control-btn"
-        aria-label={`Reculer de ${skipBackSeconds} secondes`}
-        title={`Reculer de ${skipBackSeconds} secondes`}
+        aria-label={$t('back_seconds', { count: skipBackSeconds })}
+        title={$t('back_seconds', { count: skipBackSeconds })}
         disabled={busy || !playback.duration}
         onclick={() => onSeek(Math.max(0, playback.position - skipBackSeconds))}
       >
@@ -526,8 +527,8 @@
       </button>
       <button
         class="control-btn chapter-btn"
-        aria-label="Chapitre précédent"
-        title={media.chapters?.length ? 'Chapitre précédent' : 'Aucun chapitre'}
+        aria-label={$t('previous_chapter')}
+        title={media.chapters?.length ? $t('previous_chapter') : $t('no_chapter')}
         disabled={busy || !media.chapters?.length}
         onclick={() => skipChapter(-1)}
       >
@@ -535,7 +536,7 @@
       </button>
       <button
         class="primary play-btn"
-        aria-label={playback.paused ? 'Lire' : 'Pause'}
+        aria-label={playback.paused ? $t('play_action') : $t('pause')}
         disabled={busy}
         onclick={onPlay}
       >
@@ -543,8 +544,8 @@
       </button>
       <button
         class="control-btn chapter-btn"
-        aria-label="Chapitre suivant"
-        title={media.chapters?.length ? 'Chapitre suivant' : 'Aucun chapitre'}
+        aria-label={$t('next_chapter')}
+        title={media.chapters?.length ? $t('next_chapter') : $t('no_chapter')}
         disabled={busy || !media.chapters?.length}
         onclick={() => skipChapter(1)}
       >
@@ -552,8 +553,8 @@
       </button>
       <button
         class="control-btn"
-        aria-label={`Avancer de ${skipForwardSeconds} secondes`}
-        title={`Avancer de ${skipForwardSeconds} secondes`}
+        aria-label={$t('forward_seconds', { count: skipForwardSeconds })}
+        title={$t('forward_seconds', { count: skipForwardSeconds })}
         disabled={busy || !playback.duration}
         onclick={() => onSeek(Math.min(playback.duration, playback.position + skipForwardSeconds))}
       >
@@ -564,13 +565,13 @@
       <span class="current-time">{clock(shownPosition)}</span>
       <span class="duration-time"> / {clock(playback.duration)}</span>
       {#if playback.duration > 0 && endTime}
-        <span class="remaining-time"> · Fin à {endTime}</span>
+        <span class="remaining-time"> · {$t('end_at', { time: endTime })}</span>
       {/if}
     </span>
     <div class="right-controls" bind:this={triggers}>
       <button
         data-menu="subtitles"
-        aria-label="Sous-titres"
+        aria-label={$t('subtitles')}
         aria-haspopup="menu"
         aria-expanded={menu === 'subtitles'}
         aria-controls={menu === 'subtitles' ? 'player-menu' : undefined}
@@ -582,7 +583,7 @@
       {#if selectableAudio.length > 1}
       <button
         data-menu="audio"
-        aria-label="Audio"
+        aria-label={$t('audio')}
         aria-haspopup="menu"
         aria-expanded={menu === 'audio'}
         aria-controls={menu === 'audio' ? 'player-menu' : undefined}
@@ -595,7 +596,7 @@
       <div class="volume-group">
         <button
           class="mute"
-          aria-label={playback.volume === 0 ? 'Rétablir le son' : 'Couper le son'}
+          aria-label={playback.volume === 0 ? $t('restore_sound') : $t('mute')}
           aria-pressed={playback.volume === 0}
           onclick={onMute}
         >
@@ -603,7 +604,7 @@
         </button>
         <input
           class="volume"
-          aria-label="Volume"
+          aria-label={$t('volume')}
           type="range"
           min="0"
           max="1"
@@ -615,7 +616,7 @@
       </div>
       <button
         data-menu="settings"
-        aria-label="Paramètres"
+        aria-label={$t('player_settings_label')}
         aria-haspopup="menu"
         aria-expanded={menu === 'settings'}
         aria-controls={menu === 'settings' ? 'player-menu' : undefined}
@@ -625,7 +626,7 @@
         <Icon name="settings" size={20} />
       </button>
       <button
-        aria-label={fullscreen ? 'Quitter le plein écran' : 'Plein écran'}
+        aria-label={fullscreen ? $t('exit_fullscreen') : $t('fullscreen')}
         onclick={onFullscreen}
       >
         <Icon name={fullscreen ? 'minimize' : 'fullscreen'} size={22} />

@@ -12,9 +12,9 @@
       "seasonSelection": true,
       "responsiveThemes": true
     },
-    "decodedVideoFrames": 7,
+    "decodedVideoFrames": 8,
     "episode1Playback": true,
-    "episodeLaunchMs": 1253,
+    "episodeLaunchMs": 1313,
     "realChapters": true,
     "seekAndPause": true,
     "upNextCard": true,
@@ -35,7 +35,9 @@
     "filmPresentation": true,
     "accountSwitchCacheIsolation": true,
     "delayedLogoutDoesNotWipeNewLoginCookie": true,
-    "concurrentLoginsSequencedCorrectly": true
+    "concurrentLoginsSequencedCorrectly": true,
+    "personalPasswordAndDeviceRevocation": true,
+    "cspErrors": []
   },
-  "failure": "page.waitForURL: Timeout 30000ms exceeded.\n=========================== logs ===========================\nwaiting for navigation to \"**/app/login/**\" until \"load\"\n============================================================\n    at C:\\Users\\Mael\\Documents\\GitHub\\Aether\\Aether\\scripts\\browser-series.cjs:677:106"
+  "passed": true
 }

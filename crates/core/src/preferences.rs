@@ -48,6 +48,14 @@ struct Preferences {
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_credits_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    auto_skip_intro: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_skip_credits: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_recap_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_skip_recap: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     autoplay_next_episode: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skip_back_seconds: Option<u16>,
@@ -241,12 +249,31 @@ async fn read(
     .fetch_optional(&auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(match saved {
-        Some(value) => {
-            serde_json::from_str(&value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    Ok(Json(
+        saved.map(|value| tolerant(&value)).unwrap_or_default(),
+    ))
+}
+
+/// Stored preferences outlive client versions: a field that no longer validates is
+/// dropped on its own instead of making every preference unavailable.
+fn tolerant(stored: &str) -> Preferences {
+    if let Ok(preferences) = serde_json::from_str::<Preferences>(stored)
+        && preferences.valid()
+    {
+        return preferences;
+    }
+    let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(stored) else {
+        return Preferences::default();
+    };
+    let mut kept = serde_json::Map::new();
+    for (key, value) in fields {
+        let single =
+            serde_json::Value::Object([(key.clone(), value.clone())].into_iter().collect());
+        if serde_json::from_value::<Preferences>(single).is_ok_and(|p| p.valid()) {
+            kept.insert(key, value);
         }
-        None => Preferences::default(),
-    }))
+    }
+    serde_json::from_value(serde_json::Value::Object(kept)).unwrap_or_default()
 }
 async fn write(
     State(auth): State<AuthState>,
@@ -274,12 +301,10 @@ async fn write(
     .fetch_optional(&mut *tx)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let mut saved: serde_json::Value = match previous {
-        Some(value) => {
-            serde_json::from_str(&value).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        }
-        None => serde_json::json!({}),
-    };
+    // Rebuilt from the readable fields only, so one stale value never blocks saving.
+    let mut saved =
+        serde_json::to_value(previous.map(|value| tolerant(&value)).unwrap_or_default())
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let patch = serde_json::to_value(input).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let target = saved
         .as_object_mut()
@@ -298,4 +323,19 @@ async fn write(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stale_field_no_longer_hides_every_preference() {
+        let kept =
+            tolerant(r#"{"theme":"dark","removedField":1,"cardSize":"huge","autoSkipIntro":true}"#);
+        assert_eq!(kept.theme.as_deref(), Some("dark"));
+        assert_eq!(kept.card_size, None);
+        assert_eq!(kept.auto_skip_intro, Some(true));
+        assert!(tolerant("not json").theme.is_none());
+    }
 }

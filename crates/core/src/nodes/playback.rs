@@ -551,7 +551,7 @@ pub(super) async fn authorize_playback(
         "SELECT COUNT(*) FROM sessions s JOIN users u ON u.id=s.user_id JOIN libraries l ON l.id=? \
          WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 \
          AND u.disabled_at IS NULL AND l.enabled=1 AND l.node_id=? \
-         AND (u.role='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=u.id))")
+         AND ((u.role='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=u.id))")
         .bind(claims.library_id.as_str()).bind(&claims.session_hash).bind(&rec.id)
         .fetch_one(&state.auth.store.pool).await.unwrap_or(0) == 1;
     // Resolve the live identity once per authorization request, including its

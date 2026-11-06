@@ -800,7 +800,8 @@ async fn import_image_checked(
             return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
         }
     }
-    // A full pool (12 images of this kind, 64 in total) downloads nothing.
+    // A full pool downloads nothing: automatic collection stops at 12 images of a
+    // kind, a manual choice only at the 64 images of a work.
     if input.append {
         let (same_kind, total): (i64, i64) = query_as(
             "SELECT COALESCE(SUM(CASE WHEN kind=? THEN 1 ELSE 0 END),0),COUNT(*) FROM work_image_entries WHERE work_id=?",
@@ -810,7 +811,7 @@ async fn import_image_checked(
         .fetch_one(store.pool())
         .await
         .map_err(db)?;
-        if same_kind >= 12 || total >= 64 {
+        if (input.apply_collection_policy && same_kind >= 12) || total >= 64 {
             return Err(err(StatusCode::CONFLICT, "image_pool_full"));
         }
     }

@@ -67,6 +67,8 @@ pub struct LibraryOptions {
     pub artwork_languages: Vec<String>,
     pub artwork_include_neutral: bool,
     pub artwork_max_images: u8,
+    /// Administrators see this library in their catalogue (management is unaffected).
+    pub admin_access: bool,
 }
 impl Default for LibraryOptions {
     fn default() -> Self {
@@ -117,6 +119,7 @@ impl Default for LibraryOptions {
             artwork_languages: vec!["fr".into(), "en".into()],
             artwork_include_neutral: true,
             artwork_max_images: 12,
+            admin_access: true,
         }
     }
 }
@@ -282,6 +285,29 @@ fn valid_providers(providers: &[ProviderPreference]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Access checks recognise hidden libraries with `LIKE '%adminAccess__false%'`.
+    #[tokio::test]
+    async fn hidden_admin_access_is_found_by_the_sql_access_checks() {
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&root.path().join("access.sqlite"))
+            .await
+            .unwrap();
+        crate::libraries::initialize_local(&store).await.unwrap();
+        let hidden = serde_json::to_string(&LibraryOptions {
+            admin_access: false,
+            ..LibraryOptions::default()
+        })
+        .unwrap();
+        let shown = serde_json::to_string(&LibraryOptions::default()).unwrap();
+        for (id, options) in [("hidden", &hidden), ("shown", &shown)] {
+            crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES(?,?,'films','local','/fixture',1,?)")
+                .bind(id).bind(id).bind(options).execute(&store.pool).await.unwrap();
+        }
+        let visible: Vec<String> = crate::database::query_scalar("SELECT id FROM libraries l WHERE l.id IN ('hidden','shown') AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')")
+            .fetch_all(&store.pool).await.unwrap();
+        assert_eq!(visible, vec!["shown".to_string()]);
+    }
 
     #[test]
     fn library_defaults_enable_cached_features_without_media_writes_and_preserve_opt_outs() {

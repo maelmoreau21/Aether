@@ -7,7 +7,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
   import { adminNavigation, adminDestinationLabel, adminEntryFor, normalizeAdminSearch, searchAdmin, type AdminSearchResult } from './navigation';
-  import { extensionPins } from './extension-pins';
+  import { extensionPins, extensionPinNames, hasOwnPage } from './extension-pins';
   import { features, loadFeatures } from '../applications/api';
 
   let { title, currentHash, administrator, onnavigate, children }: {
@@ -20,6 +20,8 @@
   let content: HTMLElement;
   let sidebar = $state<HTMLElement>();
   const currentEntry = $derived(adminEntryFor(currentHash));
+  /** Pinned extensions without a dedicated administration page open their extension page. */
+  const pinnedPages = $derived($extensionPins.filter(id => !hasOwnPage(id)));
   let query = $state('');
   const searching = $derived(query.trim().length > 0);
   const results = $derived(searchAdmin(query).filter(result => !result.entry.extensionId || (result.entry.extensionId === 'media-requests' ? $features.requests : $features.reports)));
@@ -122,6 +124,16 @@
         {/each}
       </div>
     {/each}
+    {#if pinnedPages.length}
+      <div class="sidebar-group"><p class="group-label">Extensions épinglées</p>
+        {#each pinnedPages as id (id)}
+          {@const hash = `#extensions-section?extension=${encodeURIComponent(id)}`}
+          <a class="sidebar-nav-item" class:active={currentHash === hash} href={resolve(`admin/libraries/#${hash.slice(1)}`)} aria-current={currentHash === hash ? 'page' : undefined} onclick={event => choose(event, hash)}>
+            <Icon name="star" size={18} /><span>{$extensionPinNames[id] ?? id}</span>
+          </a>
+        {/each}
+      </div>
+    {/if}
   </nav>
   {/if}
 {/snippet}

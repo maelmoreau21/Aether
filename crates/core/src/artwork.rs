@@ -823,7 +823,9 @@ pub(crate) async fn upload_internal(
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(db)?;
-        if same_kind >= 12 {
+        // Only automatic collection is capped per kind; manual additions use the
+        // per-work limit below.
+        if options.apply_collection_policy && same_kind >= 12 {
             return Err(StatusCode::CONFLICT);
         }
     }

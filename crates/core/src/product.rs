@@ -99,7 +99,7 @@ async fn automatic_collections(
     auth: &AuthState,
     actor: &Authenticated,
 ) -> Result<std::collections::BTreeMap<String, (String, Vec<Value>)>, Error> {
-    let rows: Vec<(String, String, String, Option<String>)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.kind='film' AND w.has_available_asset=1 AND l.enabled=1 AND n.status!='revoked' AND CAST(COALESCE(json_extract(l.options_json,'$.automaticCollections'),'0') AS TEXT) IN ('1','true') AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (json_extract(w.editorial_json,'$.collection') IS NOT NULL OR json_extract(COALESCE(w.manual_json,'{}'),'$.collection') IS NOT NULL) ORDER BY w.effective_year,w.title_sort,w.id LIMIT 10000")
+    let rows: Vec<(String, String, String, Option<String>)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.kind='film' AND w.has_available_asset=1 AND l.enabled=1 AND n.status!='revoked' AND CAST(COALESCE(json_extract(l.options_json,'$.automaticCollections'),'0') AS TEXT) IN ('1','true') AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (json_extract(w.editorial_json,'$.collection') IS NOT NULL OR json_extract(COALESCE(w.manual_json,'{}'),'$.collection') IS NOT NULL) ORDER BY w.effective_year,w.title_sort,w.id LIMIT 10000")
         .bind(actor.user.role.as_str()).bind(&actor.user.id)
         .fetch_all(auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut collections = std::collections::BTreeMap::<String, (String, Vec<Value>)>::new();
@@ -237,11 +237,11 @@ async fn list(
          JOIN inventory_works w ON w.id = COALESCE( \
            (SELECT dw.id FROM inventory_works dw JOIN libraries dl ON dl.id=dw.library_id JOIN media_nodes dn ON dn.id=dl.node_id \
             WHERE dw.id=i.work_id AND dl.enabled=1 AND dn.status!='revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=dl.id AND p.user_id=?))), \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=dl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=dl.id AND p.user_id=?))), \
            (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
             WHERE (gm.group_id=i.work_id OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=i.work_id)) \
               AND gl.enabled=1 AND gn.status!='revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
             ORDER BY gw.id LIMIT 1) \
          ) \
          WHERE i.list_id=? AND w.kind IN ('film','series','episode') \
@@ -792,7 +792,7 @@ pub async fn target_allowed(
              JOIN media_nodes n ON n.id = l.node_id \
              WHERE (gm.group_id = ? OR gm.group_id = (SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id = ?)) \
                AND l.enabled = 1 AND n.status != 'revoked' \
-               AND (? = 'administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id = l.id AND lp.user_id = ?))",
+               AND ((? = 'administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=l.id AND lp.user_id = ?))",
         )
         .bind(&work)
         .bind(&work)

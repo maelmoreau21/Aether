@@ -7,7 +7,7 @@
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
-  import { extensionPins, isPinnableExtension, toggleExtensionPin } from './extension-pins';
+  import { extensionPins, hasOwnPage, isPinnableExtension, toggleExtensionPin } from './extension-pins';
   import { loadFeatures } from '../applications/api';
   import { t } from '../i18n';
   type ConfigOption = { label: string; value: string };
@@ -183,7 +183,16 @@
     catch (e) { error = e instanceof Error ? e.message : $t('operation_failed'); }
     finally { busy = false; }
   }
-  onMount(() => { void reload(true); });
+  // A pinned extension in the menu opens its page: #extensions-section?extension=<id>.
+  function openRequested() {
+    const id = new URLSearchParams(window.location.hash.split('?', 2)[1] ?? '').get('extension');
+    if (id && isPinnableExtension(id)) { tab = 'installed'; catalogueId = null; managedId = id; settingsOpen = false; }
+  }
+  onMount(() => {
+    void reload(true); openRequested();
+    window.addEventListener('hashchange', openRequested);
+    return () => window.removeEventListener('hashchange', openRequested);
+  });
   function chooseOfficialRepository(branch: 'main' | 'develop') {
     repositoryName = branch === 'develop' ? 'Aether Plugins (develop)' : 'Aether Plugins';
     repositoryUrl = `https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/${branch}/repository/manifest.json`;
@@ -620,8 +629,8 @@
               {$t('settings_title')}
             </button>
             {#if isPinnableExtension(extension.manifest.id)}
-              <button aria-pressed={$extensionPins.includes(extension.manifest.id)} disabled={busy || (!extension.enabled && !$extensionPins.includes(extension.manifest.id))} onclick={() => toggleExtensionPin(extension.manifest.id)}><Icon name="star" size={16} />{$extensionPins.includes(extension.manifest.id) ? $t('unpin_menu') : $t('pin_menu')}</button>
-              {#if extension.enabled}<a class="button-link" href={`#${extension.manifest.id === 'media-requests' ? 'requests' : 'reports'}-section`}>{$t('open_extension', { name: displayName(extension.manifest.name) })}</a>{/if}
+              <button aria-pressed={$extensionPins.includes(extension.manifest.id)} disabled={busy} onclick={() => toggleExtensionPin(extension.manifest.id, displayName(extension.manifest.name))}><Icon name="star" size={16} />{$extensionPins.includes(extension.manifest.id) ? $t('unpin_menu') : $t('pin_menu')}</button>
+              {#if extension.enabled && hasOwnPage(extension.manifest.id)}<a class="button-link" href={`#${extension.manifest.id === 'media-requests' ? 'requests' : 'reports'}-section`}>{$t('open_extension', { name: displayName(extension.manifest.name) })}</a>{/if}
             {/if}
             <button class="btn-detail-uninstall" disabled={busy} onclick={()=>void perform(async()=>{await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`,{method:'DELETE',body:JSON.stringify({deleteData:false})});managedId=null;},'Extension désinstallée.')}>
               <Icon name="trash" size={18} />

@@ -358,7 +358,7 @@ fn push_group_filter(
     }
     builder.push(" AND (NOT EXISTS(SELECT 1 FROM media_group_members own_group WHERE own_group.work_id=w.id) OR w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM media_group_members gm JOIN inventory_works w ON w.id=gm.work_id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' ");
     if let Some(user) = &filter.user_id {
-        builder.push(" AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator') OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) ");
+        builder.push(" AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) ");
     }
     if fast_avail {
         builder.push(" AND (w.kind!='film' OR w.has_available_asset=1) ");
@@ -1288,7 +1288,7 @@ async fn populate_episode_page(
     // The same permissions and parental policy apply before pagination as on direct work access.
     let eligible = format!(
         "wl.enabled=1 AND wn.status!='revoked' AND \
-         (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=wl.id AND p.user_id=?)) \
+         ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=wl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=wl.id AND p.user_id=?)) \
          AND {} AND EXISTS(SELECT 1 FROM inventory_editions pe \
          JOIN inventory_versions pv ON pv.edition_id=pe.id JOIN inventory_sources ps ON ps.version_id=pv.id \
          JOIN inventory_assets pa ON pa.source_id=ps.id JOIN libraries pl ON pl.id=ps.library_id \

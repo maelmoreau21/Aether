@@ -56,6 +56,8 @@ export interface LibraryOptions {
   artworkLanguages?: string[];
   artworkIncludeNeutral?: boolean;
   artworkMaxImages?: number;
+  /** Administrators see the library in their catalogue; management is unaffected. */
+  adminAccess?: boolean;
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
@@ -70,7 +72,7 @@ export function defaultLibraryOptions(): LibraryOptions {
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
     posterRotationEnabled: true, artworkDeduplicate: true, artworkSimilarity: 5,
     artworkMinPosterWidth: 0, artworkMinPosterHeight: 0,
-    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12 };
+    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12, adminAccess: true };
 }
 /** Apply the processing preset without changing language, provider scopes or media paths. */
 export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptions {

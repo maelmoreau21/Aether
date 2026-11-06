@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import OfflineDownload from './OfflineDownload.svelte';
   import { bestVersion } from '../player/version-choice';
   import { preloadProgress } from '../player/progress';
   import {
@@ -33,13 +32,6 @@
   } = $props();
 
   const versionIds = $derived(playbackIds(episode));
-  const downloadOptions = $derived.by(() => {
-    void cacheVersion;
-    return versionIds.map((id, index) => {
-      const item = getCachedMedia(id) ?? media.find(entry => entry.id === id);
-      return {url:`/api/v1/assets/${encodeURIComponent(id)}/content`,label:item ? sourceLabel(item) : `Fichier ${index + 1}`,mime:item?.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'};
-    });
-  });
   let selected = $state('auto');
   let cacheVersion = $state(0);
   let launchError=$state('');
@@ -126,7 +118,6 @@
     {#if versionIds.length > 1}
       <label>Version<select aria-label={`Version de ${episode.title}`} bind:value={selected} onfocus={prefetchVersions} onpointerenter={prefetchVersions}><option value="auto">Meilleure version disponible</option>{#each versionIds as id, index (id)}<option value={id}>{getLabel(id, index)}</option>{/each}</select></label>
     {/if}
-    {#if !episode.synthetic && versionIds.length}<OfflineDownload options={downloadOptions} url={`/api/v1/assets/${selected === 'auto' ? versionIds[0] : selected}/content`} title={episode.title} mime={media.find(item => item.id === (selected === 'auto' ? versionIds[0] : selected))?.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'} />{/if}
   </details>
 {/if}
 

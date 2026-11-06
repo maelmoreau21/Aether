@@ -355,7 +355,7 @@
         }),
         signal: AbortSignal.timeout(30000)
       });
-      if (response.status === 409) throw new Error('Cette œuvre a déjà 12 images de ce type : rien n’a été téléchargé. Supprimez-en une pour en ajouter une autre.');
+      if (response.status === 409) throw new Error('Cette œuvre a atteint la limite de 64 images : rien n’a été téléchargé. Supprimez-en une pour en ajouter une autre.');
       if (!response.ok) throw new Error(`Échec de l’enregistrement (HTTP ${response.status}).`);
       appliedUrls = new Set([...appliedUrls, candidate.url]);
       await load();

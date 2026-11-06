@@ -1,6 +1,5 @@
 <script lang="ts">
   import WorkTools from './WorkTools.svelte';
-  import OfflineDownload from './OfflineDownload.svelte';
   import { bestVersion } from '../player/version-choice';
   import { preloadProgress, isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
@@ -27,7 +26,6 @@
   const currentAudioTracks = $derived(inspectedAudioTracks(currentSelectedMedia));
   const resolutionBadge = $derived(videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height));
   const colorBadge = $derived(colorProfileLabel(currentVideoTrack?.pix_fmt));
-  const downloadOptions = $derived(playableMedia.filter(item => item.available !== false).map(item => ({ url: `/api/v1/assets/${encodeURIComponent(item.id)}/content`, label: sourceLabel(item), mime: item.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream' })));
 </script>
 
 <div class="film-detail-view">
@@ -105,10 +103,8 @@
           <PersonalFeedback workId={work.id} compact />
         </div>
         <span class="action-divider" aria-hidden="true"></span>
+        <!-- Offline downloads are offered by the native clients only. -->
         <div class="tools-inline">
-          {#if currentSelectedMedia}
-            <OfflineDownload options={downloadOptions} url={`/api/v1/assets/${encodeURIComponent(currentSelectedMedia.id)}/content`} title={work.title} mime={currentSelectedMedia.sources.find(source => !source.prepare)?.mime ?? 'application/octet-stream'} />
-          {/if}
           <WorkTools {work} selectedMedia={currentSelectedMedia} />
         </div>
       {/if}

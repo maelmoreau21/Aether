@@ -281,8 +281,9 @@
 
   .body {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(200px, 20vw, 280px);
-    gap: clamp(24px, 4vw, 48px);
+    /* The poster gets a wide column; the information column narrows instead. */
+    grid-template-columns: minmax(0, 1fr) clamp(260px, 27vw, 420px);
+    gap: clamp(24px, 3vw, 40px);
     align-items: start;
     margin-top: 24px;
   }
@@ -384,7 +385,7 @@
   }
 
   @media (max-width: 1023px) {
-    .body { grid-template-columns: minmax(0, 1fr) 200px; }
+    .body { grid-template-columns: minmax(0, 1fr) clamp(220px, 30vw, 280px); }
   }
 
   @media (max-width: 760px) {
@@ -401,7 +402,7 @@
     .body { grid-template-columns: minmax(0, 1fr); margin-top: 16px; }
     .side { display: none; }
     /* Sans image de fond, l'affiche reste la seule image : on la garde. */
-    .body:not(.has-backdrop) .side { display: block; position: static; order: -1; width: 140px; }
+    .body:not(.has-backdrop) .side { display: block; position: static; order: -1; width: min(200px, 55vw); }
     .synopsis { font-size: 15px; }
     .meta-row { grid-template-columns: 100px minmax(0, 1fr); gap: 10px; }
   }

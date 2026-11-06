@@ -26,6 +26,7 @@
       onedit: (library: Library) => void; onreset: () => void; onnodechange: () => void;
   } = $props();
   let editor = $state<HTMLDialogElement>(), refresher = $state<HTMLDialogElement>();
+  let access = $state<{ saveGroups: () => Promise<boolean> }>();
   let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   let showPathPicker = $state(false);
@@ -98,6 +99,8 @@
       await tick(); editor?.querySelector<HTMLInputElement>('#library-root')?.focus();
       return;
     }
+    // Group grants are saved first: a failure keeps the editor open on the access tab.
+    if (access && !(await access.saveGroups())) { chooseEditorSection('access'); return; }
     if (await onsave(event)) editor?.close();
   }
   async function refresh(event: SubmitEvent) {
@@ -210,7 +213,7 @@
             <div id={`library-panel-${section}`} role="tabpanel" aria-labelledby={`library-tab-${section}`} data-editor-panel={section} hidden={activeSection !== section} tabindex="0"><LibraryOptionsForm bind:options bind:excludedPatterns {kind} {section} /></div>
           {/if}
         {/each}
-        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><LibraryAccess library={editedLibrary} {libraries} {users} {groups} {onchanged} /></div>
+        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><LibraryAccess bind:this={access} bind:options library={editedLibrary} {groups} {onchanged} /></div>
       </div>
     </div>
     <footer class="editor-actions">

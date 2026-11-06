@@ -232,14 +232,14 @@ async fn save(
         query("INSERT INTO user_groups(id,name,is_default) VALUES(?,?,?)")
             .bind(id)
             .bind(name)
-            .bind(input.is_default)
+            .bind(i64::from(input.is_default))
             .execute(&mut *tx)
             .await
             .map_err(database)?;
     } else {
         if query("UPDATE user_groups SET name=?,is_default=? WHERE id=?")
             .bind(name)
-            .bind(input.is_default)
+            .bind(i64::from(input.is_default))
             .bind(id)
             .execute(&mut *tx)
             .await

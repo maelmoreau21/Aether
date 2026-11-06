@@ -6,7 +6,7 @@
   let { libraryId, options }: { libraryId: string; options?: LibraryOptions } = $props();
   type Job = { id: string; status: string; processed: number; downloaded: number; duplicates: number; skipped: number; errors: number; lastError: string; cursorWork: string };
   let job = $state<Job | null>(null), error = $state(''), busy = $state(false);
-  let languages = $state('fr, en'), includeNeutral = $state(true), maxImages = $state(12), maxWorks = $state(1000);
+  let maxWorks = $state(1000);
   const active = $derived(job && ['queued', 'running', 'paused'].includes(job.status));
   let alive = false, generation = 0;
   async function refresh() {
@@ -24,15 +24,10 @@
     } catch (cause) { if (alive && request === generation) error = cause instanceof Error ? cause.message : 'Erreur'; }
   }
   $effect(() => { void libraryId; untrack(() => { generation++; job = null; if (alive) void refresh(); }); });
-  // Defaults come from the library's « Pool d’images » settings.
-  $effect(() => {
-    const pool = options;
-    untrack(() => {
-      languages = (pool?.artworkLanguages ?? ['fr', 'en']).join(', ');
-      includeNeutral = pool?.artworkIncludeNeutral ?? true;
-      maxImages = pool?.artworkMaxImages ?? 12;
-    });
-  });
+  // Languages, neutral images and per-work limit come from the library settings (Images).
+  const languages = $derived(options?.artworkLanguages ?? ['fr', 'en']);
+  const includeNeutral = $derived(options?.artworkIncludeNeutral ?? true);
+  const maxImages = $derived(options?.artworkMaxImages ?? 12);
   onMount(() => { alive = true; void refresh(); const timer = setInterval(() => void refresh(), 5000); return () => { alive = false; clearInterval(timer); }; });
   async function submit(action?: 'pause' | 'resume' | 'cancel') {
     if (busy || !libraryId) return;
@@ -40,7 +35,7 @@
     try {
       const response = await fetch(action ? `/api/v1/admin/artwork/jobs/${encodeURIComponent(job?.id ?? '')}` : '/api/v1/admin/artwork/jobs', {
         method: action ? 'PUT' : 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' },
-        body: JSON.stringify(action ? { action } : { libraryId, after: job?.status === 'completed' ? job.cursorWork : undefined, languages: [...new Set(languages.split(',').map(v => v.trim()).filter(Boolean))], includeNeutral, maxImages, maxWorks }),
+        body: JSON.stringify(action ? { action } : { libraryId, after: job?.status === 'completed' ? job.cursorWork : undefined, languages, includeNeutral, maxImages, maxWorks }),
         signal: AbortSignal.timeout(10000)
       });
       if (!response.ok) throw new Error(`Collecte non enregistrée (HTTP ${response.status}).`);
@@ -51,13 +46,10 @@
 </script>
 <section aria-label="Collecte durable des images">
   <h3>Collecter les images</h3>
-  <p>La collecte continue après la fermeture de cette page et reprend après un redémarrage. La langue originale connue est incluse. Une image reste fixe uniquement si elle est épinglée. Les valeurs par défaut viennent des options de la bibliothèque (Images → Pool d’images).</p>
+  <p>La collecte continue après la fermeture de cette page et reprend après un redémarrage. Langues et nombre d’images se règlent dans les paramètres de la bibliothèque (Images).</p>
   <form onsubmit={event => { event.preventDefault(); void submit(); }}>
     <fieldset disabled={busy || !!active}>
-      <label>Langues recherchées<input bind:value={languages} maxlength="100" required placeholder="fr, en" /></label>
-      <label>Maximum d’images par œuvre<input type="number" min="1" max="12" bind:value={maxImages} required /></label>
       <label>Budget d’œuvres par collecte<input type="number" min="1" max="100000" bind:value={maxWorks} required /></label>
-      <label><input type="checkbox" bind:checked={includeNeutral} /> Inclure les images sans langue</label>
     </fieldset>
     {#if !active}<button type="submit" disabled={busy || !libraryId}>{job?.status === 'completed' ? 'Continuer la collecte' : 'Lancer la collecte'}</button>{/if}
   </form>
@@ -76,7 +68,5 @@
   p { color: var(--mu); font-size: 14px; line-height: 1.6; }
   fieldset { display: grid; gap: 12px; border: 0; padding: 0; margin: 16px 0; }
   label { display: grid; gap: 6px; }
-  label:has(input[type='checkbox']) { display: flex; align-items: center; }
-  input[type='checkbox'] { width: 18px; height: 18px; }
   .actions { display: flex; gap: 12px; flex-wrap: wrap; }
 </style>

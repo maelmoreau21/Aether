@@ -82,7 +82,10 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
     Router::new()
         .route("/api/v1/libraries", get(accessible))
         .route("/api/v1/admin/libraries", get(list).post(create))
-        .route("/api/v1/admin/libraries/{id}", axum::routing::put(update))
+        .route(
+            "/api/v1/admin/libraries/{id}",
+            axum::routing::put(update).delete(remove),
+        )
         .route("/api/v1/admin/roots", get(roots))
         .route("/api/v1/admin/filesystem/browse", get(browse_filesystem))
         .route(
@@ -166,7 +169,7 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
     // Same transaction gives a coherent configuration/grants snapshot.
     let mut tx = store.pool.begin().await.map_err(database)?;
     let mut libraries: Vec<Library> = crate::database::query_as(
-        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns,options_json FROM libraries WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=libraries.id) ORDER BY name,id",
+        "SELECT id,name,kind,node_id,root,enabled,excluded_patterns,options_json FROM libraries WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=libraries.id) AND NOT EXISTS(SELECT 1 FROM deleted_libraries d WHERE d.library_id=libraries.id) ORDER BY name,id",
     )
     .fetch_all(&mut *tx)
     .await
@@ -587,6 +590,67 @@ async fn update(
     administrator(&state, &headers, true).await?;
     Ok(Json(save(&state, id, input, true).await?))
 }
+/// Removes a library from Aether without touching the media files: the library
+/// and its folders are disabled, every grant is revoked and it is hidden.
+async fn remove(
+    State(state): State<LibraryState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    administrator(&state, &headers, true).await?;
+    delete_library(&state, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn delete_library(state: &LibraryState, id: &str) -> Result<(), StatusCode> {
+    let mut conn = state.auth.store.pool.acquire().await.map_err(database)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(database)?;
+    let visible: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM libraries l WHERE l.id=? AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND NOT EXISTS(SELECT 1 FROM deleted_libraries d WHERE d.library_id=l.id)")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(database)?;
+    if visible != 1 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let active: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) FROM scan_jobs WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running')",
+    )
+    .bind(&id)
+    .bind(&id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(database)?;
+    if active != 0 {
+        return Err(StatusCode::CONFLICT);
+    }
+    for statement in [
+        "UPDATE libraries SET enabled=0 WHERE id=? OR id IN (SELECT library_id FROM library_folders WHERE parent_id=?)",
+        "UPDATE library_folders SET active=0 WHERE parent_id=? OR parent_id=?",
+        "DELETE FROM library_permissions WHERE library_id=? OR library_id=?",
+        "DELETE FROM user_group_libraries WHERE library_id=? OR library_id=?",
+    ] {
+        crate::database::query(statement)
+            .bind(&id)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(database)?;
+    }
+    crate::database::query("INSERT INTO deleted_libraries(library_id,deleted_at) VALUES(?,?)")
+        .bind(&id)
+        .bind(media_contracts::protocol::unix_now())
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    crate::database::query("UPDATE inventory_cache_generation SET gen=gen+1 WHERE id=1")
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    tx.commit().await.map_err(database)?;
+    Ok(())
+}
 async fn validate_folder(
     state: &LibraryState,
     node_id: &str,
@@ -691,7 +755,8 @@ async fn save(
         .await
         .map_err(database)?;
     let hidden: i64 =
-        crate::database::query_scalar("SELECT COUNT(*) FROM library_folders WHERE library_id=?")
+        crate::database::query_scalar("SELECT (SELECT COUNT(*) FROM library_folders WHERE library_id=?)+(SELECT COUNT(*) FROM deleted_libraries WHERE library_id=?)")
+            .bind(&id)
             .bind(&id)
             .fetch_one(&mut *tx)
             .await
@@ -882,6 +947,26 @@ mod tests {
             options: None,
             folders: None,
         }
+    }
+    #[tokio::test]
+    async fn deleted_library_is_hidden_disabled_and_ungranted() {
+        let (_temp, state, user) = setup().await;
+        save(&state, "gone".into(), input(&state, vec![user.clone()]), false)
+            .await
+            .unwrap();
+        let store = &state.auth.store;
+        delete_library(&state, "gone").await.unwrap();
+        assert_eq!(delete_library(&state, "gone").await.unwrap_err(), StatusCode::NOT_FOUND);
+        let grants: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM library_permissions WHERE library_id='gone'")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(grants, 0);
+        assert!(load(store).await.unwrap().iter().all(|l| l.id != "gone"));
+        assert!(matches!(
+            save(&state, "gone".into(), input(&state, vec![]), true).await,
+            Err(StatusCode::NOT_FOUND)
+        ));
     }
     #[tokio::test]
     async fn multiple_nodes_folders_permissions_and_removal_are_persistent() {

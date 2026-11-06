@@ -14,7 +14,7 @@
   import Navbar from '../ui/Navbar.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
-  import { selectArtwork } from './artwork-selection';
+  import { selectArtwork, renewArtworkVisit } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
   import CatalogGrid from './CatalogGrid.svelte';
   import CatalogSkeleton from './CatalogSkeleton.svelte';
@@ -139,7 +139,9 @@
     finally { playerLoading = undefined; }
   }
 
-  beforeNavigate(() => {
+  beforeNavigate(({ to }) => {
+    // Opening a work keeps the artwork just clicked; any other page draws new artwork.
+    if (!to?.url.searchParams.get('work')) renewArtworkVisit();
     if (!workId) saveCatalogScroll(page.url.pathname + page.url.search, window.scrollY);
   });
   afterNavigate(() => {

@@ -10,6 +10,7 @@
   import type { AuthUser } from '../auth/session';
   import type { UserGroup } from './request';
   import Icon from '../ui/Icon.svelte';
+  import { adminRequest } from './request';
   import { t } from '../i18n';
   let { libraries, nodes, scans, pending, saving, editing, error, users = [], groups = [],
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
@@ -33,14 +34,15 @@
     { id: 'sources', label: 'Sources et dossiers' },
     { id: 'metadata', label: 'Métadonnées' },
     { id: 'images', label: 'Images' },
-    { id: 'scan', label: 'Analyse' },
     { id: 'playback', label: 'Lecture' },
+    { id: 'subtitles', label: 'Sous-titres' },
+    { id: 'providers', label: 'Fournisseurs' },
     { id: 'access', label: 'Accès' }
   ] as const;
   type EditorSection = typeof allSections[number]['id'];
-  const optionSections: LibraryOptionsSection[] = ['metadata', 'images', 'scan', 'playback'];
-  // Music has no artwork collection nor video playback options.
-  const editorSections = $derived(allSections.filter(section => kind !== 'music' || (section.id !== 'images' && section.id !== 'playback')));
+  const optionSections: LibraryOptionsSection[] = ['metadata', 'images', 'playback', 'subtitles', 'providers'];
+  // Music has no artwork collection, video playback, subtitles nor video providers.
+  const editorSections = $derived(allSections.filter(section => kind !== 'music' || !['images', 'playback', 'subtitles', 'providers'].includes(section.id)));
   let activeSection = $state<EditorSection>('general');
   let presetApplied = $state(false);
   const editedLibrary = $derived(editing ? libraries.find(library => library.id === editing) ?? null : null);
@@ -60,33 +62,19 @@
     editor?.querySelector<HTMLButtonElement>(`#library-tab-${editorSections[next].id}`)?.focus();
   }
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
-  function closeMenu(event: MouseEvent) { const details = (event.currentTarget as HTMLElement).closest('details'); details?.removeAttribute('open'); details?.querySelector('summary')?.focus(); }
   function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? 'Node local' : id); }
-  // The table scrolls horizontally, so an open "⋮" menu is placed in the viewport instead of being clipped by it.
-  let menuOpen = $state(false);
-  function placeMenu(event: Event) {
-    const details = event.currentTarget as HTMLDetailsElement;
-    if (!details.open) { menuOpen = Boolean(document.querySelector('.library-menu[open]')); return; }
-    for (const other of document.querySelectorAll<HTMLDetailsElement>('.library-menu[open]')) if (other !== details) other.open = false;
-    const summary = details.querySelector('summary'), menu = details.querySelector<HTMLElement>('.menu-actions');
-    if (!summary || !menu) return;
-    const zoom = (details as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom || 1;
-    const anchor = summary.getBoundingClientRect(), height = menu.getBoundingClientRect().height;
-    const above = anchor.bottom + 6 + height > innerHeight && anchor.top - 6 - height > 0;
-    menu.style.right = `${Math.max(8, innerWidth - anchor.right) / zoom}px`;
-    menu.style.top = above ? 'auto' : `${(anchor.bottom + 6) / zoom}px`;
-    menu.style.bottom = above ? `${(innerHeight - anchor.top + 6) / zoom}px` : 'auto';
-    menuOpen = true;
+  let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
+  async function deleteLibrary() {
+    if (!editedLibrary || deleting) return;
+    deleting = true; deleteError = '';
+    try {
+      await adminRequest(`/api/v1/admin/libraries/${encodeURIComponent(editedLibrary.id)}`, { method: 'DELETE' });
+      editor?.close(); onreset(); await onchanged();
+    } catch (cause) {
+      deleteError = cause instanceof Error && !cause.message.startsWith('Ce nom') ? cause.message : 'Suppression impossible pendant une analyse. Réessayez après sa fin.';
+    } finally { deleting = false; confirmDelete = false; }
   }
-  $effect(() => {
-    if (!menuOpen) return;
-    const closeAll = () => { for (const open of document.querySelectorAll<HTMLDetailsElement>('.library-menu[open]')) open.open = false; };
-    const outside = (event: PointerEvent) => { if (!(event.target instanceof Element && event.target.closest('.library-menu[open]'))) closeAll(); };
-    const scrolled = (event: Event) => { if (!(event.target instanceof Element && event.target.closest('.menu-actions'))) closeAll(); };
-    addEventListener('resize', closeAll); addEventListener('scroll', scrolled, true); document.addEventListener('pointerdown', outside);
-    return () => { removeEventListener('resize', closeAll); removeEventListener('scroll', scrolled, true); document.removeEventListener('pointerdown', outside); };
-  });
-  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; presetApplied = false; formError = ''; editor?.showModal(); }
+  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; presetApplied = false; formError = ''; confirmDelete = false; deleteError = ''; editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -160,15 +148,7 @@
         <td class="actions-cell">
           <div class="row-actions">
             <button class="icon-action" disabled={unavailable} aria-label={`Scanner ${library.name}`} title="Scanner la bibliothèque" onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
-            <details class="library-menu" ontoggle={placeMenu}><summary aria-label={`Actions ${library.name}`}>⋮</summary><div class="menu-actions">
-              <button onclick={(event) => { closeMenu(event); manage(library); }}>Gérer la bibliothèque</button>
-              <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
-              <button disabled={unavailable} onclick={(event) => { closeMenu(event); void onscan(library); }}>Scanner la bibliothèque</button>
-              <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
-              <button disabled={unavailable} onclick={(event) => { closeMenu(event); target = library; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
-              <button disabled={unavailable} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la bibliothèque</button>
-              <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>{$t('schedule_refresh')}</a>
-            </div></details>
+            <button class="icon-action" aria-label={`Paramètres de ${library.name}`} title="Gérer la bibliothèque" onclick={() => manage(library)}><Icon name="settings" size={18} /></button>
           </div>
         </td>
       </tr>
@@ -196,6 +176,27 @@
           {#if !folders.length}<p class="field-hint">Ajoutez un dossier dans <button type="button" class="inline-link" onclick={() => chooseEditorSection('sources')}>Sources et dossiers</button> pour pouvoir enregistrer.</p>{/if}
           <div class="preset-row"><p>Réinitialiser les réglages avec les valeurs recommandées pour ce type de contenu.</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>Appliquer les réglages recommandés</button></div>
           {#if presetApplied}<p role="status" class="field-hint">Réglages recommandés appliqués. Enregistrez la bibliothèque pour les conserver.</p>{/if}
+          <LibraryOptionsForm bind:options bind:excludedPatterns {kind} section="scan" />
+          {#if editedLibrary}
+            {@const busyLibrary = !editedLibrary.enabled || pending.includes(editedLibrary.id) || ['queued', 'running'].includes(scans[editedLibrary.id]?.status)}
+            <div class="library-actions">
+              <h4>Actions</h4>
+              <div class="action-buttons">
+                <button type="button" disabled={busyLibrary} onclick={() => refreshLibrary(editedLibrary)}><Icon name="refresh" size={16} /> Actualiser la bibliothèque</button>
+                <button type="button" disabled={busyLibrary} onclick={() => { target = editedLibrary; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
+                <button type="button" onclick={() => imageTarget = editedLibrary}>Modifier les images</button>
+                <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(editedLibrary.id)}`)} onclick={() => editor?.close()}>{$t('schedule_refresh')}</a>
+              </div>
+            </div>
+            <div class="danger-zone">
+              <h4>Supprimer la bibliothèque</h4>
+              <p>La bibliothèque disparaît d’Aether pour tous les comptes. Vos fichiers ne sont ni modifiés ni supprimés.</p>
+              {#if confirmDelete}
+                <div class="action-buttons"><button type="button" class="danger" disabled={deleting} onclick={() => void deleteLibrary()}>{deleting ? 'Suppression…' : `Supprimer définitivement « ${editedLibrary.name} »`}</button><button type="button" disabled={deleting} onclick={() => confirmDelete = false}>Annuler</button></div>
+              {:else}<button type="button" class="danger" onclick={() => confirmDelete = true}><Icon name="trash" size={16} /> Supprimer la bibliothèque</button>{/if}
+              {#if deleteError}<p role="alert" class="editor-error">{deleteError}</p>{/if}
+            </div>
+          {/if}
         </div>
         <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
           <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / 32</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
@@ -256,7 +257,15 @@
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .primary { min-height: 44px; border-color: transparent; background: var(--btn); color: var(--btn-tx); font-weight: 700; box-shadow: none; }
   .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
-  button:focus-visible, summary:focus-visible, a:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .library-actions, .danger-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--color-line-subtle); }
+  .library-actions h4, .danger-zone h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mu); }
+  .action-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+  .action-buttons a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border: 1px solid var(--color-line); border-radius: var(--r-md); color: var(--tx); font-size: 14px; font-weight: 600; text-decoration: none; }
+  .action-buttons a:hover { background: var(--color-surface-hover); }
+  .danger { border-color: color-mix(in srgb, var(--err, #e5484d) 55%, transparent); color: var(--err, #e5484d); }
+  .danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err, #e5484d) 12%, transparent); }
+  @media (max-width: 640px) { .action-buttons > * { width: 100%; justify-content: center; } }
+  button:focus-visible, a:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   .library-table-panel { overflow-x: auto; background: var(--color-surface); border-radius: var(--r-md); }
   .library-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .library-table thead th { padding: 14px 16px; border-bottom: 1px solid var(--color-line-subtle); color: var(--mu); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-align: left; text-transform: uppercase; white-space: nowrap; }
@@ -292,13 +301,6 @@
   progress::-webkit-progress-bar { background: var(--pn-2); border-radius: var(--r-pill); }
   progress::-webkit-progress-value { background: var(--ac); border-radius: var(--r-pill); }
   progress::-moz-progress-bar { background: var(--ac); border-radius: var(--r-pill); }
-  .library-menu { position: relative; flex-shrink: 0; }
-  summary { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--color-line); border-radius: var(--r-sm); background: transparent; color: var(--tx); font-size: 22px; font-weight: 800; line-height: 1; list-style: none; cursor: pointer; transition: background-color var(--t-fast) ease; }
-  summary:hover, .library-menu[open] summary { background: var(--color-surface-hover); }
-  summary::-webkit-details-marker { display: none; }
-  .menu-actions { position: fixed; z-index: 120; width: min(290px, calc(100vw - 48px)); padding: 6px; background: var(--color-surface-elevated); border: 1px solid var(--color-line-subtle); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
-  .menu-actions button, .menu-actions a { display: flex; justify-content: flex-start; align-items: center; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--tx); font-size: 14px; font-weight: 600; text-align: left; transition: background-color var(--t-fast) ease; }
-  .menu-actions button:hover:not(:disabled), .menu-actions a:hover { background: var(--color-surface-hover); }
 
   /* Dialogues */
   dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 28px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-lg); background: var(--color-surface-elevated); color: var(--tx); font-family: var(--font); box-shadow: var(--shadow-md); }
@@ -406,6 +408,6 @@
     .editor-content { padding: 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    button, summary, .library-table td, .library-table tbody th { transition: none; }
+    button, .library-table td, .library-table tbody th { transition: none; }
   }
 </style>

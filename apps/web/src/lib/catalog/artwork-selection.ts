@@ -10,38 +10,16 @@ const history = new Map<string, Record<string, Choice>>();
 const ROTATION_PERIOD_MS = 3_600_000;
 /** Scene images carry no title and can rotate like posters; logos stay stable. */
 const SCENE_KINDS = new Set(['backdrop', 'landscape', 'thumb']);
-const visits = new Map<string, string>();
-onSessionGenerationChange(() => { history.clear(); visits.clear(); });
-
-function visitSeed(current: Session | null): string {
-  if (!current) return 'anonymous';
-  const owner = current.user.id;
-  const auth = hash(`artwork-auth:${current.csrfToken}`);
-  const key = `${owner}:${auth}`;
-  const cached = visits.get(key);
-  if (cached) return cached;
-  const storageKey = `media_artwork_visit_${owner}`;
-  let seed = '';
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      const raw = sessionStorage.getItem(storageKey);
-      const stored = raw && raw.length < 1024 ? JSON.parse(raw) : null;
-      if (stored?.auth === auth && typeof stored.seed === 'string' && stored.seed.length <= 80) seed = stored.seed;
-    } catch { /* Optional visit cache. */ }
-  }
-  if (!seed) {
-    seed = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
-    if (typeof sessionStorage !== 'undefined') {
-      try { sessionStorage.setItem(storageKey, JSON.stringify({ auth, seed })); } catch { /* In-memory visit remains stable. */ }
-    }
-  }
-  visits.set(key, seed);
-  return seed;
-}
+// Each catalogue page visit draws a new selection; it stays stable while the
+// page is open and when a work opened from it shows its details.
+const newVisit = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
+let pageVisit = newVisit();
+onSessionGenerationChange(() => { history.clear(); pageVisit = newVisit(); });
+export function renewArtworkVisit(): void { pageVisit = newVisit(); }
 
 function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVariants']>, current: Session | null, policy: ArtworkRotationPolicy): string {
   const owner = current?.user.id ?? 'anonymous';
-  const seed = `${owner}:${visitSeed(current)}`;
+  const seed = `${owner}:${pageVisit}`;
   const period = Math.floor(Date.now() / ROTATION_PERIOD_MS);
   const session = hash(`artwork-session:${seed}:${period}`);
   const storageKey = `media_artwork_choices_${owner}`;

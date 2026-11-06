@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  export type LibraryOptionsSection = 'metadata' | 'images' | 'scan' | 'playback';
+  export type LibraryOptionsSection = 'metadata' | 'images' | 'scan' | 'playback' | 'providers' | 'subtitles';
 </script>
 
 <script lang="ts">
@@ -15,8 +15,8 @@
     get value() { return (options.artworkLanguages ?? ['fr', 'en']).join(', '); },
     set value(text: string) { options.artworkLanguages = [...new Set(text.split(',').map(value => value.trim()).filter(Boolean))].slice(0, 5); }
   };
-  let providers = $state<{ id: string; name: string }[]>([]);
-  let subtitleProviders = $state<{ id: string; name: string }[]>([]);
+  type Suggestion = { id: string; name: string };
+  let metadataProviders = $state<Suggestion[]>([]), imageProviders = $state<Suggestion[]>([]), segmentProviders = $state<Suggestion[]>([]), subtitleProviders = $state<Suggestion[]>([]);
   let providerError = $state('');
   onMount(() => {
     const controller = new AbortController();
@@ -25,9 +25,9 @@
         if (!response.ok) throw new Error();
         const data = await response.json();
         const extensions = (data.extensions ?? []) as { manifest: { id: string; name: string; permissions?: string[] } }[];
-        providers = extensions.map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
-        subtitleProviders = extensions.filter(entry => entry.manifest.permissions?.includes('subtitles')).map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
-      }).catch(() => { if (!controller.signal.aborted) providerError = 'Les suggestions d’extensions sont indisponibles. Vous pouvez saisir leur identifiant.'; });
+        const having = (permission: string) => extensions.filter(entry => entry.manifest.permissions?.includes(permission)).map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
+        metadataProviders = having('metadata.read'); imageProviders = having('images'); segmentProviders = having('playback.markers'); subtitleProviders = having('subtitles');
+      }).catch(() => { if (!controller.signal.aborted) providerError = 'La liste des extensions est indisponible. Réessayez plus tard.'; });
     return () => controller.abort();
   });
 </script>
@@ -54,8 +54,7 @@
         <h4>Identification</h4>
         <label class="check"><input type="checkbox" bind:checked={options.readLocalNfo} /><span>Lire les fichiers NFO locaux<small>Les identifiants écrits par Radarr, Sonarr ou Kodi sont utilisés en priorité.</small></span></label>
         <p class="hint">Un média non reconnu est laissé tel quel puis réessayé automatiquement plus tard. S’il reste inconnu, utilisez « Identifier » sur sa fiche.</p>
-        {#if providerError}<p role="status">{providerError}</p>{/if}
-        <ProviderPriority id="metadata-providers" label="Fournisseurs de métadonnées" bind:value={options.metadataProviders} suggestions={providers} />
+        <p class="hint">L’ordre des fournisseurs se règle dans Fournisseurs.</p>
       </div>
       <div class="group">
         <h4>Mises à jour</h4>
@@ -87,22 +86,18 @@
       <div class="grid"><div><label for="artwork-min-width">Largeur minimale des affiches</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale des affiches</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
       <p class="hint">Une valeur de 0 conserve toutes les tailles disponibles.</p>
     </div>
-    <div class="group"><ProviderPriority id="image-providers" label="Fournisseurs d’images" bind:value={options.imageProviders} suggestions={providers} /></div>
   {:else if section === 'scan'}
-    <h3>Analyse des fichiers</h3><p class="lead">Ce qui est surveillé, ignoré et lu dans les fichiers.</p>
     <div class="group">
+      <h4>Analyse des fichiers</h4>
       <label class="toggle-row"><span><strong>Suivre les changements des dossiers</strong><small>Les nouveaux médias sont analysés automatiquement.</small></span><input type="checkbox" role="switch" bind:checked={options.realtimeMonitoring} /></label>
       <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="bonus, trailers" autocomplete="off" />
       <p class="hint">Les dossiers système, .nomedia et .ignore sont déjà pris en compte.</p>
     </div>
     {#if kind !== 'music'}
-      <div class="group">
-        <label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /><span>Préférer les titres intégrés aux fichiers</span></label>
-        <label for="embedded-subtitles">Sous-titres intégrés</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">Tous les sous-titres</option><option value="allow_text">Sous-titres texte uniquement</option><option value="block_all">Aucun sous-titre intégré</option></select>
-      </div>
+      <div class="group"><label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /><span>Préférer les titres intégrés aux fichiers</span></label></div>
     {/if}
   {:else if section === 'playback'}
-    <h3>Lecture</h3><p class="lead">Aperçus, chapitres, intros et sous-titres en ligne.</p>
+    <h3>Lecture</h3><p class="lead">Aperçus, chapitres et intros.</p>
     <div class="group">
       <label class="toggle-row"><span><strong>Aperçus dans la barre de lecture</strong><small>Miniatures trickplay pour retrouver une scène.</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
       {#if options.trickplayEnabled}
@@ -114,15 +109,25 @@
     </div>
     <div class="group">
       <h4>Intros et génériques</h4>
-      <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>Détecter les intros avec les extensions activées</span></label>
-      <ProviderPriority id="segment-providers" label="Détection d’intro et segments" bind:value={options.segmentProviders} suggestions={providers} />
+      <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>Détecter les intros avec les extensions activées<small>L’ordre des extensions se règle dans Fournisseurs.</small></span></label>
+    </div>
+  {:else if section === 'providers'}
+    <h3>Fournisseurs</h3><p class="lead">Cochez les extensions à utiliser et classez-les par ordre de préférence : la première qui répond est utilisée. Les clés et réglages des extensions se configurent dans Extensions.</p>
+    {#if providerError}<p role="status">{providerError}</p>{/if}
+    <ProviderPriority id="metadata-providers" label="Métadonnées" description="Titres, résumés, distribution et identifiants." bind:value={options.metadataProviders} suggestions={metadataProviders} />
+    <ProviderPriority id="image-providers" label="Images" description="Affiches, fonds, logos et miniatures." bind:value={options.imageProviders} suggestions={imageProviders} />
+    <ProviderPriority id="segment-providers" label="Intros et génériques" description="Détection des intros, récapitulatifs et génériques." bind:value={options.segmentProviders} suggestions={segmentProviders} />
+    <ProviderPriority id="subtitle-providers" label="Sous-titres" description="Recherche manuelle depuis la fiche d’un média." bind:value={options.subtitleProviders} suggestions={subtitleProviders} />
+  {:else if section === 'subtitles'}
+    <h3>Sous-titres</h3><p class="lead">Sous-titres intégrés aux fichiers et recherche en ligne.</p>
+    <div class="group">
+      <label for="embedded-subtitles">Sous-titres intégrés</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">Tous les sous-titres</option><option value="allow_text">Sous-titres texte uniquement</option><option value="block_all">Aucun sous-titre intégré</option></select>
     </div>
     <div class="group">
       <h4>Sous-titres en ligne</h4>
       <label class="check"><input type="checkbox" bind:checked={options.subtitleDownloadEnabled} /><span>Autoriser la recherche manuelle de sous-titres<small>Depuis la fiche d’un média, avec une extension configurée.</small></span></label>
       {#if options.subtitleDownloadEnabled}
         <label class="check"><input type="checkbox" bind:checked={options.subtitleRequireHash} /><span>Exiger une correspondance exacte du fichier (hash)<small>Indisponible actuellement : cette exigence bloque les recherches.</small></span></label>
-        <ProviderPriority id="subtitle-providers" label="Sous-titres" bind:value={options.subtitleProviders} suggestions={subtitleProviders} />
       {/if}
     </div>
   {/if}

@@ -34,6 +34,7 @@
     busy = true; message = ''; failed = false;
     try {
       for (const group of groups) {
+        if (group.systemRole === 'administrator') continue;
         const had = group.libraryIds.includes(id), wants = groupIds.includes(group.id);
         if (had === wants) continue;
         await adminRequest(`/api/v1/admin/groups/${encodeURIComponent(group.id)}`, {
@@ -78,7 +79,11 @@
   <fieldset disabled={busy}>
     <legend>Groupes</legend>
     {#each groups as group (group.id)}
-      <label class="check"><input type="checkbox" value={group.id} bind:group={groupIds} /><span>{group.name}<small>{group.userIds.length} membre(s){group.isDefault ? ' · groupe par défaut' : ''}</small></span></label>
+      {#if group.systemRole === 'administrator'}
+        <label class="check"><input type="checkbox" checked disabled /><span>{group.name}<small>{group.userIds.length} membre(s) · accès permanent à toutes les bibliothèques</small></span></label>
+      {:else}
+        <label class="check"><input type="checkbox" value={group.id} bind:group={groupIds} /><span>{group.name}<small>{group.userIds.length} membre(s){group.isDefault ? ' · groupe par défaut' : ''}</small></span></label>
+      {/if}
     {:else}<p class="hint">Aucun groupe. Créez-en dans Groupes.</p>{/each}
   </fieldset>
   <fieldset disabled={busy}>

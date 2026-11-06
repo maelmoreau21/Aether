@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-import { selectArtwork } from './artwork-selection';
+import { selectArtwork, renewArtworkVisit } from './artwork-selection';
 import { invalidateSession, session, type Session } from '../auth/session';
 import type { Work } from './api';
 import { setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
@@ -12,8 +12,6 @@ const policy: ArtworkRotationPolicy = { enabled: true, enableMovies: true, enabl
 beforeEach(() => {
   const stored = new Map<string, string>();
   vi.stubGlobal('localStorage', { getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => stored.set(key, value) });
-  const visit = new Map<string, string>();
-  vi.stubGlobal('sessionStorage', { getItem: (key: string) => visit.get(key) ?? null, setItem: (key: string, value: string) => visit.set(key, value), clear: () => visit.clear() });
   invalidateSession();
   setArtworkRotationPolicy(policy);
 });
@@ -23,17 +21,12 @@ test('preserves legacy fallbacks and handles missing works', () => {
   expect(selectArtwork(null, current)).toEqual({});
 });
 
-test('stays stable across API ordering, navigation and reload; next login avoids the previous image', () => {
+test('stays stable during a page visit and changes on the next visit', () => {
   const images = [variant('a', 'poster'), variant('b', 'poster'), variant('c', 'poster')];
   const first = selectArtwork({ ...work, imageVariants: images }, current).poster;
   expect(selectArtwork({ ...work, imageVariants: images.toReversed() }, current).poster).toBe(first);
-  session.set(current); // Clear in-memory history as a reload would; recover browser history.
-  setArtworkRotationPolicy(policy);
-  expect(selectArtwork({ ...work, imageVariants: images }, current).poster).toBe(first);
-  const next = { ...current, csrfToken: 'session-two' };
-  session.set(next);
-  setArtworkRotationPolicy(policy);
-  expect(selectArtwork({ ...work, imageVariants: images }, next).poster).not.toBe(first);
+  renewArtworkVisit();
+  expect(selectArtwork({ ...work, imageVariants: images }, current).poster).not.toBe(first);
   expect(localStorage.getItem('media_artwork_choices_viewer')).not.toContain(current.csrfToken);
 });
 
@@ -64,15 +57,6 @@ test('keeps account histories separate and bounds retained choices', () => {
   const other = { ...current, user: { ...current.user, id: 'other' } };
   selectArtwork({ ...work, imageVariants: images }, other);
   expect(Object.keys(JSON.parse(localStorage.getItem('media_artwork_choices_other')!))).toEqual(['film:poster']);
-});
-
-test('new browsing visits rotate while the authentication cookie remains the same', () => {
-  const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
-  const first = selectArtwork(item, current).poster;
-  sessionStorage.clear();
-  session.set(current);
-  setArtworkRotationPolicy(policy);
-  expect(selectArtwork(item, current).poster).not.toBe(first);
 });
 
 test('disabled rotation leaves posters fixed and does not write rotation history', () => {

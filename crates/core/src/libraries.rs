@@ -951,16 +951,26 @@ mod tests {
     #[tokio::test]
     async fn deleted_library_is_hidden_disabled_and_ungranted() {
         let (_temp, state, user) = setup().await;
-        save(&state, "gone".into(), input(&state, vec![user.clone()]), false)
-            .await
-            .unwrap();
+        save(
+            &state,
+            "gone".into(),
+            input(&state, vec![user.clone()]),
+            false,
+        )
+        .await
+        .unwrap();
         let store = &state.auth.store;
         delete_library(&state, "gone").await.unwrap();
-        assert_eq!(delete_library(&state, "gone").await.unwrap_err(), StatusCode::NOT_FOUND);
-        let grants: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM library_permissions WHERE library_id='gone'")
-            .fetch_one(&store.pool)
-            .await
-            .unwrap();
+        assert_eq!(
+            delete_library(&state, "gone").await.unwrap_err(),
+            StatusCode::NOT_FOUND
+        );
+        let grants: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM library_permissions WHERE library_id='gone'",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
         assert_eq!(grants, 0);
         assert!(load(store).await.unwrap().iter().all(|l| l.id != "gone"));
         assert!(matches!(

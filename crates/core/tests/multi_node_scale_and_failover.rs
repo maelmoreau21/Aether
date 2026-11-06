@@ -37,7 +37,7 @@ use media_poc::{
 };
 use serde_json::{Value, json};
 use std::{
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    net::{Ipv4Addr, SocketAddrV4},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -228,38 +228,51 @@ async fn spawn_node_server(
     pairing_token: &str,
 ) -> (
     String,
-    NodeServerState,
     tokio::sync::oneshot::Sender<()>,
-    SocketAddr,
+    tokio::sync::oneshot::Receiver<()>,
 ) {
-    let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-        .await
-        .expect("bind node listener");
-    let addr = listener.local_addr().expect("node local addr");
-    let public_url = format!("http://127.0.0.1:{}", addr.port());
-    let config = NodeServerConfig {
-        bind: addr,
-        data_dir,
-        allowed_roots: vec![root],
-        bootstrap_token: Some(pairing_token.to_owned()),
-        configured_node_id: None,
-        configured_name: Some(name.to_owned()),
-        public_url: Some(public_url.clone()),
-        batch_size: 16,
-    };
-    let state = NodeServerState::initialize(config)
-        .await
-        .expect("initialize node state");
-    let app = node_router(state.clone());
-    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
-    tokio::spawn(async move {
-        let _ = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                let _ = rx.await;
-            })
-            .await;
+    let name = name.to_owned();
+    let pairing_token = pairing_token.to_owned();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+    let (stopped_tx, stopped_rx) = tokio::sync::oneshot::channel();
+    // Isolate every Node task in its own runtime: stopping just the HTTP listener
+    // leaves detached scan/task callbacks alive and does not simulate a crash.
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("node runtime");
+        runtime.block_on(async move {
+            let listener = TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("bind node listener");
+            let addr = listener.local_addr().expect("node local addr");
+            let public_url = format!("http://127.0.0.1:{}", addr.port());
+            let config = NodeServerConfig {
+                bind: addr,
+                data_dir,
+                allowed_roots: vec![root],
+                bootstrap_token: Some(pairing_token),
+                configured_node_id: None,
+                configured_name: Some(name),
+                public_url: Some(public_url.clone()),
+                batch_size: 16,
+            };
+            let state = NodeServerState::initialize(config)
+                .await
+                .expect("initialize node state");
+            tokio::spawn(async move {
+                let _ = axum::serve(listener, node_router(state)).await;
+            });
+            let _ = ready_tx.send(public_url);
+            let _ = stop_rx.await;
+        });
+        drop(runtime);
+        let _ = stopped_tx.send(());
     });
-    (public_url, state, tx, addr)
+    (ready_rx.await.expect("node started"), stop_tx, stopped_rx)
 }
 
 /// 1. SIMULATED SCALE BENCHMARK: 1, 10, and 100 Registered Media Nodes.
@@ -742,14 +755,14 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
     });
 
     // 2. Start Node 1 (Primary) and Node 2 (Backup)
-    let (node1_url, node1_state, node1_stop_tx, _node1_addr) = spawn_node_server(
+    let (node1_url, node1_stop_tx, node1_stopped_rx) = spawn_node_server(
         "Node Primary",
         node1_root.clone(),
         node1_data.clone(),
         "token-primary-node",
     )
     .await;
-    let (node2_url, _node2_state, node2_stop_tx, _node2_addr) = spawn_node_server(
+    let (node2_url, node2_stop_tx, node2_stopped_rx) = spawn_node_server(
         "Node Backup",
         node2_root.clone(),
         node2_data.clone(),
@@ -1032,7 +1045,7 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
 
     // 6. SIMULATE NODE 1 CRASH / NETWORK LOSS
     let _ = node1_stop_tx.send(());
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    node1_stopped_rx.await.expect("primary node stopped");
 
     // Attempt a Core relay request on `primary_asset_id` -> Core detects Node 1 is unreachable,
     // returns 503 `node_unavailable`, and immediately marks Node 1 `disconnected` in the warm registry!
@@ -1260,8 +1273,8 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
     .await;
     assert_eq!(missing_st, StatusCode::NOT_FOUND);
 
-    let _ = node1_state;
     let _ = node2_stop_tx.send(());
+    node2_stopped_rx.await.expect("backup node stopped");
     let _ = core_shutdown_tx.send(());
     store.close().await;
 }

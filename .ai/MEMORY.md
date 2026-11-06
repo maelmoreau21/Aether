@@ -17,6 +17,13 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 6 novembre 2026 — Isolation de la panne simulée multi-Node
+
+- Le test arrête désormais le runtime propre à chaque Node et attend sa fin :
+  arrêter le seul serveur HTTP laissait vivre les tâches de scan et leurs callbacks.
+  Les assertions de bascule et les 50 flux concurrents sont conservés. Le scénario
+  ciblé réussit localement sous Windows ; confirmation Linux/GitHub CI nécessaire.
+
 ## 6 novembre 2026 — Diagnostic CI du basculement multi-Node
 
 - Le test de basculement à 50 requêtes a échoué en CI avec le média primaire

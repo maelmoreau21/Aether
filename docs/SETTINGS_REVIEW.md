@@ -40,3 +40,11 @@ Compte réunit le profil, l’image, le thème et la langue. Sécurité réunit 
 GET `/api/v1/account/avatar/policy` authentifié retourne `{uploadAllowed,removeAllowed}` sans cache. La politique native administrateur contrôle séparément l’import personnel (`allowCustom`), l’attribution à la création (`assignOnCreate`) et l’obligation d’avatar (`requireAvatar`, activée par défaut). Un avatar obligatoire peut être importé si l’import est autorisé, mais ne peut pas être supprimé. Les contrôles PUT/DELETE sont appliqués par le Core, administrateurs inclus ; le profil affiche les boutons autorisés. Voir [API](API.md).
 
 L’en-tête administratif présente le logo puis Menu et Retour. Le tiroir contient aussi un lien logo vers l’accueil et Retour.
+
+## Menu profil et menus playlist — 6 novembre 2026
+
+Dans le menu profil, Clair/Sombre reflètent le thème effectif, y compris lorsque
+la préférence suit le système. Les boutons de langue montrent les drapeaux
+locaux et conservent leur nom accessible ainsi que leur état sélectionné.
+Les menus d’ajout aux playlists se ferment au clic extérieur et à Échap ;
+les interactions internes restent disponibles et Échap rend le focus au bouton.

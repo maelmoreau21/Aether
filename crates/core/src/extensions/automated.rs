@@ -16,6 +16,13 @@ pub(super) type TargetResolution = (
     Option<(String, String, String, Option<f64>)>,
 );
 
+/// Durable error code for a search that found no single trustworthy candidate.
+pub(crate) const UNIDENTIFIED_ERROR: &str = "metadata_unidentified";
+
+fn unidentified_search(non_music: bool, operation: &str, value: &Value) -> bool {
+    non_music && operation == "metadata.search" && value.is_array()
+}
+
 pub(crate) struct AutomatedResult {
     pub value: Value,
     pub marker_sources: Vec<(String, String)>,
@@ -351,6 +358,9 @@ pub(crate) async fn run_automated(
     )
     .await
     .map_err(db)?
+        // Older builds cached unresolved candidate lists; those must be retried
+        // against the provider instead of replaying "not identified" for a day.
+        && !unidentified_search(music_track.is_none(), operation, &cached)
     {
         if operation == "lyrics.get" && !lyrics_result_matches_input(&payload, &cached) {
             return Err(err(
@@ -490,6 +500,16 @@ pub(crate) async fn run_automated(
                 marker_sources,
             });
         }
+    }
+    // No single trustworthy candidate: leave the work untouched and fail the
+    // task so the engine retries it later (ids found meanwhile by other
+    // providers or an NFO are picked up), then surfaces it for manual identify.
+    if unidentified_search(music_track.is_none(), operation, &result) {
+        drop(tx);
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            UNIDENTIFIED_ERROR,
+        ));
     }
     let _ = crate::automation::put_cached_provider_response(
         &mut tx,

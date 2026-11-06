@@ -8,6 +8,7 @@
   import { playbackIds, type Work } from './api';
   import type { Media } from '../player/types';
   import Icon from '../ui/Icon.svelte';
+  import { dismissibleDetails } from '../ui/dismissible-details';
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
@@ -264,6 +265,7 @@
   <!-- Quick Playlist Dropdown -->
   <details
     class="list-picker"
+    use:dismissibleDetails
     bind:open={listOpen}
     ontoggle={event => {
       if (event.currentTarget.open) {

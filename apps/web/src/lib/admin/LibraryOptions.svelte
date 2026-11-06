@@ -1,91 +1,148 @@
+<script lang="ts" module>
+  export type LibraryOptionsSection = 'metadata' | 'images' | 'scan' | 'playback';
+</script>
+
 <script lang="ts">
+  import { onMount } from 'svelte';
   import type { LibraryOptions } from './types';
-  import { recommendedLibraryOptions } from './types';
-  import AdvancedLibraryOptions from './AdvancedLibraryOptions.svelte';
-  let { options = $bindable(), kind, excludedPatterns = $bindable('') }: { options: LibraryOptions; kind: string; excludedPatterns?: string } = $props();
+  import ProviderPriority from './ProviderPriority.svelte';
+  let { options = $bindable(), kind, section, excludedPatterns = $bindable('') }: { options: LibraryOptions; kind: string; section: LibraryOptionsSection; excludedPatterns?: string } = $props();
   const languages = [{ value: 'fr', label: 'Français' }, { value: 'fr-CA', label: 'Français (Canada)' }, { value: 'en', label: 'Anglais' }, { value: 'de', label: 'Allemand' }, { value: 'es', label: 'Espagnol' }, { value: 'it', label: 'Italien' }, { value: 'pt', label: 'Portugais' }, { value: 'ja', label: 'Japonais' }, { value: 'ko', label: 'Coréen' }, { value: 'zh', label: 'Chinois' }];
   const images = [['fetchPoster', 'Affiches'], ['fetchBackdrop', 'Fonds'], ['fetchLogo', 'Logos'], ['fetchThumb', 'Miniatures'], ['fetchBanner', 'Bannières'], ['fetchDisc', 'Disques']] as const;
-  let presetApplied = $state(false);
   let customLanguage = $state(false);
+  let providers = $state<{ id: string; name: string }[]>([]);
+  let subtitleProviders = $state<{ id: string; name: string }[]>([]);
+  let providerError = $state('');
+  onMount(() => {
+    const controller = new AbortController();
+    void fetch('/api/v1/admin/extensions', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        const extensions = (data.extensions ?? []) as { manifest: { id: string; name: string; permissions?: string[] } }[];
+        providers = extensions.map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
+        subtitleProviders = extensions.filter(entry => entry.manifest.permissions?.includes('subtitles')).map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
+      }).catch(() => { if (!controller.signal.aborted) providerError = 'Les suggestions d’extensions sont indisponibles. Vous pouvez saisir leur identifiant.'; });
+    return () => controller.abort();
+  });
 </script>
 
 <div class="library-options">
-  <header><h3>Réglages de la bibliothèque</h3><p>Les nouvelles bibliothèques sont préconfigurées. Vous pouvez conserver ces choix ou les adapter.</p></header>
-  <div class="essentials">
-    <label for="library-metadata-language">Langue des métadonnées</label>
-    {#if customLanguage}
-      <input id="library-metadata-language" bind:value={options.preferredMetadataLanguage} required minlength="2" maxlength="35" placeholder="fr-CA" />
-      <button type="button" class="language-back" onclick={() => customLanguage = false}>Choisir dans la liste</button>
-    {:else}
-      <select id="library-metadata-language" value={options.preferredMetadataLanguage} onchange={event => { if (event.currentTarget.value === '_custom') customLanguage = true; else options.preferredMetadataLanguage = event.currentTarget.value; }}>
-        {#if !languages.some(language => language.value === options.preferredMetadataLanguage)}<option value={options.preferredMetadataLanguage}>{options.preferredMetadataLanguage}</option>{/if}
-        {#each languages as language (language.value)}<option value={language.value}>{language.label}</option>{/each}
-        <option value="_custom">Autre langue…</option>
-      </select>
-    {/if}
-    <label class="toggle-row"><span><strong>Suivre les changements des dossiers</strong><small>Les nouveaux médias sont analysés automatiquement.</small></span><input type="checkbox" role="switch" bind:checked={options.realtimeMonitoring} /></label>
-    {#if kind !== 'music'}
-      <label class="toggle-row"><span><strong>Aperçus dans la barre de lecture</strong><small>Miniatures trickplay pour retrouver une scène.</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
-    {/if}
-  </div>
-  <details class="custom-settings">
-    <summary>Personnaliser les réglages</summary>
-    <div class="preset-row"><p>Appliquer les réglages recommandés à cette bibliothèque.</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>Appliquer les réglages recommandés</button></div>
-    {#if presetApplied}<p role="status">Réglages recommandés appliqués. Enregistrez la bibliothèque pour les conserver.</p>{/if}
-    <details class="option-section"><summary>Métadonnées et images</summary>
-      <label for="library-metadata-country">Pays des classifications</label><input id="library-metadata-country" bind:value={options.metadataCountryCode} required pattern={'[A-Z]{2}'} maxlength="2" placeholder="FR" />
-      {#if kind !== 'music'}
-        <label class="check"><input type="checkbox" bind:checked={options.readLocalNfo} /> Lire les fichiers NFO locaux</label>
-        <h4>Illustrations à récupérer</h4><div class="image-grid">{#each images as [key, label] (key)}<label class="check"><input type="checkbox" bind:checked={options[key]} />{label}</label>{/each}</div>
-        <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /> Éviter les images en double</label>
-        {#if options.artworkDeduplicate}<label for="artwork-similarity">Tolérance aux différences</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
-        <div class="grid"><div><label for="artwork-min-width">Largeur minimale des affiches</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale des affiches</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
-        <p>Une valeur de 0 conserve toutes les tailles disponibles.</p>
-      {:else}<p>Les informations intégrées aux fichiers musicaux sont lues pendant l’analyse.</p>{/if}
-    </details>
-    <details class="option-section"><summary>Analyse des fichiers</summary>
-      <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="bonus, trailers" autocomplete="off" />
-      <p>Les dossiers système, .nomedia et .ignore sont déjà pris en compte.</p>
-      {#if kind !== 'music'}
-        <label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /> Préférer les titres intégrés aux fichiers</label>
-        <label for="embedded-subtitles">Sous-titres intégrés</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">Tous les sous-titres</option><option value="allow_text">Sous-titres texte uniquement</option><option value="block_all">Aucun sous-titre intégré</option></select>
-        <label for="library-metadata-refresh">Relire les métadonnées locales</label><select id="library-metadata-refresh" bind:value={options.automaticRefreshIntervalDays}><option value={0}>Lors des analyses uniquement</option><option value={30}>Tous les 30 jours</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
+  {#if section === 'metadata'}
+    <h3>Métadonnées</h3><p class="lead">Langue, sources d’identification et fréquence de mise à jour.</p>
+    <div class="group">
+      <label for="library-metadata-language">Langue des métadonnées</label>
+      {#if customLanguage}
+        <input id="library-metadata-language" bind:value={options.preferredMetadataLanguage} required minlength="2" maxlength="35" placeholder="fr-CA" />
+        <button type="button" class="language-back" onclick={() => customLanguage = false}>Choisir dans la liste</button>
+      {:else}
+        <select id="library-metadata-language" value={options.preferredMetadataLanguage} onchange={event => { if (event.currentTarget.value === '_custom') customLanguage = true; else options.preferredMetadataLanguage = event.currentTarget.value; }}>
+          {#if !languages.some(language => language.value === options.preferredMetadataLanguage)}<option value={options.preferredMetadataLanguage}>{options.preferredMetadataLanguage}</option>{/if}
+          {#each languages as language (language.value)}<option value={language.value}>{language.label}</option>{/each}
+          <option value="_custom">Autre langue…</option>
+        </select>
       {/if}
-    </details>
-    <AdvancedLibraryOptions bind:options {kind} />
-  </details>
+      <label for="library-metadata-country">Pays des classifications</label><input id="library-metadata-country" bind:value={options.metadataCountryCode} required pattern={'[A-Z]{2}'} maxlength="2" placeholder="FR" />
+    </div>
+    {#if kind !== 'music'}
+      <div class="group">
+        <h4>Identification</h4>
+        <label class="check"><input type="checkbox" bind:checked={options.readLocalNfo} /><span>Lire les fichiers NFO locaux<small>Les identifiants écrits par Radarr, Sonarr ou Kodi sont utilisés en priorité.</small></span></label>
+        <p class="hint">Un média non reconnu est laissé tel quel puis réessayé automatiquement plus tard. S’il reste inconnu, utilisez « Identifier » sur sa fiche.</p>
+        {#if providerError}<p role="status">{providerError}</p>{/if}
+        <ProviderPriority id="metadata-providers" label="Fournisseurs de métadonnées" bind:value={options.metadataProviders} suggestions={providers} />
+      </div>
+      <div class="group">
+        <h4>Mises à jour</h4>
+        <label for="online-refresh">Actualiser les métadonnées en ligne</label>
+        <select id="online-refresh" bind:value={options.onlineRefreshIntervalDays}><option value={0}>Lors des analyses uniquement</option><option value={30}>Tous les 30 jours (recommandé)</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
+        <label for="library-metadata-refresh">Relire les métadonnées locales</label><select id="library-metadata-refresh" bind:value={options.automaticRefreshIntervalDays}><option value={0}>Lors des analyses uniquement</option><option value={30}>Tous les 30 jours</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
+        <p class="hint">Les corrections manuelles sont conservées. Les clés des fournisseurs se configurent dans Extensions.</p>
+      </div>
+      {#if kind === 'films'}<div class="group"><h4>Collections</h4><label class="check"><input type="checkbox" bind:checked={options.automaticCollections} /><span>Regrouper automatiquement les films d’une collection</span></label></div>{/if}
+    {:else}<p class="hint">Les informations intégrées aux fichiers musicaux sont lues pendant l’analyse.</p>{/if}
+  {:else if section === 'images'}
+    <h3>Images</h3><p class="lead">Illustrations récupérées en ligne. Les images déjà présentes dans le dossier du média sont gardées et ne sont pas re-téléchargées.</p>
+    <div class="group">
+      <h4>Illustrations à récupérer</h4><div class="image-grid">{#each images as [key, label] (key)}<label class="check"><input type="checkbox" bind:checked={options[key]} /><span>{label}</span></label>{/each}</div>
+    </div>
+    <div class="group">
+      <h4>Qualité</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span>Éviter les images en double</span></label>
+      {#if options.artworkDeduplicate}<label for="artwork-similarity">Tolérance aux différences (0–16)</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
+      <div class="grid"><div><label for="artwork-min-width">Largeur minimale des affiches</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale des affiches</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
+      <p class="hint">Une valeur de 0 conserve toutes les tailles disponibles.</p>
+    </div>
+    <div class="group"><ProviderPriority id="image-providers" label="Fournisseurs d’images" bind:value={options.imageProviders} suggestions={providers} /></div>
+  {:else if section === 'scan'}
+    <h3>Analyse des fichiers</h3><p class="lead">Ce qui est surveillé, ignoré et lu dans les fichiers.</p>
+    <div class="group">
+      <label class="toggle-row"><span><strong>Suivre les changements des dossiers</strong><small>Les nouveaux médias sont analysés automatiquement.</small></span><input type="checkbox" role="switch" bind:checked={options.realtimeMonitoring} /></label>
+      <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="bonus, trailers" autocomplete="off" />
+      <p class="hint">Les dossiers système, .nomedia et .ignore sont déjà pris en compte.</p>
+    </div>
+    {#if kind !== 'music'}
+      <div class="group">
+        <label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /><span>Préférer les titres intégrés aux fichiers</span></label>
+        <label for="embedded-subtitles">Sous-titres intégrés</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">Tous les sous-titres</option><option value="allow_text">Sous-titres texte uniquement</option><option value="block_all">Aucun sous-titre intégré</option></select>
+      </div>
+    {/if}
+  {:else if section === 'playback'}
+    <h3>Lecture</h3><p class="lead">Aperçus, chapitres, intros et sous-titres en ligne.</p>
+    <div class="group">
+      <label class="toggle-row"><span><strong>Aperçus dans la barre de lecture</strong><small>Miniatures trickplay pour retrouver une scène.</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
+      {#if options.trickplayEnabled}
+        <label class="check"><input type="checkbox" bind:checked={options.trickplayDuringScan} /><span>Préparer les miniatures après l’analyse des médias</span></label>
+        <div class="grid three"><div><label for="trickplay-interval">Intervalle (s)</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">Largeur (px)</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div><div><label for="trickplay-quality">Qualité JPEG (1–31)</label><input id="trickplay-quality" type="number" min="1" max="31" step="1" required bind:value={options.trickplayQuality} /></div></div>
+        <p class="hint">320 px, un aperçu toutes les 10 secondes et une qualité de 7 offrent un bon compromis.</p>
+      {/if}
+      <label class="check"><input type="checkbox" bind:checked={options.chapterImagesEnabled} /><span>Afficher les images des chapitres<small>Préparées à la demande à partir des chapitres des fichiers.</small></span></label>
+    </div>
+    <div class="group">
+      <h4>Intros et génériques</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>Détecter les intros avec les extensions activées</span></label>
+      <ProviderPriority id="segment-providers" label="Détection d’intro et segments" bind:value={options.segmentProviders} suggestions={providers} />
+    </div>
+    <div class="group">
+      <h4>Sous-titres en ligne</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.subtitleDownloadEnabled} /><span>Autoriser la recherche manuelle de sous-titres<small>Depuis la fiche d’un média, avec une extension configurée.</small></span></label>
+      {#if options.subtitleDownloadEnabled}
+        <label class="check"><input type="checkbox" bind:checked={options.subtitleRequireHash} /><span>Exiger une correspondance exacte du fichier (hash)<small>Indisponible actuellement : cette exigence bloque les recherches.</small></span></label>
+        <ProviderPriority id="subtitle-providers" label="Sous-titres" bind:value={options.subtitleProviders} suggestions={subtitleProviders} />
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
   .library-options { min-width: 0; color: var(--tx); font-family: var(--font); }
-  h3 { margin: 0; font-size: 20px; font-weight: 800; }
-  h4 { margin: 20px 0 8px; font-size: 14px; }
-  p { margin: 8px 0 16px; color: var(--mu); font-size: 14px; line-height: 1.6; }
-  .essentials { margin-top: 24px; }
-  label { display: block; margin: 20px 0 8px; font-size: 14px; font-weight: 600; }
-  input:not([type='checkbox']), select { width: 100%; min-width: 0; min-height: 46px; padding: 10px 14px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background-color: var(--pn); color: var(--tx); font: inherit; }
+  h3 { margin: 0; font-size: 17px; font-weight: 700; }
+  h4 { margin: 0 0 4px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mu); }
+  p { margin: 8px 0 0; color: var(--mu); font-size: 14px; line-height: 1.6; }
+  .lead { margin-bottom: 8px; }
+  .group { padding: 18px 0; border-bottom: 1px solid var(--color-line-subtle); }
+  .group:last-child { border-bottom: 0; }
+  .hint { font-size: 13px; }
+  label { display: block; margin: 16px 0 8px; font-size: 14px; font-weight: 600; }
+  input:not([type='checkbox']), select { width: 100%; min-width: 0; min-height: 46px; padding: 10px 14px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background-color: var(--color-surface); color: var(--tx); font: inherit; }
+  input:not([type='checkbox']):focus, select:focus { outline: none; border-color: var(--ac); }
   select { padding-right: 40px; }
-  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 0; accent-color: var(--ac); }
-  .toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; min-height: 64px; margin: 0; padding: 16px 0; border-bottom: 1px solid var(--line); cursor: pointer; }
+  input[type='checkbox'] { flex: none; width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--ac); }
+  .toggle-row { display: flex; justify-content: space-between; align-items: center; gap: 20px; min-height: 56px; margin: 0; cursor: pointer; }
   .toggle-row strong { font-size: 14px; font-weight: 600; }
-  small { display: block; margin-top: 4px; color: var(--mu); font-size: 13px; line-height: 1.5; font-weight: 400; }
+  small { display: block; margin-top: 2px; color: var(--mu); font-size: 13px; line-height: 1.5; font-weight: 400; }
   .toggle-row input { appearance: none; position: relative; width: 42px; height: 24px; border-radius: var(--r-pill); background: var(--line-2); cursor: pointer; }
   .toggle-row input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: var(--r-pill); background: var(--tx); }
   .toggle-row input:checked { background: var(--ac); }
   .toggle-row input:checked::after { transform: translateX(18px); background: var(--on-ac); }
-  .custom-settings { margin-top: 24px; border-top: 1px solid var(--line); }
-  .option-section { border-bottom: 1px solid var(--line); padding-bottom: 12px; }
-  summary { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 12px 0; cursor: pointer; list-style: none; font-size: 14px; font-weight: 600; }
-  summary::-webkit-details-marker { display: none; }
-  summary::after { content: '+'; margin-left: auto; color: var(--mu); font-size: 20px; }
-  details[open] > summary::after { content: '−'; }
-  .custom-settings > summary { color: var(--mu); }
-  .preset-row { padding: 4px 0 20px; }
   button { min-height: 44px; padding: 10px 16px; border: 1px solid var(--line-2); border-radius: var(--r-sm); background: transparent; color: var(--tx); font: inherit; font-size: 13px; cursor: pointer; }
   button:hover { background: var(--pn); }
   .language-back { margin-top: 8px; }
   .grid, .image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
-  .check { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 4px 0; font-weight: 400; cursor: pointer; }
-  :is(input, select, button, summary):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
-  @media (max-width: 640px) { .grid { grid-template-columns: minmax(0, 1fr); } input:not([type='checkbox']), select { font-size: 16px; } }
+  .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .image-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .check { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 4px 0; padding: 8px 0; font-weight: 600; cursor: pointer; }
+  .image-grid .check { font-weight: 500; }
+  :is(input, select, button):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  @media (max-width: 640px) { .grid, .grid.three { grid-template-columns: minmax(0, 1fr); } .image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } input:not([type='checkbox']), select { font-size: 16px; } }
 </style>

@@ -650,8 +650,25 @@ pub(super) async fn collect_with_context(
             .map_err(db)?;
     let mut counts: std::collections::HashMap<String, i64> = counts.into_iter().collect();
     let mut total: i64 = counts.values().sum();
+    // Artwork already beside the media (poster.jpg, logo.png… often written by
+    // Radarr/Sonarr) is authoritative: re-downloading the same picture from a
+    // provider only produced visible duplicates. Single-image roles are skipped
+    // when a local file exists; backdrops still accept additional pictures.
+    let local_kinds: HashSet<String> = query_scalar::<_, String>(
+        "SELECT DISTINCT i.role FROM inventory_images i LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id WHERE i.work_id=? AND i.available=1 AND h.image_id IS NULL",
+    )
+    .bind(&input.work_id)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?
+    .into_iter()
+    .collect();
     for (provider, image) in queue {
         let image_kind = kind(image.image_type);
+        if image_kind != "backdrop" && local_kinds.contains(image_kind) {
+            skipped += 1;
+            continue;
+        }
         if total >= 64 || counts.get(image_kind).copied().unwrap_or(0) >= 12 {
             skipped += 1;
             continue;
@@ -708,9 +725,12 @@ pub(super) async fn collect_with_context(
                     *counts.entry(image_kind.into()).or_default() += 1;
                 }
             }
-            Ok(Err((status, _))) => {
-                errors.push(json!({"provider":provider,"status":status.as_u16()}))
-            }
+            Ok(Err((status, body))) => errors.push(json!({
+                "provider": provider,
+                "kind": image_kind,
+                "status": status.as_u16(),
+                "error": body.0["error"].as_str().unwrap_or("image_import_failed")
+            })),
             Err(_) => {
                 partial = true;
                 break;

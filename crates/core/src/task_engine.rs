@@ -502,6 +502,11 @@ pub async fn finish(
     let failed = i64::from(!error.is_empty() && error != "playback_preempted");
     let delay = if failed == 0 {
         1
+    } else if error == crate::extensions::UNIDENTIFIED_ERROR {
+        // Unidentified media is left as-is and retried much later (1 h, then
+        // 6 h) so NFO files written by Radarr/Sonarr or ids found by other
+        // providers can land first; the final failure asks for manual identify.
+        if attempt <= 1 { 3_600 } else { 21_600 }
     } else {
         // Stable bounded jitter avoids synchronized retries after provider outages.
         let jitter = id.bytes().fold(attempt as u64, |n, b| {

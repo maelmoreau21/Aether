@@ -2,19 +2,22 @@
   import { tick } from 'svelte';
   import { resolve } from '$app/paths';
   import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
-  import LibraryOptionsForm from './LibraryOptions.svelte';
+  import LibraryOptionsForm, { type LibraryOptionsSection } from './LibraryOptions.svelte';
+  import LibraryAccess from './LibraryAccess.svelte';
   import LibraryImages from './LibraryImages.svelte';
   import PathPickerModal from './PathPickerModal.svelte';
-  import { scanLabels } from './types';
+  import { recommendedLibraryOptions, scanLabels } from './types';
+  import type { AuthUser } from '../auth/session';
+  import type { UserGroup } from './request';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
-  let { libraries, nodes, scans, pending, saving, editing, error,
+  let { libraries, nodes, scans, pending, saving, editing, error, users = [], groups = [],
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
     options = $bindable(), onchanged,
     onsave, onscan, onedit, onreset, onnodechange }: {
       libraries: Library[]; nodes: AdminNode[]; scans: Record<string, Scan>; pending: string[];
-      saving: boolean; editing: string | null; error: string;
+      saving: boolean; editing: string | null; error: string; users?: AuthUser[]; groups?: UserGroup[];
       name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; folders: { nodeId: string; root: string }[]; enabled: boolean;
       excludedPatterns: string;
       options: LibraryOptions; onchanged: () => Promise<void>;
@@ -25,14 +28,23 @@
   let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   let showPathPicker = $state(false);
-  const editorSections = [
+  const allSections = [
     { id: 'general', label: 'Général' },
     { id: 'sources', label: 'Sources et dossiers' },
-    { id: 'metadata', label: 'Réglages' },
+    { id: 'metadata', label: 'Métadonnées' },
+    { id: 'images', label: 'Images' },
+    { id: 'scan', label: 'Analyse' },
+    { id: 'playback', label: 'Lecture' },
     { id: 'access', label: 'Accès' }
   ] as const;
-  type EditorSection = typeof editorSections[number]['id'];
+  type EditorSection = typeof allSections[number]['id'];
+  const optionSections: LibraryOptionsSection[] = ['metadata', 'images', 'scan', 'playback'];
+  // Music has no artwork collection nor video playback options.
+  const editorSections = $derived(allSections.filter(section => kind !== 'music' || (section.id !== 'images' && section.id !== 'playback')));
   let activeSection = $state<EditorSection>('general');
+  let presetApplied = $state(false);
+  const editedLibrary = $derived(editing ? libraries.find(library => library.id === editing) ?? null : null);
+  $effect(() => { if (!editorSections.some(section => section.id === activeSection)) activeSection = 'general'; });
   let formError = $state('');
   let editorContent: HTMLDivElement;
   function chooseEditorSection(section: EditorSection) {
@@ -74,7 +86,7 @@
     addEventListener('resize', closeAll); addEventListener('scroll', scrolled, true); document.addEventListener('pointerdown', outside);
     return () => { removeEventListener('resize', closeAll); removeEventListener('scroll', scrolled, true); document.removeEventListener('pointerdown', outside); };
   });
-  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; formError = ''; editor?.showModal(); }
+  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; presetApplied = false; formError = ''; editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -181,7 +193,9 @@
           <h3>{$t('library_general')}</h3><p class="panel-description">{$t('library_general_note')}</p>
           <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" bind:value={kind}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="music">{$t('music')}</option></select></div></div>
           <label class="check"><input type="checkbox" bind:checked={enabled} /> {$t('active_library')}</label><p class="field-hint">{$t('disabled_library_hint')}</p>
-          <div class="source-summary"><strong>{folders.length} {folders.length > 1 ? 'dossiers configurés' : 'dossier configuré'}</strong><p>{folders.length ? 'Les médias restent en lecture seule.' : 'Ajoutez un dossier pour pouvoir enregistrer cette bibliothèque.'}</p><button type="button" onclick={() => chooseEditorSection('sources')}>{folders.length ? 'Consulter les dossiers' : 'Configurer les dossiers'}</button></div>
+          {#if !folders.length}<p class="field-hint">Ajoutez un dossier dans <button type="button" class="inline-link" onclick={() => chooseEditorSection('sources')}>Sources et dossiers</button> pour pouvoir enregistrer.</p>{/if}
+          <div class="preset-row"><p>Réinitialiser les réglages avec les valeurs recommandées pour ce type de contenu.</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>Appliquer les réglages recommandés</button></div>
+          {#if presetApplied}<p role="status" class="field-hint">Réglages recommandés appliqués. Enregistrez la bibliothèque pour les conserver.</p>{/if}
         </div>
         <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
           <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / 32</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
@@ -190,8 +204,12 @@
           <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
           <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
         </div>
-        <div id="library-panel-metadata" role="tabpanel" aria-labelledby="library-tab-metadata" data-editor-panel="metadata" hidden={activeSection !== 'metadata'} tabindex="0"><LibraryOptionsForm bind:options bind:excludedPatterns {kind} /></div>
-        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><h3>Accès à la bibliothèque</h3><p>Les autorisations se gèrent dans les rubriques <strong>Utilisateurs</strong> et <strong>Groupes</strong> de l’administration.</p><p>Ce formulaire configure les sources et l’import. Ajouter un dossier n’accorde aucun droit supplémentaire à un compte.</p><p>Les médias et les fichiers utilisés par Jellyfin restent en lecture seule.</p></div>
+        {#each optionSections as section (section)}
+          {#if editorSections.some(item => item.id === section)}
+            <div id={`library-panel-${section}`} role="tabpanel" aria-labelledby={`library-tab-${section}`} data-editor-panel={section} hidden={activeSection !== section} tabindex="0"><LibraryOptionsForm bind:options bind:excludedPatterns {kind} {section} /></div>
+          {/if}
+        {/each}
+        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><LibraryAccess library={editedLibrary} {libraries} {users} {groups} {onchanged} /></div>
       </div>
     </div>
     <footer class="editor-actions">
@@ -318,9 +336,9 @@
   .panel-description { margin: 6px 0 20px; }
   .identity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; }
   .identity-fields label { margin-top: 0; }
-  .source-summary { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-line-subtle); }
-  .source-summary strong { font-size: 15px; font-weight: 700; }
-  .source-summary p { margin: 6px 0 16px; }
+  .preset-row { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-line-subtle); }
+  .preset-row p { margin: 0 0 12px; }
+  .inline-link { display: inline; min-height: 0; padding: 0; border: 0; background: none; color: var(--ac); font-size: inherit; text-decoration: underline; }
   .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .section-heading span { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--color-raised); color: var(--tx); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .folders { display: grid; margin: 16px 0 20px; padding: 0; list-style: none; border-top: 1px solid var(--color-line-subtle); }

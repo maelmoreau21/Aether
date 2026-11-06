@@ -17,6 +17,19 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 6 novembre 2026 — Menus playlist, thème et drapeaux
+
+- Menus playlist média/musique : fermeture au clic extérieur et Échap, avec
+  retour au déclencheur au clavier. Les clics internes restent possibles.
+- Menu profil : sélection du thème réellement affiché, même en mode système,
+  mise à jour lors des changements du système ; FR/EN remplacés par les
+  drapeaux SVG locaux existants, avec noms accessibles et état sélectionné.
+- Vérifié : Web check (0 erreur/avertissement), lint, build et diff. Chrome avec
+  API synthétique : clic interne/externe, réouverture, ajout à une playlist,
+  Échap/focus, largeur 390 px ; changement système clair→sombre, sélection
+  explicite et langue. Captures dans `output/playwright/menu-fixes/`.
+  Pas de validation du serveur déployé ni du parcours musical séparé.
+
 ## 6 novembre 2026 — Paramètres d’avatars et chemins Docker
 
 - Politique d’avatars native à nouveau persistante : import personnel et attribution

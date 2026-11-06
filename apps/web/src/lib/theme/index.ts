@@ -24,17 +24,19 @@ function getStoredTheme(): ThemeMode {
 }
 
 export const themeMode = writable<ThemeMode>(getStoredTheme());
+const systemTheme = writable(getSystemTheme());
 /** True when the TV layout is active (data-tv on <html>). */
 export const tvLayout = writable(false);
 
-export const effectiveTheme = derived(themeMode, ($mode) => {
+export const effectiveTheme = derived([themeMode, systemTheme], ([$mode, $system]) => {
   if ($mode === 'system') {
-    return getSystemTheme();
+    return $system;
   }
   return $mode;
 });
 
 export function setTheme(mode: ThemeMode, persist = true) {
+  if (mode === 'system') systemTheme.set(getSystemTheme());
   themeMode.set(mode);
   if (persist) savePreferences({ theme: mode });
   if (typeof window === 'undefined') return;
@@ -53,6 +55,7 @@ export function initTheme() {
   if (typeof window === 'undefined') return;
 
   const currentMode = getStoredTheme();
+  systemTheme.set(getSystemTheme());
   themeMode.set(currentMode);
 
   const effective = currentMode === 'system' ? getSystemTheme() : currentMode;
@@ -62,6 +65,7 @@ export function initTheme() {
   // Watch for OS theme changes when in 'system' mode
   const mediaQuery = window.matchMedia('(prefers-color-scheme: light)');
   const listener = () => {
+    systemTheme.set(getSystemTheme());
     themeMode.update((current) => {
       if (current === 'system') {
         document.documentElement.setAttribute('data-theme', getSystemTheme());

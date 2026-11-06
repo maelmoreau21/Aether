@@ -9,7 +9,7 @@
   import Icon from '../ui/Icon.svelte';
   import { fitArtwork } from '../ui/fit-artwork';
 
-  let { work, duration, children }: { work: Work; duration?: number; children: Snippet } = $props();
+  let { work, duration, children, below }: { work: Work; duration?: number; children: Snippet; below?: Snippet } = $props();
   const artwork = $derived(selectArtwork(work, $session));
   // backdrop.jpg is the detail image; landscape.jpg is a wide fallback.
   const wideArtwork = $derived(artwork.backdrop || artwork.landscape || artwork.poster);
@@ -139,6 +139,8 @@
           {/if}
         </dl>
       {/if}
+      <!-- Content placed under the information stays beside the poster (no empty gap). -->
+      {#if below}<div class="below">{@render below()}</div>{/if}
     </div>
     <!-- folder.jpg : l’affiche reste visible à côté des informations -->
     <aside class="side" aria-label="Affiche"><Poster {work} showMetadata={false} /></aside>
@@ -301,6 +303,8 @@
     position: sticky;
     top: 88px;
   }
+
+  .below { width: 100%; min-width: 0; margin-top: 8px; }
 
   .synopsis {
     max-width: 72ch;

@@ -112,9 +112,9 @@
       {#if !playableMedia.length && !allowedIds.length}<p class="unavailable">Aucune version disponible pour la lecture.</p>{/if}
     </div>
     {#if mediaError}<p class="error-banner" role="alert">{mediaError}</p>{/if}
+    {#snippet below()}<EditorialCredits {work} />{/snippet}
   </DetailHero>
 
-  <EditorialCredits {work} />
   {#if currentSelectedMedia && !work.synthetic}{#key currentSelectedMedia.id}<ChapterImages assetId={currentSelectedMedia.id} />{/key}{/if}
   <SimilarWorks {work} candidates={similarCandidates} />
 </div>

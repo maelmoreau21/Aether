@@ -67,6 +67,7 @@
   let prefSubtitles = $state('forced');
 
   async function launchEpisode(episode: Work, versionId: string): Promise<void> {
+    quickWork = null;
     if (episodeLaunchController) {
       episodeLaunchController.abort();
       episodeLaunchController = null;
@@ -180,10 +181,13 @@
             ? $t('search')
             : $t('home'))
   );
-  const allowedIds = $derived(detail ? playbackIds(detail) : []);
+  /** A film started from a poster's quick action, without leaving the current page. */
+  let quickWork = $state<Work | null>(null);
+  const playbackSource = $derived(quickWork ?? detail);
+  const allowedIds = $derived(playbackSource ? playbackIds(playbackSource) : []);
   const playableMedia = $derived(media.filter(item => allowedIds.includes(item.id)));
   const episodeIds = $derived(playingEpisode ? playbackIds(playingEpisode) : []);
-  const playerMedia = $derived(detail?.kind === 'series' ? media.filter(item => episodeIds.includes(item.id)) : playableMedia);
+  const playerMedia = $derived(!quickWork && detail?.kind === 'series' ? media.filter(item => episodeIds.includes(item.id)) : playableMedia);
 
   const nextEpisode = $derived.by(() => {
     if (!playingEpisode || detail?.kind !== 'series') return undefined;
@@ -270,7 +274,7 @@
     }
     const controller = new AbortController();
     episodeLaunchController = controller;
-    if (detail && !detail.synthetic) preloadProgress(detail.id);
+    if (playbackSource && !playbackSource.synthetic) preloadProgress(playbackSource.id);
     const launchGen = getSessionGeneration();
     launching = true;
     mediaError = '';
@@ -311,8 +315,12 @@
       await goto(detailUrl(work));
       return;
     }
-    const ids = playbackIds(work);
-    const targetId = ids[0];
+    // Cards and shelves carry no playable versions: read the full work first.
+    let full = work;
+    if (!playbackIds(work).length) {
+      try { full = await request<Work>(`/api/v1/catalog/${encodeURIComponent(work.id)}?episodeLimit=1`, AbortSignal.timeout(10000)); } catch { full = work; }
+    }
+    const targetId = playbackIds(full)[0];
     if (!targetId) {
       // detailUrl already applies SvelteKit resolve to the route and base.
       // eslint-disable-next-line svelte/no-navigation-without-resolve
@@ -320,7 +328,8 @@
       return;
     }
     try {
-      detail = work;
+      // The player opens over the current page; the page itself does not change.
+      quickWork = detail?.id === full.id ? null : full;
       selected = targetId;
       await openPlayer();
     } catch {
@@ -589,7 +598,7 @@
         bind:selected
         {mediaError}
         similarCandidates={films}
-        onPlay={openPlayer}
+        onPlay={() => { quickWork = null; return openPlayer(); }}
       />
       {:catch}<p role="alert">{$t('movie_load_failed')}</p>{/await}
     {:else}
@@ -641,7 +650,7 @@
   {/if}
 </main>
 
-{#if detail && ImmersivePlayerComponent && createPlayer}
+{#if (detail || quickWork) && ImmersivePlayerComponent && createPlayer}
   <ImmersivePlayerComponent
     bind:this={immersive}
     catalogue={playerMedia}

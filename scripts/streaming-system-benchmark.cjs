@@ -75,7 +75,7 @@ async function preparePage(storageState){
   });
   page.on('pageerror',e=>errors.push(String(e)));
   await page.goto(origin+'/app/films/');
-  await page.locator('.media-card').filter({hasText:'Streaming Benchmark'}).first().click();
+  await page.locator('.media-card').filter({hasText:'Streaming Benchmark'}).first().click({position:{x:12,y:12}});
   await page.getByRole('heading',{name:'Streaming Benchmark',exact:true}).waitFor();
   return {context,page,network,mediaRequests,endpoints,errors};
 }

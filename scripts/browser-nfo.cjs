@@ -70,7 +70,7 @@ fs.mkdirSync(out, {recursive:true});
         assert.ok((await card.textContent()).includes(expectedSynopsis));
       }
     }
-    await page.locator('a.media-card').click();
+    await page.locator('a.media-card').click({position:{x:12,y:12}});
     await page.getByRole('heading',{name:expectedTitle,exact:true}).waitFor();
     if (phase !== 'delete') {
       assert.equal(await page.locator('.synopsis').textContent(),expectedSynopsis);

@@ -145,9 +145,9 @@
 
 {#if href && actions}
   <!-- Buttons cannot live inside the link: they sit above the poster, beside it. -->
-  <div class="media-card has-actions" class:landscape={wide} role="group" aria-label={displayTitle} onpointerenter={prime} onfocusin={prime}>
+  <div class="card-shell has-actions" class:landscape={wide} role="group" aria-label={displayTitle} onpointerenter={prime} onfocusin={prime}>
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-    <a class="card-link" {href} aria-label={`Voir ${displayTitle}`}>{@render posterBody()}</a>
+    <a class="media-card card-link" class:landscape={wide} {href} aria-label={`Voir ${displayTitle}`}>{@render posterBody()}</a>
     <div class="quick-actions">
       <button type="button" class="quick-play" aria-label={`Lire ${displayTitle}`} title="Lire" disabled={!!busy || work.available === false} onclick={launch}>
         <Icon name="play" size={26} />
@@ -203,6 +203,7 @@
 
   .poster img.loaded { opacity: 1; }
 
+  .card-shell { position: relative; min-width: 0; }
   .card-link { display: block; color: inherit; }
 
   @media (hover: hover) and (pointer: fine) {

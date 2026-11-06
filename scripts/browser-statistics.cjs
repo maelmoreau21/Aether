@@ -42,7 +42,7 @@ fs.mkdirSync(out, {recursive:true});
       await page.getByText('Paramètres enregistrés.',{exact:true}).waitFor();
       assert.equal((await read('/api/v1/playback/statistics')).enabled,true);
       await page.goto(`${origin}/app/films/`);
-      await page.locator('.media-card').filter({hasText:'Statistics Film'}).first().click();
+      await page.locator('.media-card').filter({hasText:'Statistics Film'}).first().click({position:{x:12,y:12}});
       await page.getByRole('heading',{name:'Statistics Film',exact:true}).waitFor();
       await page.getByRole('button',{name:'Sélectionner la version MP4',exact:true}).click();
       await page.locator('.hero-cta').click();

@@ -70,7 +70,7 @@ fs.mkdirSync(out, {recursive: true});
     const card=page.locator('.media-card').filter({hasText:'Scanner Film'});
     await card.waitFor();
     assert.equal(await page.locator('.media-card').count(), 1);
-    await card.click();
+    await card.click({position:{x:12,y:12}});
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();

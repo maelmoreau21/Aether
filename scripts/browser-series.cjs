@@ -108,7 +108,7 @@ fs.mkdirSync(out, {recursive: true});
     const mediaCallsBeforeDetail = requestedMediaUrls.length;
 
     // 4. Click Series Card -> open Detail
-    await card.click();
+    await card.click({position:{x:12,y:12}});
     await page.getByRole('heading', {name:'Browser Series', exact:true}).waitFor();
 
     // Verify: Opening series detail did NOT trigger batch /api/v1/media/ requests!
@@ -445,7 +445,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForURL('**/app/series/**');
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
-    await card.click();
+    await card.click({position:{x:12,y:12}});
     await page.getByRole('heading', {name: 'Browser Series', exact: true}).waitFor();
 
     // Verify opening series detail in Session B still makes 0 eager media calls

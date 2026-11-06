@@ -504,7 +504,9 @@ async fn library_similarity(store: &IdentityStore, work: &str) -> u32 {
     let settings: Option<String> = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM inventory_works w JOIN libraries l ON l.id=w.library_id LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE w.id=?")
         .bind(work).fetch_optional(&store.pool).await.ok().flatten();
     settings
-        .and_then(|value| serde_json::from_str::<crate::library_options::LibraryOptions>(&value).ok())
+        .and_then(|value| {
+            serde_json::from_str::<crate::library_options::LibraryOptions>(&value).ok()
+        })
         .map_or(5, |options| u32::from(options.artwork_similarity))
 }
 

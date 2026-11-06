@@ -686,10 +686,7 @@ pub(super) async fn collect_with_context(
             skipped += 1;
             continue;
         }
-        if downloaded >= max_images
-            || attempts >= 24
-            || tokio::time::Instant::now() >= deadline
-        {
+        if downloaded >= max_images || attempts >= 24 || tokio::time::Instant::now() >= deadline {
             partial = true;
             break;
         }

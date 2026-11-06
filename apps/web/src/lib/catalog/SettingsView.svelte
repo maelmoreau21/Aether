@@ -3,7 +3,7 @@
   import { preferences, ensurePreferences, savePreferences } from '../preferences';
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
-  import { session } from '../auth/session';
+  import { session, onSessionGenerationChange } from '../auth/session';
   import { features } from '../applications/api';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
   import AppearanceCustomization from './AppearanceCustomization.svelte';
@@ -27,6 +27,16 @@
   import { invalidateLatestCatalog } from './page-cache';
 
   let serverConfig = $state<AppServerConfig | null>(null);
+  let statisticsVisible = $state(false);
+  onMount(() => {
+    let revision=0,disposed=false;
+    const refresh=async()=>{const request=++revision;if(!$session){statisticsVisible=false;return;}try{const response=await fetch('/api/v1/playback/statistics',{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)return;const value=await response.json();if(!disposed&&request===revision){statisticsVisible=value.canView===true;if(!statisticsVisible&&current==='statistics')current='account';}}catch{/* Optional feature stays hidden. */}};
+    void refresh();const off=onSessionGenerationChange(()=>{statisticsVisible=false;void refresh();});
+    window.addEventListener('statistics-settings-changed',refresh);
+    const timer=setInterval(()=>void refresh(),60000);
+    return()=>{disposed=true;revision++;off();clearInterval(timer);window.removeEventListener('statistics-settings-changed',refresh);};
+  });
+
 
   let {
     prefAudio = $bindable('fr'),
@@ -168,7 +178,7 @@
     <nav class="settings-nav" aria-label={$t('settings_title')}>
       {#each pageGroups as group (group)}
         <p class="nav-group">{$t(group)}</p>
-        {#each pages.filter(page => page.groupKey === group && (!page.feature || $features[page.feature])) as page (page.id)}
+        {#each pages.filter(page => page.groupKey === group && (page.id !== 'statistics' || statisticsVisible) && (!page.feature || $features[page.feature])) as page (page.id)}
           <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{$t(page.labelKey)}</a>
         {/each}
       {/each}
@@ -271,7 +281,7 @@
       <!-- Data panels mount only while shown: nothing is fetched for hidden pages. -->
       <div class="embedded-panel" hidden={current !== 'requests'}>{#if current === 'requests'}<h2>{$t('settings_requests')}</h2><Requests embedded />{/if}</div>
       <div class="embedded-panel" hidden={current !== 'reports'}>{#if current === 'reports'}<h2>{$t('settings_reports')}</h2><Reports embedded />{/if}</div>
-      <div class="embedded-panel" hidden={current !== 'statistics'}>{#if current === 'statistics'}<Statistics embedded />{/if}</div>
+      <div class="embedded-panel" hidden={current !== 'statistics'}>{#if current === 'statistics' && statisticsVisible}<Statistics embedded />{/if}</div>
       <div hidden={current !== 'downloads'}>{#if current === 'downloads'}<section class="card"><DownloadsPanel embedded /></section>{/if}</div>
       <div hidden={current !== 'security'}><section class="card"><h2>{$t('security')}</h2><AccountSecurity mode="security" /><h3>{$t('sso_connection')}</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
       <div hidden={current !== 'devices'}><section class="card"><h2>{$t('settings_nav_devices')}</h2><AccountSecurity mode="devices" /></section></div>

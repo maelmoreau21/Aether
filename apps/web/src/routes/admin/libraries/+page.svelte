@@ -417,7 +417,7 @@
           <AdminSettings section={currentHash} />
 
           <!-- Section 1: Dashboard Overview -->
-          <div hidden={currentHash !== '#statistics-section'}><Statistics administrator active={currentHash === '#statistics-section'} /></div>
+          <div hidden={currentHash !== '#statistics-section'}><Statistics administrator embedded active={currentHash === '#statistics-section'} /></div>
           <div hidden={currentHash !== "#overview"}>
           <AdminOverview active={currentHash === "#overview"}
             {coreHealth}

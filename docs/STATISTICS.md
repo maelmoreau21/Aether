@@ -1,9 +1,23 @@
 # Statistiques de lecture natives
 
 Module Rust/Svelte facultatif, désactivé à l'installation et sans service externe.
-L'administrateur l'active dans **Administration → Statistiques → Collecte et
-conservation**. **Menu profil → Mes statistiques** donne accès à l'activité du
-compte courant. Une information visible signale la collecte sur le serveur.
+Dans **Administration → Statistiques**, seul « Activer les statistiques » est
+présenté tant que le module est désactivé. Une fois activé, **Paramètres** permet
+d'autoriser les utilisateurs à consulter leurs statistiques (`usersCanView`,
+désactivé par défaut). La collecte et la visibilité sont indépendantes : activer
+la collecte ne donne pas automatiquement accès aux bilans personnels.
+
+Le menu personnel **Paramètres → Moi → Mes statistiques** apparaît uniquement
+lorsque la collecte et la visibilité personnelle sont actives. Les routes de
+lecture personnelles, détails, analyses, export et Wrapped renvoient 403 aux
+utilisateurs dans les autres cas. L'administrateur conserve l'accès aux rapports
+par API ; désactiver ne supprime pas l'historique. L'effacement personnel reste
+possible par API. Les collecteurs de lecture continuent à suivre `enabled`.
+
+La page se répartit en **Vue d'ensemble**, **Activité**, **Contenus**,
+**Technique**, **Historique** et **Paramètres**. Les filtres avancés sont repliés.
+La rubrique Paramètres regroupe visibilité, conservation, Wrapped et purge.
+Le bandeau global annonçant la collecte a été retiré.
 
 ## Données et interprétation
 
@@ -156,14 +170,14 @@ Les mutations exigent origine autorisée et `x-csrf-token`.
 
 | Méthode et chemin | Contrat |
 | --- | --- |
-| `GET /api/v1/playback/statistics` | Activation, première activation, conservation, signal 15 s et expiration 90 s. |
+| `GET /api/v1/playback/statistics` | Activation, `usersCanView`, `canView` effectif pour le compte, première activation, conservation, signal 15 s et expiration 90 s. |
 | `POST /api/v1/playback/sessions` | `{id: UUID client, mediaId: identifiant asset vidéo ou titre musique, music: bool}`. Création idempotente, compte et bibliothèque déduits côté Core. |
 | `POST /api/v1/playback/sessions/{id}/events` | `{events:[...]}` : lot ordonné de 1 à 100 événements, corps au plus 64 Kio. |
 | `GET /api/v1/admin/statistics` | Bilans globaux, classements, activité, historique et périodes. Administrateur seulement. |
 | `GET /api/v1/account/statistics` | Même contrat, restreint au compte courant et à ses droits actuels. |
 | `GET …/statistics/sessions/{id}?after=sequence` | Bilan et jusqu'à 2 000 événements ; `nextSequence` permet de continuer. Détail soumis aux mêmes droits. |
 | `GET …/statistics/export` | CSV protégé contre les formules, mêmes filtres ; lots de 2 000 lignes, indicateur `x-export-truncated`. L'interface propose le lot suivant. |
-| `GET/PUT /api/v1/admin/statistics/settings` | `{enabled:bool,eventRetentionDays:int,summaryRetentionDays:int}`. |
+| `GET/PUT /api/v1/admin/statistics/settings` | `{enabled:bool,usersCanView:bool,eventRetentionDays:int,summaryRetentionDays:int}`. |
 | `POST /api/v1/admin/statistics/purge` | Purge bornée selon la conservation actuelle. |
 | `DELETE /api/v1/account/statistics` | Suppression de tout l'historique statistique personnel. |
 | `GET /api/v1/admin/statistics/insights` · `GET /api/v1/account/statistics/insights` | Mêmes filtres plus `tz` : totaux, croissance, jours de semaine, grille heure × jour, mois, calendrier, simultanéité, genres, séries, titres, personnes, complétion et titres délaissés, résolution, méthodes, clients. |

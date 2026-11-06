@@ -8,7 +8,7 @@ export interface SessionSummary {
   metrics: Record<string, unknown>;
 }
 export interface Statistics {
-  enabled: boolean; firstEnabledAt: number | null; eventRetentionDays: number; summaryRetentionDays: number;
+  enabled: boolean; usersCanView: boolean; firstEnabledAt: number | null; eventRetentionDays: number; summaryRetentionDays: number;
   wrappedAvailable?: boolean;
   periods: { startedAt: number; endedAt: number | null }[];
   summary: { plays: number; qualifiedPlays?: number; users: number; media: number; seconds: number; completed: number; active: number };

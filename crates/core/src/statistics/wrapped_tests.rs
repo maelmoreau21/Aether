@@ -33,6 +33,14 @@ async fn session(
 
 async fn contract(store: IdentityStore) {
     fixture(&store).await;
+    query("UPDATE statistics_settings SET enabled=1")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    query("UPDATE statistics_visibility SET users_can_view=1")
+        .execute(&store.pool)
+        .await
+        .unwrap();
     work(&store, "stats-show", "series", r#"{"genres":["drame"]}"#).await;
     for episode in ["stats-ep1", "stats-ep2"] {
         work(&store, episode, "episode", "{}").await;

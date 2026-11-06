@@ -15,7 +15,6 @@
   import { readSession } from '../lib/auth/session';
   import { preloadCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
-  import StatisticsNotice from '../lib/statistics/StatisticsNotice.svelte';
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
 
   onMount(() => {
@@ -77,7 +76,6 @@
   });
 </script>
 {#if verified}
-  {#if !isLogin && !isDownloads}<StatisticsNotice />{/if}
   {#if $preferenceSyncError}<p class="preference-error" role="alert">{$preferenceSyncError}</p>{/if}
   {@render children()}
   {#if !isLogin && !isDownloads}<MusicPlayer />{/if}

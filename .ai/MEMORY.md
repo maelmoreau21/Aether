@@ -17,6 +17,24 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 6 novembre 2026 — Activation et visibilité des statistiques
+
+- Collecte conservée désactivée par défaut. Admin : seul contrôle d’activation
+  tant qu’elle est arrêtée ; ensuite six sous-menus (vue d’ensemble, activité,
+  contenus, technique, historique, paramètres), filtres avancés repliés.
+- Visibilité personnelle indépendante (`usersCanView`, défaut false) ; collecte
+  active requise pour les utilisateurs, liens personnels masqués et refus Core
+  sur rapports, analyses, exports, détails et Wrapped. Historique conservé et
+  administration/API conservée ; effacement personnel toujours possible par API.
+- Bandeau global de collecte supprimé. Voir `docs/STATISTICS.md`.
+- Vérifié : 12 tests Rust statistiques/SQLite réussis (11 au premier passage,
+  puis nouveau test de visibilité après correction de son jeton synthétique) ;
+  deux contrats PostgreSQL ignorés. Douze tests Web ciblés réussis, check sans
+  erreur/avertissement et lint réussis. Chrome/API synthétique : activation,
+  six sous-menus, visibilité personnelle dans les quatre combinaisons et retrait
+  du bandeau, aperçu mobile 390 px. Build final et formatage Rust ciblé réussis.
+  Aucun déploiement ni validation PostgreSQL/lectures réelles supplémentaire.
+
 ## 6 novembre 2026 — Menus playlist, thème et drapeaux
 
 - Menus playlist média/musique : fermeture au clic extérieur et Échap, avec

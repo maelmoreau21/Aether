@@ -4,7 +4,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use media_extension_sdk::{Manifest, Package};
 use media_poc::{
     backup::restore_database,
-    backup_bundle::{create_with_assets, extract},
+    backup_bundle::{BackupKey, Protection, create_with_assets, extract},
     extensions::storage::{persist, sync_installed, wasm},
     identity::IdentityStore,
 };
@@ -12,6 +12,10 @@ use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use zeroize::Zeroizing;
+
+fn backup_key() -> BackupKey {
+    BackupKey::parse("3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12").unwrap()
+}
 
 fn generate_key() -> Ed25519KeyPair {
     let bytes = Ed25519KeyPair::generate_pkcs8(&SystemRandom::new()).unwrap();
@@ -114,7 +118,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
     persist(&store_a, &package).await.unwrap();
     assert_eq!(wasm(&store_a, &package).await.unwrap(), package.wasm);
 
-    // === 2. Take a full unencrypted backup of Server A ===
+    // === 2. Take a full encrypted backup of Server A ===
     let backups_dir = temp.path().join("backups");
     tokio::fs::create_dir_all(&backups_dir).await.unwrap();
     let backup_archive = backups_dir.join("live-full-backup.media-backup");
@@ -133,17 +137,26 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
         &backup_archive,
         "sqlite",
         Some(asset_source),
+        Protection::Encrypted(backup_key()),
     )
     .await
     .unwrap();
     assert!(archive_size > 0);
+    assert!(
+        !std::fs::read(&backup_archive)
+            .unwrap()
+            .windows(asset_bytes.len())
+            .any(|window| window == asset_bytes)
+    );
 
     // Close Server A store
     store_a.close().await;
 
     // === 3. Disaster recovery onto Server B (clean slate) ===
     let extracted_dir = temp.path().join("extracted-recovery");
-    let summary = extract(&backup_archive, &extracted_dir).await.unwrap();
+    let summary = extract(&backup_archive, &extracted_dir, Some(&backup_key()))
+        .await
+        .unwrap();
     assert_eq!(summary.engine, "sqlite");
     assert_eq!(summary.assets as usize, seeded + 1);
     assert!(extracted_dir.join("database.sqlite3").exists());

@@ -100,6 +100,17 @@ async fn full_backup(
     target: &std::path::Path,
     media_root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Fail closed before any snapshot is written: no key means no plaintext copy of the secrets.
+    let protection =
+        media_poc::backup_bundle::protection_from_settings(&|name: &str| std::env::var(name).ok())?;
+    if matches!(
+        protection,
+        media_poc::backup_bundle::Protection::Unencrypted
+    ) {
+        eprintln!(
+            "WARNING: MEDIA_BACKUP_ALLOW_UNENCRYPTED is set: the archive will contain secrets in clear text."
+        );
+    }
     media_poc::backup::check_path_safety(target, "full backup")?;
     media_poc::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
     if target.exists() {
@@ -131,7 +142,10 @@ async fn full_backup(
     let mut config: std::collections::BTreeMap<String, String> = std::env::vars()
         .filter(|(name, _)| {
             (name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
-                && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
+                && !matches!(
+                    name.as_str(),
+                    "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE" | "MEDIA_BACKUP_ALLOW_UNENCRYPTED"
+                )
         })
         .collect();
     let engine = std::env::var("MEDIA_DB_ENGINE").unwrap_or_else(|_| "sqlite".into());
@@ -150,7 +164,7 @@ async fn full_backup(
         _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
     }
     config.insert("MEDIA_DB_ENGINE".into(), engine.clone());
-    media_poc::backup_bundle::create(&snapshot, config, target, &engine).await?;
+    media_poc::backup_bundle::create(&snapshot, config, target, &engine, protection).await?;
     Ok(())
 }
 

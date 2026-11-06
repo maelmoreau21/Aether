@@ -110,7 +110,7 @@ try {
   const archiveLink = backups.getByRole('link', { name: 'Télécharger', exact: true }).first();
   const download = await page.request.get(origin + await archiveLink.getAttribute('href'));
   assert.equal(download.status(), 200);
-  assert.equal((await download.body()).subarray(0, 8).toString(), 'MDBK0001');
+  assert.equal((await download.body()).subarray(0, 8).toString(), 'MDBK0003');
   await backups.getByLabel('Activer les sauvegardes automatiques').check();
   await backups.getByLabel('Intervalle en minutes', { exact: true }).fill('1440');
   await backups.getByRole('button', { name: 'Enregistrer la planification', exact: true }).click();

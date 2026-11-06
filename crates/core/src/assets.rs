@@ -1053,6 +1053,13 @@ mod tests {
         backend: Arc<LocalFs>,
     }
 
+    fn test_backup_key() -> crate::backup_bundle::BackupKey {
+        crate::backup_bundle::BackupKey::parse(
+            "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12",
+        )
+        .unwrap()
+    }
+
     async fn fixture(config: AssetConfig) -> Fixture {
         let dir = tempfile::tempdir().unwrap();
         let identity = IdentityStore::open(&dir.path().join("core.sqlite3"))
@@ -1410,11 +1417,14 @@ mod tests {
             &archive,
             "sqlite",
             Some(source),
+            crate::backup_bundle::Protection::Encrypted(test_backup_key()),
         )
         .await
         .unwrap();
         let out = f._dir.path().join("extracted");
-        let summary = crate::backup_bundle::extract(&archive, &out).await.unwrap();
+        let summary = crate::backup_bundle::extract(&archive, &out, Some(&test_backup_key()))
+            .await
+            .unwrap();
         assert_eq!(summary.assets, 2);
 
         // Fresh installation: SQL rows come back with the restored database, bytes via restore_object.
@@ -1490,6 +1500,7 @@ mod tests {
             &target,
             "sqlite",
             Some(f.store.export_source().await.unwrap()),
+            crate::backup_bundle::Protection::Encrypted(test_backup_key()),
         )
         .await;
         assert!(matches!(
@@ -1508,6 +1519,7 @@ mod tests {
             &target,
             "sqlite",
             Some(f.store.export_source().await.unwrap()),
+            crate::backup_bundle::Protection::Encrypted(test_backup_key()),
         )
         .await;
         assert!(matches!(

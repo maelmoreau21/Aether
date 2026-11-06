@@ -1,5 +1,7 @@
-//! Administrator-only SQLite/PostgreSQL backups. Archives are unencrypted and contain secrets.
-use crate::{auth::AuthState, identity::Role};
+//! Administrator-only SQLite/PostgreSQL backups. Archives contain secrets and are encrypted
+//! (`MDBK0003`) with the operator key from `MEDIA_BACKUP_KEY_FILE` / `MEDIA_BACKUP_KEY`; without
+//! a key no archive is produced unless `MEDIA_BACKUP_ALLOW_UNENCRYPTED=true` is set explicitly.
+use crate::{auth::AuthState, backup_bundle::Protection, identity::Role};
 use axum::{
     Json, Router,
     body::Body,
@@ -26,7 +28,14 @@ struct Backups {
     gate: Arc<Semaphore>,
     worker: Mutex<Option<tokio::task::AbortHandle>>,
     configuration: BTreeMap<String, String>,
+    /// `None` when no valid key is configured: backups then fail closed.
+    protection: Option<Protection>,
 }
+
+const KEY_REQUIRED: (&str, &str) = (
+    "backup_key_required",
+    "Aucune clé de sauvegarde valide n’est configurée. Définissez MEDIA_BACKUP_KEY_FILE (64 caractères hexadécimaux, par ex. `openssl rand -hex 32`) puis redémarrez Core.",
+);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -95,11 +104,9 @@ fn environment_inputs() -> (Option<PathBuf>, BTreeMap<String, String>) {
     let directory = std::env::var_os("MEDIA_BACKUP_DIR")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
+    // Key settings are consumed (and stripped from the archived configuration) by `build_state`.
     let configuration = std::env::vars()
-        .filter(|(name, _)| {
-            (name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
-                && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
-        })
+        .filter(|(name, _)| name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
         .collect();
     (directory, configuration)
 }
@@ -122,8 +129,29 @@ async fn build_state(
     directory: Option<PathBuf>,
     mut configuration: BTreeMap<String, String>,
 ) -> Result<Backups, Box<dyn std::error::Error + Send + Sync>> {
-    configuration.remove("MEDIA_BACKUP_KEY");
-    configuration.remove("MEDIA_BACKUP_KEY_FILE");
+    let protection = {
+        let lookup = |name: &str| configuration.get(name).cloned();
+        match crate::backup_bundle::protection_from_settings(&lookup) {
+            Ok(Protection::Unencrypted) => {
+                eprintln!(
+                    "admin_backups: WARNING backups will be UNENCRYPTED (MEDIA_BACKUP_ALLOW_UNENCRYPTED)"
+                );
+                Some(Protection::Unencrypted)
+            }
+            Ok(protection) => Some(protection),
+            Err(error) => {
+                eprintln!("admin_backups: backups disabled: {error}");
+                None
+            }
+        }
+    };
+    for name in [
+        "MEDIA_BACKUP_KEY",
+        "MEDIA_BACKUP_KEY_FILE",
+        "MEDIA_BACKUP_ALLOW_UNENCRYPTED",
+    ] {
+        configuration.remove(name);
+    }
     let mut connection = auth.store.pool().acquire().await?;
     let source = if connection.backend_name() == "SQLite" {
         let rows = crate::database::query("PRAGMA database_list")
@@ -198,6 +226,7 @@ async fn build_state(
         gate: Arc::new(Semaphore::new(1)),
         worker: Mutex::new(None),
         configuration,
+        protection,
     })
 }
 
@@ -411,6 +440,11 @@ async fn list(
             ),
         }
     };
+    let (available, reason) = if available && state.protection.is_none() {
+        (false, Some(KEY_REQUIRED.1))
+    } else {
+        (available, reason)
+    };
     let schedule = load_schedule(&state).await?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
@@ -426,6 +460,11 @@ async fn list(
 }
 
 async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
+    // Fail closed before any snapshot: no key means no plaintext copy of the secrets on disk.
+    let protection = state
+        .protection
+        .clone()
+        .ok_or_else(|| BackupFailure::new(StatusCode::CONFLICT, KEY_REQUIRED.0, KEY_REQUIRED.1))?;
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -517,6 +556,7 @@ async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
         &directory.join(format!("{id}.media-backup")),
         engine,
         Some(assets),
+        protection,
     )
     .await
     .map_err(|error| {
@@ -905,6 +945,12 @@ mod tests {
             gate: Arc::new(Semaphore::new(1)),
             worker: Mutex::new(None),
             configuration: BTreeMap::new(),
+            protection: Some(Protection::Encrypted(
+                crate::backup_bundle::BackupKey::parse(
+                    "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12",
+                )
+                .unwrap(),
+            )),
         };
         assert!(!load_schedule(&state).await.unwrap().enabled);
         crate::database::query("UPDATE backup_schedule SET enabled=1,interval_minutes=60,next_due_at=0 WHERE singleton=1").execute(store.pool()).await.unwrap();

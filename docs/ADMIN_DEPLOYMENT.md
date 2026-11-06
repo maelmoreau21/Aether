@@ -3,7 +3,7 @@
 Les images Core et autonome incluent `media-backup`, `media-restore` et
 `media-recover`. Le Core conserve les sessions, utilisateurs, groupes, droits,
 clés API et plans de scans dans sa base applicative. Les sauvegardes complètes
-ajoutent la configuration serveur capturée à l'archive non chiffrée ; elles ne
+ajoutent la configuration serveur capturée à l'archive chiffrée (`MDBK0003`) ; elles ne
 contiennent pas les médias ni l'infrastructure externe.
 
 ## Deux modes conservés
@@ -34,10 +34,23 @@ d'un mode Unix ne prouve pas qu'aucune ACL supplémentaire ne donne accès.
 Ne pas changer les droits des dossiers médias pour résoudre un problème de
 sauvegarde.
 
-Les archives sont non chiffrées et contiennent des secrets applicatifs en clair.
-Réserver `/backups` à l'opérateur, protéger aussi toutes ses copies et ne pas
-servir ce dossier par le proxy Web. Le digest du paquet détecte la corruption
-accidentelle, pas une modification hostile. Voir [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md).
+Les archives `MDBK0003` sont chiffrées, mais le Core refuse d'en créer **sans clé** :
+après mise à jour, les sauvegardes manuelles et planifiées échouent avec
+`backup_key_required` tant que `MEDIA_BACKUP_KEY_FILE` n'est pas défini. Générer
+une clé hors du dépôt et hors du volume `/backups`, par exemple :
+
+```sh
+umask 077 && openssl rand -hex 32 > ./backup.key
+```
+
+puis l'exposer au conteneur en lecture seule (fichier ou secret Docker) et définir
+`MEDIA_BACKUP_KEY_FILE=/run/secrets/aether_backup_key`. Le fichier doit être lisible
+par l'UID/GID du service (`user:`), pas par les autres comptes du NAS. Redémarrer
+le Core. Copier la clé dans un gestionnaire de secrets : sans elle, les archives
+sont irrécupérables. Ne pas y réutiliser la clé publiée dans l'historique Git
+(voir [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md)). Les archives antérieures `MDBK0002`
+restent en place, lisibles et en clair : réserver `/backups` à l'opérateur, protéger
+leurs copies et ne pas servir ce dossier par le proxy Web.
 
 Pour les installations autonomes antérieures utilisant un volume anonyme créé
 par le `VOLUME` de l'image, inventorier et conserver ce volume avant de passer au

@@ -1,4 +1,4 @@
-//! Opt-in proof with real PostgreSQL 18 dump/restore and unencrypted Core state.
+//! Opt-in proof with real PostgreSQL 18 dump/restore and encrypted (MDBK0003) Core state.
 use axum::{
     Router,
     body::{Body, to_bytes},
@@ -12,6 +12,8 @@ use media_poc::{
 };
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
+
+const BACKUP_KEY: &str = "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12";
 
 async fn request(
     app: &Router,
@@ -82,10 +84,13 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
         auth,
         media.clone(),
         Some(temp.path().join("backups")),
-        std::collections::BTreeMap::from([(
-            "MEDIA_OIDC_CLIENT_SECRET".into(),
-            "synthetic-oidc-secret".into(),
-        )]),
+        std::collections::BTreeMap::from([
+            (
+                "MEDIA_OIDC_CLIENT_SECRET".into(),
+                "synthetic-oidc-secret".into(),
+            ),
+            ("MEDIA_BACKUP_KEY".into(), BACKUP_KEY.into()),
+        ]),
     )
     .await
     .unwrap();
@@ -96,15 +101,19 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
         serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
     let id = value["id"].as_str().unwrap();
     let output = temp.path().join("recovered");
-    let summary = media_poc::backup_bundle::extract(
-        &temp
-            .path()
-            .join("backups")
-            .join(format!("{id}.media-backup")),
-        &output,
-    )
-    .await
-    .unwrap();
+    let archive = temp
+        .path()
+        .join("backups")
+        .join(format!("{id}.media-backup"));
+    let bytes = std::fs::read(&archive).unwrap();
+    assert_eq!(&bytes[..8], b"MDBK0003");
+    for secret in [url.as_bytes(), &b"synthetic-oidc-secret"[..]] {
+        assert!(!bytes.windows(secret.len()).any(|part| part == secret));
+    }
+    let key = media_poc::backup_bundle::BackupKey::parse(BACKUP_KEY).unwrap();
+    let summary = media_poc::backup_bundle::extract(&archive, &output, Some(&key))
+        .await
+        .unwrap();
     assert_eq!(summary.engine, "postgres");
     let config: serde_json::Value =
         serde_json::from_slice(&std::fs::read(output.join("config.json")).unwrap()).unwrap();
@@ -140,6 +149,12 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'_')
         );
+        // Derived bookkeeping: opening a store re-runs the idempotent task-trigger migration, which
+        // derives triggers for the scan this test inserted after the source store had already
+        // migrated. These rows are not backup content (pre-existing expectation drift).
+        if matches!(table.as_str(), "task_trigger_migrations" | "task_triggers") {
+            continue;
+        }
         let sql = format!("SELECT COUNT(*) FROM \"{table}\"");
         let before: i64 = query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT COUNT(*) FROM \"{table}\""

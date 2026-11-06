@@ -10,6 +10,8 @@ const history = new Map<string, Record<string, Choice>>();
 const ROTATION_PERIOD_MS = 3_600_000;
 /** Scene images carry no title and can rotate like posters; logos stay stable. */
 const SCENE_KINDS = new Set(['backdrop', 'landscape', 'thumb']);
+/** Lower-priority poster languages join the rotation until it has this many images. */
+const MIN_ROTATION_POOL = 3;
 // Each catalogue page visit draws a new selection; it stays stable while the
 // page is open and when a work opened from it shows its details.
 const newVisit = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
@@ -94,10 +96,33 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
     }
     const interfaceLanguage = languages[0] || 'fr';
     const original = work.originalLanguage?.trim();
-    const selectionLanguages = kind === 'poster' && policy.languageMode
-      ? policy.languageMode === 'original' && original && /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(original)
-        ? [original] : [interfaceLanguage]
-      : rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
+    if (kind === 'poster' && policy.languageMode) {
+      // Priority tiers: chosen language, then the other one (interface/original), textless,
+      // English, everything else. Rotation fills its pool tier by tier so a single
+      // localized poster still alternates with the next best ones.
+      const knownOriginal = original && /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(original) ? original : undefined;
+      const order = (policy.languageMode === 'original' ? [knownOriginal, interfaceLanguage] : [interfaceLanguage, knownOriginal])
+        .filter((value): value is string => !!value).map(value => value.toLowerCase().split('-')[0]);
+      const tier = (language?: string | null) => {
+        const value = language?.toLowerCase().split('-')[0];
+        if (!value || ['und', 'xx', '00', 'zxx'].includes(value)) return 2;
+        const index = order.indexOf(value);
+        if (index >= 0) return index;
+        return value === 'en' ? 3 : 4;
+      };
+      const ranked = candidates.map(image => ({ image, rank: tier(image.language) }))
+        .sort((a, b) => a.rank - b.rank || (a.image.language ?? '').localeCompare(b.image.language ?? '') || a.image.id.localeCompare(b.image.id));
+      if (!ranked.length) continue;
+      if (!rotation) { selected[kind] = ranked[0].image.url; continue; }
+      const pool: typeof candidates = [];
+      for (const rank of [...new Set(ranked.map(entry => entry.rank))]) {
+        if (pool.length >= MIN_ROTATION_POOL) break;
+        pool.push(...ranked.filter(entry => entry.rank === rank).map(entry => entry.image));
+      }
+      selected[kind] = choose(work, kind, pool.slice(0, Math.max(policy.poolSize, MIN_ROTATION_POOL)), current, policy);
+      continue;
+    }
+    const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {
       candidates = candidates.filter(image => {
         const language = image.language?.toLowerCase();

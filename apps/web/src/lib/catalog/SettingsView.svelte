@@ -269,8 +269,8 @@
 
           <label>{$t('artwork_language')}
             <select bind:value={artworkRotation.languageMode} onchange={() => artworkEdited = true}>
-              <option value="interface">{$t('interface_language')}</option>
-              <option value="original">{$t('original_work_language')}</option>
+              <option value="interface">{$t('artwork_priority_interface')}</option>
+              <option value="original">{$t('artwork_priority_original')}</option>
             </select>
           </label>
           <p class="muted">{$t('artwork_fallback_note')}</p>

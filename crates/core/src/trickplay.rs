@@ -70,7 +70,7 @@ pub(crate) async fn queue_scanned_assets(
                 let key = format!(
                     "trickplay:{:x}",
                     Sha256::digest(format!(
-                        "{asset}:{size}:{modified}:{}:{}:{}",
+                        "{asset}:{size}:{modified}:{}:{}:{}:webp",
                         options.trickplay_width,
                         options.trickplay_interval_seconds,
                         options.trickplay_quality

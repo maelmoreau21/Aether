@@ -447,7 +447,7 @@
       <span class="knob" aria-hidden="true" style:left={`${percentOf(shownPosition, playback.duration)}%`}></span>
     {/if}
     {#if preview.hoverTime !== null && playback.duration > 0}
-      <output class="seek-preview" aria-hidden="true" bind:offsetWidth={tooltipWidth} style:left={`${tooltipLeft}px`}>
+      <output class="seek-preview" class:has-frame={!!previewFrame} aria-hidden="true" bind:offsetWidth={tooltipWidth} style:left={`${tooltipLeft}px`}>
         {#if previewFrame}
           <!-- Vignette au ratio exact de la tuile, mise à l'échelle (jamais rognée) :
                la planche est positionnée en pourcentages de la tuile affichée. -->
@@ -837,29 +837,38 @@
   }
 
   /* Aperçu au survol : vignette Trickplay, chapitre et horodatage. */
+  /* Carte en verre discret : la vignette remplit la carte, le temps est incrusté en bas. */
   .seek-preview {
     position: absolute;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + 10px);
     z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
     max-width: min(320px, 80vw);
     pointer-events: none;
     transform: translateX(-50%);
     color: #fff;
+    animation: seek-preview-in 120ms ease-out;
   }
+  .seek-preview.has-frame {
+    padding: 3px;
+    border-radius: 14px;
+    background: rgb(18 20 28 / 0.55);
+    border: 1px solid rgb(255 255 255 / 0.14);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.08);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  }
+  @keyframes seek-preview-in { from { opacity: 0; translate: 0 4px; } }
   .trickplay-frame {
     --trickplay-max-w: min(70vw, 320px);
     --trickplay-max-h: 180px;
     display: block;
     overflow: hidden;
     position: relative;
-    border-radius: var(--r-sm);
+    border-radius: 11px;
     background: #000;
-    /* Anneau extérieur : la bordure ne mange plus 4 px de l'image. */
-    box-shadow: 0 0 0 2px rgb(255 255 255 / 0.9), 0 10px 30px rgb(0 0 0 / 0.5);
   }
   .trickplay-frame img { position: absolute; display: block; height: auto; max-width: none; max-height: none; }
   .preview-label {
@@ -868,10 +877,26 @@
     align-items: center;
     max-width: 100%;
     padding: 4px 10px;
-    border-radius: var(--r-xs);
-    background: rgb(0 0 0 / 0.72);
+    border-radius: 999px;
+    background: rgb(18 20 28 / 0.62);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     text-align: center;
   }
+  .has-frame .preview-label {
+    position: absolute;
+    inset: auto 3px 3px;
+    max-width: none;
+    padding: 18px 10px 7px;
+    border: 0;
+    border-radius: 0 0 11px 11px;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.78), rgb(0 0 0 / 0));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+  }
+  .has-frame .preview-time { color: #fff; }
   .preview-chapter {
     display: -webkit-box;
     max-width: 260px;

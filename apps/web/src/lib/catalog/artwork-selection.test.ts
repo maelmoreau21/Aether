@@ -131,9 +131,9 @@ test('an explicitly empty library selection disables rotation for every library'
 test('poster language follows interface or the known original language, with interface fallback', () => {
   const images = [variant('fr', 'poster', 'fr'), variant('ja', 'poster', 'ja'), variant('en', 'poster', 'en')];
   const item = { ...work, originalLanguage: 'ja', imageVariants: images };
-  setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: 'interface' });
+  setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'interface' });
   expect(selectArtwork(item, current, ['fr', 'en']).poster).toBe('/images/fr');
-  setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: 'original' });
+  setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'original' });
   expect(selectArtwork(item, current, ['fr', 'en']).poster).toBe('/images/ja');
   expect(selectArtwork({ ...item, originalLanguage: null }, current, ['fr', 'en']).poster).toBe('/images/fr');
   expect(selectArtwork({ ...item, originalLanguage: 'de' }, current, ['fr', 'en']).poster).toBe('/images/fr');
@@ -153,19 +153,37 @@ test('logos follow the interface language, fall back to neutral, then to a text 
 
 
 test('manual imports join the language pool; only explicit pins override language and rotation', () => {
-  setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: 'interface' });
+  setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'interface' });
   const images = [variant('manual-ja', 'poster', 'ja', 'manual'), variant('fr', 'poster', 'fr-CA')];
   expect(selectArtwork({ ...work, originalLanguage: 'ja', imageVariants: images }, current, ['fr-FR']).poster).toBe('/images/fr');
   images[0].pinned = true;
   expect(selectArtwork({ ...work, imageVariants: images }, current, ['fr']).poster).toBe('/images/manual-ja');
 });
 
-test('VO uses the known original, then neutral, interface, English, and other languages', () => {
+test('VO uses the known original, then interface, neutral, English, and other languages', () => {
   setArtworkRotationPolicy({ ...policy, enabled: false, languageMode: 'original' });
   const images = [variant('english', 'poster', 'en-US'), variant('french', 'poster', 'fr-CA'), variant('neutral', 'poster'), variant('japanese', 'poster', 'ja')];
   const item = { ...work, originalLanguage: 'ja', imageVariants: images };
   expect(selectArtwork(item, current, ['fr-FR']).poster).toBe('/images/japanese');
-  expect(selectArtwork({ ...item, imageVariants: images.slice(0, 3) }, current, ['fr-FR']).poster).toBe('/images/neutral');
+  expect(selectArtwork({ ...item, imageVariants: images.slice(0, 3) }, current, ['fr-FR']).poster).toBe('/images/french');
+  expect(selectArtwork({ ...item, imageVariants: [images[0], images[2]] }, current, ['fr-FR']).poster).toBe('/images/neutral');
   expect(selectArtwork({ ...item, originalLanguage: 'en' }, current, ['fr-FR']).poster).toBe('/images/english');
   expect(selectArtwork({ ...item, originalLanguage: null }, current, ['fr-FR']).poster).toBe('/images/french');
+});
+
+test('poster rotation keeps the priority tiers and only widens a too small first tier', () => {
+  const seen = (images: ReturnType<typeof variant>[], mode: 'interface' | 'original') => {
+    setArtworkRotationPolicy({ ...policy, enabled: true, languageMode: mode, poolSize: 12 });
+    const urls = new Set<string>();
+    for (let visit = 0; visit < 40; visit++) {
+      renewArtworkVisit();
+      urls.add(selectArtwork({ ...work, originalLanguage: 'ja', imageVariants: images }, current, ['fr-FR']).poster!);
+    }
+    return urls;
+  };
+  const mixed = [variant('fr', 'poster', 'fr'), variant('ja', 'poster', 'ja'), variant('en', 'poster', 'en'), variant('de', 'poster', 'de')];
+  expect([...seen(mixed, 'interface')].sort()).toEqual(['/images/en', '/images/fr', '/images/ja']);
+  const french = [variant('fr1', 'poster', 'fr'), variant('fr2', 'poster', 'fr-FR'), variant('fr3', 'poster', 'fr'), variant('ja2', 'poster', 'ja')];
+  expect([...seen(french, 'interface')].sort()).toEqual(['/images/fr1', '/images/fr2', '/images/fr3']);
+  expect(seen(french, 'original').has('/images/ja2')).toBe(true);
 });

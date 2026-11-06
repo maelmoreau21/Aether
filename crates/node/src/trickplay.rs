@@ -264,6 +264,10 @@ impl TrickplayManager {
         {
             return None;
         }
+        // Legacy JPEG sheets are regenerated as WebP once this Node's FFmpeg can encode it.
+        if meta.mime == "image/jpeg" && self.enabled && self.supports_libwebp().await {
+            return None;
+        }
 
         // Validate that the first and last sheets actually exist on disk and are non-empty.
         let extension = sheet_extension(&meta.mime)?;
@@ -722,6 +726,9 @@ impl TrickplayManager {
 
         match publish_work_dir(&work, &target).await {
             Ok(_) => {
+                if request.chapter_time.is_none() {
+                    self.remove_superseded(&request.asset_id, key).await;
+                }
                 self.enforce_quota().await;
                 Ok(())
             }
@@ -878,6 +885,29 @@ impl TrickplayManager {
             .verify_unchanged_sync()
             .map_err(|_| "source_changed")?;
         Ok(())
+    }
+
+    /// A modified source or a new profile publishes under a new fingerprint: earlier
+    /// preview grids of the same asset are obsolete and removed (chapter images stay).
+    async fn remove_superseded(&self, asset_id: &str, keep: &str) {
+        let Ok(mut read_dir) = tokio::fs::read_dir(&self.cache_root).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == keep || !cache_key(&name) {
+                continue;
+            }
+            let Ok(bytes) = tokio::fs::read(entry.path().join("manifest.json")).await else {
+                continue;
+            };
+            let Ok(meta) = serde_json::from_slice::<CacheManifest>(&bytes) else {
+                continue;
+            };
+            if meta.asset_id == asset_id && (meta.columns > 1 || meta.rows > 1) {
+                remove_dir_tolerant(&entry.path()).await;
+            }
+        }
     }
 
     /// Enforce global cache size quota using LRU eviction.
@@ -1299,8 +1329,14 @@ mod tests {
         };
         let cache = temp.path().join("cache");
         std::fs::create_dir(&cache).unwrap();
-        let manager =
-            TrickplayManager::new(cache.clone(), 16 * 1024 * 1024, "ffmpeg".into(), true, None);
+        // No FFmpeg here: legacy JPEG caches stay valid when WebP cannot be produced.
+        let manager = TrickplayManager::new(
+            cache.clone(),
+            16 * 1024 * 1024,
+            "aether-missing-ffmpeg".into(),
+            true,
+            None,
+        );
         let key = manager.fingerprint(&request);
         let image = image::DynamicImage::new_rgb8(320, 180);
         let jellyfin = media.join("film.mkv.trickplay").join("320 - 1x1");
@@ -1334,8 +1370,13 @@ mod tests {
                 serde_json::to_vec(&metadata).unwrap(),
             )
             .unwrap();
-            let restarted =
-                TrickplayManager::new(cache.clone(), 16 * 1024 * 1024, "ffmpeg".into(), true, None);
+            let restarted = TrickplayManager::new(
+                cache.clone(),
+                16 * 1024 * 1024,
+                "aether-missing-ffmpeg".into(),
+                true,
+                None,
+            );
             assert_eq!(
                 restarted.check_native_cache(&request).await.unwrap().mime,
                 mime

@@ -96,6 +96,7 @@ Le cache Trickplay est administré par le `TrickplayManager` du Media Node :
   - La largeur demandée (`width`)
   - L'intervalle (`interval_ms`)
   - Le niveau de qualité JPEG (`quality`)
+- **Format WebP** : dès que le FFmpeg du nœud fournit `libwebp`, les planches sont en WebP ; un ancien cache JPEG est ignoré et régénéré. Après publication, les anciennes planches du même asset (média modifié, profil changé) sont supprimées.
 - **Manifeste persistant** :
   Chaque dossier de cache validé contient un fichier `manifest.json` précisant les paramètres (dimensions, nombre de planches, intervalle, nombre de colonnes et de lignes).
 - **Quota global et éviction LRU** :

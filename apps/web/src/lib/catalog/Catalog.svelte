@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { loadArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
+  import { provideQuickPlay } from './quick-play';
   import { serverPresentation } from '../config/presentation';
   import { ensurePreferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
@@ -302,6 +303,7 @@
     }
   }
 
+  provideQuickPlay(work => handleDirectPlay(work));
   async function handleDirectPlay(work: Work): Promise<void> {
     if (work.kind === 'series') {
       // detailUrl already applies SvelteKit resolve to the route and base.

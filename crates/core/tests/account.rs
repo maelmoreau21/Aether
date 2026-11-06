@@ -333,7 +333,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
     );
     assert_eq!(
         body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
-        json!({"uploadAllowed":false,"removeAllowed":false})
+        json!({"uploadAllowed":true,"removeAllowed":false})
     );
     let package = media_extension_sdk::Package {
         manifest: media_extension_sdk::Manifest {
@@ -361,7 +361,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
     .unwrap();
     assert_eq!(
         body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
-        json!({"uploadAllowed":false,"removeAllowed":false})
+        json!({"uploadAllowed":true,"removeAllowed":false})
     );
     media_poc::database::query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,0,0,0) ON CONFLICT(singleton) DO UPDATE SET allow_custom=0")
         .execute(store.pool())
@@ -375,6 +375,10 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         .execute(store.pool())
         .await
         .unwrap();
+    assert_eq!(
+        body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
+        json!({"uploadAllowed":true,"removeAllowed":false})
+    );
     assert_eq!(
         req(
             &app,
@@ -394,7 +398,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         .unwrap();
     assert_eq!(
         body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
-        json!({"uploadAllowed":false,"removeAllowed":false})
+        json!({"uploadAllowed":true,"removeAllowed":false})
     );
     assert_eq!(
         req(

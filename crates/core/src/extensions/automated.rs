@@ -506,10 +506,7 @@ pub(crate) async fn run_automated(
     // providers or an NFO are picked up), then surfaces it for manual identify.
     if unidentified_search(music_track.is_none(), operation, &result) {
         drop(tx);
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            UNIDENTIFIED_ERROR,
-        ));
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, UNIDENTIFIED_ERROR));
     }
     let _ = crate::automation::put_cached_provider_response(
         &mut tx,

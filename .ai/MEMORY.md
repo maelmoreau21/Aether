@@ -17,6 +17,18 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 6 novembre 2026 — CI formatage et attentes des tests d’avatars
+
+- Formatage de `extensions/automated.rs` corrigé. Test `account` aligné sur le
+  contrat natif actuel (`allowCustom=true` par défaut), avec indépendance des
+  extensions vérifiée avant/après activation de la politique persistée.
+- Test `settings_avatars` : politique restrictive configurée explicitement par
+  l’API admin ; envoi dépassant 2 Mio attendu en 413 (limite HTTP), petits envois
+  interdits en 403. Aucun changement du comportement produit.
+- Vérifié sous Windows : `cargo fmt --check`, `git diff --check`, tests
+  `account` (4/4) et `settings_avatars` (2/2), avec `--locked --all-features`.
+  Shard complet et confirmation Linux/GitHub CI non exécutés.
+
 ## 6 novembre 2026 — Activation et visibilité des statistiques
 
 - Collecte conservée désactivée par défaut. Admin : seul contrôle d’activation

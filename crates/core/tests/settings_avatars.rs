@@ -239,11 +239,35 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
             .is_client_error()
         );
     }
-    // Gallery-only avatars are mandatory for both administrators and users.
-    for (mime, bytes) in [
-        ("image/png", picture()),
-        ("image/svg+xml", b"<svg></svg>".to_vec()),
-        ("image/png", vec![0; 2 * 1024 * 1024 + 1]),
+    // Explicitly restrict both administrators and users to mandatory gallery avatars.
+    assert_eq!(
+        request(
+            &app,
+            "/api/v1/admin/avatar-policy",
+            "PUT",
+            &cookie,
+            &csrf,
+            "application/json",
+            json!({"allowCustom":false,"allowGravatar":false,"assignOnCreate":true,"requireAvatar":true})
+                .to_string()
+                .into_bytes()
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    for (mime, bytes, expected) in [
+        ("image/png", picture(), StatusCode::FORBIDDEN),
+        (
+            "image/svg+xml",
+            b"<svg></svg>".to_vec(),
+            StatusCode::FORBIDDEN,
+        ),
+        (
+            "image/png",
+            vec![0; 2 * 1024 * 1024 + 1],
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
     ] {
         assert_eq!(
             request(
@@ -257,7 +281,7 @@ async fn settings_and_avatars_are_persistent_account_scoped_and_validated() {
             )
             .await
             .status(),
-            StatusCode::FORBIDDEN
+            expected
         );
     }
     let policy = request(

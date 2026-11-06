@@ -201,6 +201,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     result
 }
 
+/// Checksummed text of the one-shot translation backfill; bump it only with the step's meaning.
+const COMPAT_TRANSLATIONS_BACKFILL: &str = "translations_backfill v1: editorial_json/manual_json 'translations' -> work_translations (source legacy, ON CONFLICT DO NOTHING)";
+
 /// Re-run on every start, in this order; each file is additive and idempotent.
 const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
     (
@@ -230,6 +233,10 @@ const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
     (
         "person_images",
         include_str!("../migrations/person_images.sql"),
+    ),
+    (
+        "metadata_translations",
+        include_str!("../migrations/metadata_translations.sql"),
     ),
     (
         "quick_connect",
@@ -534,6 +541,17 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
         journal::run_idempotent(&mut tx, name, sql).await?;
     }
     journal::apply_versioned(&mut tx, sqlite, journal::VERSIONED_STEPS).await?;
+    // Per-language texts kept as JSON by older versions become rows; the JSON stays.
+    if !journal::recorded(&mut tx, "compat:translations_backfill").await? {
+        crate::translations::backfill_legacy_blobs(&mut tx).await?;
+        journal::record(
+            &mut tx,
+            "compat:translations_backfill",
+            "compat",
+            COMPAT_TRANSLATIONS_BACKFILL,
+        )
+        .await?;
+    }
     tx.commit().await
 }
 

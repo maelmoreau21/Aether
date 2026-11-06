@@ -36,6 +36,22 @@ describe('session catalogue SWR cache', () => {
     await Promise.resolve();
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
+  it('drops pages rendered in the previous language once the new language is stored', async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json(page())));
+    vi.stubGlobal('fetch', fetcher);
+    // The module registers its listener on `window` at import time: provide one first.
+    const browser = new EventTarget();
+    vi.stubGlobal('window', browser);
+    vi.resetModules();
+    const fresh = await import('./page-cache');
+    await fresh.loadCatalog('home', '/api/v1/catalog');
+    expect(fresh.cachedCatalog('home')).toBeDefined();
+    browser.dispatchEvent(new Event('media-locale-saved'));
+    expect(fresh.cachedCatalog('home')).toBeUndefined();
+    await fresh.loadCatalog('home', '/api/v1/catalog');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fresh.invalidateCatalog();
+  });
   it('deduplicates and serves ten fresh returns with zero extra requests', async () => {
     const fetcher=vi.fn().mockResolvedValue(Response.json(page())); vi.stubGlobal('fetch',fetcher);
     await Promise.all([loadCatalog('home','/api/v1/catalog'),loadCatalog('home','/api/v1/catalog')]);

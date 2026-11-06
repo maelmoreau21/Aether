@@ -54,6 +54,8 @@ export function invalidateCatalog(library?: string, notify = true): void {
 }
 onSessionGenerationChange(() => { scrolls.clear(); invalidateCatalog(undefined, false); });
 if (typeof window !== 'undefined') window.addEventListener('media-access-denied', () => invalidateCatalog(undefined, false));
+// Pages are rendered in the account's metadata language: a language change makes them stale.
+if (typeof window !== 'undefined') window.addEventListener('media-locale-saved', () => invalidateCatalog());
 // Progress affects latest shelves, not the rest of the inventory. Do not
 // trigger a catalog reload while the player is open.
 export function invalidateLatestCatalog(): void {

@@ -21,7 +21,10 @@ d'acceptation et n'a pas été modifié.
    `compat:task_constraints` (Rust, `database/task_schema.rs` : catégorie/largeur
    `trickplay`, marqueurs `recap`/`preview`, reconstruction SQLite de la table), puis
    les fichiers idempotents `IDEMPOTENT_STEPS`, le seed Rust des groupes de rôles,
-   `IDEMPOTENT_STEPS_AFTER_GROUPS`, enfin les étapes `VERSIONED_STEPS` (vide aujourd'hui).
+   `IDEMPOTENT_STEPS_AFTER_GROUPS`, enfin les étapes `VERSIONED_STEPS` (vide aujourd'hui), puis l'étape Rust unique
+   `compat:translations_backfill` (JSON `translations` → `work_translations`, voir
+   [METADATA_LOCALIZATION.md](METADATA_LOCALIZATION.md)). Elle n'est inscrite au journal
+   qu'avec ses écritures, dans la même transaction : un échec la rejoue au démarrage suivant.
 
 Conséquence : **un objet ajouté à `schema.sql` n'atteint pas les bases existantes**.
 Il doit aussi être créé par un fichier idempotent ou une étape versionnée. Le test

@@ -342,10 +342,6 @@ pub(super) async fn apply(
         }
     }
 
-    if let Some(v) = proposal.get("translations").filter(|v| v.is_object()) {
-        metadata_map.insert("translations".into(), v.clone());
-    }
-
     metadata_map.insert("external_ids".into(), json!(external_ids));
     metadata_map.insert(
         "provenance".into(),
@@ -362,6 +358,16 @@ pub(super) async fn apply(
     .bind(serde_json::to_string(&metadata_map).unwrap_or_default())
     .bind(&input.work_id)
     .execute(&mut *tx)
+    .await
+    .map_err(db)?;
+
+    // Per-language texts go to the translation tables, one source per provider.
+    crate::translations::store_proposal_translations(
+        &mut tx,
+        &input.provider,
+        &input.work_id,
+        &proposal,
+    )
     .await
     .map_err(db)?;
 

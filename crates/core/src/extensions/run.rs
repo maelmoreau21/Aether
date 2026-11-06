@@ -298,6 +298,13 @@ pub(super) async fn run_with_context(
         payload["country"] = settings["country"].clone();
         payload["countryCode"] = settings["countryCode"].clone();
     }
+    if input.operation == "metadata.details" {
+        // Plugins on the first contract ignore this field and answer in one language.
+        let wanted = crate::translations::wanted_locales(&auth.store, preferred_lang, 6)
+            .await
+            .map_err(db)?;
+        payload["languages"] = json!(wanted);
+    }
     payload = metadata_input_with_settings(payload, settings);
     let operation = input.operation.clone();
     let invocation = crate::extensions::runtime::Invocation {

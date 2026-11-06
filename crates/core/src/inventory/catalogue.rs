@@ -120,6 +120,9 @@ pub struct CatalogueFilter {
     pub codec: Option<String>,
     pub language: Option<String>,
     pub person: Option<String>,
+    /// Metadata locale chain of the caller. Part of the cache key through `Debug`:
+    /// two languages never share a rendered page. Empty keeps the stored language.
+    pub locale_chain: Vec<String>,
 }
 fn push_search_filter(
     builder: &mut sqlx::QueryBuilder<sqlx::Any>,
@@ -786,6 +789,7 @@ pub async fn catalogue_page(
         .filter_map(|id| row_map.remove(*id))
         .collect();
     crate::product::decorate_many(store, &mut items).await?;
+    crate::translations::localize_values(store, &mut items, &filter.locale_chain).await?;
 
     let response = json!({
         "items": items,
@@ -1147,6 +1151,20 @@ pub struct EpisodePage {
 
 pub async fn detail(store: &IdentityStore, work_id: &str) -> Result<Option<Value>, sqlx::Error> {
     detail_window(store, work_id, None).await
+}
+
+/// `detail_window` rendered in the caller's metadata language.
+pub async fn detail_window_localized(
+    store: &IdentityStore,
+    work_id: &str,
+    page: Option<&EpisodePage>,
+    chain: &[String],
+) -> Result<Option<Value>, sqlx::Error> {
+    let mut value = detail_window(store, work_id, page).await?;
+    if let Some(value) = value.as_mut() {
+        crate::translations::localize_detail(store, value, chain).await?;
+    }
+    Ok(value)
 }
 
 pub async fn detail_window(

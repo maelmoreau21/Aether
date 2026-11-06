@@ -60,6 +60,20 @@ pub(super) async fn record(
     Ok(())
 }
 
+/// Whether a step name is already in the journal; one-shot Rust data steps use it so
+/// the step and its journal row commit (or roll back) together in the caller's transaction.
+pub(super) async fn recorded(
+    tx: &mut Transaction<'_, Any>,
+    name: &str,
+) -> Result<bool, sqlx::Error> {
+    let found: Option<String> =
+        super::query_scalar("SELECT name FROM schema_migrations WHERE name=?")
+            .bind(name)
+            .fetch_optional(&mut **tx)
+            .await?;
+    Ok(found.is_some())
+}
+
 /// Run an idempotent script and journal it.
 pub(super) async fn run_idempotent(
     tx: &mut Transaction<'_, Any>,

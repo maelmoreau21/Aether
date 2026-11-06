@@ -21,6 +21,7 @@ fn test_structured_metadata_roundtrip() {
         title: Some("Fight Club".into()),
         original_title: Some("Fight Club".into()),
         original_language: Some("en".into()),
+        locale: Some("en-US".into()),
         tagline: Some("Mischief. Mayhem. Soap.".into()),
         synopsis: Some("An insomniac office worker...".into()),
         year: Some(1999),
@@ -146,4 +147,73 @@ fn test_host_http_contract() {
     // On non-wasm32, host_http_fetch returns a typed unsupported_platform error
     let err = host_http_fetch(&req).unwrap_err();
     assert_eq!(err.code, "unsupported_platform");
+}
+
+#[test]
+fn localization_fields_are_additive_in_both_directions() {
+    use media_extension_sdk::{
+        DetailsRequest, EpisodeMetadata, LOCALIZATION_CONTRACT, SeasonMetadata, TranslationItem,
+    };
+    assert_eq!(LOCALIZATION_CONTRACT, 2);
+
+    // A request from a first-contract Core has no `languages`: it still parses, empty.
+    let old: DetailsRequest = serde_json::from_str(r#"{"id":"550","mediaType":"movie"}"#).unwrap();
+    assert!(old.languages.is_empty());
+    // A second-contract request round-trips; the field is omitted when empty so a
+    // first-contract plugin never sees a key it does not know.
+    let new = DetailsRequest {
+        id: "550".into(),
+        languages: vec!["fr-FR".into(), "en-GB".into()],
+        ..Default::default()
+    };
+    let json = serde_json::to_value(&new).unwrap();
+    assert_eq!(json["languages"], serde_json::json!(["fr-FR", "en-GB"]));
+    assert!(
+        serde_json::to_value(DetailsRequest::default())
+            .unwrap()
+            .get("languages")
+            .is_none()
+    );
+
+    // A first-contract answer (no locale, no season/episode translations) still parses.
+    let legacy: StructuredMetadata = serde_json::from_str(
+        r#"{"provider":"tmdb","providerId":"1","title":"T","translations":{"fr":{"title":"Titre"}},
+            "seasons":[{"seasonNumber":1,"episodes":[{"episodeNumber":1,"title":"E"}]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(legacy.locale, None);
+    assert!(
+        legacy.seasons[0].translations.is_empty()
+            && legacy.seasons[0].episodes[0].translations.is_empty()
+    );
+
+    // A second-contract answer keeps regional keys and per-episode languages.
+    let item = |t: &str| TranslationItem {
+        title: Some(t.into()),
+        ..Default::default()
+    };
+    let meta = StructuredMetadata {
+        provider: "tmdb".into(),
+        provider_id: "1".into(),
+        locale: Some("fr-FR".into()),
+        translations: BTreeMap::from([
+            ("fr-FR".into(), item("Titre")),
+            ("fr-CA".into(), item("Titre QC")),
+        ]),
+        seasons: vec![SeasonMetadata {
+            season_number: 1,
+            translations: BTreeMap::from([("en-US".into(), item("Season 1"))]),
+            episodes: vec![EpisodeMetadata {
+                episode_number: 1,
+                translations: BTreeMap::from([("en-US".into(), item("Pilot"))]),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let back: StructuredMetadata =
+        serde_json::from_value(serde_json::to_value(&meta).unwrap()).unwrap();
+    assert_eq!(back, meta);
+    assert_eq!(back.translations.len(), 2, "fr-FR and fr-CA stay distinct");
 }

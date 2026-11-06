@@ -1791,7 +1791,11 @@ export const locale = writable<SupportedLocale>(getInitialLocale());
 
 export function setLocale(newLocale: SupportedLocale, persist = true) {
   locale.set(newLocale);
-  if (persist) savePreferences({ locale: newLocale });
+  // The server renders titles and summaries in the account's saved language: caches filled
+  // in the previous language are dropped only once that preference is stored.
+  if (persist) void savePreferences({ locale: newLocale }).finally(() => {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('media-locale-saved'));
+  });
   if (typeof window !== 'undefined') {
     try { localStorage.setItem('media_locale', newLocale); } catch { /* Optional cache. */ }
     document.documentElement.lang = newLocale;

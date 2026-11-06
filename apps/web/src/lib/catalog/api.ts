@@ -80,6 +80,14 @@ function syncCacheWithSession(): void {
   }
 }
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('media-locale-saved', () => {
+    descriptorCache.clear();
+    demoFetchPromise = null;
+    cacheGeneration += 1;
+  });
+}
+
 onSessionGenerationChange(newSessionGen => {
   descriptorCache.clear();
   demoFetchPromise = null;

@@ -15,6 +15,12 @@ struct Preferences {
     theme: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     locale: Option<String>,
+    /// Language of titles, summaries and artwork, independent of the interface language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata_locale: Option<String>,
+    /// Tried in order when `metadata_locale` has no translation (at most four).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata_fallback_locales: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     home_sections: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -194,6 +200,16 @@ impl Preferences {
                 .locale
                 .as_deref()
                 .is_none_or(|v| matches!(v, "fr" | "en"))
+            && self
+                .metadata_locale
+                .as_deref()
+                .is_none_or(|v| crate::metadata_locale::normalize(v).is_some())
+            && self.metadata_fallback_locales.as_ref().is_none_or(|list| {
+                list.len() <= 4
+                    && list
+                        .iter()
+                        .all(|v| crate::metadata_locale::normalize(v).is_some())
+            })
             && self.audio_language.as_deref().is_none_or(language)
             && self
                 .subtitles

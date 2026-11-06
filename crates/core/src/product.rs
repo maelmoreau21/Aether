@@ -380,6 +380,10 @@ struct Editorial {
     backdrop_url: Option<String>,
     #[serde(default)]
     minimum_age: Option<i64>,
+    /// Language of `title`, `tagline` and `plot`. Omitted: the correction is
+    /// language-neutral and shown to everyone, as before translations existed.
+    #[serde(default)]
+    locale: Option<String>,
 }
 async fn metadata(
     State(auth): State<AuthState>,
@@ -408,12 +412,40 @@ async fn metadata(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let scoped = match input.locale.as_deref() {
+        Some(locale) => {
+            Some(crate::metadata_locale::normalize(locale).ok_or(StatusCode::BAD_REQUEST)?)
+                .filter(|locale| locale != crate::metadata_locale::NEUTRAL)
+        }
+        None => None,
+    };
+    // A correction scoped to one language must not turn the neutral texts into that language.
+    let previous: Option<Value> =
+        query_scalar::<_, Option<String>>("SELECT manual_json FROM inventory_works WHERE id=?")
+            .bind(&work)
+            .fetch_optional(&auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok());
+    let kept = |key: &str| {
+        previous
+            .as_ref()
+            .and_then(|p| p.get(key))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let (title, tagline, plot) = if scoped.is_some() {
+        (kept("title"), kept("tagline"), kept("plot"))
+    } else {
+        (json!(input.title), json!(input.tagline), json!(input.plot))
+    };
     let value = json!({
-        "title": input.title,
+        "title": title,
         "original_title": input.original_title,
-        "tagline": input.tagline,
+        "tagline": tagline,
         "year": input.year,
-        "plot": input.plot,
+        "plot": plot,
         "genres": input.genres,
         "tags": input.tags.iter().map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
         "directors": input.directors,
@@ -444,6 +476,22 @@ async fn metadata(
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+    if let Some(locale) = scoped {
+        crate::translations::upsert_work(
+            &mut tx,
+            &work,
+            &crate::translations::Translation {
+                locale,
+                source: crate::metadata_locale::SOURCE_MANUAL.into(),
+                title: Some(input.title.clone()),
+                overview: Some(input.plot.clone()),
+                tagline: input.tagline.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
     crate::consolidation::consolidate_work_tx(&mut tx, &work)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -471,6 +519,14 @@ async fn reset_metadata(
     query("UPDATE inventory_works SET manual_json=NULL,minimum_age=NULL WHERE id=?")
         .bind(&work)
         .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("DELETE FROM work_translations WHERE work_id=? AND source='manual'")
+        .bind(&work)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::translations::bump_generation(&mut tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _ = crate::consolidation::consolidate_work_tx(&mut tx, &work).await;

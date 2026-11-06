@@ -39,6 +39,7 @@ pub mod libraries;
 pub mod library_options;
 mod local_mounts;
 pub mod media;
+pub mod metadata_locale;
 pub mod music;
 pub mod node;
 pub mod nodes;
@@ -53,6 +54,7 @@ mod provider_download;
 pub mod recommendations;
 pub mod scans;
 pub mod statistics;
+pub mod translations;
 pub mod trickplay;
 pub mod user_media_policy;
 

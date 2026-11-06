@@ -926,8 +926,11 @@ pub async fn apply_missing_metadata(
                     .await?;
             }
         }
-        if let Some(trans) = proposal.get("translations").filter(|v| v.is_object()) {
-            fields.insert("translations".into(), trans.clone());
+        // Provider translations never replace each other's or manual rows: they are
+        // stored per (locale, provider) and ranked when read.
+        if crate::translations::store_proposal_translations(tx, extension, &work, proposal).await?
+            > 0
+        {
             changed = true;
         }
         let kind: Option<String> = query_scalar("SELECT kind FROM inventory_works WHERE id=?")

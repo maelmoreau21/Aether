@@ -92,7 +92,9 @@ pub async fn router(
 }
 
 fn environment_inputs() -> (Option<PathBuf>, BTreeMap<String, String>) {
-    let directory = std::env::var_os("MEDIA_BACKUP_DIR").map(PathBuf::from);
+    let directory = std::env::var_os("MEDIA_BACKUP_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
     let configuration = std::env::vars()
         .filter(|(name, _)| {
             (name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
@@ -152,7 +154,15 @@ async fn build_state(
         .as_ref()
         .and_then(|source| source.parent())
         .map(|parent| parent.join("backups"))
-        .unwrap_or(std::env::current_dir()?.join("backups"));
+        .unwrap_or_else(|| {
+            if DiskPath::new("/backups").is_dir() {
+                PathBuf::from("/backups")
+            } else if DiskPath::new("/data").is_dir() {
+                PathBuf::from("/data/backups")
+            } else {
+                PathBuf::from("backups")
+            }
+        });
     let directory = Some(directory.unwrap_or(default_directory));
     if let Some(directory) = &directory {
         configuration.insert(
@@ -247,7 +257,12 @@ fn safe_directory(directory: &DiskPath, media_root: &DiskPath) -> Result<(), Sta
     if let Ok(metadata) = std::fs::symlink_metadata(directory) {
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o077 != 0 {
-            return Err(StatusCode::CONFLICT);
+            eprintln!(
+                "admin_backups: backup directory {:?} must have mode 0700 (current {:o})",
+                directory,
+                metadata.permissions().mode() & 0o777
+            );
+            return Err(StatusCode::FORBIDDEN);
         }
     }
     for ancestor in directory.ancestors().filter(|p| !p.as_os_str().is_empty()) {
@@ -380,6 +395,13 @@ async fn list(
                     }
                 }
             }
+            Err(StatusCode::FORBIDDEN) => (
+                false,
+                Some(
+                    "Le dossier de sauvegarde doit être privé (permissions 0700). Vérifiez aussi qu’il appartient à l’UID/GID du conteneur.",
+                ),
+                Vec::new(),
+            ),
             Err(_) => (
                 false,
                 Some(
@@ -943,6 +965,25 @@ mod tests {
         assert!(!valid_id("../secret"));
         assert!(!valid_id("00000000-0000-0000-0000-000000000000"));
         assert!(valid_id(&uuid::Uuid::new_v4().to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_policy_reports_non_private_mount_without_changing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let backups = root.path().join("backups");
+        let media = root.path().join("media");
+        std::fs::create_dir(&backups).unwrap();
+        std::fs::create_dir(&media).unwrap();
+        std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(safe_directory(&backups, &media), Err(StatusCode::FORBIDDEN));
+        assert_eq!(
+            std::fs::metadata(&backups).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(safe_directory(&backups, &media).is_ok());
     }
 
     #[cfg(unix)]

@@ -593,20 +593,23 @@ pour créer une collection, soit `packId` pour ajouter à une collection native
 existante, avec les champs `images`. Les deux champs sont exclusifs ; une
 collection est limitée à 500 images. Session administrateur et CSRF requis.
 
-Les avatars de compte sont obligatoires et choisis exclusivement dans la galerie.
-`GET /api/v1/account/avatar/policy` retourne toujours
-`{uploadAllowed:false,removeAllowed:false}`. `PUT` et `DELETE` sur
-`/api/v1/account/avatar` exigent une session et CSRF puis renvoient `403` ; un
-ancien réglage ou une extension ne peut les réautoriser. `GET` et `HEAD` servent
-l'avatar attribué, avec un SVG local de secours si nécessaire. Les anciens
-choix sont conservés. L'application directe d'un avatar généré par extension
-(`apply:true`) renvoie également `403` (`avatar_gallery_required`).
+Les avatars de compte sont obligatoires par défaut. `GET`/`PUT
+/api/v1/admin/avatar-policy` (administrateur, CSRF pour PUT) lit/enregistre
+`{allowCustom:true,allowGravatar:false,assignOnCreate:true,requireAvatar:true}`.
+Les réglages existants d’import et d’attribution sont conservés ; `requireAvatar`
+vaut true si absent. Le réglage Gravatar est retiré (true est refusé en 422).
+`GET /api/v1/account/avatar/policy` retourne `{uploadAllowed,removeAllowed}` :
+import selon `allowCustom`, suppression uniquement si `requireAvatar:false`.
+`PUT /api/v1/account/avatar` normalise PNG/JPEG/WebP (2 Mio maximum) ; DELETE
+supprime la référence. Session et CSRF requis, 403 si l’action est interdite.
+`GET`/`HEAD` servent l’image ; sans image, 404 si facultative ou SVG local si
+obligatoire. Les comptes obligatoires sans image sont complétés au démarrage.
+L’attribution à la création s’applique si `assignOnCreate` ou `requireAvatar`.
+Le bouton administrateur d’attribution des manquants reste une action explicite,
+même lorsque les avatars sont facultatifs. Les anciens choix sont conservés.
+L’application directe d’un avatar généré par extension (`apply:true`) reste
+refusée en 403 (`avatar_gallery_required`).
 
-La politique administrateur est fixe :
-`{allowCustom:false,allowGravatar:false,assignOnCreate:true}`. Une tentative de
-réautoriser les images personnelles ou de désactiver l'attribution renvoie `403`.
-Les nouveaux comptes locaux, bootstrap et SSO reçoivent une image ; au démarrage,
-les comptes existants sans avatar sont complétés sans remplacer leurs choix.
 Lorsque toutes les galeries sont vides, les routes de collections exposent
 `native-orbits-fallback`, une galerie virtuelle locale, sans recréer les packs
 supprimés. Retirer un pack ou une image conserve les copies déjà attribuées.

@@ -778,7 +778,7 @@ mod tests {
         let policy: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             policy,
-            json!({"allowCustom":false,"allowGravatar":false,"assignOnCreate":true})
+            json!({"allowCustom":true,"allowGravatar":false,"assignOnCreate":true,"requireAvatar":true})
         );
         // A clean installation offers usable local images without a plugin or upload.
         let gallery = app
@@ -1044,7 +1044,7 @@ mod tests {
                 .unwrap(),
             1
         );
-        for invalid_policy in [
+        for valid_policy in [
             json!({"allowCustom":true,"allowGravatar":false,"assignOnCreate":true}),
             json!({"allowCustom":false,"allowGravatar":false,"assignOnCreate":false}),
         ] {
@@ -1058,13 +1058,180 @@ mod tests {
                         .header(header::ORIGIN, "http://localhost")
                         .header("x-csrf-token", &csrf)
                         .header(header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(invalid_policy.to_string()))
+                        .body(Body::from(valid_policy.to_string()))
                         .unwrap(),
                 )
                 .await
                 .unwrap();
-            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
         }
+        // Mandatory avatars and personal uploads are independent persisted settings.
+        let mut png = std::io::Cursor::new(Vec::new());
+        ::image::DynamicImage::new_rgb8(8, 8)
+            .write_to(&mut png, ::image::ImageFormat::Png)
+            .unwrap();
+        for (required, custom) in [(true, true), (true, false), (false, true), (false, false)] {
+            let expected = json!({"allowCustom":custom,"allowGravatar":false,"assignOnCreate":false,"requireAvatar":required});
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/admin/avatar-policy")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(expected.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/v1/admin/avatar-policy")
+                        .header(header::COOKIE, &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(
+                    &response.into_body().collect().await.unwrap().to_bytes()
+                )
+                .unwrap(),
+                expected
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/account/avatar")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .header(header::CONTENT_TYPE, "image/png")
+                        .body(Body::from(png.get_ref().clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if custom {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("DELETE")
+                        .uri("/api/v1/account/avatar")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if required {
+                    StatusCode::FORBIDDEN
+                } else {
+                    StatusCode::NO_CONTENT
+                }
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/v1/account/avatar")
+                        .header(header::COOKIE, &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if required {
+                    StatusCode::OK
+                } else {
+                    StatusCode::NOT_FOUND
+                }
+            );
+        }
+        // Optional avatars with automatic assignment disabled stay absent on account creation.
+        query("INSERT INTO users(id,role) VALUES('optional-user','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assign_new_user(&auth, "optional-user").await.unwrap();
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM user_avatars WHERE user_id='optional-user'"
+            )
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+            0
+        );
+        let reopened = crate::identity::IdentityStore::open(&root.path().join("native.sqlite"))
+            .await
+            .unwrap();
+        let reopened_auth = AuthState::new(reopened.clone(), "http://localhost".into())
+            .await
+            .unwrap();
+        assert!(
+            !crate::avatars::load_policy(&reopened_auth)
+                .await
+                .unwrap()
+                .require_avatar
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM user_avatars WHERE user_id='optional-user'"
+            )
+            .fetch_one(reopened.pool())
+            .await
+            .unwrap(),
+            0
+        );
+        drop(reopened_auth);
+        reopened.close().await;
+        query("DELETE FROM users WHERE id='optional-user'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        // Restore mandatory policy for the remaining empty-gallery checks.
+        query("UPDATE avatar_requirements SET required=1")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        crate::avatars::defaults::assign_user(
+            &store,
+            &auth
+                .authenticate(&HeaderMap::from_iter([(
+                    header::COOKIE,
+                    cookie.parse().unwrap(),
+                )]))
+                .await
+                .unwrap()
+                .user
+                .id,
+        )
+        .await
+        .unwrap();
         // Removing every administrative collection leaves assigned photos intact
         // and exposes a usable local gallery for new selections.
         query("DELETE FROM avatar_packs")

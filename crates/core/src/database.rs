@@ -462,6 +462,9 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
     sqlx::raw_sql(include_str!("../migrations/default_avatars.sql"))
         .execute(&mut *tx)
         .await?;
+    sqlx::raw_sql(include_str!("../migrations/avatar_requirements.sql"))
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await
 }
 

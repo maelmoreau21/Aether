@@ -73,9 +73,16 @@ pub(crate) fn fallback_images() -> Vec<serde_json::Value> {
         .collect()
 }
 
-/// Gallery photos are mandatory. Existing choices, including those whose
+/// Assign on creation when enabled or required. Existing choices, including those whose
 /// collection was subsequently removed, retain their immutable asset reference.
 pub(crate) async fn assign_user(store: &IdentityStore, user: &str) -> Result<u64, AssetError> {
+    let policy: Option<(i64, i64)> = crate::database::query_as("SELECT COALESCE((SELECT required FROM avatar_requirements WHERE singleton=1),1), COALESCE((SELECT assign_on_create FROM avatar_policy WHERE singleton=1),1)").fetch_optional(store.pool()).await?;
+    if policy.is_some_and(|(required, assign)| required == 0 && assign == 0) {
+        return Ok(0);
+    }
+    assign_user_unconditionally(store, user).await
+}
+async fn assign_user_unconditionally(store: &IdentityStore, user: &str) -> Result<u64, AssetError> {
     let existing: i64 = query_scalar("SELECT COUNT(*) FROM user_avatars WHERE user_id=?")
         .bind(user)
         .fetch_one(store.pool())
@@ -98,12 +105,22 @@ pub(crate) async fn assign_user(store: &IdentityStore, user: &str) -> Result<u64
         .bind(sha256).bind(user).execute(store.pool()).await?.rows_affected())
 }
 
+pub(crate) async fn ensure_required_missing(store: &IdentityStore) -> Result<u64, AssetError> {
+    let required: Option<i64> =
+        query_scalar("SELECT required FROM avatar_requirements WHERE singleton=1")
+            .fetch_optional(store.pool())
+            .await?;
+    if required == Some(0) {
+        return Ok(0);
+    }
+    assign_missing(store).await
+}
 pub(crate) async fn assign_missing(store: &IdentityStore) -> Result<u64, AssetError> {
     let users: Vec<String> = query_scalar("SELECT id FROM users WHERE NOT EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=users.id)")
         .fetch_all(store.pool()).await?;
     let mut count = 0;
     for user in users {
-        count += assign_user(store, &user).await?;
+        count += assign_user_unconditionally(store, &user).await?;
     }
     Ok(count)
 }

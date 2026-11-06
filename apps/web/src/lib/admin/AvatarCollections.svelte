@@ -4,6 +4,11 @@
   let {extensionId}:{extensionId?:string}=$props();
   type Pack={id:string;name:string;count:number};
   let packs=$state<Pack[]>([]);
+  type Policy={allowCustom:boolean;allowGravatar:boolean;assignOnCreate:boolean;requireAvatar:boolean};
+  let policy=$state<Policy>({allowCustom:true,allowGravatar:false,assignOnCreate:true,requireAvatar:true});
+  let policyReady=$state(false);
+  async function loadPolicy(){policy=await adminRequest<Policy>('/api/v1/admin/avatar-policy');policyReady=true;}
+  async function savePolicy(){busy=true;error='';notice='';try{await adminRequest('/api/v1/admin/avatar-policy',{method:'PUT',body:JSON.stringify(policy)});await loadPolicy();notice='Paramètres enregistrés.';}catch(e){error=e instanceof Error?e.message:'Enregistrement impossible.';}finally{busy=false;}}
   let busy=$state(false),error=$state(''),notice=$state('');
   let legacy=$state({packs:0,images:0});
   async function loadLegacy(){legacy=await adminRequest<typeof legacy>('/api/v1/admin/avatars/migrate-legacy');}
@@ -19,7 +24,7 @@
   async function galleryAction(action:()=>Promise<unknown>,message:string){busy=true;error='';notice='';try{await action();await load();notice=message;}catch(e){error=e instanceof Error?e.message:'Action impossible.';}finally{busy=false;}}
   async function assignMissing(){busy=true;error='';notice='';try{const result=await adminRequest<{count:number}>(assignMissingEndpoint,{method:'POST'});notice=`${result.count} compte${result.count>1?'s':''} ${result.count>1?'ont':'a'} reçu un avatar.`;}catch(e){error=e instanceof Error?e.message:'Attribution impossible.';}finally{busy=false;}}
 
-  onMount(()=>{void load().catch(()=>error='Collections indisponibles.');if(!extensionId){void loadLegacy().catch(()=>error='État des anciennes collections indisponible.');}});
+  onMount(()=>{void load().catch(()=>error='Collections indisponibles.');if(!extensionId){void loadPolicy().catch(()=>error='Paramètres indisponibles.');void loadLegacy().catch(()=>error='État des anciennes collections indisponible.');}});
   async function remove(id:string){if(!window.confirm('Supprimer cette collection de la galerie ? Les photos déjà choisies par les comptes sont conservées.'))return;busy=true;error='';try{await adminRequest(endpoint+'/'+encodeURIComponent(id),{method:'DELETE'});await load();notice='Collection retirée.';}catch(e){error=e instanceof Error?e.message:'Suppression impossible.';}finally{busy=false;}}
   async function upload(){
     if(!uploadFiles.length||uploadFiles.length>500||uploadFiles.some(file=>file.size>2*1024*1024)||uploadFiles.reduce((sum,file)=>sum+file.size,0)>64*1024*1024){error='Choisissez de 1 à 500 images de 2 Mo maximum, 64 Mo au total.';return;}
@@ -38,7 +43,15 @@
     {#if legacy.packs > 0}
       <div class="legacy-notice"><strong>Collections à transférer</strong><p>{legacy.packs} collection(s) et {legacy.images} image(s) proviennent d’une ancienne installation. Transférez-les pour les gérer ici et les conserver après sa suppression.</p><button disabled={busy} onclick={()=>void migrateLegacy()}>Transférer les collections</button></div>
     {/if}
-    <div class="avatar-rules"><h3>Avatars obligatoires</h3><p>Chaque compte reçoit un avatar de la galerie. Les utilisateurs peuvent en choisir un autre, mais ne peuvent ni importer une image personnelle ni supprimer leur avatar. Si la galerie est vide, les avatars locaux de secours restent disponibles.</p></div>
+    <form class="avatar-rules" onsubmit={event=>{event.preventDefault();void savePolicy();}}>
+      <h3>Paramètres des avatars</h3>
+      <label class="toggle"><input type="checkbox" bind:checked={policy.requireAvatar} disabled={busy||!policyReady} />Rendre les avatars obligatoires</label>
+      <p>Activé par défaut. Chaque compte conserve un avatar ; une image locale est utilisée si la galerie est vide. L’import personnel reste configurable séparément.</p>
+      <label class="toggle"><input type="checkbox" bind:checked={policy.allowCustom} disabled={busy||!policyReady} />Permettre l’importation d’images personnelles</label>
+      <label class="toggle"><input type="checkbox" bind:checked={policy.assignOnCreate} disabled={busy||!policyReady||policy.requireAvatar} />Attribuer automatiquement un avatar aux nouveaux comptes</label>
+      <p>Lorsque les avatars sont obligatoires, l’attribution automatique est toujours appliquée.</p>
+      <button disabled={busy||!policyReady}>Enregistrer les paramètres</button>
+    </form>
   {/if}
   <h3>Votre galerie d’avatars</h3><p>Ajoutez vos images et organisez-les en collections. Les utilisateurs choisissent ensuite leur avatar dans leur profil.</p>
   <button disabled={busy || (!!extensionId && !packs.some(pack=>pack.count>0))} onclick={()=>void assignMissing()}>Attribuer les avatars manquants maintenant</button>
@@ -64,6 +77,9 @@
 </section>
 <style>
   .avatar-collections { display: grid; gap: 16px; min-width: 0; margin-top: 8px; font-family: var(--font-sans); color: var(--color-text); }
+  .avatar-rules { display: grid; }
+  .toggle { display: flex; align-items: center; min-width: 0; }
+  .toggle input { width: 18px; height: 18px; flex: none; }
   .avatar-collections > p { margin: 0; }
   h3 { margin: 4px 0 0; font-size: 16px; font-weight: 600; }
   p, small { margin: 0; font-size: 13px; line-height: 1.6; color: var(--color-muted); }

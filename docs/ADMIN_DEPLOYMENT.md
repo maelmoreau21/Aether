@@ -44,6 +44,28 @@ par le `VOLUME` de l'image, inventorier et conserver ce volume avant de passer a
 nouveau volume nommé ; aucune migration automatique des anciennes archives
 n'est réalisée par Compose.
 
+## Compose minimal et UID personnalisé
+
+Les images Core et autonome définissent déjà `MEDIA_BACKUP_DIR=/backups` et
+`MEDIA_ASSETS_PATH=/data/assets`. Ces deux lignes sont inutiles dans Compose ;
+conserver les montages `/data` et `/backups`. Une image existante doit être
+recréée après sa mise à jour pour utiliser ses nouvelles valeurs par défaut.
+
+Avec `user: 1039:65539` et `./backups:/backups`, préparer depuis le dossier
+Compose sur le NAS :
+
+```sh
+sudo chown 1039:65539 ./backups
+sudo chmod 0700 ./backups
+```
+
+Ces commandes portent uniquement sur le dossier de sauvegardes, sans récursion.
+Adapter les ACL DSM si elles empêchent cet utilisateur d’accéder au dossier.
+Le volume `/data` doit également être accessible en écriture à cet UID/GID.
+Le serveur conserve les contrôles de confidentialité et ne change pas les
+permissions des dossiers montés. Un mode trop ouvert est désormais indiqué
+explicitement dans la console et dans les journaux.
+
 ## Clients PostgreSQL 18
 
 Les images Core et autonome installent uniquement `postgresql-client-18`, pas

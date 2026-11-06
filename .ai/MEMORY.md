@@ -17,6 +17,22 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 6 novembre 2026 — Paramètres d’avatars et chemins Docker
+
+- Politique d’avatars native à nouveau persistante : import personnel et attribution
+  à la création configurables ; obligation distincte, activée par défaut. Import
+  normalisé restauré dans API/profil, suppression réservée aux avatars facultatifs.
+  Les avatars facultatifs supprimés ne sont plus réattribués au démarrage.
+- Compose autonome sans répétition des chemins assets/backups déjà définis dans
+  l’image ; repli PostgreSQL vers les dossiers persistants présents. Diagnostic
+  explicite du mode privé 0700 ; procédure UID/GID personnalisé dans
+  `docs/ADMIN_DEPLOYMENT.md`. Aucun droit de volume NAS modifié.
+- Vérifié localement : Web check (0 erreur/avertissement), lint, build, Compose
+  config, fmt/diff ; huit tests Rust ciblés réussis (avatars, HTTP/galeries avec
+  politique persistée et redémarrage, sauvegardes). Aucun déploiement ni validation
+  PostgreSQL/NAS ou navigateur réelle ; test Unix de permissions ajouté, non
+  exécuté sous Windows.
+
 ## 6 novembre 2026 — Isolation de la panne simulée multi-Node
 
 - Le test arrête désormais le runtime propre à chaque Node et attend sa fin :

@@ -10,6 +10,17 @@
   };
 
   let busy = $state(false), error = $state(''), notice = $state('');
+  let permissions = $state({uploadAllowed:false,removeAllowed:false});
+  let uploadInput = $state<HTMLInputElement>();
+  async function loadPermissions(userId:string,signal:AbortSignal){
+    try{const response=await fetch('/api/v1/account/avatar/policy',{credentials:'same-origin',cache:'no-store',signal});if(!response.ok)throw new Error('Paramètres des avatars indisponibles.');const data=await response.json();if($session?.user.id===userId&&!signal.aborted)permissions=data;}catch(cause){if(!signal.aborted)error=cause instanceof Error?cause.message:'Paramètres indisponibles.';}
+  }
+  async function changePersonal(file?:File){
+    const current=$session;if(!current)return;
+    if(file&&(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024)){error='Choisissez une image PNG, JPEG ou WebP de 2 Mo maximum.';return;}
+    busy=true;error='';notice='';
+    try{const response=await fetch('/api/v1/account/avatar',{method:file?'PUT':'DELETE',credentials:'same-origin',headers:{'x-csrf-token':current.csrfToken,...(file?{'Content-Type':file.type}:{})},body:file,signal:AbortSignal.timeout(20000)});if(!response.ok)throw new Error('Modification impossible. Vérifiez les autorisations et le format de l’image.');if($session?.user.id===current.user.id&&$session.csrfToken===current.csrfToken){avatarRevision.update(v=>v+1);notice=file?'Photo de profil importée.':'Photo de profil supprimée.';}}catch(cause){if($session?.user.id===current.user.id)error=cause instanceof Error?cause.message:'Modification impossible.';}finally{busy=false;if(uploadInput)uploadInput.value='';}
+  }
   let showModal = $state(false);
   let dialog = $state<HTMLDialogElement>();
   let galleryButton = $state<HTMLButtonElement>();
@@ -110,14 +121,20 @@
     allImages = [];
     selectedItem = null;
     modalLoading = false;
+    permissions={uploadAllowed:false,removeAllowed:false};
+    const controller=new AbortController();
+    if(userId)void loadPermissions(userId,controller.signal);
     if (!userId) { error = ''; notice = ''; }
+    return ()=>controller.abort();
   });
 
 </script>
 
 <div class="avatar-editor">
-  <p>Votre avatar est obligatoire. Choisissez une image dans la galerie du serveur.</p>
+  <p>Choisissez une image dans la galerie du serveur{permissions.uploadAllowed ? ", ou importez votre propre image" : ""}. {permissions.removeAllowed ? "" : "Un avatar est obligatoire."}</p>
   <div class="avatar-actions">
+    {#if permissions.uploadAllowed}<input hidden type="file" bind:this={uploadInput} accept="image/png,image/jpeg,image/webp" onchange={event=>{const file=event.currentTarget.files?.[0];if(file)void changePersonal(file);}} /><button disabled={busy} onclick={()=>uploadInput?.click()}>Importer une image</button>{/if}
+    {#if permissions.removeAllowed}<button disabled={busy} onclick={()=>void changePersonal()}>Supprimer l’avatar</button>{/if}
     <button bind:this={galleryButton} disabled={busy} aria-expanded={showModal} onclick={() => void openModal()}>
       Choisir dans la galerie
     </button>

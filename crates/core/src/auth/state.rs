@@ -115,7 +115,7 @@ impl AuthState {
             // The marker is committed with the images, so a later start retries.
             eprintln!("Default avatar gallery initialization failed: {error}");
         }
-        if let Err(error) = crate::avatars::defaults::assign_missing(&store).await {
+        if let Err(error) = crate::avatars::defaults::ensure_required_missing(&store).await {
             // The read endpoint still serves an in-memory local fallback, even
             // if the asset volume cannot currently persist an assignment.
             eprintln!("Mandatory avatar assignment failed: {error}");

@@ -69,7 +69,7 @@ fs.mkdirSync(out, {recursive: true});
 
     if (await page.locator('.mobile-menu-toggle').isVisible() && await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
     await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();
-    await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
+    await page.getByLabel('Paramètres de Séries Navigateur', {exact:true}).click();
     await page.getByRole('button', {name:'Actualiser la bibliothèque', exact:true}).click();
     await page.getByRole('dialog').getByRole('button', {name:'Actualiser', exact:true}).click();
     await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});

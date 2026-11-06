@@ -607,7 +607,7 @@ async fn delete_library(state: &LibraryState, id: &str) -> Result<(), StatusCode
         .await
         .map_err(database)?;
     let visible: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM libraries l WHERE l.id=? AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND NOT EXISTS(SELECT 1 FROM deleted_libraries d WHERE d.library_id=l.id)")
-        .bind(&id)
+        .bind(id)
         .fetch_one(&mut *tx)
         .await
         .map_err(database)?;
@@ -617,8 +617,8 @@ async fn delete_library(state: &LibraryState, id: &str) -> Result<(), StatusCode
     let active: i64 = crate::database::query_scalar(
         "SELECT COUNT(*) FROM scan_jobs WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running')",
     )
-    .bind(&id)
-    .bind(&id)
+    .bind(id)
+    .bind(id)
     .fetch_one(&mut *tx)
     .await
     .map_err(database)?;
@@ -632,14 +632,14 @@ async fn delete_library(state: &LibraryState, id: &str) -> Result<(), StatusCode
         "DELETE FROM user_group_libraries WHERE library_id=? OR library_id=?",
     ] {
         crate::database::query(statement)
-            .bind(&id)
-            .bind(&id)
+            .bind(id)
+            .bind(id)
             .execute(&mut *tx)
             .await
             .map_err(database)?;
     }
     crate::database::query("INSERT INTO deleted_libraries(library_id,deleted_at) VALUES(?,?)")
-        .bind(&id)
+        .bind(id)
         .bind(media_contracts::protocol::unix_now())
         .execute(&mut *tx)
         .await

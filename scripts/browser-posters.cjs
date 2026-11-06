@@ -39,7 +39,7 @@ fs.mkdirSync(out, {recursive:true});
       const article=page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
       const runScan = async () => {
         const posted=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/scan'));
-        await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
+        await page.getByLabel('Paramètres de Films scanner navigateur',{exact:true}).click();
       await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
       await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
         assert.equal((await posted).status(),202);

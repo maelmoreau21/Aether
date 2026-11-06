@@ -129,13 +129,13 @@ fs.mkdirSync(out, { recursive: true });
     report.results.librariesCreated = true;
 
     // 4. Trigger scans on both remote Nodes from UI and wait for completion
-    await page.getByLabel('Actions Films NAS Node 1',{exact:true}).click();
+    await page.getByLabel('Paramètres de Films NAS Node 1',{exact:true}).click();
     await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
     const filmLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Films NAS Node 1', exact: true }) });
     await filmLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });
 
-    await page.getByLabel('Actions Séries NAS Node 2',{exact:true}).click();
+    await page.getByLabel('Paramètres de Séries NAS Node 2',{exact:true}).click();
     await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
     await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
     const seriesLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Séries NAS Node 2', exact: true }) });

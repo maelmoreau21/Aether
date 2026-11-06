@@ -182,9 +182,9 @@
             <div class="library-actions">
               <h4>Actions</h4>
               <div class="action-buttons">
-                <button type="button" disabled={busyLibrary} onclick={() => refreshLibrary(editedLibrary)}><Icon name="refresh" size={16} /> Actualiser la bibliothèque</button>
-                <button type="button" disabled={busyLibrary} onclick={() => { target = editedLibrary; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
-                <button type="button" onclick={() => imageTarget = editedLibrary}>Modifier les images</button>
+                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; editor?.close(); refreshLibrary(library); }}><Icon name="refresh" size={16} /> Actualiser la bibliothèque</button>
+                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; target = library; mode = 'missing_metadata'; editor?.close(); refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
+                <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}>Modifier les images</button>
                 <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(editedLibrary.id)}`)} onclick={() => editor?.close()}>{$t('schedule_refresh')}</a>
               </div>
             </div>

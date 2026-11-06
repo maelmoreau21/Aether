@@ -1,6 +1,7 @@
 //! Small shared SQL surface; values always remain bound parameters.
 use sqlx::{Any, AnyConnection, Connection, Database, FromRow, SqlSafeStr};
 use std::fmt::Write as _;
+mod journal;
 mod task_schema;
 
 #[cfg(feature = "query-metrics")]
@@ -200,6 +201,98 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     result
 }
 
+/// Re-run on every start, in this order; each file is additive and idempotent.
+const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
+    (
+        "baseline_gaps",
+        include_str!("../migrations/baseline_gaps.sql"),
+    ),
+    (
+        "extension_update",
+        include_str!("../migrations/extension_update.sql"),
+    ),
+    (
+        "extension_run",
+        include_str!("../migrations/extension_run.sql"),
+    ),
+    ("subtitle", include_str!("../migrations/subtitle.sql")),
+    (
+        "recommendation",
+        include_str!("../migrations/recommendation.sql"),
+    ),
+    (
+        "notification",
+        include_str!("../migrations/notification.sql"),
+    ),
+    ("statistics", include_str!("../migrations/statistics.sql")),
+    ("acquisition", include_str!("../migrations/acquisition.sql")),
+    ("reports", include_str!("../migrations/reports.sql")),
+    (
+        "person_images",
+        include_str!("../migrations/person_images.sql"),
+    ),
+    (
+        "quick_connect",
+        include_str!("../migrations/quick_connect.sql"),
+    ),
+    (
+        "application_scope",
+        include_str!("../migrations/application_scope.sql"),
+    ),
+    ("task_runs", include_str!("../migrations/task_runs.sql")),
+    (
+        "task_triggers",
+        include_str!("../migrations/task_triggers.sql"),
+    ),
+    (
+        "artwork_webp",
+        include_str!("../migrations/artwork_webp.sql"),
+    ),
+];
+/// Depend on the role-group seed that Rust performs between the two lists.
+const IDEMPOTENT_STEPS_AFTER_GROUPS: &[(&str, &str)] = &[
+    ("media_kinds", include_str!("../migrations/media_kinds.sql")),
+    ("role_groups", include_str!("../migrations/role_groups.sql")),
+    (
+        "default_avatars",
+        include_str!("../migrations/default_avatars.sql"),
+    ),
+    (
+        "avatar_requirements",
+        include_str!("../migrations/avatar_requirements.sql"),
+    ),
+    (
+        "library_deletions",
+        include_str!("../migrations/library_deletions.sql"),
+    ),
+];
+/// Journal text for the Rust-coded constraint upgrades in `task_schema`.
+const COMPAT_TASK_CONSTRAINTS: &str =
+    "durable_tasks trickplay category and width; timeline marker recap/preview kinds";
+/// Early PostgreSQL schemas stored epoch timestamps as 32-bit `integer`, which overflows in 2038.
+/// Widening is lossless. The two views are recreated by `role_groups.sql` later in the same
+/// transaction (a view blocks `ALTER COLUMN TYPE` on the columns it reads).
+const POSTGRES_WIDEN_TIMESTAMPS: &str = r#"
+DROP VIEW IF EXISTS effective_library_permissions;
+DROP VIEW IF EXISTS effective_user_group_members;
+DO $$
+DECLARE target record;
+BEGIN
+  FOR target IN
+    SELECT c.table_name, c.column_name
+    FROM information_schema.columns c
+    JOIN information_schema.tables t ON t.table_schema=c.table_schema AND t.table_name=c.table_name
+    WHERE c.table_schema=current_schema() AND t.table_type='BASE TABLE' AND c.data_type='integer'
+      AND (c.column_name LIKE '%!_at' ESCAPE '!' OR c.column_name='window_started')
+  LOOP
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE bigint', target.table_name, target.column_name);
+  END LOOP;
+END $$;
+"#;
+/// Journal text for the watch-party tables and 64-bit sizes created for databases that predate them.
+const COMPAT_WATCH_PARTIES: &str =
+    "watch_party tables; PostgreSQL size and timestamp columns widened to bigint";
+
 async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
     const SOURCE: &str = include_str!("../migrations/schema.sql");
     const SQLITE_START: &str = "-- AETHER_SCHEMA_SQLITE_BEGIN";
@@ -227,6 +320,8 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
             .fetch_one(&mut *tx)
             .await?
     };
+    let fresh = current == 0 && tables == 0;
+    journal::ensure(&mut tx).await?;
     if current != 0 {
         let marker: i64 = if sqlite {
             sqlx::query_scalar(
@@ -400,6 +495,9 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
             )
             .execute(&mut *tx)
             .await?;
+            sqlx::raw_sql(POSTGRES_WIDEN_TIMESTAMPS)
+                .execute(&mut *tx)
+                .await?;
         }
     } else if tables != 0 {
         return Err(sqlx::Error::Protocol(
@@ -408,66 +506,34 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
     } else {
         sqlx::raw_sql(section).execute(&mut *tx).await?;
     }
+    // Journalled on fresh installs too, so the journal does not depend on how many starts happened.
+    journal::record(
+        &mut tx,
+        "compat:watch_parties",
+        "compat",
+        COMPAT_WATCH_PARTIES,
+    )
+    .await?;
+    if fresh {
+        journal::record(&mut tx, "baseline", "baseline", section).await?;
+    }
     task_schema::allow_trickplay(&mut tx, sqlite, section).await?;
     task_schema::allow_marker_kinds(&mut tx, sqlite, section).await?;
-    sqlx::raw_sql(include_str!("../migrations/extension_update.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/extension_run.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/subtitle.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/recommendation.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/notification.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/statistics.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/acquisition.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/reports.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/person_images.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/quick_connect.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/application_scope.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/task_runs.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/artwork_webp.sql"))
-        .execute(&mut *tx)
-        .await?;
+    journal::record(
+        &mut tx,
+        "compat:task_constraints",
+        "compat",
+        COMPAT_TASK_CONSTRAINTS,
+    )
+    .await?;
+    for (name, sql) in IDEMPOTENT_STEPS {
+        journal::run_idempotent(&mut tx, name, sql).await?;
+    }
     crate::groups::initialize_role_groups(&mut tx).await?;
-    sqlx::raw_sql(include_str!("../migrations/media_kinds.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/role_groups.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/default_avatars.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/avatar_requirements.sql"))
-        .execute(&mut *tx)
-        .await?;
-    sqlx::raw_sql(include_str!("../migrations/library_deletions.sql"))
-        .execute(&mut *tx)
-        .await?;
+    for (name, sql) in IDEMPOTENT_STEPS_AFTER_GROUPS {
+        journal::run_idempotent(&mut tx, name, sql).await?;
+    }
+    journal::apply_versioned(&mut tx, sqlite, journal::VERSIONED_STEPS).await?;
     tx.commit().await
 }
 

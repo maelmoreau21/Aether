@@ -1,6 +1,17 @@
 //! Widen existing task constraints without changing task identity or queue state.
 use sqlx::{Any, Transaction};
 
+async fn table_columns(
+    tx: &mut Transaction<'_, Any>,
+    table: &str,
+) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT name FROM pragma_table_info('{table}') ORDER BY cid"
+    )))
+    .fetch_all(&mut **tx)
+    .await
+}
+
 /// Rebuild one SQLite table from the current schema definition, keeping rows,
 /// rowids, indexes and triggers. Callers run with foreign keys suspended.
 async fn rebuild_sqlite_table(
@@ -26,7 +37,22 @@ async fn rebuild_sqlite_table(
     sqlx::raw_sql(sqlx::AssertSqlSafe(&*created))
         .execute(&mut **tx)
         .await?;
-    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("INSERT INTO {table}_widened SELECT * FROM {table}; DROP TABLE {table}; ALTER TABLE {table}_widened RENAME TO {table};")))
+    // Copy by column name: a legacy table whose columns were appended by ALTER TABLE has a
+    // different order from the current definition, and `SELECT *` would shift values silently.
+    let old_columns = table_columns(tx, table).await?;
+    let new_columns = table_columns(tx, &format!("{table}_widened")).await?;
+    if let Some(lost) = old_columns.iter().find(|c| !new_columns.contains(c)) {
+        return Err(sqlx::Error::Protocol(format!(
+            "{table}.{lost} is absent from the current schema; refusing to drop user data"
+        )));
+    }
+    let columns = new_columns
+        .iter()
+        .filter(|c| old_columns.contains(c))
+        .map(|c| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(",");
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("INSERT INTO {table}_widened({columns}) SELECT {columns} FROM {table}; DROP TABLE {table}; ALTER TABLE {table}_widened RENAME TO {table};")))
         .execute(&mut **tx)
         .await?;
     for definition in definitions {
@@ -222,5 +248,61 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[tokio::test]
+    async fn rebuild_copies_by_column_name_when_legacy_column_order_differs() {
+        sqlx::any::install_default_drivers();
+        let source = include_str!("../../migrations/schema.sql");
+        let schema = source
+            .split_once("-- AETHER_SCHEMA_SQLITE_BEGIN")
+            .unwrap()
+            .1
+            .split_once("-- AETHER_SCHEMA_SQLITE_END")
+            .unwrap()
+            .0;
+        let legacy = schema.replace("'image','trickplay','system'", "'image','system'").replace("CHECK((category='trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280))", "CHECK(width IN (320,640,1280))");
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*legacy))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        // Swap two adjacent columns, as a database whose columns were added by ALTER TABLE would have.
+        let table_sql: String =
+            sqlx::query_scalar("SELECT sql FROM sqlite_master WHERE name='durable_tasks'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        let reordered = table_sql.replacen(
+            "available_at BIGINT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',",
+            "error TEXT NOT NULL DEFAULT '',
+    available_at BIGINT NOT NULL,",
+            1,
+        );
+        assert_ne!(
+            reordered, table_sql,
+            "fixture must actually reorder the columns"
+        );
+        sqlx::raw_sql("PRAGMA foreign_keys=OFF; DROP TABLE durable_tasks;")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(&*reordered))
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        sqlx::raw_sql("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','L','films','local','/x',1); INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,created_at,updated_at,available_at,error) VALUES('t','lib','the-owner','key','local','scan',1,2,3,'kept error');").execute(&mut conn).await.unwrap();
+        super::super::initialize_fresh_schema(&mut conn)
+            .await
+            .unwrap();
+        let row: (String, i64, String) =
+            sqlx::query_as("SELECT owner,available_at,error FROM durable_tasks WHERE id='t'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(row, ("the-owner".into(), 3, "kept error".into()));
     }
 }

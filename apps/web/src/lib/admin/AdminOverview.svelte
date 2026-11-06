@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
   import { adminRequest } from './request';
   import type { CoreHealth, AdminNode, Library, Scan } from './types';
   import type { Work } from '../catalog/api';
@@ -15,7 +16,7 @@
   let sessions=$state<Activity[]>([]),activityError=$state(''),updated=$state(''),loading=$state(false);
   let artwork=$state<Record<string,Art>>({});
   let failed=$state<Record<string,number>>({});
-  const requested=new Set<string>();
+  const requested=new SvelteSet<string>();
   const connected=$derived(nodes.filter(node=>node.status==='connected').length);
   const offline=$derived(nodes.filter(node=>node.status==='disconnected').length);
   const running=$derived(Object.values(scans).filter(scan=>scan.status==='queued'||scan.status==='running').length);

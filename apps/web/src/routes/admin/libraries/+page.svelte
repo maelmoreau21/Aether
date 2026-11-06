@@ -438,7 +438,6 @@
             {saving}
             {editing}
             {error}
-            {users}
             {groups}
             bind:name
             bind:kind

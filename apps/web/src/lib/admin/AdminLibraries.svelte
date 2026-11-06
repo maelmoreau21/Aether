@@ -7,18 +7,17 @@
   import LibraryImages from './LibraryImages.svelte';
   import PathPickerModal from './PathPickerModal.svelte';
   import { recommendedLibraryOptions, scanLabels } from './types';
-  import type { AuthUser } from '../auth/session';
   import type { UserGroup } from './request';
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
   import { t } from '../i18n';
-  let { libraries, nodes, scans, pending, saving, editing, error, users = [], groups = [],
+  let { libraries, nodes, scans, pending, saving, editing, error, groups = [],
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
     options = $bindable(), onchanged,
     onsave, onscan, onedit, onreset, onnodechange }: {
       libraries: Library[]; nodes: AdminNode[]; scans: Record<string, Scan>; pending: string[];
-      saving: boolean; editing: string | null; error: string; users?: AuthUser[]; groups?: UserGroup[];
+      saving: boolean; editing: string | null; error: string; groups?: UserGroup[];
       name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; folders: { nodeId: string; root: string }[]; enabled: boolean;
       excludedPatterns: string;
       options: LibraryOptions; onchanged: () => Promise<void>;

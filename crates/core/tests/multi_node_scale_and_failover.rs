@@ -1142,6 +1142,9 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
             backup_asset_id.clone()
         };
         let b_id = backup_asset_id.clone();
+        let task_store = store.clone();
+        let primary_node = node1_id.clone();
+        let backup_node = node2_id.clone();
         handles.push(tokio::spawn(async move {
             let (st_d, _, body_d) = http_request(
                 &origin,
@@ -1153,7 +1156,13 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
             .await;
             assert_eq!(st_d, StatusCode::OK);
             let d: Value = serde_json::from_slice(&body_d).unwrap();
-            assert_eq!(d["id"], b_id);
+            assert_eq!(
+                d["id"], b_id,
+                "requested={req_id}; descriptor node={}, status={}, fallbacks={}; primary={:?}; backup={:?}",
+                d["nodeId"], d["nodeStatus"], d["fallbackMediaIds"],
+                task_store.node_registry().get(&primary_node).map(|e| (e.record.status, e.telemetry)),
+                task_store.node_registry().get(&backup_node).map(|e| (e.record.status, e.telemetry)),
+            );
 
             let (st_s, _, bytes_s) = http_request(
                 &origin,

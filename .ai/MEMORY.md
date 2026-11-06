@@ -17,6 +17,15 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 6 novembre 2026 — Diagnostic CI du basculement multi-Node
+
+- Le test de basculement à 50 requêtes a échoué en CI avec le média primaire
+  sélectionné au lieu de la copie de secours. L'assertion conserve son exigence
+  et affiche désormais les statuts et la télémétrie des deux Nodes en cas d'échec.
+- Le scénario ciblé a réussi deux fois localement sous Windows, dont une après
+  ajout du diagnostic ; `cargo fmt --check` réussit. Cause non établie et
+  reproduction Linux/CI encore nécessaire ; aucun correctif produit revendiqué.
+
 ## 5 novembre 2026 — Tâches post-scan, permissions par type, images et lecteur
 
 - Tâches non-scan (trickplay, chapitres, analyses) suivies par `active_task_runs`

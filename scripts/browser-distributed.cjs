@@ -151,7 +151,7 @@ fs.mkdirSync(out, { recursive: true });
     report.results.catalogLatencyMs = Math.round(performance.now() - tCatStart);
     await page.screenshot({ path: `${out}/03-catalog-films.png` });
 
-    await filmCard.click();
+    await filmCard.click({position:{x:12,y:12}});
     const playFilmBtn = page.locator('button.primary-play, button').filter({ hasText: /Lecture|Lire/ }).first();
     await playFilmBtn.waitFor({ timeout: 15000 });
     await playFilmBtn.click();
@@ -179,7 +179,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.goto(origin + '/app/series/');
     const seriesCard = page.locator('.media-card').first();
     await seriesCard.waitFor({ timeout: 15000 });
-    await seriesCard.click();
+    await seriesCard.click({position:{x:12,y:12}});
 
     const playEpBtn = page.getByRole('button', { name: /^Lire / }).first();
     await playEpBtn.waitFor({ timeout: 15000 });

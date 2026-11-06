@@ -371,7 +371,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.goto(origin+'/app/films/');
     const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
     await filmCard.waitFor();
-    await filmCard.click();
+    await filmCard.click({position:{x:12,y:12}});
     await page.getByText('Film Actor',{exact:true}).waitFor();
     assert.match(await page.locator('.media-experience-strip').innerText(),/français/);
     assert.match(await page.locator('.media-experience-strip').innerText(),/anglais/);

@@ -61,6 +61,7 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - Déploiement : [`DEPLOYMENT.md`](DEPLOYMENT.md) (historique, renvoie vers Docker), [`DEPLOYMENT_DOCKER.md`](DEPLOYMENT_DOCKER.md), [`DEPLOYMENT_SYNOLOGY.md`](DEPLOYMENT_SYNOLOGY.md).
 - Publication : [`CI_GHCR.md`](CI_GHCR.md), [`RELEASES_AND_VERSIONING.md`](RELEASES_AND_VERSIONING.md), [`GITHUB_GOVERNANCE_AND_MIGRATION.md`](GITHUB_GOVERNANCE_AND_MIGRATION.md).
 - Réglages : [`SETTINGS_AND_REFRESH.md`](SETTINGS_AND_REFRESH.md), [`SETTINGS_REVIEW.md`](SETTINGS_REVIEW.md), [`PREFERENCES.md`](PREFERENCES.md).
+- Métadonnées traduites par compte : [`METADATA_LOCALIZATION.md`](METADATA_LOCALIZATION.md).
 
 ## Extensions (plugins)
 

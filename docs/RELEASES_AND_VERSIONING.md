@@ -9,16 +9,16 @@ Ce document décrit en détail l'architecture SemVer automatisée, la gestion de
 Aether respecte strictement le standard **Semantic Versioning 2.0.0** :
 
 - **Versions stables** : `MAJOR.MINOR.PATCH` (exemples : `0.1.0`, `0.2.0`, `0.2.1`, `1.0.0`).
-- **Versions de développement** : `MAJOR.MINOR.PATCH-beta.N` (exemples : `0.2.0-beta.0`, `0.2.0-beta.1`).
+- **Versions de développement** : `MAJOR.MINOR.PATCH-beta.N`, le patch suivant la dernière stable : si `main` est en `1.5.0`, `develop` publie `1.5.1-beta.0`, `1.5.1-beta.1`… autant de bêtas que nécessaire.
+- **Promotion** : chaque fusion de `develop` dans `main` publie automatiquement la version préparée (`1.5.1`), puis `develop` repart en `1.5.2-beta.0`. `[skip release]` dans le commit de fusion ne publie rien ; un saut mineur/majeur se fait par `workflow_dispatch` (`MINOR`, `MAJOR`).
 - **Tags Git** : Préfixés par la lettre `v` (exemples : `v0.1.0`, `v0.2.0-beta.1`).
 - **Builds locaux non publiés** : Version explicite avec suffixe de développement et commit Git (exemple : `0.2.0-beta.0-dev+b08c635`), sans prétendre être une release officielle.
 
 ```
-       [ main ]  ────────────────────► v0.1.0 (Stable) ──────► v0.2.0 (Stable) ──────► v0.2.1 (Hotfix)
-                                         │                       ▲                      ▲
-                                         │ Promotion PR          │ Promotion PR         │ Hotfix PR
-                                         ▼                       │                      │
-    [ develop ]  ──► v0.2.0-beta.0 ──────┴──► v0.2.0-beta.1 ─────┴──► v0.3.0-beta.0 ───┴──► v0.3.0-beta.1
+       [ main ]  ──► v1.5.0 ─────────────────────────────► v1.5.1 ──────────────► v1.5.2
+                       │                                   ▲                      ▲
+                       ▼                                   │ fusion               │ fusion
+    [ develop ]  ──► v1.5.1-beta.0 ► beta.1 ► beta.2 ──────┴► v1.5.2-beta.0 ► … ──┘
 ```
 
 ---
@@ -80,11 +80,10 @@ La branche `main` est protégée. Les modifications et promotions sont réalisé
 
 ### Étapes après fusion d'une release :
 1. **Détection de release** :
-   - Identifiée par le titre de PR (`release: v0.2.0`), un label GitHub `release`, ou un déclenchement manuel `workflow_dispatch` (avec choix `AUTO`, `PATCH`, `MINOR`, `MAJOR`).
-   - Si la fusion sur `main` est purement documentaire ou de maintenance sans intention de release, aucune release n'est créée silencieusement.
+   - Toute push sur `main` publie une version, sauf si le message du commit contient `[skip release]`. Un déclenchement manuel `workflow_dispatch` permet de choisir `AUTO`, `PATCH`, `MINOR` ou `MAJOR`.
 2. **Calcul de la version stable** :
-   - Première initialisation du dépôt : `0.1.0` (tag `v0.1.0`).
-   - Cycle suivant : déterminé selon Conventional Commits (`feat:` -> `MINOR`, `fix:` -> `PATCH`, breaking -> `MAJOR`).
+   - `AUTO` : la version préparée par les bêtas de `develop` (`1.5.1-beta.N` → `1.5.1`).
+   - Sans bêta en cours : Conventional Commits (`feat:` -> `MINOR`, `fix:` -> `PATCH`, breaking -> `MAJOR`) ; première initialisation `0.1.0`.
    - Contrôle d'absence de collision : si le tag existe déjà sur un commit différent, le workflow s'arrête avec une erreur explicite.
 3. **Construction et vérification des 3 images Docker** :
    - Vérification du démarrage et de l'exécution de `--version`.
@@ -98,7 +97,7 @@ La branche `main` est protégée. Les modifications et promotions sont réalisé
 6. **Mise à jour du tag `latest`** :
    - Le tag `latest` est mis à jour sur Docker GHCR **uniquement lorsque l'ensemble de la chaîne est validé**.
 7. **Préparation automatique du cycle suivant sur develop** :
-   - Le workflow calcule automatiquement la version initiale du cycle suivant (ex : `0.3.0-beta.0`) et pose le tag correspondant sur `develop`, garantissant une continuité immédiate pour les futurs développements.
+   - Le workflow calcule automatiquement la version initiale du cycle suivant (ex : après `0.2.0`, `0.2.1-beta.0`) et pose le tag correspondant sur `develop`, garantissant une continuité immédiate pour les futurs développements.
 
 ---
 

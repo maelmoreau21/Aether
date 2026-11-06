@@ -189,9 +189,9 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
         &HeaderMap::new(),
         image_collection::Collect {
             work_id: work.clone(),
-            languages: parameters.languages,
-            include_neutral: parameters.include_neutral,
-            max_images: parameters.max_images,
+            languages: Some(parameters.languages),
+            include_neutral: Some(parameters.include_neutral),
+            max_images: Some(parameters.max_images),
         },
         Some(super::run::Background::Artwork(&job)),
     )

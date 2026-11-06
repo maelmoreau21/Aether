@@ -12,11 +12,6 @@ on:
         type: choice
         options: [AUTO, PATCH, MINOR, MAJOR]
         default: AUTO
-      force_release:
-        description: 'Forcer la release même si la PR n’est pas marquée release'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -52,14 +47,11 @@ jobs:
         id: calc
         env:
           RELEASE_BUMP: ${{ inputs.bump_type || 'AUTO' }}
-          EVENT_NAME: ${{ github.event_name }}
-          FORCE_RELEASE: ${{ inputs.force_release || false }}
         run: |
           set -euo pipefail
+          # Every push to main publishes the version prepared on develop.
+          # Add [skip release] to the merge commit message to skip it.
           CHECK_ARG=()
-          if [ "$EVENT_NAME" = "push" ] && [ "$FORCE_RELEASE" != "true" ]; then
-            CHECK_ARG=(--check-release-pr)
-          fi
 
           python scripts/calculate_release.py \
             --json \

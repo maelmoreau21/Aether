@@ -304,14 +304,15 @@
   );
 
   async function switchVersion(entry: CatalogueEntry, showNotice = true) {
-    const extId = managed?.manifest.id || entry.manifest.id;
+    // The catalogue entry names the extension; the open detail page may be another one.
+    const extId = entry.manifest.id;
     const currentInstalled = installed.find(e => e.manifest.id === extId);
     const action = async () => {
       await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`, {
         method: 'POST',
         body: JSON.stringify({ extensionId: entry.manifest.id, version: entry.manifest.version, upgrade: !!currentInstalled })
       });
-      managedId = extId;
+      if (showNotice) managedId = extId;
     };
 
     if (showNotice) {
@@ -334,11 +335,17 @@
 
   async function updateAllExtensions() {
     if (updatableExtensions.length === 0) return;
+    const pending = [...updatableExtensions];
+    const failures: string[] = [];
     await perform(async () => {
-      for (const { upd } of updatableExtensions) {
-        await switchVersion(upd, false);
+      // One incompatible package must not block the remaining updates.
+      for (const { upd } of pending) {
+        try { await switchVersion(upd, false); }
+        catch (cause) { failures.push(`${displayName(upd.manifest.name)} : ${cause instanceof Error ? cause.message : $t('operation_failed')}`); }
       }
-    }, `${updatableExtensions.length} extension(s) mise(s) à jour avec succès.`);
+      if (failures.length === pending.length) throw new Error(failures.join(' · '));
+    }, `${pending.length - failures.length} extension(s) mise(s) à jour avec succès.`);
+    if (failures.length && failures.length < pending.length) error = failures.join(' · ');
   }
 
 </script>

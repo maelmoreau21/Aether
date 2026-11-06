@@ -2,7 +2,8 @@
   import { onMount, untrack } from 'svelte';
   import { session } from '../auth/session';
   import { invalidateCatalog } from '../catalog/page-cache';
-  let { libraryId }: { libraryId: string } = $props();
+  import type { LibraryOptions } from './types';
+  let { libraryId, options }: { libraryId: string; options?: LibraryOptions } = $props();
   type Job = { id: string; status: string; processed: number; downloaded: number; duplicates: number; skipped: number; errors: number; lastError: string; cursorWork: string };
   let job = $state<Job | null>(null), error = $state(''), busy = $state(false);
   let languages = $state('fr, en'), includeNeutral = $state(true), maxImages = $state(12), maxWorks = $state(1000);
@@ -23,6 +24,15 @@
     } catch (cause) { if (alive && request === generation) error = cause instanceof Error ? cause.message : 'Erreur'; }
   }
   $effect(() => { void libraryId; untrack(() => { generation++; job = null; if (alive) void refresh(); }); });
+  // Defaults come from the library's « Pool d’images » settings.
+  $effect(() => {
+    const pool = options;
+    untrack(() => {
+      languages = (pool?.artworkLanguages ?? ['fr', 'en']).join(', ');
+      includeNeutral = pool?.artworkIncludeNeutral ?? true;
+      maxImages = pool?.artworkMaxImages ?? 12;
+    });
+  });
   onMount(() => { alive = true; void refresh(); const timer = setInterval(() => void refresh(), 5000); return () => { alive = false; clearInterval(timer); }; });
   async function submit(action?: 'pause' | 'resume' | 'cancel') {
     if (busy || !libraryId) return;
@@ -41,7 +51,7 @@
 </script>
 <section aria-label="Collecte durable des images">
   <h3>Collecter les images</h3>
-  <p>La collecte continue après la fermeture de cette page et reprend après un redémarrage. La langue originale connue est incluse. Une image reste fixe uniquement si elle est épinglée.</p>
+  <p>La collecte continue après la fermeture de cette page et reprend après un redémarrage. La langue originale connue est incluse. Une image reste fixe uniquement si elle est épinglée. Les valeurs par défaut viennent des options de la bibliothèque (Images → Pool d’images).</p>
   <form onsubmit={event => { event.preventDefault(); void submit(); }}>
     <fieldset disabled={busy || !!active}>
       <label>Langues recherchées<input bind:value={languages} maxlength="100" required placeholder="fr, en" /></label>

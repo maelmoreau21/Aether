@@ -100,14 +100,16 @@ test('media type, pool size and sequential setting control rotation', () => {
   expect(selectArtwork(item, { ...current, csrfToken: 'next' }).poster).toBe(first === '/images/a' ? '/images/b' : '/images/a');
 });
 
-test('remains stable after the configured interval within the same visit', () => {
+test('stays stable within the hour and renews regularly during a long visit', () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date('2026-10-27T10:00:00Z'));
   setArtworkRotationPolicy({ ...policy, rotationMode: 'sequential', minHoursBetweenSwitches: 1 });
   const item = { ...work, imageVariants: [variant('a', 'poster'), variant('b', 'poster')] };
   const first = selectArtwork(item, current).poster;
-  vi.advanceTimersByTime(3_600_000);
+  vi.advanceTimersByTime(1_800_000);
   expect(selectArtwork(item, current).poster).toBe(first);
+  vi.advanceTimersByTime(1_800_000);
+  expect(selectArtwork(item, current).poster).not.toBe(first);
   vi.useRealTimers();
 });
 

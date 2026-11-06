@@ -10,6 +10,11 @@
   const languages = [{ value: 'fr', label: 'Français' }, { value: 'fr-CA', label: 'Français (Canada)' }, { value: 'en', label: 'Anglais' }, { value: 'de', label: 'Allemand' }, { value: 'es', label: 'Espagnol' }, { value: 'it', label: 'Italien' }, { value: 'pt', label: 'Portugais' }, { value: 'ja', label: 'Japonais' }, { value: 'ko', label: 'Coréen' }, { value: 'zh', label: 'Chinois' }];
   const images = [['fetchPoster', 'Affiches'], ['fetchBackdrop', 'Fonds'], ['fetchLogo', 'Logos'], ['fetchThumb', 'Miniatures'], ['fetchBanner', 'Bannières'], ['fetchDisc', 'Disques']] as const;
   let customLanguage = $state(false);
+  // Image pool languages are edited as « fr, en » and stored as an ordered list.
+  const artworkLanguagesText = {
+    get value() { return (options.artworkLanguages ?? ['fr', 'en']).join(', '); },
+    set value(text: string) { options.artworkLanguages = [...new Set(text.split(',').map(value => value.trim()).filter(Boolean))].slice(0, 5); }
+  };
   let providers = $state<{ id: string; name: string }[]>([]);
   let subtitleProviders = $state<{ id: string; name: string }[]>([]);
   let providerError = $state('');
@@ -67,9 +72,18 @@
       <h4>Illustrations à récupérer</h4><div class="image-grid">{#each images as [key, label] (key)}<label class="check"><input type="checkbox" bind:checked={options[key]} /><span>{label}</span></label>{/each}</div>
     </div>
     <div class="group">
-      <h4>Qualité</h4>
-      <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span>Éviter les images en double</span></label>
-      {#if options.artworkDeduplicate}<label for="artwork-similarity">Tolérance aux différences (0–16)</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
+      <h4>Pool d’images</h4>
+      <p class="hint">Utilisé par « Collecter les images » pour remplir les variantes affichées en rotation.</p>
+      <label for="artwork-languages">Langues recherchées, dans l’ordre</label>
+      <input id="artwork-languages" maxlength="100" placeholder="fr, en" required bind:value={artworkLanguagesText.value} />
+      <label class="check"><input type="checkbox" bind:checked={() => options.artworkIncludeNeutral ?? true, value => options.artworkIncludeNeutral = value} /><span>Inclure les images sans langue (fonds, scènes)</span></label>
+      <label for="artwork-max-images">Images ajoutées par média et par collecte (1–12)</label>
+      <input id="artwork-max-images" type="number" min="1" max="12" step="1" required bind:value={() => options.artworkMaxImages ?? 12, value => options.artworkMaxImages = value} />
+    </div>
+    <div class="group">
+      <h4>Doublons et qualité</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span>Écarter les images similaires à celles déjà enregistrées</span></label>
+      {#if options.artworkDeduplicate}<label for="artwork-similarity">Tolérance aux différences (0–16, utilisée aussi par « Repérer les doublons »)</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
       <div class="grid"><div><label for="artwork-min-width">Largeur minimale des affiches</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale des affiches</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
       <p class="hint">Une valeur de 0 conserve toutes les tailles disponibles.</p>
     </div>

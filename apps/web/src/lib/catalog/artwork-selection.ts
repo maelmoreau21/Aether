@@ -6,6 +6,10 @@ import { artworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rot
 
 type Choice = { session: number; image: string; switchedAt?: number };
 const history = new Map<string, Record<string, Choice>>();
+/** Rich pools are renewed regularly, even during a long visit. */
+const ROTATION_PERIOD_MS = 3_600_000;
+/** Scene images carry no title and can rotate like posters; logos stay stable. */
+const SCENE_KINDS = new Set(['backdrop', 'landscape', 'thumb']);
 const visits = new Map<string, string>();
 onSessionGenerationChange(() => { history.clear(); visits.clear(); });
 
@@ -38,7 +42,8 @@ function visitSeed(current: Session | null): string {
 function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVariants']>, current: Session | null, policy: ArtworkRotationPolicy): string {
   const owner = current?.user.id ?? 'anonymous';
   const seed = `${owner}:${visitSeed(current)}`;
-  const session = hash(`artwork-session:${seed}`);
+  const period = Math.floor(Date.now() / ROTATION_PERIOD_MS);
+  const session = hash(`artwork-session:${seed}:${period}`);
   const storageKey = `media_artwork_choices_${owner}`;
   let choices = history.get(owner);
   if (!choices) {
@@ -67,7 +72,7 @@ function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVar
   const pool = candidates.length > 1 && previousIndex >= 0 ? candidates.filter(image => image.id !== previous?.image) : candidates;
   const selected = policy.rotationMode === 'sequential' && previousIndex >= 0
     ? candidates[(previousIndex + 1) % candidates.length]
-    : pool[hash(`${seed}:${work.id}:${kind}`) % pool.length];
+    : pool[hash(`${seed}:${period}:${work.id}:${kind}`) % pool.length];
   delete choices[key];
   choices[key] = { session, image: selected.id, switchedAt: Date.now() };
   while (Object.keys(choices).length > 512) delete choices[Object.keys(choices)[0]];
@@ -100,7 +105,8 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
     const isLibraryAllowed = policy.languageMode ? (work.kind === 'film' || work.kind === 'series') : policy.enabledLibraries !== undefined
       ? policy.enabledLibraries.includes(work.libraryId)
       : ((work.kind === 'film' && (policy.enableMovies ?? true)) || (work.kind === 'series' && (policy.enableSeries ?? true)));
-    const rotation = kind === 'poster' && policy.enabled && isLibraryAllowed;
+    const rotates = policy.enabled && isLibraryAllowed && (kind === 'poster' || SCENE_KINDS.has(kind));
+    const rotation = kind === 'poster' && rotates;
     if (kind === 'poster' && !rotation && !policy.languageMode) {
       const serverChoice = candidates.find(image => image.origin === 'provider' && image.position < 0);
       if (serverChoice) {
@@ -150,7 +156,7 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
     // Stable identity ordering makes API ordering and shelf/detail navigation irrelevant.
     candidates.sort((a, b) => a.id.localeCompare(b.id));
     if (candidates.length) {
-      selected[kind] = rotation ? choose(work, kind, candidates.slice(0, policy.poolSize), current, policy) : candidates[0].url;
+      selected[kind] = rotates ? choose(work, kind, candidates.slice(0, kind === 'poster' ? policy.poolSize : 24), current, policy) : candidates[0].url;
     }
   }
   return selected;

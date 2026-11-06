@@ -18,7 +18,6 @@
     language?: string | null;
     provider?: string | null;
     pinned?: boolean;
-    representationCount?: number;
     originalReleaseVerified?: boolean;
   };
 
@@ -66,7 +65,7 @@
   let fileInput = $state<HTMLInputElement>();
   let imageLanguages = $state(preferences().locale === 'en' ? 'en, fr' : 'fr, en'), includeNeutral = $state(true), collectionMessage = $state('');
   let uploadLanguage = $state(''), originalLanguage = $state<string | null>(null);
-  let similarityThreshold = $state(5), similarPairs = $state<{ first: string; second: string }[] | null>(null), uncompared = $state(0), similarVisible = $state(20), similarTruncated = $state(false);
+  let similarPairs = $state<{ first: string; second: string }[] | null>(null), uncompared = $state(0), similarVisible = $state(20), similarTruncated = $state(false);
 
   // Live visual search state (Jellyfin-style image picker)
   let candidates = $state<CandidateImage[]>([]);
@@ -80,6 +79,14 @@
   let appliedUrls = $state<Set<string>>(new Set());
 
   const kinds = $derived(library ? ['poster', 'backdrop'] : Object.keys(labels));
+  const groups = $derived(library
+    ? [{ id: 'poster', title: 'Image principale', kinds: ['poster'] }, { id: 'backdrop', title: 'Arrière-plan', kinds: ['backdrop'] }]
+    : [
+      { id: 'poster', title: 'Affiches', kinds: ['poster'] },
+      { id: 'logo', title: 'Logo', kinds: ['logo'] },
+      { id: 'backdrop', title: 'Arrière-plans', kinds: ['backdrop'] },
+      { id: 'other', title: 'Autres images', kinds: ['thumb', 'landscape', 'banner', 'disc', 'illustration'] }
+    ]);
   const base = $derived(workId ? `/api/v1/works/${encodeURIComponent(workId)}/images` : `/api/v1/admin/libraries/${encodeURIComponent(library?.id ?? '')}/images`);
   const imageUrl = (entry: Entry, small = true) => workId ? `${entry.url}${entry.url.includes('?') ? '&' : '?'}width=${small ? 320 : 1280}` : entry.url;
 
@@ -258,11 +265,6 @@
 
   async function collect() {
     if (busy || !workId) return;
-    const languages = [...new Set(imageLanguages.split(',').map(language => language.trim().toLowerCase()).filter(Boolean))];
-    if (!languages.length || languages.length > 5 || languages.some(language => !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/.test(language))) {
-      error = 'Indiquez une à cinq langues, dans l’ordre de préférence (ex. fr, en).';
-      return;
-    }
     busy = true;
     error = '';
     collectionMessage = 'Recherche et téléchargement auprès des fournisseurs activés…';
@@ -270,7 +272,7 @@
       const response = await fetch('/api/v1/admin/extensions/images/collect', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' },
-        body: JSON.stringify({ workId, languages, includeNeutral, maxImages: 12 }),
+        body: JSON.stringify({ workId }),
         signal: AbortSignal.timeout(70000)
       });
       if (!response.ok) throw new Error(`Collecte indisponible (HTTP ${response.status}). Vérifiez les fournisseurs activés et les identifiants du média.`);
@@ -366,16 +368,12 @@
 
   async function findSimilar() {
     if (busy || !workId) return;
-    if (!Number.isInteger(similarityThreshold) || similarityThreshold < 0 || similarityThreshold > 16) {
-      error = 'Choisissez une tolérance entre 0 et 16.';
-      return;
-    }
     busy = true;
     error = '';
     similarPairs = null;
     similarVisible = 20;
     try {
-      const response = await fetch(`${base}/similar?threshold=${similarityThreshold}`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
+      const response = await fetch(`${base}/similar`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error('Comparaison des images indisponible.');
       const result = await response.json() as { pairs: { first: string; second: string }[]; uncompared: number; truncated: boolean };
       similarPairs = result.pairs;
@@ -404,49 +402,42 @@
     {#if loading}<p role="status">Chargement des images…</p>{/if}
 
     {#if workId && $session?.user.role === 'administrator'}
-      <section class="collection-panel" aria-label="Collecte d’images">
-        <h3>Enrichir les images</h3>
-        <p>Les fournisseurs activés recherchent les images à partir des identifiants de ce média. Vous pouvez utiliser la recherche visuelle ci-dessous avec le bouton loupe « Rechercher des images » ou lancer une collecte automatique.</p>
-        <label>Langues et secours, dans l’ordre
-          <input bind:value={imageLanguages} disabled={busy} placeholder="fr, en" maxlength="100" />
-        </label>
-        <label class="neutral-language">
-          <input type="checkbox" bind:checked={includeNeutral} disabled={busy} />
-          Inclure les images sans langue déclarée
-        </label>
-        <button type="button" disabled={busy || loading} onclick={collect}>Collecter automatiquement les images</button>
-        {#if collectionMessage}<p role="status">{collectionMessage}</p>{/if}
-      </section>
-
-      <section class="collection-panel" aria-label="Images similaires">
-        <h3>Comparer les images enregistrées</h3>
-        <p>Repérez les images proches avant de choisir celles à retirer. La comparaison est une estimation et ne supprime rien automatiquement.</p>
-        <label>Tolérance aux différences
-          <input type="number" min="0" max="16" step="1" bind:value={similarityThreshold} disabled={busy} />
-        </label>
-        <button type="button" disabled={busy || loading} onclick={findSimilar}>Rechercher les images similaires</button>
-        {#if similarPairs !== null}
-          <p role="status">{similarPairs.length} paire{similarPairs.length > 1 ? 's' : ''} trouvée{similarPairs.length > 1 ? 's' : ''}. Images sans empreinte non comparées : {uncompared}.</p>
-          {#if similarTruncated}<p>La liste est limitée à 128 paires. Relancez la comparaison après avoir retiré les images voulues.</p>{/if}
-          {#each similarPairs.slice(0, similarVisible) as pair (`${pair.first}:${pair.second}`)}
-            <div class="similar-pair">
-              {#each [pair.first, pair.second] as id (id)}
-                {@const entry = entries.find(item => item.id === id)}
-                {#if entry}
-                  <div>
-                    <img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" />
-                    <p>{provenance(entry)}</p>
-                    <button type="button" disabled={busy} onclick={() => removeSimilar(id)}>Retirer cette image</button>
-                  </div>
-                {/if}
-              {/each}
-            </div>
-          {/each}
+      <div class="toolbar" role="group" aria-label="Outils d’images">
+        <button type="button" disabled={busy || loading} onclick={collect} title="Ajoute des images des fournisseurs selon les options de la bibliothèque">Collecter les images</button>
+        <button type="button" disabled={busy || loading} onclick={findSimilar} title="Compare toutes les images enregistrées, sans rien supprimer">Repérer les doublons</button>
+        <span class="toolbar-hint">Langues, nombre d’images et tolérance se règlent dans les options de la bibliothèque, section Images.</span>
+      </div>
+      {#if collectionMessage}<p role="status" class="toolbar-status">{collectionMessage}</p>{/if}
+      {#if similarPairs !== null}
+        <section class="similar-panel" aria-labelledby="similar-title">
+          <div class="section-heading">
+            <h3 id="similar-title">Doublons probables<span class="count">{similarPairs.length}</span></h3>
+            <button type="button" class="ghost" onclick={() => similarPairs = null}>Fermer</button>
+          </div>
+          {#if uncompared}<p>{uncompared} image{uncompared > 1 ? 's' : ''} sans empreinte non comparée{uncompared > 1 ? 's' : ''}.</p>{/if}
+          {#if similarTruncated}<p>Liste limitée à 128 paires : relancez après avoir retiré des images.</p>{/if}
+          {#if !similarPairs.length}<p>Aucune image similaire.</p>{/if}
+          <div class="similar-list">
+            {#each similarPairs.slice(0, similarVisible) as pair (`${pair.first}:${pair.second}`)}
+              <div class="similar-pair">
+                {#each [pair.first, pair.second] as id (id)}
+                  {@const entry = entries.find(item => item.id === id)}
+                  {#if entry}
+                    <div>
+                      <img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" />
+                      <p>{provenance(entry)}</p>
+                      <button type="button" class="ghost danger" disabled={busy} onclick={() => removeSimilar(id)}>Retirer</button>
+                    </div>
+                  {/if}
+                {/each}
+              </div>
+            {/each}
+          </div>
           {#if similarVisible < similarPairs.length}
-            <button type="button" onclick={() => similarVisible += 20}>Afficher davantage de résultats</button>
+            <button type="button" onclick={() => similarVisible += 20}>Afficher davantage</button>
           {/if}
-        {/if}
-      </section>
+        </section>
+      {/if}
     {/if}
 
     {#if adding}
@@ -466,72 +457,52 @@
       </form>
     {/if}
 
-    {#each [false, true] as backdrops(backdrops)}
-      {@const sectionType = backdrops ? 'backdrop' : 'poster'}
-      <section aria-label={backdrops ? 'Arrière-plans' : 'Images'}>
-        <div class="section-heading">
-          <h3>{backdrops ? 'Arrière-plans' : 'Images'}</h3>
-          <div class="heading-actions">
-            {#if workId && $session?.user.role === 'administrator'}
-              <button
-                class="round search-action-btn"
-                type="button"
-                disabled={busy}
-                title={`Rechercher des ${backdrops ? 'arrière-plans' : 'affiches'} en ligne`}
-                aria-label={`Rechercher des ${backdrops ? 'arrière-plans' : 'affiches'}`}
-                onclick={() => openSearch(sectionType)}
-              >
-                <Icon name="search" size={18} />
-              </button>
-            {/if}
-            <button
-              class="round"
-              type="button"
-              disabled={busy}
-              aria-label={backdrops ? 'Ajouter un arrière-plan' : 'Ajouter une image'}
-              onclick={() => add(sectionType)}
-            >+</button>
+    {#each groups as group (group.id)}
+      {@const items = entries.filter(e => group.kinds.includes(e.kind)).sort((a, b) => group.kinds.indexOf(a.kind) - group.kinds.indexOf(b.kind))}
+      {#if group.id !== 'other' || items.length}
+        <section class="image-section" data-group={group.id} aria-labelledby={`images-${group.id}`}>
+          <div class="section-heading">
+            <h3 id={`images-${group.id}`}>{group.title}{#if items.length}<span class="count">{items.length}</span>{/if}</h3>
+            <div class="heading-actions">
+              {#if workId && $session?.user.role === 'administrator'}
+                <button class="round" type="button" disabled={busy} title={`Rechercher en ligne : ${group.title.toLowerCase()}`} aria-label={`Rechercher en ligne : ${group.title.toLowerCase()}`} onclick={() => openSearch(group.kinds[0])}>
+                  <Icon name="search" size={18} />
+                </button>
+              {/if}
+              <button class="round" type="button" disabled={busy} aria-label={`Ajouter : ${group.title.toLowerCase()}`} title="Ajouter un fichier" onclick={() => add(group.kinds[0])}>+</button>
+            </div>
           </div>
-        </div>
-
-        <div class="image-grid">
-          {#each entries.filter(e => (e.kind === 'backdrop') === backdrops).sort((a, b) => kinds.indexOf(a.kind) - kinds.indexOf(b.kind)) as entry(entry.id)}
-            <article class="image-card" data-kind={entry.kind}>
-              <button class="image-preview" type="button" aria-label={`Agrandir ${labels[entry.kind]}`} onclick={() => { selected = entry; preview.showModal(); }}>
-                <img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" decoding="async" onload={event => dimensions(event, entry)} />
-              </button>
-              <div class="card-caption">
-                <h4>{labels[entry.kind]}</h4>
-                <p>{provenance(entry)}</p>
-                {#if workId}<p>{artworkCategories(entry.language, originalLanguage).join(' · ')}{entry.pinned ? ' · Épinglée' : ''}</p>{/if}
-                {#if entry.representationCount}<p>{entry.representationCount} représentations</p>{/if}
-                {#if entry.width && entry.height}<p class="res-tag">{entry.width} × {entry.height}</p>{/if}
+          <div class="image-grid">
+            {#each items as entry (entry.id)}
+              <article class="image-card" data-kind={entry.kind}>
+                <button class="image-preview" type="button" aria-label={`Agrandir ${labels[entry.kind]}`} onclick={() => { selected = entry; preview.showModal(); }}>
+                  <img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" decoding="async" onload={event => dimensions(event, entry)} />
+                  {#if entry.pinned}<span class="badge pin-badge">Épinglée</span>{/if}
+                  {#if group.id === 'other'}<span class="badge kind-badge">{labels[entry.kind]}</span>{/if}
+                </button>
+                <p class="meta" title={provenance(entry)}>
+                  {#if workId && entry.origin === 'provider'}{artworkCategories(entry.language, originalLanguage).join(' · ')}{#if entry.provider} · {entry.provider}{/if}{:else}{provenance(entry)}{/if}{#if entry.width && entry.height} · <span class="res">{entry.width}×{entry.height}</span>{/if}
+                </p>
                 <div class="card-actions">
-                  <button type="button" aria-label={`Agrandir ${labels[entry.kind]}`} title="Agrandir" onclick={() => { selected = entry; preview.showModal(); }}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
-                  </button>
                   {#if workId && $session?.user.role === 'administrator'}
                     <button type="button" disabled={busy} aria-label={entry.pinned ? 'Désépingler cette image' : 'Épingler cette image'} title={entry.pinned ? 'Désépingler' : 'Épingler pour tous les utilisateurs'} onclick={() => togglePin(entry)}>{entry.pinned ? '◆' : '◇'}</button>
-                    <button type="button" aria-label={`Rechercher des remplaçants pour ${labels[entry.kind]}`} title="Rechercher des images" onclick={() => openSearch(entry.kind)}>
-                      <Icon name="search" size={18} />
-                    </button>
                   {/if}
                   <button type="button" disabled={busy} aria-label={`Remplacer ${labels[entry.kind]}`} title="Remplacer par un fichier" onclick={() => add(entry.kind, entry)}>↥</button>
-                  {#if backdrops && workId}
-                    <button type="button" disabled={busy || entries.filter(e => e.kind === 'backdrop')[0]?.id === entry.id} aria-label="Déplacer l’arrière-plan à gauche" onclick={() => move(entry, -1)}>‹</button>
-                    <button type="button" disabled={busy || entries.filter(e => e.kind === 'backdrop').at(-1)?.id === entry.id} aria-label="Déplacer l’arrière-plan à droite" onclick={() => move(entry, 1)}>›</button>
+                  {#if entry.kind === 'backdrop' && workId}
+                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop')[0]?.id === entry.id} aria-label="Déplacer l’arrière-plan à gauche" onclick={() => move(entry, -1)}>‹</button>
+                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop').at(-1)?.id === entry.id} aria-label="Déplacer l’arrière-plan à droite" onclick={() => move(entry, 1)}>›</button>
                   {/if}
                   <button type="button" class="danger" disabled={busy} aria-label={`Supprimer ${labels[entry.kind]}`} title={entry.origin === 'local' ? 'Masquer cette image dans le catalogue, sans supprimer le fichier' : 'Supprimer cette image personnalisée'} onclick={() => remove(entry)}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>
                   </button>
                 </div>
-              </div>
-            </article>
-          {:else}
-            <p class="empty">{loading ? 'Chargement…' : 'Aucune image. Utilisez le bouton loupe pour en chercher ou + pour en ajouter.'}</p>
-          {/each}
-        </div>
-      </section>
+              </article>
+            {:else}
+              <p class="empty">{loading ? 'Chargement…' : 'Aucune image.'}</p>
+            {/each}
+          </div>
+        </section>
+      {/if}
     {/each}
     {#if busy}<p role="status">Enregistrement…</p>{/if}
   </div>
@@ -545,7 +516,7 @@
       <h3 id="search-modal-title">Rechercher des images</h3>
     </div>
     <div class="search-controls">
-      <label>Source
+      <label><span>Source</span>
         <select bind:value={searchProvider} onchange={fetchCandidates}>
           <option value="all">Tout</option>
           {#each providersList as p (p.id)}
@@ -553,7 +524,7 @@
           {/each}
         </select>
       </label>
-      <label>Type
+      <label><span>Type</span>
         <select bind:value={searchType} onchange={fetchCandidates}>
           <option value="all">Tous types</option>
           <option value="poster">Affiche (Principal)</option>
@@ -650,9 +621,10 @@
 
   header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 14px; padding: 20px 28px 16px; background: var(--bg-3); border-bottom: 1px solid var(--line); }
   h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0; overflow-wrap: anywhere; min-width: 0; }
-  .manager-content { padding: 24px 28px 28px; }
-  section { margin-bottom: 36px; }
-  .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 18px; }
+  .manager-content { padding: 18px 28px 28px; }
+  section { margin-bottom: 0; }
+  .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+  .count { margin-left: 8px; padding: 1px 8px; border-radius: var(--r-pill); background: var(--pn); color: var(--mu); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; vertical-align: 2px; }
   .heading-actions { display: flex; align-items: center; gap: 10px; }
   h3 { font-size: 17px; font-weight: 700; margin: 0; }
   h4 { font-size: 14px; font-weight: 700; margin: 0; }
@@ -683,19 +655,23 @@
   button:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   header > button, .back-btn { width: 44px; padding: 0; border-radius: 14px; font-size: 20px; flex: none; }
   .round { width: 44px; padding: 0; border-radius: 14px; font-size: 24px; font-weight: 500; }
-  .search-action-btn { background: var(--pn); }
 
-  /* Panels */
-  .collection-panel { display: grid; gap: 12px; padding: 20px; margin-bottom: 20px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
-  .collection-panel p { margin: 0; }
-  .collection-panel label { display: grid; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
-  .collection-panel .neutral-language { display: flex; align-items: center; gap: 10px; min-height: 44px; font-weight: 600; }
-  .neutral-language input { min-height: 18px; width: 18px; height: 18px; }
-  .collection-panel button { justify-self: start; }
-  .similar-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .similar-pair img { display: block; width: 100%; height: 180px; object-fit: contain; background: var(--pn); border-radius: var(--r-sm); }
-  .similar-pair div { min-width: 0; }
-  .similar-pair p { font-size: 13px; margin: 6px 0; }
+  /* Toolbar & duplicates */
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 18px; }
+  .toolbar button { min-height: 40px; padding: 0 14px; font-size: 13px; }
+  .toolbar-hint { flex: 1 1 260px; color: var(--mu); font-size: 12px; line-height: 1.4; }
+  .toolbar-status { margin: -8px 0 16px; }
+  .ghost { background: transparent; }
+  .ghost:hover:not(:disabled) { background: var(--pn); }
+  .danger { color: var(--err); }
+  .similar-panel { padding: 16px; margin-bottom: 20px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
+  .similar-panel p { margin: 0 0 8px; }
+  .similar-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; margin-bottom: 8px; }
+  .similar-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 8px; background: var(--bg-3); border-radius: var(--r-md); }
+  .similar-pair img { display: block; width: 100%; height: 130px; object-fit: contain; background: var(--pn); border-radius: var(--r-sm); }
+  .similar-pair div { min-width: 0; text-align: center; }
+  .similar-pair p { font-size: 12px; margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .similar-pair button { min-height: 36px; padding: 0 10px; font-size: 13px; }
 
   .upload-panel { margin-bottom: 26px; padding: 20px; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--r-lg); }
   fieldset { min-width: 0; display: grid; gap: 10px; border: 0; margin: 0; padding: 0; }
@@ -726,21 +702,33 @@
 
   .alert-box { padding: 12px 16px; margin: 0 0 16px; background: var(--err-soft); border-radius: var(--r-sm); color: var(--err); font-size: 14px; font-weight: 600; }
 
-  /* Image grid: the image is the card */
-  .image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 24px; }
-  .image-card { min-width: 0; }
-  .image-preview { display: block; width: 100%; aspect-ratio: 16/9; padding: 0; border: 0; border-radius: var(--r-md); overflow: hidden; background: var(--pn); }
+  /* Sections: one per role, compact grids sized to the image shape */
+  .image-section { padding: 16px 0 20px; border-top: 1px solid var(--line); }
+  .image-section:first-of-type { border-top: 0; padding-top: 0; }
+  .image-grid { --min: 150px; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--min)), 1fr)); gap: 14px; }
+  [data-group='logo'] .image-grid { --min: 220px; }
+  [data-group='backdrop'] .image-grid { --min: 260px; }
+  [data-group='other'] .image-grid { --min: 200px; }
+  .image-card { min-width: 0; display: flex; flex-direction: column; }
+  .image-preview { position: relative; display: block; width: 100%; aspect-ratio: 16/9; padding: 0; border: 0; border-radius: var(--r-md); overflow: hidden; background: var(--pn); }
   .image-preview:hover:not(:disabled) { background: var(--pn-2); }
   .image-card[data-kind='poster'] .image-preview { aspect-ratio: 2/3; }
+  .image-card[data-kind='logo'] .image-preview { aspect-ratio: 5/2; padding: 12px; background: repeating-conic-gradient(var(--pn) 0% 25%, var(--pn-2) 0% 50%) 50% / 16px 16px; }
+  .image-card[data-kind='disc'] .image-preview { aspect-ratio: 1; }
+  .image-card[data-kind='banner'] .image-preview { aspect-ratio: 5/1; }
   .image-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
-  .card-caption { text-align: center; padding: 10px 4px 0; }
-  .card-caption p { margin: 2px 0; font-size: 13px; }
-  .res-tag { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; }
-  .card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 8px; }
-  .card-actions button { width: 44px; padding: 0; border-radius: 14px; background: transparent; font-size: 20px; font-weight: 500; }
+  .badge { position: absolute; top: 6px; left: 6px; padding: 2px 8px; border-radius: var(--r-pill); background: rgb(0 0 0 / 0.6); color: #fff; font-size: 11px; font-weight: 700; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .kind-badge { left: auto; right: 6px; }
+  .meta { margin: 6px 2px 0; font-size: 12px; line-height: 1.35; text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  .res { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 4px; }
+  .card-actions button { width: 40px; min-width: 40px; min-height: 40px; padding: 0; border-radius: 12px; background: transparent; font-size: 17px; font-weight: 500; }
   .card-actions button:hover:not(:disabled) { background: var(--pn); }
-  .card-actions .danger { color: var(--err); }
-  .empty { margin: 0; }
+  .empty { margin: 0; font-size: 13px; }
+  @media (hover: hover) and (pointer: fine) {
+    .card-actions { opacity: 0.55; transition: opacity var(--t-fast) var(--ease); }
+    .image-card:hover .card-actions, .image-card:focus-within .card-actions { opacity: 1; }
+  }
 
   /* Zoom preview */
   .zoom { max-width: calc(100vw - 48px); max-height: calc(100dvh - 48px); padding: 16px; }
@@ -751,7 +739,9 @@
   .search-title-bar { display: flex; align-items: center; gap: 12px; }
   .search-title-bar h3 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
   .search-controls { display: flex; align-items: center; gap: 12px 20px; flex-wrap: wrap; }
-  .search-controls label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); }
+  .search-controls label { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--tx); white-space: nowrap; }
+  .search-controls label > span { flex: none; }
+  .search-controls select { width: auto; min-width: 9rem; }
   .all-lang-toggle { min-height: 44px; cursor: pointer; font-weight: 600; }
   .all-lang-toggle input { width: 18px; height: 18px; min-height: 18px; }
   .count-badge { margin-left: auto; font-size: 13px; color: var(--mu); font-variant-numeric: tabular-nums; }
@@ -791,7 +781,8 @@
     header, .search-header { padding: 16px; }
     h2, .search-title-bar h3 { font-size: 20px; }
     .manager-content, .search-body { padding: 16px; }
-    .image-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); gap: 16px; }
+    .image-grid { --min: 130px; gap: 10px; }
+    [data-group='backdrop'] .image-grid, [data-group='logo'] .image-grid, [data-group='other'] .image-grid { --min: 100%; }
     .candidates-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
     .count-badge { margin-left: 0; }
   }

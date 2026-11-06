@@ -100,12 +100,13 @@ pub(super) struct SearchCandidates {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Collect {
     pub(super) work_id: String,
-    #[serde(default = "default_languages")]
-    pub(super) languages: Vec<String>,
-    #[serde(default = "yes")]
-    pub(super) include_neutral: bool,
-    #[serde(default = "default_max")]
-    pub(super) max_images: usize,
+    /// Omitted values come from the owning library's image options.
+    #[serde(default)]
+    pub(super) languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) include_neutral: Option<bool>,
+    #[serde(default)]
+    pub(super) max_images: Option<usize>,
 }
 fn default_languages() -> Vec<String> {
     vec!["fr".into(), "en".into()]
@@ -272,9 +273,9 @@ pub(super) async fn collect_batch(
         let title = effective_title(title, &editorial, manual.as_deref());
         let request = Collect {
             work_id: work_id.clone(),
-            languages: input.languages.clone(),
-            include_neutral: input.include_neutral,
-            max_images: input.max_images,
+            languages: Some(input.languages.clone()),
+            include_neutral: Some(input.include_neutral),
+            max_images: Some(input.max_images),
         };
         let item = match collect(State(auth.clone()), headers.clone(), Json(request)).await {
             Ok(Json(result)) => json!({"workId":work_id,"title":title,"result":result}),
@@ -475,17 +476,11 @@ pub(super) async fn collect_with_context(
     input: Collect,
     background: Option<super::run::Background<'_>>,
 ) -> Result<Json<Value>, Error> {
-    if input.max_images == 0 || input.max_images > 12 {
+    if input.max_images.is_some_and(|max| max == 0 || max > 12) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_limit"));
     }
-    let mut ordered = languages(&json!({"languages":input.languages}))?;
-    if let Some(original) = crate::artwork::original_language(&auth.store, &input.work_id)
-        .await
-        .map_err(db)?
-        && !ordered.iter().any(|v| v == &original)
-        && ordered.len() < 5
-    {
-        ordered.push(original);
+    if let Some(requested) = &input.languages {
+        languages(&json!({"languages":requested}))?;
     }
     let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
         .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
@@ -513,6 +508,24 @@ pub(super) async fn collect_with_context(
         .map_err(db)?;
     let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    let include_neutral = input
+        .include_neutral
+        .unwrap_or(options.artwork_include_neutral);
+    let max_images = input
+        .max_images
+        .unwrap_or(usize::from(options.artwork_max_images))
+        .clamp(1, 12);
+    let mut ordered = languages(&json!({
+        "languages": input.languages.clone().unwrap_or_else(|| options.artwork_languages.clone())
+    }))?;
+    if let Some(original) = crate::artwork::original_language(&auth.store, &input.work_id)
+        .await
+        .map_err(db)?
+        && !ordered.iter().any(|v| v == &original)
+        && ordered.len() < 5
+    {
+        ordered.push(original);
+    }
     rows.retain(|(id, _, _)| {
         crate::library_options::LibraryOptions::provider_priority(&options.image_providers, id, 100)
             .is_some()
@@ -571,7 +584,7 @@ pub(super) async fn collect_with_context(
                 "mediaType": media_type,
                 "externalIds": ids,
                 "languages": ordered,
-                "includeNeutral": input.include_neutral
+                "includeNeutral": include_neutral
             }),
         };
         providers += 1;
@@ -587,7 +600,7 @@ pub(super) async fn collect_with_context(
                     .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
                 for image in images {
                     if let Some(priority) =
-                        rank(image.language.as_deref(), &ordered, input.include_neutral)
+                        rank(image.language.as_deref(), &ordered, include_neutral)
                     {
                         candidates.push((priority, id.clone(), image));
                     }
@@ -673,7 +686,7 @@ pub(super) async fn collect_with_context(
             skipped += 1;
             continue;
         }
-        if downloaded >= input.max_images
+        if downloaded >= max_images
             || attempts >= 24
             || tokio::time::Instant::now() >= deadline
         {

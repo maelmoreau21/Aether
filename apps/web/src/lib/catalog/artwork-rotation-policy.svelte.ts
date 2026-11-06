@@ -10,7 +10,7 @@ export type ArtworkRotationPolicy = {
 
 export const defaultArtworkRotationPolicy: ArtworkRotationPolicy = {
   enabled: true, languageMode: 'interface', enableMovies: true, enableSeries: true,
-  rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 4,
+  rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 12,
   preferredLanguage: 'fr', fallbackLanguage: 'en',
   includeUnknownLanguage: true, allowAnyLanguageFallback: true,
 };

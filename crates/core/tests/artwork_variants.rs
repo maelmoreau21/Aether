@@ -44,7 +44,7 @@ async fn call(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn variant_imports_preserve_other_images_and_deduplicate_by_language() {
+async fn variant_imports_preserve_other_images_and_deduplicate_across_labels() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("db.sqlite"))
         .await
@@ -144,14 +144,19 @@ async fn variant_imports_preserve_other_images_and_deduplicate_by_language() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(duplicate["id"], first["id"]);
     assert_eq!(duplicate["duplicate"], true);
+    // The same picture labelled with a language is still a duplicate of the neutral one.
+    let (status, labelled) = upload(format!("{base}?append=true&language=fr"), [255, 0, 0]).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(labelled["duplicate"], true);
     assert_eq!(
-        upload(format!("{base}?append=true&language=fr"), [255, 0, 0])
+        upload(format!("{base}?append=true&language=fr"), [0, 0, 255])
             .await
             .0,
         StatusCode::CREATED
     );
+    // Titled roles keep one variant per explicit language.
     assert_eq!(
-        upload(format!("{base}?append=true&language=fr"), [0, 0, 255])
+        upload(format!("{base}?append=true&language=en"), [0, 0, 255])
             .await
             .0,
         StatusCode::CREATED
@@ -182,7 +187,7 @@ async fn variant_imports_preserve_other_images_and_deduplicate_by_language() {
     );
     // Mark the harvested variants as provider-owned and verify a manual override retains their pool.
     media_poc::database::query(
-        "UPDATE work_image_entries SET provider='test.provider' WHERE language='fr'",
+        "UPDATE work_image_entries SET provider='test.provider' WHERE language IN ('fr','en')",
     )
     .execute(store.pool())
     .await

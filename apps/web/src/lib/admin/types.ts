@@ -53,6 +53,9 @@ export interface LibraryOptions {
   artworkSimilarity: number;
   artworkMinPosterWidth: number;
   artworkMinPosterHeight: number;
+  artworkLanguages?: string[];
+  artworkIncludeNeutral?: boolean;
+  artworkMaxImages?: number;
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
@@ -66,7 +69,8 @@ export function defaultLibraryOptions(): LibraryOptions {
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
     posterRotationEnabled: true, artworkDeduplicate: true, artworkSimilarity: 5,
-    artworkMinPosterWidth: 0, artworkMinPosterHeight: 0 };
+    artworkMinPosterWidth: 0, artworkMinPosterHeight: 0,
+    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12 };
 }
 /** Apply the processing preset without changing language, provider scopes or media paths. */
 export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptions {

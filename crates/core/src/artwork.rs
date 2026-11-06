@@ -495,11 +495,17 @@ impl Fingerprint {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SimilarQuery {
-    #[serde(default = "default_similarity")]
-    threshold: u32,
+    /// Omitted: the owning library's `artworkSimilarity` option.
+    #[serde(default)]
+    threshold: Option<u32>,
 }
-fn default_similarity() -> u32 {
-    5
+
+async fn library_similarity(store: &IdentityStore, work: &str) -> u32 {
+    let settings: Option<String> = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM inventory_works w JOIN libraries l ON l.id=w.library_id LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE w.id=?")
+        .bind(work).fetch_optional(&store.pool).await.ok().flatten();
+    settings
+        .and_then(|value| serde_json::from_str::<crate::library_options::LibraryOptions>(&value).ok())
+        .map_or(5, |options| u32::from(options.artwork_similarity))
 }
 
 type ImageEntryRow = (String, String, Option<String>, i64, i64, Option<String>);
@@ -516,9 +522,13 @@ async fn similar_images(
         return Err(StatusCode::FORBIDDEN);
     }
     allowed(&auth, &headers, &work, false).await?;
-    if options.threshold > 16 {
+    if options.threshold.is_some_and(|threshold| threshold > 16) {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let threshold = match options.threshold {
+        Some(threshold) => threshold,
+        None => library_similarity(&auth.store, &work).await,
+    };
     let rows: Vec<ImageEntryRow> = query_as(
         "SELECT id,kind,language,width,height,fingerprint FROM work_image_entries WHERE work_id=? ORDER BY kind,position,id LIMIT 65"
     ).bind(&work).fetch_all(auth.store.pool()).await.map_err(db)?;
@@ -544,7 +554,7 @@ async fn similar_images(
                         *height,
                         *other_width,
                         *other_height,
-                        options.threshold,
+                        threshold,
                     )
                 })
             {
@@ -775,8 +785,13 @@ pub(crate) async fn upload_internal(
         .await
         .map_err(db)?;
     if options.append {
-        let candidates: Vec<(String, String, i64, i64)> = query_as("SELECT id,fingerprint,width,height FROM work_image_entries WHERE work_id=? AND kind=? AND COALESCE(language,'')=COALESCE(?,'') AND fingerprint IS NOT NULL")
-            .bind(&work).bind(&kind).bind(&language).fetch_all(&mut *tx).await.map_err(db)?;
+        // Providers often label the same picture differently (fr, en or none), which
+        // used to bypass deduplication. Scene images are compared with every stored
+        // image of the role; titled roles keep one variant per language but are
+        // still compared with neutral images.
+        let titled = matches!(kind.as_str(), "poster" | "logo" | "banner" | "disc");
+        let candidates: Vec<(String, String, i64, i64)> = query_as("SELECT id,fingerprint,width,height FROM work_image_entries WHERE work_id=? AND kind=? AND fingerprint IS NOT NULL AND (?=0 OR language IS NULL OR ? IS NULL OR language=?)")
+            .bind(&work).bind(&kind).bind(i64::from(titled)).bind(&language).bind(&language).fetch_all(&mut *tx).await.map_err(db)?;
         if let Some((id, _, _, _)) = candidates.iter().find(|(_, fingerprint, width, height)| {
             if policy.as_ref().is_some_and(|p| !p.artwork_deduplicate) {
                 return false;

@@ -63,6 +63,10 @@ pub struct LibraryOptions {
     pub artwork_similarity: u8,
     pub artwork_min_poster_width: u16,
     pub artwork_min_poster_height: u16,
+    /// Ordered languages used when filling the image pools of this library.
+    pub artwork_languages: Vec<String>,
+    pub artwork_include_neutral: bool,
+    pub artwork_max_images: u8,
 }
 impl Default for LibraryOptions {
     fn default() -> Self {
@@ -110,6 +114,9 @@ impl Default for LibraryOptions {
             artwork_similarity: 5,
             artwork_min_poster_width: 0,
             artwork_min_poster_height: 0,
+            artwork_languages: vec!["fr".into(), "en".into()],
+            artwork_include_neutral: true,
+            artwork_max_images: 12,
         }
     }
 }
@@ -195,6 +202,12 @@ impl LibraryOptions {
             && self.artwork_similarity <= 16
             && self.artwork_min_poster_width <= 4096
             && self.artwork_min_poster_height <= 4096
+            && (1..=12).contains(&self.artwork_max_images)
+            && (1..=5).contains(&self.artwork_languages.len())
+            && self
+                .artwork_languages
+                .iter()
+                .all(|language| valid_language(language))
             && self.subtitle_languages.len() <= 16
             && self
                 .subtitle_languages

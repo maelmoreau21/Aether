@@ -48,8 +48,7 @@
   }
 </script>
 
-<section class="artwork-admin" aria-labelledby="artwork-admin-title">
-  <header><h2 id="artwork-admin-title">{$t('library_images')}</h2><p>{$t('enrich_films_and_series_with_images')}</p></header>
+<section class="artwork-admin" aria-label={$t('admin_artwork_tab')}>
   <div class="panel">
     <label>{$t('library')}<select bind:value={libraryId} onchange={changeLibrary}><option value="">{$t('choose_a_library')}</option>{#each videoLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
     {#if libraryId}<form class="filters" onsubmit={(event) => { event.preventDefault(); applyFilters(); }}><label>{$t('search_for_a_title')}<input type="search" bind:value={search} maxlength="100" /></label><label>{$t('saved_variants')}<select bind:value={posterFilter}><option value="all">{$t('all_works')}</option><option value="with">{$t('with_variant')}</option><option value="without">{$t('without_variant')}</option></select></label><button type="submit" disabled={pageLoading}>{$t('filter_extensions')}</button></form>{#if filterError}<p class="error" role="alert">{filterError}</p>{/if}<p>{$t('for_some_titles_match_case_and')}</p>{/if}
@@ -62,10 +61,8 @@
 {#if selected}<ImageManager title={selected.title || selected.workId} workId={selected.workId} onclose={() => selected = null} onchanged={async () => { invalidateCatalog(libraryId); await loadPage(pageCursor); }} />{/if}
 <style>
   .artwork-admin { display: grid; gap: 20px; min-width: 0; max-width: 1040px; font-family: var(--font); color: var(--tx); }
-  h2, h3 { margin: 0; }
-  h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.15; }
+  h3 { margin: 0; }
   h3 { margin-top: 4px; font-size: 17px; font-weight: 700; }
-  header p { margin: 6px 0 0; }
   p { font-size: 14px; line-height: 1.6; color: var(--mu); }
   .panel { min-width: 0; padding: 24px; border-radius: var(--r-md); background: var(--color-surface); }
   .panel > :first-child { margin-top: 0; }

@@ -156,6 +156,46 @@ struct Status {
     errors_json: String,
     errors_count: i64,
     warnings_count: i64,
+    /// Why a queued scan has not started yet (`node_busy`, `node_offline`, `retry`,
+    /// `prerequisite`, `dispatching`). The counters then describe the previous scan.
+    #[sqlx(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_reason: Option<String>,
+    /// The category of the task occupying the node (`node_busy`) or the last error (`retry`).
+    #[sqlx(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_detail: Option<String>,
+}
+
+/// Explains a queued scan task using the same conditions the task engine checks before leasing
+/// it. A queued scan whose library moved to another Media Node can never be leased (the engine
+/// requires both to match) and blocks every new scan with 409: it is moved to the library's
+/// current node first.
+async fn waiting_reason(
+    store: &crate::identity::IdentityStore,
+    library: &str,
+    now: i64,
+) -> Result<Option<(String, Option<String>)>, sqlx::Error> {
+    crate::database::query("UPDATE durable_tasks SET node_id=(SELECT l.node_id FROM libraries l WHERE l.id=durable_tasks.library_id),updated_at=? WHERE category='scan' AND status='queued' AND lease_until IS NULL AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND EXISTS(SELECT 1 FROM libraries l WHERE l.id=durable_tasks.library_id AND l.node_id!=durable_tasks.node_id)")
+        .bind(now).bind(library).bind(library).execute(&store.pool).await?;
+    let row: Option<(String, String, i64, String, i64, Option<String>)> = crate::database::query_as(
+        "SELECT j.node_id,COALESCE(n.status,'revoked'),j.available_at,j.error,CAST(CASE WHEN EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks p ON p.id=d.prerequisite_id WHERE d.task_id=j.id AND p.status!='completed') THEN 1 ELSE 0 END AS BIGINT),(SELECT b.category FROM durable_tasks b WHERE b.node_id=j.node_id AND b.lease_until IS NOT NULL AND b.id!=j.id ORDER BY b.started_at LIMIT 1) FROM durable_tasks j LEFT JOIN media_nodes n ON n.id=j.node_id WHERE (j.library_id=? OR j.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND j.category='scan' AND j.status='queued' AND j.lease_until IS NULL ORDER BY j.created_at,j.id LIMIT 1",
+    )
+    .bind(library).bind(library).fetch_optional(&store.pool).await?;
+    let Some((node, node_status, available_at, error, prerequisite, busy)) = row else {
+        return Ok(None);
+    };
+    Ok(Some(if node != "local" && node_status != "connected" {
+        ("node_offline".into(), None)
+    } else if prerequisite != 0 {
+        ("prerequisite".into(), None)
+    } else if available_at > now {
+        ("retry".into(), (!error.is_empty()).then_some(error))
+    } else if let Some(category) = busy {
+        ("node_busy".into(), Some(category))
+    } else {
+        ("dispatching".into(), None)
+    }))
 }
 pub async fn router(
     auth: AuthState,
@@ -241,6 +281,8 @@ async fn status(
         errors_json: "[]".into(),
         errors_count: 0,
         warnings_count: 0,
+        waiting_reason: None,
+        waiting_detail: None,
     };
     for item in statuses {
         let rank = |s: &str| match s {
@@ -269,13 +311,12 @@ async fn status(
         && let Some(pending_status) = pending
     {
         status.status = pending_status;
-        let _ = crate::scheduler::dispatch_once(
-            &state.auth,
-            &state.root,
-            &state.jobs,
-            media_contracts::protocol::unix_now(),
-        )
-        .await;
+        let now = media_contracts::protocol::unix_now();
+        if let Ok(Some((reason, detail))) = waiting_reason(&state.auth.store, &id, now).await {
+            status.waiting_reason = Some(reason);
+            status.waiting_detail = detail;
+        }
+        let _ = crate::scheduler::dispatch_once(&state.auth, &state.root, &state.jobs, now).await;
     }
     Ok(Json(status))
 }
@@ -639,6 +680,64 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
     use zeroize::Zeroizing;
+
+    #[tokio::test]
+    async fn waiting_scan_explains_itself_and_follows_a_moved_library() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        let pool = &store.pool;
+        crate::database::query(
+            "INSERT INTO media_nodes(id,name,kind,status) VALUES('nas','NAS','remote','connected')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','nas','/media',1)").execute(pool).await.unwrap();
+        // Queued while the library still lived on the local node: the engine can never lease it.
+        crate::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,created_at,updated_at,available_at) VALUES('scan','films','admin','scan','local','scan',1,1,1)").execute(pool).await.unwrap();
+        crate::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,attempt,lease_until,started_at,created_at,updated_at,available_at) VALUES('prep','films','admin','prep','nas','prepare','running',1,9999999999,1,1,1,1)").execute(pool).await.unwrap();
+        let reason = waiting_reason(&store, "films", 100).await.unwrap();
+        assert_eq!(reason, Some(("node_busy".into(), Some("prepare".into()))));
+        let node: String =
+            crate::database::query_scalar("SELECT node_id FROM durable_tasks WHERE id='scan'")
+                .fetch_one(pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            node, "nas",
+            "the queued scan follows its library to its current node"
+        );
+
+        crate::database::query("DELETE FROM durable_tasks WHERE id='prep'")
+            .execute(pool)
+            .await
+            .unwrap();
+        crate::database::query(
+            "UPDATE durable_tasks SET available_at=500,error='node timeout' WHERE id='scan'",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            waiting_reason(&store, "films", 100).await.unwrap(),
+            Some(("retry".into(), Some("node timeout".into())))
+        );
+        crate::database::query("UPDATE media_nodes SET status='disconnected' WHERE id='nas'")
+            .execute(pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            waiting_reason(&store, "films", 100).await.unwrap(),
+            Some(("node_offline".into(), None))
+        );
+        crate::database::query("UPDATE durable_tasks SET status='completed' WHERE id='scan'")
+            .execute(pool)
+            .await
+            .unwrap();
+        assert_eq!(waiting_reason(&store, "films", 100).await.unwrap(), None);
+    }
 
     #[tokio::test]
     async fn queued_scan_is_exclusive_and_shutdown_retains_inventory() {

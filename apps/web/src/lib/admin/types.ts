@@ -1,5 +1,5 @@
 import { translatedLabels } from '../i18n';
-export const scanLabels = translatedLabels({ idle: 'never_scanned', queued: 'waiting', running: 'stats_kpi_active', completed: 'done', error: 'admin_error' });
+export const scanLabels = translatedLabels({ idle: 'never_scanned', queued: 'waiting', paused: 'paused', running: 'stats_kpi_active', completed: 'done', error: 'admin_error' });
 
 export const nodeStatusLabels = translatedLabels({ connected: 'connected', disconnected: 'disconnected', revoked: 'revoked' });
 
@@ -89,13 +89,17 @@ export interface Library {
 }
 
 export interface Scan {
-  status: 'idle' | 'queued' | 'running' | 'completed' | 'error';
+  status: 'idle' | 'queued' | 'paused' | 'running' | 'completed' | 'error';
   discovered: number;
   probed: number;
   reused: number;
   errors: string[];
   errorsCount?: number;
   warningsCount?: number;
+  /** Why a queued scan has not started; the counters then describe the previous scan. */
+  waitingReason?: 'node_busy' | 'node_offline' | 'retry' | 'prerequisite' | 'dispatching';
+  /** Category of the task occupying the node, or the last error before a retry. */
+  waitingDetail?: string;
 }
 
 export interface NodeLibraryRef {

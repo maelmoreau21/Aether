@@ -62,6 +62,18 @@
     editor?.querySelector<HTMLButtonElement>(`#library-tab-${editorSections[next].id}`)?.focus();
   }
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
+  function scanWaitingText(scan: Scan): string {
+    switch (scan.waitingReason) {
+      case 'node_busy': {
+        const tasks: Record<string, string> = { scan: $t('task_kind_scan'), analyze: $t('task_kind_analyze'), prepare: $t('task_kind_prepare'), image: $t('task_kind_image'), trickplay: $t('task_kind_trickplay'), system: $t('task_kind_system') };
+        return $t('scan_waiting_node_busy', { task: tasks[scan.waitingDetail ?? ''] ?? $t('task_kind_system') });
+      }
+      case 'node_offline': return $t('scan_waiting_node_offline');
+      case 'retry': return scan.waitingDetail ? $t('scan_waiting_retry_after', { error: scan.waitingDetail }) : $t('scan_waiting_retry');
+      case 'prerequisite': return $t('scan_waiting_prerequisite');
+      default: return $t('scan_waiting_dispatching');
+    }
+  }
   function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? $t('local_node') : id); }
   let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
   async function deleteLibrary() {
@@ -142,7 +154,8 @@
           {#if scan}
             <div class="scan-status scan-counters" role="status">
               <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">{$t('admin_scan')} </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
-              <span class="counters">{$t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused })}</span>
+              {#if scan.waitingReason}<span class="counters waiting-reason">{scanWaitingText(scan)}</span>{/if}
+              <span class="counters">{scan.waitingReason ? $t('previous_scan_counters', { counters: $t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused }) }) : $t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused })}</span>
             </div>
             {#if scanning}<progress aria-label={$t('scanning', { name: library.name })}></progress>{/if}
           {:else}<span class="no-scan">—</span>{/if}

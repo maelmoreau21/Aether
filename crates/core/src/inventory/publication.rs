@@ -51,11 +51,17 @@ pub async fn publish_staged_scan(
             .unwrap_or_else(|| "incremental".into());
     let mut affected_work_ids = std::collections::BTreeSet::new();
 
-    // A film renamed or moved inside this library keeps its asset (and so its work, corrections and
+    // A film or episode renamed or moved inside this library keeps its asset (and so its work, corrections and
     // prepared caches). Needs a complete scan: an unreadable folder is not a vanished one.
-    if complete && lib_kind == "films" {
-        let (_relocated, works) =
-            super::relocation::apply(&mut tx, scan_id, library_id, &root_snapshot).await?;
+    if complete && matches!(lib_kind.as_str(), "films" | "series") {
+        let (_relocated, works) = super::relocation::apply(
+            &mut tx,
+            scan_id,
+            library_id,
+            &root_snapshot,
+            lib_kind == "series",
+        )
+        .await?;
         affected_work_ids.extend(works);
     }
 

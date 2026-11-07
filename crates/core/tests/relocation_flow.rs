@@ -99,6 +99,25 @@ async fn scan(
     films: &[Film],
     complete: bool,
 ) {
+    scan_files(
+        store,
+        scan_id,
+        library,
+        root,
+        films.iter().map(Film::scanned).collect(),
+        complete,
+    )
+    .await;
+}
+
+async fn scan_files(
+    store: &IdentityStore,
+    scan_id: &str,
+    library: &str,
+    root: &Path,
+    files: Vec<ScannedFile>,
+    complete: bool,
+) {
     stage_batch(
         store,
         scan_id,
@@ -106,7 +125,7 @@ async fn scan(
         &InventoryBatch {
             scan_id: scan_id.into(),
             sequence: 0,
-            files: films.iter().map(Film::scanned).collect(),
+            files,
             errors: vec![],
             warnings: vec![],
         },
@@ -457,5 +476,342 @@ async fn libraries_are_never_merged_even_with_identical_files() {
     assert_ne!(
         work_of(&store, &asset_a).await,
         work_of(&store, &asset_b).await
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Series: the episode keeps its season/episode, the series follows its folder.
+// ---------------------------------------------------------------------------------------------
+
+async fn series_store(root: &Path, library: &str) -> IdentityStore {
+    let store = store_with_libraries(root, &[library]).await;
+    query("UPDATE libraries SET kind='series' WHERE id=?")
+        .bind(library)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    store
+}
+
+fn episode(
+    path: &str,
+    series_key: &str,
+    season: u32,
+    number: u32,
+    fingerprint: &str,
+) -> ScannedFile {
+    ScannedFile {
+        relative_path: path.into(),
+        size: 1000,
+        modified_ns: "500".into(),
+        title: format!("Episode {number}"),
+        year: Some(2020),
+        identity_key: format!("episode:{series_key}:s{season:02}e{number:02}"),
+        content_fingerprint: Some(fingerprint.into()),
+        mime: "video/x-matroska".into(),
+        probe: serde_json::from_value(serde_json::json!({
+            "format": {"duration": "60.0"},
+            "streams": [{"index": 0, "codec_type": "video", "codec_name": "h264"}]
+        }))
+        .unwrap(),
+        series_identity_key: Some(series_key.into()),
+        series_title: Some("Show".into()),
+        series_year: Some(2020),
+        series_external_ids: Some(BTreeMap::new()),
+        season_number: Some(season),
+        episode_number: Some(number),
+        ..Default::default()
+    }
+}
+
+const FP_E1: &str = "b3s1:1000:11111111111111111111111111111111";
+const FP_E2: &str = "b3s1:1000:22222222222222222222222222222222";
+
+async fn series_count(store: &IdentityStore, library: &str) -> i64 {
+    count(
+        store,
+        "SELECT COUNT(*) FROM inventory_works WHERE library_id=? AND kind='series'",
+        library,
+    )
+    .await
+}
+async fn episodes_count(store: &IdentityStore, library: &str) -> i64 {
+    count(
+        store,
+        "SELECT COUNT(*) FROM inventory_works WHERE library_id=? AND kind='episode'",
+        library,
+    )
+    .await
+}
+async fn asset_at(store: &IdentityStore, library: &str, path: &str) -> Option<String> {
+    query_scalar("SELECT id FROM inventory_assets WHERE library_id=? AND relative_path=?")
+        .bind(library)
+        .bind(path)
+        .fetch_optional(store.pool())
+        .await
+        .unwrap()
+}
+async fn series_of(store: &IdentityStore, asset: &str) -> String {
+    query_scalar("SELECT ss.series_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_episodes ie ON ie.work_id=e.work_id JOIN inventory_seasons ss ON ss.id=ie.season_id WHERE a.id=?")
+        .bind(asset)
+        .fetch_one(store.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn renamed_series_folder_keeps_series_season_episode_and_corrections() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = series_store(temp.path(), "shows").await;
+    let root = temp.path();
+    let old = "folder:Show (2020)";
+    scan_files(
+        &store,
+        "s1",
+        "shows",
+        root,
+        vec![
+            episode("Show (2020)/Season 01/Show.S01E01.mkv", old, 1, 1, FP_E1),
+            episode("Show (2020)/Season 01/Show.S01E02.mkv", old, 1, 2, FP_E2),
+        ],
+        true,
+    )
+    .await;
+    let asset1 = asset_at(&store, "shows", "Show (2020)/Season 01/Show.S01E01.mkv")
+        .await
+        .unwrap();
+    let asset2 = asset_at(&store, "shows", "Show (2020)/Season 01/Show.S01E02.mkv")
+        .await
+        .unwrap();
+    let series = series_of(&store, &asset1).await;
+    let episode_work = work_of(&store, &asset1).await;
+    for work in [&series, &episode_work] {
+        query("INSERT INTO work_translations(work_id,locale,language,source,priority,title,updated_at) VALUES(?,'fr-FR','fr','manual',100,'Titre manuel',1)")
+            .bind(work)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+    let seasons_sql = "SELECT COUNT(*) FROM inventory_seasons WHERE series_id IN (SELECT id FROM inventory_works WHERE library_id=?)";
+    let seasons_before = count(&store, seasons_sql, "shows").await;
+
+    // The whole show folder is renamed (and so is every file).
+    let new = "folder:Show Renamed (2020)";
+    scan_files(
+        &store,
+        "s2",
+        "shows",
+        root,
+        vec![
+            episode("Show Renamed (2020)/S01/E01.mkv", new, 1, 1, FP_E1),
+            episode("Show Renamed (2020)/S01/E02.mkv", new, 1, 2, FP_E2),
+        ],
+        true,
+    )
+    .await;
+
+    assert_eq!(series_count(&store, "shows").await, 1, "no second series");
+    assert_eq!(
+        episodes_count(&store, "shows").await,
+        2,
+        "no second episodes"
+    );
+    assert_eq!(assets(&store, "shows").await, 2, "no second assets");
+    assert_eq!(
+        asset_at(&store, "shows", "Show Renamed (2020)/S01/E01.mkv")
+            .await
+            .as_deref(),
+        Some(asset1.as_str())
+    );
+    assert_eq!(
+        asset_at(&store, "shows", "Show Renamed (2020)/S01/E02.mkv")
+            .await
+            .as_deref(),
+        Some(asset2.as_str())
+    );
+    assert_eq!(series_of(&store, &asset1).await, series);
+    assert_eq!(work_of(&store, &asset1).await, episode_work);
+    assert_eq!(count(&store, seasons_sql, "shows").await, seasons_before);
+    let key: String = query_scalar("SELECT identity_key FROM inventory_works WHERE id=?")
+        .bind(&series)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert!(key.ends_with("\nfolder:Show Renamed (2020)"), "{key}");
+    for work in [&series, &episode_work] {
+        let manual: String =
+            query_scalar("SELECT title FROM work_translations WHERE work_id=? AND source='manual'")
+                .bind(work)
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(manual, "Titre manuel");
+    }
+    let alive = count(
+        &store,
+        "SELECT COUNT(*) FROM inventory_assets WHERE library_id=? AND available=1",
+        "shows",
+    )
+    .await;
+    assert_eq!(alive, 2);
+
+    // Stable afterwards.
+    scan_files(
+        &store,
+        "s3",
+        "shows",
+        root,
+        vec![
+            episode("Show Renamed (2020)/S01/E01.mkv", new, 1, 1, FP_E1),
+            episode("Show Renamed (2020)/S01/E02.mkv", new, 1, 2, FP_E2),
+        ],
+        true,
+    )
+    .await;
+    assert_eq!(
+        (
+            series_count(&store, "shows").await,
+            episodes_count(&store, "shows").await,
+            assets(&store, "shows").await
+        ),
+        (1, 2, 2)
+    );
+}
+
+#[tokio::test]
+async fn an_episode_file_renamed_inside_its_series_keeps_its_asset() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = series_store(temp.path(), "shows").await;
+    let key = "folder:Show (2020)";
+    scan_files(
+        &store,
+        "s1",
+        "shows",
+        temp.path(),
+        vec![episode(
+            "Show (2020)/Show.S01E01.720p.mkv",
+            key,
+            1,
+            1,
+            FP_E1,
+        )],
+        true,
+    )
+    .await;
+    let asset = asset_at(&store, "shows", "Show (2020)/Show.S01E01.720p.mkv")
+        .await
+        .unwrap();
+    scan_files(
+        &store,
+        "s2",
+        "shows",
+        temp.path(),
+        vec![episode(
+            "Show (2020)/Show - S01E01 - Pilot.mkv",
+            key,
+            1,
+            1,
+            FP_E1,
+        )],
+        true,
+    )
+    .await;
+    assert_eq!(assets(&store, "shows").await, 1);
+    assert_eq!(
+        asset_at(&store, "shows", "Show (2020)/Show - S01E01 - Pilot.mkv")
+            .await
+            .as_deref(),
+        Some(asset.as_str())
+    );
+    assert_eq!(
+        (
+            series_count(&store, "shows").await,
+            episodes_count(&store, "shows").await
+        ),
+        (1, 1)
+    );
+}
+
+#[tokio::test]
+async fn a_partial_series_move_or_a_renumbered_episode_relocates_nothing() {
+    // Only one of two episodes moves to a new folder: the old series key is still in use.
+    let temp = tempfile::tempdir().unwrap();
+    let store = series_store(temp.path(), "shows").await;
+    let old = "folder:Show (2020)";
+    scan_files(
+        &store,
+        "s1",
+        "shows",
+        temp.path(),
+        vec![
+            episode("Show (2020)/S01E01.mkv", old, 1, 1, FP_E1),
+            episode("Show (2020)/S01E02.mkv", old, 1, 2, FP_E2),
+        ],
+        true,
+    )
+    .await;
+    let first = asset_at(&store, "shows", "Show (2020)/S01E01.mkv")
+        .await
+        .unwrap();
+    scan_files(
+        &store,
+        "s2",
+        "shows",
+        temp.path(),
+        vec![
+            episode(
+                "Elsewhere (2020)/S01E01.mkv",
+                "folder:Elsewhere (2020)",
+                1,
+                1,
+                FP_E1,
+            ),
+            episode("Show (2020)/S01E02.mkv", old, 1, 2, FP_E2),
+        ],
+        true,
+    )
+    .await;
+    assert_eq!(
+        series_count(&store, "shows").await,
+        2,
+        "two distinct series folders"
+    );
+    assert_ne!(
+        asset_at(&store, "shows", "Elsewhere (2020)/S01E01.mkv")
+            .await
+            .unwrap(),
+        first
+    );
+
+    // The same bytes under another episode number are another episode.
+    let temp2 = tempfile::tempdir().unwrap();
+    let store2 = series_store(temp2.path(), "shows").await;
+    scan_files(
+        &store2,
+        "s1",
+        "shows",
+        temp2.path(),
+        vec![episode("Show (2020)/S01E01.mkv", old, 1, 1, FP_E1)],
+        true,
+    )
+    .await;
+    let before = asset_at(&store2, "shows", "Show (2020)/S01E01.mkv")
+        .await
+        .unwrap();
+    scan_files(
+        &store2,
+        "s2",
+        "shows",
+        temp2.path(),
+        vec![episode("Show (2020)/S01E02.mkv", old, 1, 2, FP_E1)],
+        true,
+    )
+    .await;
+    assert_eq!(episodes_count(&store2, "shows").await, 2);
+    assert_ne!(
+        asset_at(&store2, "shows", "Show (2020)/S01E02.mkv")
+            .await
+            .unwrap(),
+        before
     );
 }

@@ -100,7 +100,7 @@ Avant : une œuvre était identifiée par un chemin (`folder:…` / `file:…`) 
 nom ne portait pas d'identifiant. Renommer un dossier créait une œuvre neuve, sans
 corrections manuelles, traductions ni caches.
 
-Maintenant (bibliothèques **Films**, scan **complet** seulement — un dossier
+Maintenant (bibliothèques **Films** et **Séries**, scan **complet** seulement — un dossier
 illisible n'est pas un dossier disparu), le Core compare les fichiers apparus aux
 assets disparus de **la même bibliothèque** et, s'ils correspondent, déplace
 l'asset (même identifiant) vers le nouveau chemin et suit la clé de l'œuvre. Les
@@ -121,9 +121,15 @@ Deux preuves seulement, toutes deux sans ambiguïté :
 Tout doute (doublons, deux candidats, identifiants contradictoires, scan
 incomplet) ne déplace rien : le fichier devient une œuvre neuve, le comportement
 d'avant. Les bibliothèques ne sont **jamais** fusionnées : la comparaison est
-bornée à une bibliothèque (donc à ses droits). Les séries ne sont pas encore
-couvertes (la clé d'un épisode dépend de celle de la série) ; leurs empreintes
-sont toutefois déjà enregistrées.
+bornée à une bibliothèque (donc à ses droits).
+
+Séries : mêmes preuves, avec deux garde-fous en plus. Un fichier ne change jamais
+d'épisode en se déplaçant (même saison et même numéro d'épisode). La clé de la série
+(donc son œuvre, ses saisons et leurs liens) ne suit un renommage de dossier que si
+plus aucun fichier du scan n'utilise l'ancienne clé et si la nouvelle n'est pas déjà celle
+d'une autre œuvre. Un déplacement partiel (une partie des épisodes vers un autre
+dossier), une série éclatée en deux emplacements ou une clé déjà prise ne déplacent
+rien.
 
 ## 6. Empreinte de contenu partielle
 

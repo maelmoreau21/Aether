@@ -45,6 +45,7 @@ export const catalog = {
   episodes_load_failed: 'Chargement des épisodes impossible. Rechargez la page pour réessayer.',
   episode_load_failed: 'Chargement de l’épisode impossible.',
   catalog_connection_failed: 'Connexion au catalogue impossible.',
+  catalog_no_library_shared: 'Aucune médiathèque n’est partagée avec votre compte. Demandez l’accès à un administrateur.',
   partial_catalog_unavailable: 'Une partie du catalogue est indisponible. Rechargez la page pour réessayer.',
   open_media_from_library: 'Ouvrez ce média depuis sa bibliothèque Films ou Séries.',
   unknown_value: 'Inconnu',

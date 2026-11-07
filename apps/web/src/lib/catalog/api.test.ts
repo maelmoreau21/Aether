@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import {
+  CatalogRequestError,
   cacheMedia,
+  isAbortError,
+  isCatalogAccessError,
   clearDescriptorCache,
   fetchMediaDescriptor,
   fetchMediaDescriptors,
@@ -463,5 +466,28 @@ describe('catalogue requests carry the metadata language', () => {
     expect(withMetadataLocale('/api/v1/catalog?kind=film&q=')).toBe('/api/v1/catalog?kind=film&q=&locale=fr');
     expect(withMetadataLocale('/api/v1/catalog/work-1?locale=en-GB')).toBe('/api/v1/catalog/work-1?locale=en-GB');
     expect(withMetadataLocale('/api/v1/media/media-1')).toBe('/api/v1/media/media-1');
+  });
+});
+describe('typed catalogue failures', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  it('tells an account with no shared library apart from a refused resource, whatever the interface language', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => Promise.resolve(new Response(null, { status: 403 }))));
+    const listing = await request('/api/v1/catalog?kind=film', new AbortController().signal).catch((cause: CatalogRequestError) => cause);
+    expect(listing).toBeInstanceOf(CatalogRequestError);
+    expect((listing as CatalogRequestError).kind).toBe('no-library');
+    expect(isCatalogAccessError(listing)).toBe(true);
+    const detail = await request('/api/v1/catalog/work-1', new AbortController().signal).catch((cause: CatalogRequestError) => cause);
+    expect((detail as CatalogRequestError).kind).toBe('access-denied');
+  });
+  it('reports a timeout in words, never as "signal timed out"', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise(() => {})));
+    const failure = await request('/api/v1/catalog?kind=film', new AbortController().signal, 30).catch((cause: CatalogRequestError) => cause) as CatalogRequestError;
+    expect(failure.kind).toBe('timeout');
+    expect(failure.message).not.toContain('signal');
+  });
+  it('recognises a bare abort (the "signal is aborted without reason" case) as a cancellation', () => {
+    const controller = new AbortController(); controller.abort();
+    expect(isAbortError(controller.signal.reason)).toBe(true);
+    expect(isCatalogAccessError(controller.signal.reason)).toBe(false);
   });
 });

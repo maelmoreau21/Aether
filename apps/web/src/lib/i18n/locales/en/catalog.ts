@@ -47,6 +47,7 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   episodes_load_failed: 'Unable to load the episodes. Reload the page to try again.',
   episode_load_failed: 'Unable to load the episode.',
   catalog_connection_failed: 'Unable to connect to the catalog.',
+  catalog_no_library_shared: 'No library is shared with your account. Ask an administrator for access.',
   partial_catalog_unavailable: 'Part of the catalog is unavailable. Reload the page to try again.',
   open_media_from_library: 'Open this media from its Movies or TV Shows library.',
   unknown_value: 'Unknown',

@@ -131,14 +131,34 @@ async function fetchWithAbort(url: string, signal: AbortSignal): Promise<Respons
   }
 }
 
+/**
+ * Why a catalogue request failed. Callers branch on `kind`, never on the translated message, so the
+ * behaviour stays the same in every interface language.
+ */
+export type CatalogErrorKind = 'no-library' | 'access-denied' | 'session-expired' | 'session-changed' | 'timeout' | 'not-found' | 'http';
+export class CatalogRequestError extends Error {
+  constructor(message: string, readonly kind: CatalogErrorKind, readonly status?: number) {
+    super(message);
+    this.name = 'CatalogRequestError';
+  }
+}
+/** Account-level failures: retrying or showing a partial page cannot help. */
+export function isCatalogAccessError(cause: unknown): cause is CatalogRequestError {
+  return cause instanceof CatalogRequestError && (cause.kind === 'no-library' || cause.kind === 'access-denied' || cause.kind === 'session-expired' || cause.kind === 'session-changed');
+}
+export function isAbortError(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === 'AbortError';
+}
+
 export async function request<T>(url: string, signal: AbortSignal, timeoutMs=10000): Promise<T> {
   syncCacheWithSession();
   const requestSessionGen = getSessionGeneration();
   const combinedSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+  const timedOut = () => new CatalogRequestError(tr('catalog_the_server_is_taking_too_long'), 'timeout');
   let response:Response;
   try { response=await fetchWithAbort(withMetadataLocale(url), combinedSignal); }
   catch (cause) {
-    if(!signal.aborted && combinedSignal.aborted)throw new Error(tr('catalog_the_server_is_taking_too_long'));
+    if(!signal.aborted && combinedSignal.aborted)throw timedOut();
     throw cause;
   }
   if (response.status === 401) {
@@ -150,28 +170,36 @@ export async function request<T>(url: string, signal: AbortSignal, timeoutMs=100
         // Ignore router navigation error outside active SvelteKit client context
       }
     }
-    throw new Error(tr('catalog_your_session_has_expired_sign_in'));
+    throw new CatalogRequestError(tr('catalog_your_session_has_expired_sign_in'), 'session-expired', 401);
   }
   if (response.status === 403) {
     if (requestSessionGen === getSessionGeneration()) {
       clearDescriptorCache();
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('media-access-denied'));
     }
-    throw new Error(tr('catalog_your_account_does_not_have_access'));
+    // The list endpoint answers 403 only when no library is shared with the account.
+    const listing = new URL(url, 'http://local').pathname === '/api/v1/catalog';
+    throw listing
+      ? new CatalogRequestError(tr('catalog_no_library_shared'), 'no-library', 403)
+      : new CatalogRequestError(tr('catalog_your_account_does_not_have_access'), 'access-denied', 403);
   }
-  if (!response.ok) throw new Error(response.status === 404 ? tr('this_media_item_was_not_found') : tr('the_catalogue_is_unavailable_http', { status: response.status }));
+  if (!response.ok) {
+    throw response.status === 404
+      ? new CatalogRequestError(tr('this_media_item_was_not_found'), 'not-found', 404)
+      : new CatalogRequestError(tr('the_catalogue_is_unavailable_http', { status: response.status }), 'http', response.status);
+  }
   if (requestSessionGen !== getSessionGeneration()) {
-    throw new Error(tr('the_session_changed_during_the_request'));
+    throw new CatalogRequestError(tr('the_session_changed_during_the_request'), 'session-changed');
   }
   let data:T;
   try{data=await response.json() as T;}
-  catch(cause){if(!signal.aborted&&combinedSignal.aborted)throw new Error(tr('catalog_the_server_is_taking_too_long'));throw cause;}
+  catch(cause){if(!signal.aborted&&combinedSignal.aborted)throw timedOut();throw cause;}
   if (combinedSignal.aborted) {
-    if (!signal.aborted) throw new Error(tr('catalog_the_server_is_taking_too_long'));
+    if (!signal.aborted) throw timedOut();
     throw combinedSignal.reason ?? new DOMException('Aborted', 'AbortError');
   }
   if (requestSessionGen !== getSessionGeneration()) {
-    throw new Error(tr('the_session_changed_during_the_request'));
+    throw new CatalogRequestError(tr('the_session_changed_during_the_request'), 'session-changed');
   }
   return data;
 }

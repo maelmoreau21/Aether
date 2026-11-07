@@ -26,6 +26,9 @@
     fetchMediaDescriptors,
     revalidateMediaDescriptor,
     getCachedMedia,
+    isAbortError,
+    isCatalogAccessError,
+    type CatalogPage,
     type Work
   } from './api';
   import { preloadProgress } from '../player/progress';
@@ -479,7 +482,14 @@
           const results = await Promise.allSettled(
             requests.map(async ({kind, key, url}) => {
               try {
-                const result = await loadCatalog(key, url);
+                let result: CatalogPage;
+                try { result = await loadCatalog(key, url); }
+                catch (cause) {
+                  // A shared request can be cancelled under us (another shelf got a 403, the cache was
+                  // invalidated): that is not this page's answer. Ask once more for our own.
+                  if (!isAbortError(cause) || controller.signal.aborted || effectSessionGen !== getSessionGeneration()) throw cause;
+                  result = await loadCatalog(key, url);
+                }
                 if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
                 if (kind === 'film') {
                   films = result.items;
@@ -500,10 +510,12 @@
           );
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           void loadPlayer().catch(() => {});
-          const failure = results.find(result => result.status === 'rejected');
-          if (failure?.status === 'rejected') {
-            if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
-            if (completedKinds === 0 && cachedKinds === 0) throw failure.reason;
+          const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason as unknown] : []);
+          // An account-level answer explains every other failure (a 403 cancels the shelves still loading).
+          const failure = failures.find(isCatalogAccessError) ?? failures.find(cause => !isAbortError(cause)) ?? failures[0];
+          if (failure !== undefined) {
+            if (isCatalogAccessError(failure)) { films = []; series = []; throw failure; }
+            if (completedKinds === 0 && cachedKinds === 0) throw isAbortError(failure) ? new Error($t('catalog_connection_failed')) : failure;
             partialCatalogError = $t('partial_catalog_unavailable');
           }
         }

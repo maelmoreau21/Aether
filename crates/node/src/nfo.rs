@@ -261,16 +261,21 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
     // text is only searched for identifiers; anything else outside the root stays an error.
     let (xml, outside) = split_outside_root(xml);
     let mut url_ids = FilmMetadata::default();
+    // Stray text is only reported once the XML is known to be complete: in a truncated file
+    // the text after the last `>` is the unfinished content of an element, not outside it.
+    let mut stray_outside = false;
     if !outside.trim().is_empty() {
         if outside.len() > MAX_OUTSIDE_TEXT {
             return Err("text outside root".into());
         }
         ids_from_urls(&mut url_ids, &outside)?;
-        if url_ids.external_ids.is_empty() && url_ids.external_id_conflicts.is_empty() {
-            return Err("text outside root".into());
-        }
+        stray_outside = url_ids.external_ids.is_empty() && url_ids.external_id_conflicts.is_empty();
         if xml.is_empty() {
-            return Ok(url_ids);
+            return if stray_outside {
+                Err("text outside root".into())
+            } else {
+                Ok(url_ids)
+            };
         }
     }
     let mut reader = Reader::from_str(xml);
@@ -462,6 +467,9 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
     }
     if roots != 1 || !stack.is_empty() {
         return Err("incomplete NFO XML".into());
+    }
+    if stray_outside {
+        return Err("text outside root".into());
     }
     for (provider, value) in &url_ids.external_ids {
         insert_id(&mut metadata, provider, value)?;
@@ -733,6 +741,24 @@ mod tests {
         );
     }
     use super::*;
+    #[test]
+    fn truncated_documents_are_incomplete_and_stray_text_is_outside_root() {
+        // The unfinished title is inside the unclosed root, not text after it.
+        assert_eq!(
+            parse(b"<tvshow><title>Unclosed tag").unwrap_err(),
+            "incomplete NFO XML"
+        );
+        assert_eq!(
+            parse(b"<tvshow><title>Kept</title></tvshow> trailing words").unwrap_err(),
+            "text outside root"
+        );
+        assert_eq!(parse(b"only words").unwrap_err(), "text outside root");
+        // A provider URL beside a complete document is still read.
+        let with_url =
+            parse(b"<movie><title>Kept</title></movie>\nhttps://www.themoviedb.org/movie/27205")
+                .unwrap();
+        assert_eq!(with_url.external_ids["tmdb"], "27205");
+    }
     #[test]
     fn keeps_only_remote_https_actor_portraits() {
         let meta = parse(br#"<movie><actor><name>A</name><thumb>https://image.example.org/a.jpg</thumb></actor><actor><name>B</name><thumb>/config/metadata/People/B/folder.jpg</thumb></actor><actor><name>C</name><thumb>http://image.example.org/c.jpg</thumb></actor></movie>"#).unwrap();

@@ -86,8 +86,17 @@ mod tests {
     #[test]
     fn extension_failures_keep_the_extension_code() {
         let body = serde_json::json!({"error":"extension_error","pluginError":"provider_error"});
-        assert_eq!(super::automation_error(&body), "extension_error:provider_error");
-        assert_eq!(super::automation_error(&serde_json::json!({"error":"metadata_unidentified"})), "metadata_unidentified");
-        assert_eq!(super::automation_error(&serde_json::json!({})), "extension_failed");
+        assert_eq!(
+            super::automation_error(&body),
+            "extension_error:provider_error"
+        );
+        assert_eq!(
+            super::automation_error(&serde_json::json!({"error":"metadata_unidentified"})),
+            "metadata_unidentified"
+        );
+        assert_eq!(
+            super::automation_error(&serde_json::json!({})),
+            "extension_failed"
+        );
     }
 }

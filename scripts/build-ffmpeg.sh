@@ -59,12 +59,12 @@ build_chromaprint() {
   cmake --install "$work/chromaprint-build"
 }
 download_source
+tar -xJf "$work/source.tar.xz" -C "$work"
 if [ "$profile" = runtime ]; then
   build_chromaprint
   PKG_CONFIG_PATH="$work/chromaprint-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   export PKG_CONFIG_PATH
 fi
-tar -xJf "$work/source.tar.xz" -C "$work"
 cd "$work/ffmpeg-$version"
 set -- --prefix="$prefix" --disable-autodetect --disable-network \
   --disable-programs --enable-ffmpeg --enable-ffprobe --disable-doc \

@@ -916,6 +916,15 @@ async fn remove(
         .map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
+/// Catalogue identifiers whose feature the Core implements natively: avatars
+/// and poster rotation. The catalogue hides them and refuses to install them,
+/// so a published package can never shadow or duplicate the native feature.
+const NATIVE_FEATURES: &[&str] = &["avatars", "poster-rotator"];
+
+fn is_native_feature(id: &str) -> bool {
+    NATIVE_FEATURES.contains(&id)
+}
+
 async fn catalogue(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -930,9 +939,7 @@ async fn catalogue(
     for (id, name, bytes) in rows {
         // One entry per published version, so earlier versions stay installable.
         for item in parse_manifest(bytes.as_bytes())? {
-            // Avatars and Poster Rotator are native built-in features in Aether Core.
-            // Do not expose them in the extensions catalogue.
-            if matches!(item.id.as_str(), "avatars" | "poster-rotator") {
+            if is_native_feature(&item.id) {
                 continue;
             }
             entries.push(json!({
@@ -1055,7 +1062,7 @@ async fn install(
         .into_iter()
         .find(|item| item.id == input.extension_id && item.version == input.version)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_catalogue_version"))?;
-    if matches!(item.id.as_str(), "avatars" | "poster-rotator") {
+    if is_native_feature(&item.id) {
         return Err(err(StatusCode::BAD_REQUEST, "feature_is_native"));
     }
     if !item_compatible(&item) {

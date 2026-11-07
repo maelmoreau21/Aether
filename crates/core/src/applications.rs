@@ -13,8 +13,7 @@ use axum::{
 };
 use media_extension_sdk::{ExtensionRequest, ExtensionResponse, Package};
 use serde_json::{Value, json};
-use std::{process::Stdio, time::Duration};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::time::Duration;
 
 pub type Error = (StatusCode, Json<Value>);
 pub fn err(status: StatusCode, code: &str) -> Error {
@@ -170,43 +169,14 @@ pub async fn invoke(
     if payload.len() > 400_000 {
         return Err(err(StatusCode::PAYLOAD_TOO_LARGE, "invalid_input"));
     }
-    let exe = std::env::current_exe()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    let mut directory = exe
-        .parent()
+    let mut child = crate::extensions::worker::spawn()
         .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    if directory.file_name().is_some_and(|v| v == "deps") {
-        directory = directory
-            .parent()
-            .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    }
-    let mut command = tokio::process::Command::new(directory.join(if cfg!(windows) {
-        "media-extension-worker.exe"
-    } else {
-        "media-extension-worker"
-    }));
-    command
-        .env_clear()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    let mut child = command
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let result = tokio::time::timeout(Duration::from_secs(8), async {
         let mut stdin = child
             .stdin
             .take()
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        stdin
-            .write_all(&(payload.len() as u32).to_be_bytes())
-            .await
-            .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_io"))?;
-        stdin
-            .write_all(&payload)
+        crate::extensions::worker::write_frame(&mut stdin, &payload)
             .await
             .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_io"))?;
         drop(stdin);
@@ -214,19 +184,16 @@ pub async fn invoke(
             .stdout
             .take()
             .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_io"))?;
-        let size = stdout
-            .read_u32()
+        let frame = crate::extensions::worker::read_frame(&mut stdout)
             .await
-            .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"))?
-            as usize;
-        if size > media_extension_sdk::MAX_JSON + 4096 {
-            return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"));
-        }
-        let mut frame = vec![0; size];
-        stdout
-            .read_exact(&mut frame)
-            .await
-            .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"))?;
+            .map_err(|error| match error {
+                crate::extensions::worker::FrameError::TooLarge => {
+                    err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output")
+                }
+                crate::extensions::worker::FrameError::Io => {
+                    err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed")
+                }
+            })?;
         let frame: Value = serde_json::from_slice(&frame)
             .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
         if frame["kind"] != "finished" {

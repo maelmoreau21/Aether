@@ -8,6 +8,8 @@
 //! - `install`: explicit install, upgrade and uninstall flows.
 //! - `settings`: effective settings and configuration endpoints.
 //! - `run`: manual runs, worker invocation and run history.
+//! - `worker`: the disposable worker process and its bounded framing, shared
+//!   by runs, update health checks and the native application surfaces.
 //! - `automated`: automated (scan/refresh) provider runs.
 //! - `matching`: trusted candidate matching for metadata and music.
 use crate::{
@@ -29,11 +31,8 @@ use media_extension_sdk::{ExtensionRequest, Manifest, MetadataProposal, Package}
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{process::Stdio, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::{Mutex, Semaphore},
-};
+use std::time::Duration;
+use tokio::sync::{Mutex, Semaphore};
 
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 
@@ -64,6 +63,7 @@ pub(crate) mod subtitles;
 #[cfg(test)]
 mod tests;
 mod updates;
+pub(crate) mod worker;
 
 use admin::*;
 use common::*;

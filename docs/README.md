@@ -74,6 +74,7 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - [`EXTENSION_STORAGE.md`](EXTENSION_STORAGE.md) et [`PLUGIN_STORAGE.md`](PLUGIN_STORAGE.md) : stockage des extensions (deux angles, à lire ensemble).
 - [`PLUGIN_UPDATE_LIFECYCLE.md`](PLUGIN_UPDATE_LIFECYCLE.md), [`PLUGIN_SETTINGS_AND_COLLECTIONS.md`](PLUGIN_SETTINGS_AND_COLLECTIONS.md) : mises à jour, paramètres, collections.
 - [`FUTURE_PLUGIN_ARCHITECTURE.md`](FUTURE_PLUGIN_ARCHITECTURE.md) : écosystème futur (prospectif).
+- [`CORE_PLUGIN_RESPONSIBILITIES.md`](CORE_PLUGIN_RESPONSIBILITIES.md) : matrice Core / extensions, duplications confirmées et feuille de route.
 
 ## Player et UX
 

@@ -11,11 +11,7 @@ use axum::{
 use media_extension_sdk::{ExtensionRequest, ExtensionResponse, Package};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{
-    process::Stdio,
-    time::{Duration, Instant},
-};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::time::{Duration, Instant};
 
 pub(super) struct RunGuard {
     pub(super) auth: AuthState,
@@ -408,33 +404,8 @@ pub(super) async fn invoke_worker_context(
     {
         return Err(err(StatusCode::CONFLICT, "extension_run_lease_lost"));
     }
-    let exe = std::env::current_exe()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    let mut dir = exe
-        .parent()
+    let mut child = worker::spawn()
         .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    if dir.file_name().is_some_and(|n| n == "deps") {
-        dir = dir
-            .parent()
-            .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    }
-    let worker = dir.join(if cfg!(windows) {
-        "media-extension-worker.exe"
-    } else {
-        "media-extension-worker"
-    });
-    let mut command = tokio::process::Command::new(worker);
-    command
-        .env_clear()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    let mut child = command
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let payload = serde_json::to_vec(&invocation)
         .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_input"))?;
     let user_id = if let Some(job) = background {
@@ -473,12 +444,7 @@ pub(super) async fn invoke_worker_context(
             .stdin
             .take()
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        stdin
-            .write_all(&(payload.len() as u32).to_be_bytes())
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        stdin
-            .write_all(&payload)
+        worker::write_frame(&mut stdin, &payload)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         let mut stdout = child
@@ -487,20 +453,16 @@ pub(super) async fn invoke_worker_context(
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         let mut count = 0;
         loop {
-            let mut header = [0; 4];
-            stdout
-                .read_exact(&mut header)
+            let bytes = worker::read_frame(&mut stdout)
                 .await
-                .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"))?;
-            let len = u32::from_be_bytes(header) as usize;
-            if len > media_extension_sdk::MAX_JSON + 4096 {
-                return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"));
-            }
-            let mut bytes = vec![0; len];
-            stdout
-                .read_exact(&mut bytes)
-                .await
-                .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed"))?;
+                .map_err(|error| match error {
+                    worker::FrameError::TooLarge => {
+                        err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output")
+                    }
+                    worker::FrameError::Io => {
+                        err(StatusCode::UNPROCESSABLE_ENTITY, "extension_failed")
+                    }
+                })?;
             let frame: Value = serde_json::from_slice(&bytes)
                 .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
             let kind = frame["kind"].as_str().unwrap_or("");
@@ -590,12 +552,7 @@ pub(super) async fn invoke_worker_context(
                     "storage_response_too_large",
                 ));
             }
-            stdin
-                .write_all(&(bytes.len() as u32).to_be_bytes())
-                .await
-                .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-            stdin
-                .write_all(&bytes)
+            worker::write_frame(&mut stdin, &bytes)
                 .await
                 .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         }

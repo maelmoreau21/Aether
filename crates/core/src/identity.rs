@@ -84,6 +84,15 @@ pub struct IdentityStore {
     pub(crate) task_writes: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
     pub(crate) cors_origins: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
+    /// Identity of the opened database, shared by every clone and never reused in this
+    /// process. Process-wide caches key on it; a clone's address changes per request.
+    pub(crate) cache_scope: u64,
+}
+
+static NEXT_CACHE_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+fn next_cache_scope() -> u64 {
+    NEXT_CACHE_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 static ACTIVE_STORE: std::sync::RwLock<Option<IdentityStore>> = std::sync::RwLock::new(None);
@@ -227,6 +236,7 @@ impl IdentityStore {
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
             cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+            cache_scope: next_cache_scope(),
         };
         register_active_store(&store);
         Ok(store)
@@ -364,6 +374,7 @@ impl IdentityStore {
             task_writes: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
             cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
+            cache_scope: next_cache_scope(),
         };
         register_active_store(&store);
         Ok(store)

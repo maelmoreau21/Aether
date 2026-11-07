@@ -30,6 +30,7 @@ TARGET_SECONDS = {
     "catalog": 1,
     "catalog_performance": 11,
     "catalog_responsiveness": 55,
+    "catalogue_cache_scope": 8,
     "challenger_security_challenge": 32,
     "chapter_images_remote": 9,
     "concurrency_writes_during_publication": 12,

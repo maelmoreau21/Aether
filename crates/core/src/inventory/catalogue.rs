@@ -491,10 +491,10 @@ pub async fn catalogue_page(
         }));
     }
 
-    let pool_id = format!("{:p}", &store.pool);
+    // Key on the database, not on this clone's address: each request owns its own clone.
     let cache_key = format!(
-        "{pool_id}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}",
-        visible, target_kind, search, sort, offset, limit, filter, exact_count
+        "{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}",
+        store.cache_scope, visible, target_kind, search, sort, offset, limit, filter, exact_count
     );
 
     let state_fp: i64 = query_scalar("SELECT gen FROM inventory_cache_generation WHERE id = 1")

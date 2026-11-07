@@ -897,6 +897,8 @@ BEGIN
     WHERE id = NEW.id;
 END;
 
+-- `+has_available_asset` keeps the planner on the primary key: indexing the flag would visit
+-- every unavailable work once per inserted asset. Existing databases: asset_availability_insert.sql.
 CREATE TRIGGER inventory_assets_avail_insert AFTER INSERT ON inventory_assets
 WHEN NEW.available = 1 BEGIN
     UPDATE inventory_works SET has_available_asset = 1
@@ -905,7 +907,7 @@ WHEN NEW.available = 1 BEGIN
         JOIN inventory_versions v ON v.id = s.version_id
         JOIN inventory_editions e ON e.id = v.edition_id
         WHERE s.id = NEW.source_id
-    ) AND has_available_asset = 0;
+    ) AND +has_available_asset = 0;
 
     UPDATE inventory_works SET has_available_asset = 1
     WHERE id IN (
@@ -915,7 +917,7 @@ WHEN NEW.available = 1 BEGIN
         JOIN inventory_episodes ep ON ep.work_id = e.work_id
         JOIN inventory_seasons se ON se.id = ep.season_id
         WHERE s.id = NEW.source_id
-    ) AND has_available_asset = 0;
+    ) AND +has_available_asset = 0;
 END;
 
 CREATE TRIGGER inventory_episodes_avail_insert AFTER INSERT ON inventory_episodes BEGIN

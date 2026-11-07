@@ -58,6 +58,7 @@ TARGET_SECONDS = {
     "postgres": 28,
     "preferences": 6,
     "preparation_admission": 1,
+    "publication_unavailable_works": 24,
     "scan_diagnostics": 8,
     "scanner_flow": 27,
     "scanner_performance": 227,

@@ -31,8 +31,13 @@ pub struct VersionedStep {
     pub postgres: &'static str,
 }
 
-/// Steps that run exactly once. Empty today: every existing change is an idempotent step.
-pub(super) const VERSIONED_STEPS: &[VersionedStep] = &[];
+/// Steps that run exactly once, after the idempotent files. Fresh databases run them too.
+pub(super) const VERSIONED_STEPS: &[VersionedStep] = &[VersionedStep {
+    name: "0001_asset_availability_insert",
+    sqlite: include_str!("../../migrations/asset_availability_insert.sql"),
+    // PostgreSQL maintains availability in Rust; it has no such trigger.
+    postgres: "SELECT 1",
+}];
 
 /// Line endings must not change the checksum of a file checked out on another platform.
 pub(super) fn checksum(sql: &str) -> String {

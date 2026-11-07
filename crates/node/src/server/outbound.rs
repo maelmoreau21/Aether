@@ -139,6 +139,14 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                             continue;
                         };
                         backoff = Duration::from_secs(1);
+                        if cmd.is_expired_with_skew(unix_now()) {
+                            // Delivered long after its deadline: the situation it described is gone.
+                            eprintln!(
+                                "{}",
+                                serde_json::json!({"event":"node_command_expired","commandId":cmd.command_id,"expiresAt":cmd.expires_at})
+                            );
+                            continue;
+                        }
                         match cmd.command_type {
                             NodeCommandType::Ping => {}
                             NodeCommandType::Task => {
@@ -251,6 +259,20 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                             }
                         }
                     } else {
+                        if status == StatusCode::FORBIDDEN
+                            && String::from_utf8_lossy(&resp_bytes).contains("node_revoked")
+                        {
+                            // The Core refuses a revoked identity at the door, so the in-band
+                            // Revoke command may never be delivered. Stop polling instead of
+                            // retrying forever with a credential that can never work again.
+                            {
+                                let mut guard =
+                                    state.identity.write().unwrap_or_else(|e| e.into_inner());
+                                guard.revoked = true;
+                            }
+                            let _ = state.persist_identity().await;
+                            continue;
+                        }
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(Duration::from_secs(5));
                     }

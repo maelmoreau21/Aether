@@ -13,7 +13,10 @@ use axum::Router;
 use axum::extract::DefaultBodyLimit;
 use axum::routing::get;
 use axum::routing::post;
-pub use channel::{ACTIVE_CHANNELS, PENDING_STREAMS, RelayStreamResponse};
+pub use channel::{
+    ACTIVE_CHANNELS, CommandRefused, NodeChannel, PENDING_STREAMS, RelayStreamResponse,
+    channel_is_active, live_channel,
+};
 use channel::{node_channel, receive_node_heartbeat, receive_stream_uplink};
 pub use management::{CreateEnrollmentTokenInput, PairNodeAdminInput};
 use management::{
@@ -27,7 +30,8 @@ pub use playback::{build_direct_playback_url, relay_from_remote_node};
 pub use registry::{
     AdminNodeView, MediaNodeRecord, NodeLibraryRef, NodeRuntimeEntry, NodeRuntimeRegistry,
     NodeRuntimeTelemetry, NodeScanSummary, effective_connection_mode, ensure_node_registry_warm,
-    load_admin_nodes, load_node, load_node_entry, refresh_node_in_registry, score_node_entry,
+    load_admin_nodes, load_node, load_node_entry, node_is_stale, node_stale_limit_secs,
+    refresh_node_in_registry, score_node_entry,
 };
 pub use scans::{build_library_inventory_sync, dispatch_remote_scan, sync_all_libraries_for_node};
 pub(crate) use scans::{

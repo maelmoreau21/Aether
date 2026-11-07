@@ -34,7 +34,8 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - [`ARCHITECTURE_ROADMAP.md`](ARCHITECTURE_ROADMAP.md) : audit Rust et feuille de route.
 - [`BACKEND_MODULES.md`](BACKEND_MODULES.md) : modules internes du backend.
 - [`DISTRIBUTED_TASKS.md`](DISTRIBUTED_TASKS.md), [`SCHEDULED_TASKS.md`](SCHEDULED_TASKS.md), [`AUTOMATION.md`](AUTOMATION.md) : moteur de tâches, planification, automatisation événementielle.
-- [`MULTI_CORE.md`](MULTI_CORE.md) et [`MULTI_CORE_READINESS.md`](MULTI_CORE_READINESS.md) : préparation de plusieurs Core (expérimental).
+- [`MULTI_NODE_RELIABILITY.md`](MULTI_NODE_RELIABILITY.md) : un Core, plusieurs Media Nodes — audit, correctifs, mesures avant/après, limites.
+- [`MULTI_CORE.md`](MULTI_CORE.md), [`MULTI_CORE_READINESS.md`](MULTI_CORE_READINESS.md) et [`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md) : préparation de plusieurs Core (expérimental) et feuille de route.
 - [`POSTGRESQL.md`](POSTGRESQL.md), [`SQL_PERFORMANCE.md`](SQL_PERFORMANCE.md) : PostgreSQL facultatif, performance SQL du catalogue.
 - [`API.md`](API.md) et [`extensions-v1.openapi.json`](extensions-v1.openapi.json) : contrats d'API.
 

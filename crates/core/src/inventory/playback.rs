@@ -1,6 +1,7 @@
 //! Playback descriptors, source selection and validated track identities.
 
 use super::decode;
+use super::equivalence::{SourceEquivalence, SourceFacts, classify};
 use crate::database::{query, query_as, query_scalar};
 use crate::identity::IdentityStore;
 use crate::media::Probe;
@@ -69,7 +70,7 @@ pub async fn descriptor_for_user(
     // Resolve all available sibling copies across multi-location folders and consolidated work groups
     let sibling_rows = if initial_work_kind == "episode" {
         query(
-            "SELECT a.id AS asset_id, a.mime, a.library_id, l.node_id, w.id AS work_id \
+            "SELECT a.id AS asset_id, a.mime, a.library_id, a.size AS size, a.probe_json AS probe_json, fp.fingerprint AS fingerprint, l.node_id, w.id AS work_id \
              FROM inventory_episodes ep_orig \
              JOIN inventory_seasons s_orig ON s_orig.id=ep_orig.season_id \
              JOIN inventory_seasons s_cand ON s_cand.season_number=s_orig.season_number \
@@ -83,6 +84,7 @@ pub async fn descriptor_for_user(
              JOIN inventory_versions v ON v.edition_id=e.id \
              JOIN inventory_sources s ON s.version_id=v.id \
              JOIN inventory_assets a ON a.source_id=s.id \
+             LEFT JOIN inventory_asset_fingerprints fp ON fp.asset_id=a.id \
              JOIN inventory_works w ON w.id=e.work_id \
              JOIN libraries l ON l.id=s.library_id \
              JOIN media_nodes n ON n.id=l.node_id \
@@ -94,11 +96,12 @@ pub async fn descriptor_for_user(
         .unwrap_or_default()
     } else {
         query(
-            "SELECT a.id AS asset_id, a.mime, a.library_id, l.node_id, w.id AS work_id \
+            "SELECT a.id AS asset_id, a.mime, a.library_id, a.size AS size, a.probe_json AS probe_json, fp.fingerprint AS fingerprint, l.node_id, w.id AS work_id \
              FROM inventory_editions e \
              JOIN inventory_versions v ON v.edition_id=e.id \
              JOIN inventory_sources s ON s.version_id=v.id \
              JOIN inventory_assets a ON a.source_id=s.id \
+             LEFT JOIN inventory_asset_fingerprints fp ON fp.asset_id=a.id \
              JOIN inventory_works w ON w.id=e.work_id \
              JOIN libraries l ON l.id=s.library_id \
              JOIN media_nodes n ON n.id=l.node_id \
@@ -115,7 +118,37 @@ pub async fn descriptor_for_user(
         .unwrap_or_default()
     };
 
-    let mut ranked_siblings: Vec<(String, String, i64)> = Vec::new();
+    // Facts about the copy the viewer asked for, used to decide which other copies may stand in
+    // for it. A copy is a candidate only when it is provably the same content (see `equivalence`).
+    let requested_library_id: String = initial_row.get("library_id");
+    let requested_facts = {
+        let stored: Option<(i64, Option<String>)> = query_as(
+            "SELECT a.size, fp.fingerprint FROM inventory_assets a \
+             LEFT JOIN inventory_asset_fingerprints fp ON fp.asset_id=a.id WHERE a.id=?",
+        )
+        .bind(asset_id)
+        .fetch_optional(&store.pool)
+        .await?;
+        let (size, fingerprint) = stored.unwrap_or((0, None));
+        SourceFacts {
+            size,
+            fingerprint,
+            duration_secs: SourceFacts::duration_from_probe_json(
+                &initial_row.get::<String, _>("probe_json"),
+            ),
+        }
+    };
+
+    struct Candidate {
+        asset_id: String,
+        node_id: String,
+        status: String,
+        mode: String,
+        score: i64,
+        equivalence: SourceEquivalence,
+        mime: String,
+    }
+    let mut ranked_siblings: Vec<Candidate> = Vec::new();
     for srow in sibling_rows {
         let cand_asset_id: String = srow.get("asset_id");
         let cand_lib_id: String = srow.get("library_id");
@@ -123,9 +156,13 @@ pub async fn descriptor_for_user(
         let cand_mime: String = srow.get("mime");
         let cand_work_id: String = srow.get("work_id");
 
-        if let Some(vis) = visible_libraries
-            && !vis.contains(&cand_lib_id)
-        {
+        // Permissions are never merged across Nodes. A caller that did not resolve the viewer's
+        // libraries only ever sees copies from the requested asset's own library.
+        let library_allowed = match visible_libraries {
+            Some(visible) => visible.contains(&cand_lib_id),
+            None => cand_lib_id == requested_library_id,
+        };
+        if !library_allowed {
             continue;
         }
         if let Some(uid) = user_id
@@ -136,23 +173,64 @@ pub async fn descriptor_for_user(
         {
             continue;
         }
+        if ranked_siblings
+            .iter()
+            .any(|candidate| candidate.asset_id == cand_asset_id)
+        {
+            continue;
+        }
 
-        let (cand_status, _cand_mode, cand_score) = match store.node_registry.get(&cand_node_id) {
+        let equivalence = if cand_asset_id == asset_id {
+            SourceEquivalence::Identical
+        } else {
+            let mut candidate_facts = SourceFacts {
+                size: srow.get("size"),
+                fingerprint: srow.get("fingerprint"),
+                duration_secs: None,
+            };
+            // The stored fingerprint settles identity without touching the probe document;
+            // only otherwise is the (larger) probe read, and then only for its duration.
+            match classify(&requested_facts, &candidate_facts) {
+                Some(equivalence) => equivalence,
+                None => {
+                    candidate_facts.duration_secs =
+                        SourceFacts::duration_from_probe_json(&srow.get::<String, _>("probe_json"));
+                    match classify(&requested_facts, &candidate_facts) {
+                        Some(equivalence) => equivalence,
+                        // Same work, but not provably the same content: never a substitute.
+                        None => continue,
+                    }
+                }
+            }
+        };
+
+        let (cand_status, cand_mode, cand_score) = match store.node_registry.get(&cand_node_id) {
             Some(entry) => crate::nodes::score_node_entry(&entry, Some(&cand_mime), None, now),
             None => ("connected".to_owned(), "local".to_owned(), 12_000),
         };
-        if !ranked_siblings
-            .iter()
-            .any(|(id, _, _)| id == &cand_asset_id)
-        {
-            ranked_siblings.push((cand_asset_id, cand_status, cand_score));
-        }
+        ranked_siblings.push(Candidate {
+            asset_id: cand_asset_id,
+            node_id: cand_node_id,
+            status: cand_status,
+            mode: cand_mode,
+            score: cand_score,
+            equivalence,
+            mime: cand_mime,
+        });
     }
 
-    ranked_siblings.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    // Best score first; an identical file wins a tie against a merely same-runtime encode.
+    ranked_siblings.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| b.equivalence.cmp(&a.equivalence))
+            .then_with(|| a.asset_id.cmp(&b.asset_id))
+    });
 
-    // If the requested asset is on a disconnected Node and a connected sibling copy exists,
-    // automatically fail over to the best connected copy!
+    // Failover is decided here, *before* playback starts, from the Core's view of the Nodes
+    // (heartbeats, staleness, recent failures). It is not a mid-stream switch: once a browser is
+    // reading a file, a Node that dies interrupts that response and the player must request
+    // again, which lands on this selection with the new state.
     let mut active_row = initial_row;
     let mut effective_asset_id = asset_id.to_owned();
     let mut failover_from: Option<String> = None;
@@ -161,10 +239,9 @@ pub async fn descriptor_for_user(
     let mut node_score = initial_score;
 
     if node_status != "connected"
-        && let Some((best_alt_id, best_alt_status, _)) = ranked_siblings
+        && let Some(best_alt) = ranked_siblings
             .iter()
-            .find(|(id, st, _)| id != asset_id && st == "connected")
-        && *best_alt_status == "connected"
+            .find(|candidate| candidate.asset_id != asset_id && candidate.status == "connected")
         && let Some(alt_row) = query(
             "SELECT a.id AS asset_id, a.mime, a.probe_json, a.library_id, COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title, w.id AS work_id, w.kind AS work_kind, l.node_id, t.subtitles_json, au.audios_json \
              FROM inventory_assets a \
@@ -178,28 +255,48 @@ pub async fn descriptor_for_user(
              JOIN media_nodes n ON n.id=l.node_id \
              WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
         )
-        .bind(best_alt_id)
+        .bind(&best_alt.asset_id)
         .fetch_optional(&store.pool)
         .await?
     {
-        let alt_node_id: String = alt_row.get("node_id");
-        let alt_mime: String = alt_row.get("mime");
-        let (alt_st, alt_cm, alt_sc) = match store.node_registry.get(&alt_node_id) {
-            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&alt_mime), None, now),
-            None => ("connected".to_owned(), "local".to_owned(), 12_000),
-        };
-        effective_asset_id = best_alt_id.clone();
+        effective_asset_id = best_alt.asset_id.clone();
         failover_from = Some(asset_id.to_owned());
-        node_status = alt_st;
-        conn_mode = alt_cm;
-        node_score = alt_sc;
+        node_status = best_alt.status.clone();
+        conn_mode = best_alt.mode.clone();
+        node_score = best_alt.score;
         active_row = alt_row;
     }
 
     let fallback_media_ids: Vec<String> = ranked_siblings
-        .into_iter()
-        .filter(|(id, st, _)| id != &effective_asset_id && st == "connected")
-        .map(|(id, _, _)| id)
+        .iter()
+        .filter(|candidate| {
+            candidate.asset_id != effective_asset_id && candidate.status == "connected"
+        })
+        .map(|candidate| candidate.asset_id.clone())
+        .collect();
+    // Equivalent copies the viewer may choose explicitly, whatever their Node's state, so a
+    // player can offer "play from another Node". Selecting one simply requests its descriptor,
+    // which every route authorizes again for that asset's own library.
+    let alternatives: Vec<Value> = ranked_siblings
+        .iter()
+        .filter(|candidate| candidate.asset_id != effective_asset_id)
+        .map(|candidate| {
+            let node_name = store
+                .node_registry
+                .get(&candidate.node_id)
+                .map(|entry| entry.record.name)
+                .unwrap_or_default();
+            json!({
+                "id": candidate.asset_id,
+                "nodeId": candidate.node_id,
+                "nodeName": node_name,
+                "nodeStatus": candidate.status,
+                "connectionMode": candidate.mode,
+                "score": candidate.score,
+                "mime": candidate.mime,
+                "equivalence": candidate.equivalence.as_str(),
+            })
+        })
         .collect();
 
     let row = active_row;
@@ -589,6 +686,7 @@ pub async fn descriptor_for_user(
         "score": node_score,
         "available": node_status == "connected",
         "fallbackMediaIds": fallback_media_ids,
+        "alternatives": alternatives,
         "sources": sources,
         "subtitles": subtitles,
         "chapters": chapter_list.iter().map(|(start, title)| json!({"start": start, "title": title})).collect::<Vec<_>>(),

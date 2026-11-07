@@ -31,6 +31,18 @@ export interface Source {
   audioOffsetSeconds?: number;
 }
 export interface Subtitle { id: string; reportTrackId?: string; language: string; label: string; url: string; assUrl?: string | null; forced?: boolean; sdh?: boolean; sourceFormat?: string }
+/** Another copy of the same content on another Node, authorized for the current viewer. */
+export interface MediaAlternative {
+  id: string;
+  nodeId: string;
+  nodeName: string;
+  nodeStatus: 'connected' | 'disconnected' | 'revoked';
+  connectionMode: string;
+  score: number;
+  mime: string;
+  /** `identical`: same file; `same-runtime`: another encode with the same timeline. */
+  equivalence: 'identical' | 'same-runtime';
+}
 export interface Media {
   chapters?: { start: number; title: string }[];
   trickplay?: { intervalMs: number; width: number; height: number; columns: number; rows: number; sheetCount: number; thumbnailCount: number; urlPrefix: string; mime?: 'image/jpeg' | 'image/webp' } | null;
@@ -48,7 +60,10 @@ export interface Media {
   connectionMode?: string;
   score?: number;
   available?: boolean;
+  /** Equivalent copies on connected Nodes this viewer may read, best first. */
   fallbackMediaIds?: string[];
+  /** Every equivalent, authorized copy whatever its Node's state, for an explicit choice. */
+  alternatives?: MediaAlternative[];
   failoverFrom?: string;
   requestedId?: string;
   sources: Source[];

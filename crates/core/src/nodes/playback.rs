@@ -99,7 +99,13 @@ pub fn build_direct_playback_url(
     action: &str,
     session_hash: &str,
 ) -> Option<(String, i64)> {
-    if rec.kind != "remote" || rec.status != NodeStatus::Connected.as_str() {
+    let now = unix_now();
+    // A Node that stopped heartbeating is not handed out as a direct route: the browser would
+    // wait on a dead socket instead of the Core falling back to a healthy copy or the relay.
+    if rec.kind != "remote"
+        || rec.status != NodeStatus::Connected.as_str()
+        || super::registry::node_is_stale(rec, now)
+    {
         return None;
     }
     let checked_public_url = validate_public_url(rec.public_url.as_deref()?).ok()?;
@@ -107,7 +113,6 @@ pub fn build_direct_playback_url(
     if public_url.is_empty() || rec.shared_secret.is_empty() {
         return None;
     }
-    let now = unix_now();
     let exp = now + DEFAULT_PLAYBACK_TOKEN_TTL_SECS;
     let claims = PlaybackTokenClaims {
         v: PROTOCOL_VERSION.to_owned(),
@@ -163,7 +168,7 @@ pub async fn relay_from_remote_node(
     } else {
         Duration::from_secs(6)
     };
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&rec.id);
+    let is_channel_active = super::channel::channel_is_active(&rec.id).await;
     if is_channel_active || rec.base_url.is_none() {
         let is_image = path_and_query.contains("/image");
         let prepared = path_and_query
@@ -233,6 +238,7 @@ pub async fn relay_from_remote_node(
                 let cmd = NodeCommandEnvelope {
                     command_id: format!("cmd-{}", uuid::Uuid::new_v4().simple()),
                     command_type: NodeCommandType::StreamRelay,
+                    expires_at: None,
                     payload: serde_json::to_value(StreamRelayRequest {
                         head: request.method() == Method::HEAD,
                         stream_id: stream_id.clone(),

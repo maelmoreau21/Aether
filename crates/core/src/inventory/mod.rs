@@ -6,6 +6,7 @@
 mod catalogue;
 mod details;
 mod editorial;
+mod equivalence;
 mod playback;
 mod publication;
 mod relocation;

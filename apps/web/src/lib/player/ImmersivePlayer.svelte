@@ -213,12 +213,11 @@
     triedMediaIds.add(active.id);
     if (active.requestedId) triedMediaIds.add(active.requestedId);
     if (active.failoverFrom) triedMediaIds.add(active.failoverFrom);
-    const candidates = [
-      ...(active.fallbackMediaIds ?? []),
-      ...catalogue
-        .filter(item => item.available !== false && item.nodeStatus !== 'disconnected' && item.nodeStatus !== 'revoked' && (!active?.workId || !item.workId || item.workId === active.workId))
-        .map(item => item.id)
-    ];
+    // Only copies the Core vetted for this viewer: same content (identical file or same
+    // runtime), readable with this account's libraries and parental policy, on a Node it
+    // considers connected. A catalogue entry for the same work is not enough: it may be
+    // another cut whose timeline does not match the position being restored.
+    const candidates = active.fallbackMediaIds ?? [];
     const nextId = candidates.find(id => !triedMediaIds.has(id));
     if (!nextId) return false;
     triedMediaIds.add(nextId);

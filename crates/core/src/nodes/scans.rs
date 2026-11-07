@@ -95,6 +95,7 @@ pub(crate) async fn dispatch_remote_task(
             .try_send(NodeCommandEnvelope {
                 command_id: format!("task-{}", request.run_id),
                 command_type: NodeCommandType::Task,
+                expires_at: None,
                 payload: serde_json::to_value(request).map_err(|_| "Task encoding failed")?,
             })
             .map_err(|_| "node_busy_playback_priority".into());
@@ -231,6 +232,7 @@ pub(crate) async fn cancel_remote_scan(
             .try_send(NodeCommandEnvelope {
                 command_id: format!("cancel-{scan}"),
                 command_type: NodeCommandType::CancelScan,
+                expires_at: None,
                 payload: serde_json::json!({"scanId":scan}),
             })
             .map_err(|_| "Node channel busy")?;
@@ -655,7 +657,7 @@ pub async fn sync_all_libraries_for_node(
     if rec.status != NodeStatus::Connected.as_str() {
         return Ok(());
     }
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);
+    let is_channel_active = super::channel::channel_is_active(node_id).await;
     if !is_channel_active && rec.base_url.is_none() {
         return Ok(());
     }
@@ -677,6 +679,7 @@ pub async fn sync_all_libraries_for_node(
             let cmd = NodeCommandEnvelope {
                 command_id: format!("sync-{}", sync.library_id),
                 command_type: NodeCommandType::SyncInventory,
+                expires_at: None,
                 payload: serde_json::to_value(&sync).unwrap_or_default(),
             };
             let channels = ACTIVE_CHANNELS.read().await;
@@ -773,11 +776,12 @@ pub async fn dispatch_remote_scan(
         excluded_patterns,
     };
 
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);
+    let is_channel_active = super::channel::channel_is_active(node_id).await;
     if is_channel_active {
         let cmd = NodeCommandEnvelope {
             command_id: format!("scan-{scan_id}"),
             command_type: NodeCommandType::Scan,
+            expires_at: None,
             payload: serde_json::to_value(&start_req).unwrap_or_default(),
         };
         let sender = ACTIVE_CHANNELS.read().await.get(node_id).cloned();

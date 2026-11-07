@@ -514,7 +514,7 @@ pub(super) async fn reconnect_node(
     if rec.status == NodeStatus::Revoked.as_str() {
         return Err(StatusCode::CONFLICT);
     }
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(&id);
+    let is_channel_active = super::channel::channel_is_active(&id).await;
     if is_channel_active {
         let now = unix_now();
         crate::database::query(
@@ -696,6 +696,7 @@ pub(super) async fn rotate_node_secret(
             let cmd = NodeCommandEnvelope {
                 command_id: format!("rotate-{new_key_id}"),
                 command_type: NodeCommandType::RotateSecret,
+                expires_at: None,
                 payload: serde_json::to_value(&req_payload).unwrap_or_default(),
             };
             if sender.send(cmd).await.is_ok() {
@@ -811,6 +812,7 @@ pub(super) async fn revoke_node_admin(
                 .send(NodeCommandEnvelope {
                     command_id: format!("revoke-{}", unix_now()),
                     command_type: NodeCommandType::Revoke,
+                    expires_at: None,
                     payload: serde_json::Value::Null,
                 })
                 .await;

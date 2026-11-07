@@ -105,7 +105,8 @@ fs.mkdirSync(out, {recursive: true});
     if (restart) {
       // The previous process ended with subtitles explicitly disabled. That
       // account choice now survives restart; verify it before choosing SRT.
-      assert.equal(await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled),false);
+      // A choice made while the audio is in another language (VO) is remembered on its own.
+      assert.equal(await page.evaluate(async()=>{ const p=await(await fetch('/api/v1/preferences')).json(); return p.subtitlePreference?.enabled===false || p.subtitlePreferenceForeign?.enabled===false; }),true);
       await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
       report.results.rememberedSubtitlesOffAfterRestart=true;
       await openMenu('subtitles');
@@ -406,7 +407,7 @@ fs.mkdirSync(out, {recursive: true});
     }
     await openMenu('subtitles'); await page.locator('[data-subtitle-id="off"]').click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
-    await page.waitForFunction(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled===false);
+    await page.waitForFunction(async()=>{ const p=await(await fetch('/api/v1/preferences')).json(); return p.subtitlePreference?.enabled===false || p.subtitlePreferenceForeign?.enabled===false; });
     report.results.externalTracks={container,srtRendered:true,webvttRendered:true,externalOpusPcm:pcm,audioVideoSync:true,pausedSeek:true,subtitlesOff:true};
     await page.screenshot({path:`${out}/playback${restart?'-restart':''}.png`});
     await page.keyboard.press('Shift'); await page.locator('button.return').click();

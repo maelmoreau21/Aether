@@ -64,7 +64,8 @@ fs.mkdirSync(out, {recursive:true});
       assert.equal((await read('/api/v1/admin/statistics')).behavior.audioChanges,accepted.behavior.audioChanges);
       await page.unroute(rejectedAudio);report.failedAudioNotCounted=true;
       await page.locator('[data-menu="subtitles"]').click();await page.locator('[data-subtitle-id="off"]').click();
-      await waitRead('/api/v1/preferences',data=>data.subtitlePreference?.enabled===false);
+      // English audio: the choice is kept in the original-version (VO) subtitle memory.
+      await waitRead('/api/v1/preferences',data=>data.subtitlePreference?.enabled===false||data.subtitlePreferenceForeign?.enabled===false);
       await waitRead('/api/v1/admin/statistics',data=>data.behavior.subtitleChanges>=1);report.subtitles=true;
       await page.keyboard.press('Shift');await page.locator('button.return').click();
       const video=await waitRead('/api/v1/admin/statistics',data=>data.behavior.audioChanges>=1);

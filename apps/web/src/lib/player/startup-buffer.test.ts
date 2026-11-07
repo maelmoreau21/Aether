@@ -46,4 +46,15 @@ describe('startup buffer',()=>{
     const timeout=expect(waitForStartupBuffer(element(media),new AbortController().signal)).rejects.toThrow('8 secondes');await vi.advanceTimersByTimeAsync(8000);await timeout;
     expect(vi.getTimerCount()).toBe(0);
   });
+  it('holds independent audio until a real reserve is buffered, then accepts less after the soft deadline',async()=>{
+    vi.useFakeTimers();const media=new Media();media.readyState=4;let ready=false;
+    const pending=waitForStartupBuffer(element(media),new AbortController().signal,{seconds:1.5,softDeadlineMs:3000}).then(()=>{ready=true;});
+    await vi.advanceTimersByTimeAsync(200);expect(ready).toBe(false); // HAVE_ENOUGH_DATA alone is not a reserve.
+    media.ranges=[[0,1.6]];await vi.advanceTimersByTimeAsync(100);await pending;expect(ready).toBe(true);
+    const slow=new Media();slow.readyState=3;slow.ranges=[[0,.2]];let late=false;
+    const waiting=waitForStartupBuffer(element(slow),new AbortController().signal,{seconds:1.5,softDeadlineMs:3000}).then(()=>{late=true;});
+    await vi.advanceTimersByTimeAsync(2900);expect(late).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);await waiting;expect(late).toBe(true); // A slow NAS delays, never fails.
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });

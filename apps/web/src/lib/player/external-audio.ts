@@ -1,4 +1,4 @@
-import { waitForStartupBuffer } from './startup-buffer';
+import { INDEPENDENT_AUDIO_RESERVE, waitForStartupBuffer } from './startup-buffer';
 
 import { tr } from '../i18n';
 // Preserve encoded audio and channels; never route production audio through a stereo WebAudio graph.
@@ -6,6 +6,12 @@ import { tr } from '../i18n';
 export class ExternalAudio {
   // One maximum-duration Opus packet (120 ms) plus container rounding.
   private static readonly END_TOLERANCE = .15;
+  // Rate correction starts beyond 60 ms of drift (well under lip-sync perception) and stays on
+  // until the clocks are within 15 ms.
+  private static readonly DRIFT_ENGAGE = .06;
+  private static readonly DRIFT_RELEASE = .015;
+  /** -1: audio slowed down, 1: audio sped up, 0: same rate as the video. */
+  private correction: -1 | 0 | 1 = 0;
   protected audio = new Audio();
   private timer?: ReturnType<typeof setInterval>;
   private stallTimer?: ReturnType<typeof setTimeout>;
@@ -111,9 +117,18 @@ export class ExternalAudio {
     if (!this.video.paused && !this.video.seeking && !this.audio.seeking && !this.audio.paused && target >= 0 && target < this.audio.duration) {
       // Small independent-clock drift must not pause the video every 100 ms.
       // A bounded, pitch-preserving correction converges without extra seeks.
-      this.audio.playbackRate = this.video.playbackRate * (Math.abs(drift) > .04 ? (drift > 0 ? .98 : 1.02) : 1);
+      // Every playbackRate change restarts the browser's time-stretcher, which is audible as a
+      // click: hysteresis keeps one rate for a whole correction instead of toggling around a
+      // threshold every tick.
+      if (this.correction === 0 && Math.abs(drift) > ExternalAudio.DRIFT_ENGAGE) this.correction = drift > 0 ? -1 : 1;
+      else if (this.correction !== 0 && (Math.abs(drift) < ExternalAudio.DRIFT_RELEASE || Math.sign(drift) === this.correction)) {
+        this.correction = Math.abs(drift) > ExternalAudio.DRIFT_ENGAGE ? (drift > 0 ? -1 : 1) : 0;
+      }
+      const rate = this.video.playbackRate * (this.correction === 0 ? 1 : this.correction > 0 ? 1.02 : .98);
+      if (this.audio.playbackRate !== rate) this.audio.playbackRate = rate;
       return;
     }
+    this.correction = 0;
     if (!this.align() || this.video.paused || this.video.seeking || this.audio.seeking || !this.audio.paused || this.starting) return;
     this.starting = true;
     void this.audio.play().catch(() => { if (!this.video.paused && !this.waiting) this.error(); }).finally(() => { this.starting = false; });
@@ -209,7 +224,7 @@ export class ExternalAudio {
     try {
       await this.ready(startup.signal);
       if (this.stopped || this.failed) throw new Error(tr('audio_track_interrupted'));
-      await waitForStartupBuffer(this.audio, startup.signal);
+      await waitForStartupBuffer(this.audio, startup.signal, INDEPENDENT_AUDIO_RESERVE);
     }
     finally { if (this.startup === startup) this.startup = undefined; }
   }

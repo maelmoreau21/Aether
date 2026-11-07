@@ -35,17 +35,35 @@ async function fetchProgress(work: string): Promise<Progress> {
   return response.json();
 }
 
+/**
+ * A progress write that failed. `transient` failures (slow server, network blip, 5xx) are retried by
+ * the next periodic save; the others (conflict, rights, session) stop the tracker.
+ */
+export class ProgressWriteError extends Error {
+  constructor(message: string, readonly transient: boolean) {
+    super(message);
+    this.name = 'ProgressWriteError';
+  }
+}
+
 export async function writeProgress(progress: Progress, keepalive = false): Promise<Progress> {
   warmed.delete(progress.workId);
   const current = get(session);
-  if (!current) throw new Error(tr('session_required_to_save_progress'));
-  const response = await fetch(`/api/v1/progress/${encodeURIComponent(progress.workId)}`, {
-    method: 'PUT', credentials: 'same-origin', keepalive, signal: AbortSignal.timeout(10000),
-    headers: { 'content-type': 'application/json', 'x-csrf-token': current.csrfToken },
-    body: JSON.stringify({ position: progress.position, duration: progress.duration, watched: progress.watched, expectedRevision: progress.revision })
-  });
-  if (response.status === 409) throw new Error(tr('progress_changed_in_another_session_close'));
-  if (!response.ok) throw new Error(tr('progress_not_saved_check_your_connection'));
+  if (!current) throw new ProgressWriteError(tr('session_required_to_save_progress'), false);
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1/progress/${encodeURIComponent(progress.workId)}`, {
+      method: 'PUT', credentials: 'same-origin', keepalive, signal: AbortSignal.timeout(10000),
+      headers: { 'content-type': 'application/json', 'x-csrf-token': current.csrfToken },
+      body: JSON.stringify({ position: progress.position, duration: progress.duration, watched: progress.watched, expectedRevision: progress.revision })
+    });
+  } catch {
+    // Timeout ("signal timed out") or network failure: never shown raw, retried by the next save.
+    throw new ProgressWriteError(tr('progress_save_delayed'), true);
+  }
+  if (response.status === 409) throw new ProgressWriteError(tr('progress_changed_in_another_session_close'), false);
+  if (response.status >= 500 || response.status === 429 || response.status === 408) throw new ProgressWriteError(tr('progress_save_delayed'), true);
+  if (!response.ok) throw new ProgressWriteError(tr('progress_not_saved_check_your_connection'), false);
   const saved: Progress = await response.json();
   window.dispatchEvent(new Event('media-progress-updated'));
   return saved;
@@ -88,6 +106,8 @@ export class ProgressTracker {
   private failed = false;
   private watched = false;
   private creditsStart?: number;
+  private transientFailures = 0;
+  static readonly TRANSIENT_FAILURES_BEFORE_NOTICE = 3;
   constructor(private work: string, private onError: (message: string) => void, creditsStart?: number) {
     this.creditsStart = creditsStart;
   }
@@ -117,7 +137,14 @@ export class ProgressTracker {
       try {
         const progress = await writeProgress({ workId: this.work, position, duration, watched, revision: this.revision }, force);
         this.revision = progress.revision; this.watched = progress.watched;
-      } catch (error) { this.fail(error); }
+        this.transientFailures = 0;
+      } catch (error) {
+        if (!(error instanceof ProgressWriteError) || !error.transient) { this.fail(error); return; }
+        // One slow answer must not stop saving for the rest of the session: the next periodic save
+        // retries. Tell the viewer only when the server keeps failing.
+        this.transientFailures += 1;
+        if (this.transientFailures === ProgressTracker.TRANSIENT_FAILURES_BEFORE_NOTICE) this.onError(error.message);
+      }
     });
   }
 }

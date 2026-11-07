@@ -179,7 +179,10 @@ export function savePreferences(patch: PreferencePatch): Promise<boolean> {
       if (generation === getSessionGeneration()) preferenceSyncError.set('');
       return generation === getSessionGeneration();
     } catch (error) {
-      if (generation === getSessionGeneration()) preferenceSyncError.set(error instanceof Error ? error.message : tr('unable_to_save_the_preferences'));
+      // A timeout or network failure is a DOMException/TypeError whose text ("signal timed out") is
+      // not for the viewer.
+      const readable = error instanceof Error && !(error instanceof DOMException) && !(error instanceof TypeError);
+      if (generation === getSessionGeneration()) preferenceSyncError.set(readable ? error.message : tr('unable_to_save_the_preferences'));
       return false;
     }
   };

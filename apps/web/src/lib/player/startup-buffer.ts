@@ -11,9 +11,28 @@ export function bufferedAhead(media: HTMLMediaElement): number {
   return 0;
 }
 
-export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSignal): Promise<void> {
+export interface StartupReserve {
+  /** Seconds that must be buffered ahead before starting. */
+  seconds: number;
+  /** After this delay the minimal reserve is accepted again: a slow server delays, never fails. */
+  softDeadlineMs: number;
+}
+
+/**
+ * An independent audio element must not start on a few milliseconds of data: on a slow source (NAS,
+ * remote node) it runs dry at once, pauses the video, resumes, runs dry again — heard as clicks
+ * during the first seconds. Video keeps the minimal reserve (see above).
+ */
+export const INDEPENDENT_AUDIO_RESERVE: StartupReserve = { seconds: 1.5, softDeadlineMs: 3000 };
+
+export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSignal, reserve?: StartupReserve): Promise<void> {
+  const started = Date.now();
   const enough = () => {
     if (media.seeking || media.readyState < 3) return false;
+    if (reserve && Date.now() - started < reserve.softDeadlineMs) {
+      const remaining = Number.isFinite(media.duration) ? Math.max(0, media.duration - media.currentTime) : Infinity;
+      return bufferedAhead(media) >= Math.min(reserve.seconds, Math.max(0, remaining - .05));
+    }
     // Chrome can retain the previous buffered TimeRanges after reloading the
     // same URL, even while decoding the new position. HAVE_ENOUGH_DATA is the
     // browser's stronger playback readiness signal; do not deadlock a paused

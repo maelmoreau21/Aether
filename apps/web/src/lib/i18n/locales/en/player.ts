@@ -320,6 +320,7 @@ export const player: Readonly<Record<keyof typeof source, string>> = {
   session_required_to_save_progress: 'Session required to save progress.',
   progress_changed_in_another_session_close: 'Progress changed in another session. Close then reopen the player to synchronise it.',
   progress_not_saved_check_your_connection: 'Progress not saved. Check your connection and your rights.',
+  progress_save_delayed: 'The server is slow to save progress; retrying automatically.',
   resume_unavailable_after_2_5_seconds: 'Resume unavailable after 2.5 seconds. Playing from the start; progress kept on the server.',
   video_playback_cancelled: 'Video playback cancelled.',
   av1_fragment_rejected_by_the_browser: 'AV1 fragment rejected by the browser.',

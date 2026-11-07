@@ -117,6 +117,19 @@ describe('independent audio timeline',()=>{
     audio.currentTime=0;await vi.advanceTimersByTimeAsync(100);expect(paused).toHaveBeenCalled();expect(audio.currentTime).toBe(1);
     bridge.destroy();
   });
+  it('keeps one correction rate until the clocks converge instead of toggling it every tick',async()=>{
+    vi.useFakeTimers();const {video,audio,bridge}=setup();await bridge.load('/audio');await video.play();await bridge.play();
+    const rates:number[]=[];let rate=1;
+    Object.defineProperty(audio,'playbackRate',{get:()=>rate,set:(value:number)=>{rate=value;rates.push(value);},configurable:true});
+    // Audio 50 ms behind: under the engage threshold, no time-stretch restart.
+    video.currentTime=1;audio.currentTime=.95;await vi.advanceTimersByTimeAsync(300);expect(rates).toEqual([]);
+    // 80 ms behind: one change to speed up, kept while the gap closes through 50, 30, 20 ms.
+    audio.currentTime=.92;await vi.advanceTimersByTimeAsync(100);
+    for(const gap of [.05,.03,.02]){audio.currentTime=1-gap;await vi.advanceTimersByTimeAsync(100);}
+    expect(rates).toEqual([1.02]);
+    audio.currentTime=.99;await vi.advanceTimersByTimeAsync(100);expect(rates).toEqual([1.02,1]);
+    bridge.destroy();
+  });
   it('applies signed offsets without playing delayed audio before its start',async()=>{
     vi.useFakeTimers(); const {video,audio,bridge}=setup(); await bridge.load('/audio');
     bridge.setOffset(2); await video.play(); await bridge.play(); expect(audio.paused).toBe(true);

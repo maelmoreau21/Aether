@@ -318,6 +318,7 @@ export const player = {
   session_required_to_save_progress: 'Session requise pour enregistrer la progression.',
   progress_changed_in_another_session_close: 'La progression a changé dans une autre session. Fermez puis rouvrez le lecteur pour la synchroniser.',
   progress_not_saved_check_your_connection: 'Progression non enregistrée. Vérifiez votre connexion et vos droits.',
+  progress_save_delayed: 'Le serveur tarde à enregistrer la progression ; nouvel essai automatique.',
   resume_unavailable_after_2_5_seconds: 'Reprise indisponible après 2,5 secondes. Lecture depuis le début ; progression conservée sur le serveur.',
   video_playback_cancelled: 'Lecture vidéo annulée.',
   av1_fragment_rejected_by_the_browser: 'Fragment AV1 rejeté par le navigateur.',

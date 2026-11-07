@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { compareText, formatDate, formatDateTime, formatDecimal, formatNumber, formatPercent, formatTime, languageName } from './format';
 import { interpolate, translateMessage } from './index';
 
 // 2026-11-07 13:45:00 UTC. Time zone pinned so the expectations do not depend on the machine.
 const instant = Date.UTC(2026, 10, 7, 13, 45) / 1000;
-process.env.TZ = 'UTC';
+vi.stubEnv('TZ', 'UTC');
 
 describe('formats follow the interface language, not the machine', () => {
   it('writes dates in each language', () => {

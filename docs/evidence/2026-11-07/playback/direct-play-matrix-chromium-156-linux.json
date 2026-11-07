@@ -1,0 +1,1413 @@
+{
+  "date": "2026-11-07T09:44:08.398Z",
+  "browser": "156.0.8078.4",
+  "channel": "executable",
+  "rounds": 3,
+  "scope": "Direct Play of synthetic AV1/Opus media over loopback HTTP Range; no Core, Node, NAS or real film",
+  "files": [
+    {
+      "name": "av1-10bit-opus-51.mkv",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 23.20000000001164,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 3.900000000023283,
+          "soundMs": 13,
+          "hz": 431,
+          "frameMs": 34.300000000046566,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 12.099999999976717,
+            "soundMs": 25.5,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.05,
+              "soundMs": 20.79999999998836,
+              "hz": 431,
+              "frameMs": 69.79999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 19.600000000034925,
+              "hz": 431,
+              "frameMs": 49.40000000002328
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 518554
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.100000000034925,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.7000000000116415,
+          "soundMs": 16.20000000001164,
+          "hz": 431,
+          "frameMs": 31.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 15,
+            "soundMs": 17.70000000001164,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 19.599999999976717,
+              "hz": 431,
+              "frameMs": 47.29999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 20.399999999965075,
+              "hz": 431,
+              "frameMs": 44.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 518554
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 19.099999999976717,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6,
+          "soundMs": 15.5,
+          "hz": 431,
+          "frameMs": 33.59999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 0.9000000000232831,
+            "hz": 431,
+            "frameMs": 9
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 21.5,
+              "hz": 431,
+              "frameMs": 49.79999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 19.300000000046566,
+              "hz": 431,
+              "frameMs": 44.800000000046566
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 518554
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-10bit-opus-51.mp4",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.400000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.5,
+          "soundMs": 15.799999999988358,
+          "hz": 431,
+          "frameMs": 33.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.799999999988358,
+            "hz": 431,
+            "frameMs": 9
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 21.20000000001164,
+              "hz": 431,
+              "frameMs": 41.79999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 19,
+              "hz": 431,
+              "frameMs": 45.79999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 522233
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.899999999965075,
+          "soundMs": 16.29999999998836,
+          "hz": 431,
+          "frameMs": 41.09999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9.099999999976717,
+            "hz": 431,
+            "frameMs": 15.899999999965075
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 20.29999999998836,
+              "hz": 431,
+              "frameMs": 48.29999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 20.199999999953434,
+              "hz": 431,
+              "frameMs": 45.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 522233
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.599999999976717,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 5.900000000023283,
+          "soundMs": 15.099999999976717,
+          "hz": 431,
+          "frameMs": 44.09999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 11.399999999965075,
+            "soundMs": 17,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 19.79999999998836,
+              "hz": 431,
+              "frameMs": 44.5
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 17.70000000001164,
+              "hz": 431,
+              "frameMs": 49.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 522233
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-10bit-opus-51.webm",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 14.099999999976717,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.2999999999883585,
+          "soundMs": 15.5,
+          "hz": 431,
+          "frameMs": 34.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.899999999965075,
+            "hz": 431,
+            "frameMs": 10.399999999965075
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 19.099999999976717,
+              "hz": 431,
+              "frameMs": 43.199999999953434
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 19.100000000034925,
+              "hz": 431,
+              "frameMs": 49.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 518435
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.400000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.099999999976717,
+          "soundMs": 15.199999999953434,
+          "hz": 431,
+          "frameMs": 35.29999999998836,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9.200000000011642,
+            "hz": 431,
+            "frameMs": 11
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 22.100000000034925,
+              "hz": 431,
+              "frameMs": 43.5
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 17.600000000034925,
+              "hz": 431,
+              "frameMs": 46.600000000034925
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 518435
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.300000000046566,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.5,
+          "soundMs": 15.599999999976717,
+          "hz": 431,
+          "frameMs": 35.399999999965075,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.899999999965075,
+            "hz": 431,
+            "frameMs": 10.799999999988358
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 19.20000000001164,
+              "hz": 431,
+              "frameMs": 43.59999999997672
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 17.70000000001164,
+              "hz": 431,
+              "frameMs": 49.59999999997672
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 518435
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-10bit-opus-stereo.mkv",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 5.600000000034925,
+          "soundMs": 15.200000000011642,
+          "hz": 431,
+          "frameMs": 46.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 17,
+            "hz": 431,
+            "frameMs": 47.899999999965075
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 19.400000000023283,
+              "hz": 431,
+              "frameMs": 47.70000000001164
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 20.599999999976717,
+              "hz": 431,
+              "frameMs": 45.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 599194
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.20000000001164,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.900000000023283,
+          "soundMs": 16,
+          "hz": 431,
+          "frameMs": 41.40000000002328,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 8,
+            "soundMs": 17.29999999998836,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.06,
+              "soundMs": 20.20000000001164,
+              "hz": 431,
+              "frameMs": 74.10000000003492
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 18.79999999998836,
+              "hz": 431,
+              "frameMs": 45.5
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 599194
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 8.700000000011642,
+          "soundMs": 18.099999999976717,
+          "hz": 431,
+          "frameMs": 33.09999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 14.300000000046566,
+            "soundMs": 17.20000000001164,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 19.29999999998836,
+              "hz": 431,
+              "frameMs": 47
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 18.800000000046566,
+              "hz": 431,
+              "frameMs": 44.70000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 599194
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-10bit-opus-stereo.mp4",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 14,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.100000000034925,
+          "soundMs": 24.20000000001164,
+          "hz": 431,
+          "frameMs": 44.20000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 11.200000000011642,
+            "soundMs": 17,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.05,
+              "soundMs": 21.199999999953434,
+              "hz": 431,
+              "frameMs": 77.29999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 18.800000000046566,
+              "hz": 431,
+              "frameMs": 48
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 602873
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.700000000011642,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.399999999965075,
+          "soundMs": 16.5,
+          "hz": 431,
+          "frameMs": 35,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.799999999988358,
+            "hz": 431,
+            "frameMs": 9.299999999988358
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 21.599999999976717,
+              "hz": 431,
+              "frameMs": 42.29999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 18.20000000001164,
+              "hz": 431,
+              "frameMs": 45.70000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 602873
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.900000000023283,
+          "soundMs": 17,
+          "hz": 431,
+          "frameMs": 35.5,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9,
+            "hz": 431,
+            "frameMs": 9.199999999953434
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 21,
+              "hz": 431,
+              "frameMs": 41.899999999965075
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 18.400000000023283,
+              "hz": 431,
+              "frameMs": 46
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 602873
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-10bit-opus-stereo.webm",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.400000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.900000000023283,
+          "soundMs": 16.099999999976717,
+          "hz": 431,
+          "frameMs": 42.90000000002328,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 10.100000000034925,
+            "soundMs": 17.29999999998836,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 20.29999999998836,
+              "hz": 431,
+              "frameMs": 42.70000000001164
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 17.100000000034925,
+              "hz": 431,
+              "frameMs": 47.5
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 599075
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.599999999976717,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.599999999976717,
+          "soundMs": 16.79999999998836,
+          "hz": 431,
+          "frameMs": 39,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.900000000023283,
+            "hz": 431,
+            "frameMs": 13.100000000034925
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 19.599999999976717,
+              "hz": 431,
+              "frameMs": 45.79999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 18.599999999976717,
+              "hz": 431,
+              "frameMs": 43.20000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 599075
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.70000000001164,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.100000000034925,
+          "soundMs": 16.20000000001164,
+          "hz": 431,
+          "frameMs": 38.300000000046566,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9.100000000034925,
+            "hz": 431,
+            "frameMs": 13
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 19.70000000001164,
+              "hz": 431,
+              "frameMs": 45.40000000002328
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 18.5,
+              "hz": 431,
+              "frameMs": 42.70000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 599075
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-8bit-opus-51.mkv",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.400000000023283,
+          "soundMs": 16.79999999998836,
+          "hz": 431,
+          "frameMs": 34.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.900000000023283,
+            "hz": 431,
+            "frameMs": 9.200000000011642
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 24.699999999953434,
+              "hz": 452,
+              "frameMs": 41.899999999965075
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 25,
+              "hz": 431,
+              "frameMs": 42.399999999965075
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 516187
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.300000000046566,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 9.200000000011642,
+          "soundMs": 18.599999999976717,
+          "hz": 431,
+          "frameMs": 32.59999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.900000000023283,
+            "hz": 431,
+            "frameMs": 12.900000000023283
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 25.5,
+              "hz": 452,
+              "frameMs": 45.90000000002328
+            },
+            {
+              "target": 2,
+              "reached": 2.02,
+              "soundMs": 23.800000000046566,
+              "hz": 431,
+              "frameMs": 45.70000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 516187
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.400000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.600000000034925,
+          "soundMs": 16.800000000046566,
+          "hz": 431,
+          "frameMs": 37,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9.100000000034925,
+            "hz": 431,
+            "frameMs": 11.400000000023283
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 25.20000000001164,
+              "hz": 431,
+              "frameMs": 44
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 24.900000000023283,
+              "hz": 431,
+              "frameMs": 43.90000000002328
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 516187
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-8bit-opus-51.mp4",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.600000000034925,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.2999999999883585,
+          "soundMs": 17,
+          "hz": 431,
+          "frameMs": 46.79999999998836,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 17.29999999998836,
+            "hz": 431,
+            "frameMs": 45.70000000001164
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 25.599999999976717,
+              "hz": 452,
+              "frameMs": 45.59999999997672
+            },
+            {
+              "target": 2,
+              "reached": 2.05,
+              "soundMs": 23.300000000046566,
+              "hz": 431,
+              "frameMs": 78.40000000002328
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 519866
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.2000000000116415,
+          "soundMs": 16.599999999976717,
+          "hz": 431,
+          "frameMs": 32,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 14.700000000011642,
+            "soundMs": 17.29999999998836,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 25,
+              "hz": 452,
+              "frameMs": 47.5
+            },
+            {
+              "target": 2,
+              "reached": 2.02,
+              "soundMs": 24.100000000034925,
+              "hz": 431,
+              "frameMs": 47.5
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 519866
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 21.600000000034925,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 5.7000000000116415,
+          "soundMs": 15.200000000011642,
+          "hz": 431,
+          "frameMs": 35.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 11.400000000023283,
+            "soundMs": 25.70000000001164,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.05,
+              "soundMs": 26.100000000034925,
+              "hz": 431,
+              "frameMs": 68.79999999998836
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 24.099999999976717,
+              "hz": 431,
+              "frameMs": 43.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 519866
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-8bit-opus-51.webm",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.900000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.2000000000116415,
+          "soundMs": 15.300000000046566,
+          "hz": 431,
+          "frameMs": 42.100000000034925,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 9.699999999953434,
+            "soundMs": 17.199999999953434,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 25.5,
+              "hz": 431,
+              "frameMs": 42.5
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 22.29999999998836,
+              "hz": 431,
+              "frameMs": 42
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 516068
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.600000000034925,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.5,
+          "soundMs": 17,
+          "hz": 431,
+          "frameMs": 44.70000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 10.599999999976717,
+            "soundMs": 17.20000000001164,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 25.5,
+              "hz": 431,
+              "frameMs": 43.59999999997672
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 23.70000000001164,
+              "hz": 431,
+              "frameMs": 43.20000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 516068
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 18.300000000046566,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.7000000000116415,
+          "soundMs": 16.29999999998836,
+          "hz": 431,
+          "frameMs": 32.20000000001164,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.900000000023283,
+            "hz": 431,
+            "frameMs": 14.800000000046566
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 24.399999999965075,
+              "hz": 452,
+              "frameMs": 47.899999999965075
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 22.400000000023283,
+              "hz": 431,
+              "frameMs": 48.90000000002328
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 516068
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-8bit-opus-stereo.mkv",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 8.700000000011642,
+          "soundMs": 17.900000000023283,
+          "hz": 431,
+          "frameMs": 40.90000000002328,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9,
+            "hz": 431,
+            "frameMs": 14.299999999988358
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 24.899999999965075,
+              "hz": 431,
+              "frameMs": 47.09999999997672
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 23.5,
+              "hz": 431,
+              "frameMs": 47.20000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 596827
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.399999999965075,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.599999999976717,
+          "soundMs": 16.29999999998836,
+          "hz": 431,
+          "frameMs": 39.59999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 9,
+            "hz": 431,
+            "frameMs": 14.5
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 25.70000000001164,
+              "hz": 431,
+              "frameMs": 47
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 24,
+              "hz": 431,
+              "frameMs": 46.600000000034925
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 596827
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 8.100000000034925,
+          "soundMs": 17.600000000034925,
+          "hz": 431,
+          "frameMs": 37.600000000034925,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.899999999965075,
+            "hz": 431,
+            "frameMs": 11
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.05,
+              "soundMs": 25.79999999998836,
+              "hz": 452,
+              "frameMs": 77
+            },
+            {
+              "target": 2,
+              "reached": 2.02,
+              "soundMs": 24,
+              "hz": 431,
+              "frameMs": 43.79999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 596827
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-8bit-opus-stereo.mp4",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 15.799999999988358,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 8.100000000034925,
+          "soundMs": 17.600000000034925,
+          "hz": 431,
+          "frameMs": 47.600000000034925,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 17.099999999976717,
+            "hz": 431,
+            "frameMs": 46.09999999997672
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 26.099999999976717,
+              "hz": 452,
+              "frameMs": 46.09999999997672
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 22.399999999965075,
+              "hz": 452,
+              "frameMs": 44.70000000001164
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 600506
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.100000000034925,
+          "soundMs": 16.20000000001164,
+          "hz": 431,
+          "frameMs": 37.100000000034925,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.900000000023283,
+            "hz": 431,
+            "frameMs": 12
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.03,
+              "soundMs": 24.899999999965075,
+              "hz": 452,
+              "frameMs": 44.699999999953434
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 23.100000000034925,
+              "hz": 431,
+              "frameMs": 45
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 600506
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.900000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7,
+          "soundMs": 16.5,
+          "hz": 431,
+          "frameMs": 34.59999999997672,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.799999999988358,
+            "hz": 431,
+            "frameMs": 9.099999999976717
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.05,
+              "soundMs": 25.199999999953434,
+              "hz": 452,
+              "frameMs": 75.09999999997672
+            },
+            {
+              "target": 2,
+              "reached": 2.02,
+              "soundMs": 23.199999999953434,
+              "hz": 431,
+              "frameMs": 42.399999999965075
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 600506
+        }
+      ],
+      "canPlayType": "probably"
+    },
+    {
+      "name": "av1-8bit-opus-stereo.webm",
+      "runs": [
+        {
+          "round": 0,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17.400000000023283,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 6.099999999976717,
+          "soundMs": 15.5,
+          "hz": 431,
+          "frameMs": 30.899999999965075,
+          "pauseHeld": true,
+          "resume": {
+            "frameMs": 14.700000000011642,
+            "soundMs": 17.20000000001164,
+            "hz": 431
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 24.20000000001164,
+              "hz": 431,
+              "frameMs": 47.70000000001164
+            },
+            {
+              "target": 2,
+              "reached": 2.04,
+              "soundMs": 21.900000000023283,
+              "hz": 431,
+              "frameMs": 48.29999999998836
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 596708
+        },
+        {
+          "round": 1,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 16.5,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.599999999976717,
+          "soundMs": 16.900000000023283,
+          "hz": 431,
+          "frameMs": 47,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 17.399999999965075,
+            "hz": 431,
+            "frameMs": 46.29999999998836
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.02,
+              "soundMs": 26.100000000034925,
+              "hz": 452,
+              "frameMs": 46
+            },
+            {
+              "target": 2,
+              "reached": 2.05,
+              "soundMs": 24.699999999953434,
+              "hz": 431,
+              "frameMs": 78.19999999995343
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 596708
+        },
+        {
+          "round": 2,
+          "events": [],
+          "sourceChannels": 2,
+          "metadataMs": 17,
+          "duration": 12.021,
+          "videoWidth": 320,
+          "audioTracksApi": false,
+          "playResolvedMs": 7.599999999976717,
+          "soundMs": 17,
+          "hz": 431,
+          "frameMs": 40.399999999965075,
+          "pauseHeld": true,
+          "resume": {
+            "soundMs": 8.899999999965075,
+            "hz": 431,
+            "frameMs": 14.399999999965075
+          },
+          "seeks": [
+            {
+              "target": 8,
+              "reached": 8.06,
+              "soundMs": 26.300000000046566,
+              "hz": 452,
+              "frameMs": 80.60000000003492
+            },
+            {
+              "target": 2,
+              "reached": 2.03,
+              "soundMs": 25.699999999953434,
+              "hz": 431,
+              "frameMs": 46.5
+            }
+          ],
+          "requests": 1,
+          "bytesServed": 596708
+        }
+      ],
+      "canPlayType": "probably"
+    }
+  ]
+}

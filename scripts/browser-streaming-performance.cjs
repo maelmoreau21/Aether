@@ -21,7 +21,7 @@ const baselineCommit = execFileSync('git', ['rev-parse', '--verify', `${baseline
 // revisions if another agent saves a source file between browser contexts.
 const playerRef = process.env.MEDIA_PERFORMANCE_PLAYER_REF;
 const playerCommit = playerRef ? execFileSync('git', ['rev-parse', '--verify', `${playerRef}^{commit}`], {cwd: root, encoding: 'utf8'}).trim() : null;
-const playerModules = ['startup-buffer', 'errors', 'compatibility', 'source-selection', 'external-audio', 'segmented-audio', 'mp4-timeline', 'mp4-fragments', 'encoded-video-buffer', 'progressive-video', 'native'];
+const playerModules = ['startup-buffer', 'errors', 'compatibility', 'source-selection', 'external-audio', 'segmented-audio', 'mp4-timeline', 'mp4-fragments', 'encoded-video-buffer', 'progressive-video', 'diagnostics', 'startup-timeline', 'native'];
 const playerSources = Object.fromEntries(playerModules.map(name => [name,
   playerCommit || (baseline && name === 'native')
     ? execFileSync('git', ['show', `${playerCommit || baselineCommit}:apps/web/src/lib/player/${name}.ts`], {cwd: root, encoding: 'utf8'})
@@ -127,6 +127,8 @@ function compile(name) {
   return ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 }
 async function instrument(page, strategy) {
+  // The production player imports the i18n catalogue; the harness only needs stable keys, not the catalogue.
+  await page.addScriptTag({ content: "window['/i18n']={tr:(key,params)=>params?key+JSON.stringify(params):key};" });
   for (const name of playerModules) {
     await page.addScriptTag({ content: `window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);` });
   }

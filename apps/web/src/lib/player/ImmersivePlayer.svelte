@@ -16,6 +16,7 @@
   import { languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
+  import { failoverHelps, failureKindOf, type PlaybackFailureKind } from './diagnostics';
   import { revalidateMediaDescriptor } from '../catalog/api';
   import { bufferedAhead } from './startup-buffer';
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
@@ -64,6 +65,7 @@
   let active = $state<Media | undefined>();
   let busy = $state(false);
   let error = $state('');
+  let errorKind = $state<PlaybackFailureKind | ''>('');
   let notice = $state('');
   let statistics = $state(false);
   let markerEditor = $state(false);
@@ -251,14 +253,16 @@
       failoverInProgress = false;
     }
   }
-  function fail(message: string) {
+  function fail(message: string, kind?: PlaybackFailureKind) {
     if (!opened) return;
     collector?.event('error', { errorCode: 'playback' });
     engine?.pause();
+    // An equivalent copy is the same file or the same runtime: a codec, container or
+    // permission refusal would only repeat on it, so skip the detour and say why.
+    const show = () => { errorKind = kind ?? ''; error = message; busy = false; sync(); wake(); };
+    if (!failoverHelps(kind)) { show(); return; }
     void tryAutomaticFailover().then(recovered => {
-      if (!recovered && opened) {
-        error = message; busy = false; sync(); wake();
-      }
+      if (!recovered && opened) show();
     });
   }
   async function action(operation: (player: Player) => void | Promise<void>) {
@@ -268,7 +272,7 @@
     catch (e) {
       if (current === generation) {
         if (e instanceof AudioSelectionRetainedError) { loadStage = e.message; notice = $t('this_track_is_unavailable_the_previous'); }
-        else fail(e instanceof Error ? e.message : String(e));
+        else fail(e instanceof Error ? e.message : String(e), failureKindOf(e));
       }
     }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
@@ -349,7 +353,7 @@
         syncClient.setReady(true);
         syncClient.setBuffering(false, engine.state().position);
       } else if (!restore || !restore.paused) await engine.play();
-    } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e), failureKindOf(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
   function readPlaybackPreferences() {
@@ -427,11 +431,11 @@
     surface?.focus();
     // Requested synchronously from the opening user gesture, before any network await.
     requestFullscreen();
-    engine = createPlayer(video, message => { if (current === generation) fail(message); });
+    engine = createPlayer(video, (message, kind) => { if (current === generation) fail(message, kind); });
     engine.setStatusListener?.(message=>{if(current===generation)loadStage=message;});
     if (media instanceof Promise) {
       void media.then(item => { if (current === generation && opened) { active = item; void prepare(item); } })
-        .catch(cause => { if (current === generation) fail(cause instanceof Error ? cause.message : String(cause)); });
+        .catch(cause => { if (current === generation) fail(cause instanceof Error ? cause.message : String(cause), failureKindOf(cause)); });
     } else void prepare(media);
     return true;
   }
@@ -487,7 +491,7 @@
     else if (media instanceof Promise) {
       const client = syncClient;
       void media.then(item => { if (syncClient === client && opened) changeMedia(item); })
-        .catch(cause => { if (syncClient === client) fail(cause instanceof Error ? cause.message : String(cause)); });
+        .catch(cause => { if (syncClient === client) fail(cause instanceof Error ? cause.message : String(cause), failureKindOf(cause)); });
     } else changeMedia(media);
   }
   function setupSyncClientHooks() {
@@ -715,7 +719,7 @@
       </section>
     {/if}
     {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>{$t('loading_the_video')}</span><button onclick={close}>{$t('sched_cancel')}</button></div>{/if}
-    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>{$t('playback_interrupted')}</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>{$t('request_retry')}</button></div>{/if}
+    {#if error}<div class="player-error" role="alert" data-failure-kind={errorKind || undefined}><Icon name="alert" size={24} /><strong>{$t('playback_interrupted')}</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>{$t('request_retry')}</button></div>{/if}
     {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label={$t('playback_data')}>
       <header><strong>{$t('playback_data')}</strong><button onclick={() => { statistics = false; wake(); }}>{$t('close')}</button></header>
       <p>{$t('browser_video_metrics_refreshed_every_second')}</p>

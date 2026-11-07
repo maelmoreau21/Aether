@@ -87,4 +87,4 @@ export interface Player {
   destroy(): void;
 }
 
-export type PlayerFactory = (video: HTMLVideoElement, onError: (message: string) => void) => Player;
+export type PlayerFactory = (video: HTMLVideoElement, onError: (message: string, kind?: import("./diagnostics").PlaybackFailureKind) => void) => Player;

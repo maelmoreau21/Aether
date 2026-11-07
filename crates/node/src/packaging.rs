@@ -65,7 +65,50 @@ pub fn preparation_error_code(error: &io::Error) -> &'static str {
         io::ErrorKind::NotFound => "preparation_tool_or_source_unavailable",
         io::ErrorKind::Unsupported => "unsupported_preparation",
         io::ErrorKind::InvalidInput => "preparation_configuration_invalid",
+        // The Node may not read the file (NAS share permissions, a swapped link).
+        io::ErrorKind::PermissionDenied => "source_permission_denied",
+        // The file is read from storage that failed mid-preparation (NAS I/O, stale handle).
+        io::ErrorKind::ConnectionAborted => "source_io_error",
+        // The file changed under the preparation; the library must be rescanned.
+        io::ErrorKind::InvalidData => "source_changed_rescan_required",
         _ => "preparation_failed",
+    }
+}
+
+/// FFmpeg exits non-zero both when it rejects a stream layout and when it could not read the
+/// file at all. Reporting the second case as `unsupported_preparation` sends the viewer after a
+/// container problem that does not exist, so refine it from the retained stderr tail. Unknown
+/// output keeps the generic `Unsupported` verdict.
+pub(crate) fn classify_ffmpeg_failure(error: io::Error, stderr: &str) -> io::Error {
+    if error.kind() != io::ErrorKind::Unsupported {
+        return error;
+    }
+    let text = stderr.to_ascii_lowercase();
+    let contains = |needles: &[&str]| needles.iter().any(|needle| text.contains(needle));
+    if contains(&[
+        "permission denied",
+        "operation not permitted",
+        "access is denied",
+    ]) {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "source not readable by the Node",
+        )
+    } else if contains(&[
+        "input/output error",
+        "stale file handle",
+        "transport endpoint",
+        "connection reset",
+        "connection timed out",
+        "network is unreachable",
+        "no such device",
+    ]) {
+        io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            "source storage failed while reading",
+        )
+    } else {
+        error
     }
 }
 struct Entry {
@@ -232,7 +275,10 @@ impl Preparations {
             .map_err(|e| io::Error::new(e.kind(), e.to_string()))?;
         let input = OpenedFile::open_in_root(root, relative).await?;
         if input.size() != expected_size || input.modified_ns() != expected_mtime {
-            return Err(io::Error::other("source changed; rescan required"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "source changed; rescan required",
+            ));
         }
         let key = format!(
             "{:?}:{relative:?}:{expected_size}:{expected_mtime}:{component:?}",
@@ -523,9 +569,11 @@ impl Preparations {
         let size = match result {
             Ok(size) => size,
             Err(error) => {
+                let stderr = diagnostics.unwrap_or_default();
+                let error = classify_ffmpeg_failure(error, &stderr);
                 eprintln!(
                     "{}",
-                    serde_json::json!({"event":"preparation_ffmpeg_error","attempt":log.id,"component":format!("{component:?}"),"code":preparation_error_code(&error),"elapsed_ms":log.started.elapsed().as_millis(),"stderr":diagnostics.unwrap_or_default()})
+                    serde_json::json!({"event":"preparation_ffmpeg_error","attempt":log.id,"component":format!("{component:?}"),"code":preparation_error_code(&error),"elapsed_ms":log.started.elapsed().as_millis(),"stderr":stderr})
                 );
                 return Err(error);
             }
@@ -555,6 +603,54 @@ impl Preparations {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_codes_separate_busy_permission_storage_change_and_container() {
+        let code = |kind| preparation_error_code(&io::Error::new(kind, "x"));
+        assert_eq!(code(io::ErrorKind::WouldBlock), "preparation_busy");
+        assert_eq!(
+            code(io::ErrorKind::PermissionDenied),
+            "source_permission_denied"
+        );
+        assert_eq!(code(io::ErrorKind::ConnectionAborted), "source_io_error");
+        assert_eq!(
+            code(io::ErrorKind::InvalidData),
+            "source_changed_rescan_required"
+        );
+        assert_eq!(code(io::ErrorKind::Unsupported), "unsupported_preparation");
+    }
+
+    #[test]
+    fn ffmpeg_exit_is_refined_only_when_stderr_names_a_read_failure() {
+        let unsupported = || {
+            io::Error::new(
+                io::ErrorKind::Unsupported,
+                "unsupported packaging or stream",
+            )
+        };
+        let refined =
+            |stderr: &str| preparation_error_code(&classify_ffmpeg_failure(unsupported(), stderr));
+        assert_eq!(
+            refined("pipe:0: Permission denied"),
+            "source_permission_denied"
+        );
+        assert_eq!(
+            refined("Error while reading: Input/output error"),
+            "source_io_error"
+        );
+        assert_eq!(
+            refined("[mov,mp4] moov atom not found\nInvalid data found when processing input"),
+            "unsupported_preparation",
+            "a genuine container rejection stays a container verdict"
+        );
+        assert_eq!(refined(""), "unsupported_preparation");
+        // Other kinds (timeout, cache full, busy) are never rewritten from stderr text.
+        let timeout = io::Error::new(io::ErrorKind::TimedOut, "t");
+        assert_eq!(
+            preparation_error_code(&classify_ffmpeg_failure(timeout, "Permission denied")),
+            "preparation_timeout"
+        );
+    }
 
     #[tokio::test]
     async fn idle_full_preparations_evict_but_playing_handles_remain_pinned() {

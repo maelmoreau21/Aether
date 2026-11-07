@@ -53,6 +53,9 @@ struct Preferences {
     offsets: Option<Offsets>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitle_preference: Option<SubtitlePreference>,
+    /// Subtitles remembered while the audio was in another language than the person's (VO).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle_preference_foreign: Option<SubtitlePreference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitle_style: Option<SubtitleStyle>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -225,7 +228,7 @@ impl Preferences {
             && self
                 .subtitles
                 .as_deref()
-                .is_none_or(|v| matches!(v, "forced" | "always" | "off"))
+                .is_none_or(|v| matches!(v, "forced" | "foreign" | "always" | "off"))
             && self.audio_track.as_ref().is_none_or(|v| {
                 v.language.as_deref().is_none_or(language)
                     && [&v.media_id, &v.track_id].into_iter().all(|s| {
@@ -239,6 +242,10 @@ impl Preferences {
             })
             && self
                 .subtitle_preference
+                .as_ref()
+                .is_none_or(|v| v.language.as_deref().is_none_or(language))
+            && self
+                .subtitle_preference_foreign
                 .as_ref()
                 .is_none_or(|v| v.language.as_deref().is_none_or(language))
             && self.subtitle_style.as_ref().is_none_or(|s| {

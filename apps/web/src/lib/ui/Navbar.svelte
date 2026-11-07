@@ -19,6 +19,7 @@
   import { serverPresentation } from '../config/presentation';
   import { loadFeatures } from '../applications/api';
   import { t } from '../i18n';
+  import { startWatchParty } from '../syncplay/launch';
 
   type Kind = AccessibleLibrary['kind'];
 
@@ -201,7 +202,7 @@
     onClose={() => (watchPartyOpen = false)}
     onJoinParty={(partyId, mediaId) => {
       watchPartyOpen = false;
-      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, mediaId } }));
+      startWatchParty({ partyId, mediaId });
     }}
   />
 {/if}

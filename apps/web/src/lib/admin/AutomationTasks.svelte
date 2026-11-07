@@ -1,7 +1,7 @@
 <script lang="ts">
   import { adminRequest } from './request';
   import type { Library } from './types';
-  import { t } from '../i18n';
+  import { t, type TranslationKey } from '../i18n';
   let { active = false, libraries }: { active?: boolean; libraries: Library[] } = $props();
   type Policy = { extensionId: string; libraryId: string; mode: string; priority: number; operation: string; configRevision: string; algorithmVersion: string; intervalSeconds: number; nextRunAt: number; maxConcurrent: number };
   type Extension = { manifest: { id: string; name: string; permissions: string[]; httpHosts?: string[] }; enabled: boolean };
@@ -22,6 +22,20 @@
   let loaded = $state(false);
   let attempted = $state(false);
   let error = $state('');
+  // Task errors are machine codes, optionally followed by the extension's own code
+  // (`extension_error:provider_error`); the history explains them in words.
+  const errorKeys: Record<string, TranslationKey> = {
+    extension_timeout: 'automation_error_timeout', playback_preempted: 'automation_error_preempted',
+    automation_cancelled: 'automation_error_cancelled', metadata_unidentified: 'automation_error_unidentified',
+    provider_error: 'automation_error_provider', not_found: 'automation_error_not_found', rate_limited: 'automation_error_rate_limited',
+    missing_api_key: 'automation_error_api_key', invalid_api_key: 'automation_error_api_key', network_error: 'automation_error_network',
+    parse_error: 'automation_error_parse', invalid_output: 'automation_error_parse'
+  };
+  function describeError(code: string): string {
+    const [host, plugin] = code.split(':', 2);
+    const key = errorKeys[plugin ?? ''] ?? errorKeys[host];
+    return key ? $t(key) : $t('automation_error_generic');
+  }
   let notice = $state('');
   const usable = $derived(libraries.filter(l => !l.id.startsWith('fixture-')));
   const statusKeys = {'queued': 'waiting', 'running': 'stats_kpi_active', 'completed': 'stats_status_completed', 'succeeded': 'sched_outcome_succeeded', 'error': 'sched_outcome_failed', 'failed': 'sched_outcome_failed', 'cancelled': 'sched_outcome_cancelled', 'paused': 'suspended', 'interrupted': 'sched_outcome_interrupted'} as const;
@@ -91,7 +105,7 @@
   {#if history.length}
     <h4>{$t('latest_runs')}</h4>
     <div class="history-list" role="region" aria-label={$t('latest_metadata_runs')}>
-      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? $t('metadata_processing')}</strong><span class="history-status" data-status={task.status}>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{$t('attempts_duration', { count: task.attempt, duration: task.durationSeconds == null ? $t('unavailable_lower') : `${task.durationSeconds} s` })}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>{$t('run_details')}</summary><p>{$t('admin_extension', { extensionId: task.extensionId })}</p><p>{$t('identifier_operation_priority', { id: task.id, operation: task.operation, priority: task.priority })}</p></details></article>{/each}
+      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? $t('metadata_processing')}</strong><span class="history-status" data-status={task.status}>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{$t('attempts_duration', { count: task.attempt, duration: task.durationSeconds == null ? $t('unavailable_lower') : `${task.durationSeconds} s` })}</p>{#if task.error}<p class="history-error">{describeError(task.error)} <code>{task.error}</code></p>{/if}<details><summary>{$t('run_details')}</summary><p>{$t('admin_extension', { extensionId: task.extensionId })}</p><p>{$t('identifier_operation_priority', { id: task.id, operation: task.operation, priority: task.priority })}</p></details></article>{/each}
     </div>
   {/if}
   {#if quotas.length}<h4>{$t('provider_quotas')}</h4><ul>{#each quotas as quota (quota.provider)}<li>{$t('interval_s_in_parallel_next_call', { provider: quota.provider, minIntervalSeconds: quota.minIntervalSeconds, maxConcurrent: quota.maxConcurrent, value: new Date(quota.nextAllowedAt * 1000).toLocaleString() })}</li>{/each}</ul>{/if}

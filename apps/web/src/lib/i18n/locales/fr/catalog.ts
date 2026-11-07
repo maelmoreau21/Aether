@@ -73,7 +73,7 @@ export const catalog = {
   no_outline_shadow: 'Aucun contour / ombre',
   no_matching_setting: 'Aucun réglage ne correspond.',
   administrative_content: 'Aller au contenu administratif',
-  administration: 'Administration',
+  administration: 'Tableau de bord',
   back_to_library: 'Retour à la médiathèque',
   create_user: 'Créer un utilisateur',
   close: 'Fermer',

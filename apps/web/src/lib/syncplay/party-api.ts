@@ -26,9 +26,9 @@ export function initials(name: string, length = 2): string {
   return name.slice(0, length).toUpperCase();
 }
 
-/** Lien d'invitation vers une séance. */
-export function partyInviteUrl(origin: string, partyId: string): string {
-  return `${origin}/parties?id=${encodeURIComponent(partyId)}`;
+/** Lien d'invitation vers une séance : la page d'accueil de l'application la rejoint (`?party=`). */
+export function partyInviteUrl(appUrl: string, partyId: string): string {
+  return `${appUrl.endsWith('/') ? appUrl : `${appUrl}/`}?party=${encodeURIComponent(partyId)}`;
 }
 
 /** Message d'erreur renvoyé par l'API (`{ error }`), ou `fallback`. */

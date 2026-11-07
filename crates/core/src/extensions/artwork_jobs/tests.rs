@@ -23,6 +23,7 @@ async fn durable_collection_resumes_an_expired_lease_and_revokes_cancelled_or_di
         include_neutral: true,
         max_images: 12,
         max_works: 1000,
+        auto: None,
     })
     .unwrap();
     query("INSERT INTO artwork_collection_jobs(id,library_id,owner,parameters,status,lease_token,lease_until,created_at,updated_at) VALUES('job','images','owner',?,'running','expired',1,0,0)")

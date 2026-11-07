@@ -199,6 +199,7 @@ impl Scheduler {
         let notification_jobs = jobs.clone();
         let notifications = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(15));
+            let mut ticks: u32 = 0;
             loop {
                 interval.tick().await;
                 if notification_jobs.is_cancelled() {
@@ -210,6 +211,15 @@ impl Scheduler {
                 {
                     eprintln!("Notification worker pass failed; retrying on next tick");
                 }
+                // Every ten minutes: end idle "Watch together" parties, drop old invitations.
+                if ticks.is_multiple_of(40)
+                    && crate::parties::clean_expired_parties(&notification_auth.store)
+                        .await
+                        .is_err()
+                {
+                    eprintln!("Watch party expiry pass failed; retrying later");
+                }
+                ticks = ticks.wrapping_add(1);
             }
         });
         let artwork_auth = auth.clone();

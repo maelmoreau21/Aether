@@ -11,7 +11,7 @@ export const common = {
   mobile_navigation: 'Navigation principale mobile',
   quick_search: 'Recherche rapide',
   search_action: 'Rechercher',
-  watch_party_sessions: 'Séances Watch Party',
+  watch_party_sessions: 'Regarder ensemble',
   admin_dashboard: 'Tableau de bord',
   profile_settings: 'Mon profil & Préférences',
   logout: 'Se déconnecter',

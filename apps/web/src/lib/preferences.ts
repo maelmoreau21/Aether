@@ -15,12 +15,15 @@ export type Preferences = {
   artworkLocale?: string;
   /** Subtitles selected by default. Absent: the metadata language. */
   subtitleLanguage?: string;
-  subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };
+  /** `foreign`: full subtitles when the audio is not in the subtitle language (original version). */
+  subtitles?: 'forced' | 'foreign' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };
   rememberAudioSelections?: boolean; rememberSubtitleSelections?: boolean; playDefaultAudioTrack?: boolean;
   hidePlayedInLatest?: boolean;
   homeSections?: HomeSection[]; cardSize?: 'small' | 'medium' | 'large';
   cardDensity?: 'comfortable' | 'compact'; accentColor?: 'orange' | 'blue' | 'violet' | 'green';
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;
+  /** Last subtitle choice made while the audio was in another language (VO): reused for every VO. */
+  subtitlePreferenceForeign?: SubtitlePreference;
   subtitleStyle?: SubtitleStyle;
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
   autoSkipIntro?: boolean; autoSkipCredits?: boolean;

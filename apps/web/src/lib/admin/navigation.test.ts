@@ -22,11 +22,14 @@ describe('administration grouping', () => {
   it('keeps every historical section and native statistics reachable', async () => {
     const { adminEntries, adminEntryFor } = await import('./navigation');
     expect(adminEntries).toHaveLength(14);
-    for (const hash of ['#overview', '#statistics-section', '#general-section', '#network-section', '#libraries-section', '#artwork-section', '#nodes-section', '#avatars-section', '#users-section', '#groups-section', '#api-keys-section', '#tasks-section', '#backups-section', '#extensions-section']) {
+    for (const hash of ['#overview', '#statistics-section', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#avatars-section', '#users-section', '#groups-section', '#api-keys-section', '#tasks-section', '#backups-section', '#extensions-section']) {
       expect(parseAdminHash(hash).section).toBe(hash);
       expect(adminEntryFor(hash)).toBeDefined();
     }
     expect(adminDestinations.some(destination => destination.hash === '#trickplay-section')).toBe(false);
+    // The image collection moved to the library settings; old links land there.
+    expect(parseAdminHash('#artwork-section').section).toBe('#libraries-section');
+    expect(adminSectionHashes.has('#artwork-section')).toBe(false);
     expect(adminEntryFor('#network-section')?.label).toBe('Paramètres du serveur');
   });
   it('keeps operations tracking and automation reachable beside scheduled tasks', async () => {

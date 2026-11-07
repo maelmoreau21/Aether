@@ -29,6 +29,10 @@ pub fn router(auth: AuthState) -> Router {
             post(analyze_work_markers),
         )
         .route(
+            "/api/v1/admin/libraries/{id}/analyze-markers",
+            post(analyze_library_markers),
+        )
+        .route(
             "/api/v1/admin/maintenance/clear-fingerprint-cache",
             post(clear_cache),
         )
@@ -338,6 +342,54 @@ async fn analyze_work_markers(
     Ok(Json(json!({
         "status": "queued",
         "seriesId": work_id,
+        "episodesCount": count,
+        "tasksQueued": queued,
+    })))
+}
+
+/// Every episode of a series library (and of its active folders): fingerprints are queued
+/// again where they failed, and episodes already fingerprinted are re-detected at once.
+async fn analyze_library_markers(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(library_id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let actor = auth.authenticate(&headers).await?;
+    if actor.user.role != Role::Administrator {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    auth.require_csrf(&headers, &actor)?;
+    if library_id.len() > 128 {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    let episodes: Vec<(String, String, String, String)> = query_as(
+        "SELECT a.id, a.library_id, l.node_id, obs.fingerprint \
+         FROM inventory_episodes ep \
+         JOIN inventory_editions ed ON ed.work_id=ep.work_id \
+         JOIN inventory_versions v ON v.edition_id=ed.id \
+         JOIN inventory_sources s ON s.version_id=v.id \
+         JOIN inventory_assets a ON a.source_id=s.id \
+         JOIN libraries l ON l.id=a.library_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         JOIN automation_observations obs ON obs.asset_id=a.id \
+         WHERE (a.library_id=? OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+         AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
+         AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+         ORDER BY a.id LIMIT 20000",
+    )
+    .bind(&library_id)
+    .bind(&library_id)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let count = episodes.len();
+    let queued = queue_episodes_fingerprints(&auth, &episodes).await?;
+
+    Ok(Json(json!({
+        "status": "queued",
+        "libraryId": library_id,
         "episodesCount": count,
         "tasksQueued": queued,
     })))

@@ -67,6 +67,10 @@ pub struct LibraryOptions {
     pub artwork_languages: Vec<String>,
     pub artwork_include_neutral: bool,
     pub artwork_max_images: u8,
+    /// Multi-image mode: keep a pool of several images per kind (up to
+    /// `artwork_max_images`), filled automatically in the background. Off, every
+    /// identified work still receives one image of each enabled kind.
+    pub artwork_pool_enabled: bool,
     /// Administrators see this library in their catalogue (management is unaffected).
     pub admin_access: bool,
 }
@@ -119,6 +123,7 @@ impl Default for LibraryOptions {
             artwork_languages: vec!["fr".into(), "en".into()],
             artwork_include_neutral: true,
             artwork_max_images: 12,
+            artwork_pool_enabled: false,
             admin_access: true,
         }
     }
@@ -333,6 +338,7 @@ mod tests {
     fn artwork_policy_defaults_and_bounds_are_stable() {
         let defaults: LibraryOptions = serde_json::from_str("{}").unwrap();
         assert!(defaults.artwork_deduplicate);
+        assert!(!defaults.artwork_pool_enabled);
         assert_eq!(defaults.artwork_similarity, 5);
         assert_eq!(
             (

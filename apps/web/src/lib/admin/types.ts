@@ -43,6 +43,8 @@ export interface LibraryOptions {
   artworkLanguages?: string[];
   artworkIncludeNeutral?: boolean;
   artworkMaxImages?: number;
+  /** Multi-image mode: several images per kind, collected automatically. Off by default. */
+  artworkPoolEnabled?: boolean;
   /** Administrators see the library in their catalogue; management is unaffected. */
   adminAccess?: boolean;
 }
@@ -59,7 +61,7 @@ export function defaultLibraryOptions(): LibraryOptions {
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
     posterRotationEnabled: true, artworkDeduplicate: true, artworkSimilarity: 5,
     artworkMinPosterWidth: 0, artworkMinPosterHeight: 0,
-    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12, adminAccess: true };
+    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12, artworkPoolEnabled: false, adminAccess: true };
 }
 /** Apply the processing preset without changing language, provider scopes or media paths. */
 export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptions {

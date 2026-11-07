@@ -658,13 +658,19 @@ async fn list(
     authorize(&auth, &headers, false).await?;
     let limit = page.limit.unwrap_or(100).clamp(1, 200);
     let offset = page.offset.unwrap_or(0).clamp(0, 100_000);
+    // The history spans every task ever recorded, including rows written by older
+    // versions: every column is normalised in SQL so one odd row (a REAL progress, a
+    // NULL text) cannot make the whole page fail to decode.
     let jobs: Vec<Job> =
-        query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,'{}' AS result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks ORDER BY created_at DESC,id LIMIT ? OFFSET ?")
+        query_as("SELECT id,COALESCE(library_id,'') AS library_id,COALESCE(owner,'') AS owner,COALESCE(node_id,'') AS node_id,COALESCE(category,'') AS category,COALESCE(target_id,'') AS target_id,COALESCE(component,'') AS component,CAST(COALESCE(width,0) AS BIGINT) AS width,'{}' AS result_json,COALESCE(refresh_mode,'') AS refresh_mode,COALESCE(status,'') AS status,CAST(COALESCE(priority,0) AS BIGINT) AS priority,CAST(COALESCE(attempt,0) AS BIGINT) AS attempt,CAST(COALESCE(failure_count,0) AS BIGINT) AS failure_count,CAST(COALESCE(max_attempts,1) AS BIGINT) AS max_attempts,CAST(COALESCE(progress,0) AS BIGINT) AS progress,CAST(COALESCE(processed_items,0) AS BIGINT) AS processed_items,CAST(COALESCE(created_at,0) AS BIGINT) AS created_at,CAST(COALESCE(updated_at,0) AS BIGINT) AS updated_at,CAST(started_at AS BIGINT) AS started_at,CAST(finished_at AS BIGINT) AS finished_at,CAST(lease_until AS BIGINT) AS lease_until,COALESCE(error,'') AS error FROM durable_tasks ORDER BY created_at DESC,id LIMIT ? OFFSET ?")
             .bind(limit)
             .bind(offset)
             .fetch_all(auth.store.pool())
             .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            .map_err(|error| {
+                eprintln!("Task history could not be listed: {error}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
     Ok(Json(
         serde_json::json!({"jobs":jobs,"limit":limit,"offset":offset}),
     ))

@@ -13,7 +13,7 @@ export const common: Readonly<Record<keyof typeof source, string>> = {
   mobile_navigation: 'Mobile main navigation',
   quick_search: 'Quick search',
   search_action: 'Search',
-  watch_party_sessions: 'Watch Party sessions',
+  watch_party_sessions: 'Watch together',
   admin_dashboard: 'Admin Dashboard',
   profile_settings: 'My Profile & Preferences',
   logout: 'Sign out',

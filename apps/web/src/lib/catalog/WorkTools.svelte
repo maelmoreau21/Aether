@@ -13,6 +13,7 @@
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
   import { t, fmt } from '../i18n';
+  import { startWatchParty } from '../syncplay/launch';
   import {
     audioSummary,
     codecLabel,
@@ -224,7 +225,7 @@
     onClose={() => (watchPartyOpen = false)}
     onJoinParty={(partyId) => {
       watchPartyOpen = false;
-      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, workId: work.id } }));
+      startWatchParty({ partyId, workId: work.id });
     }}
   />
 {/if}

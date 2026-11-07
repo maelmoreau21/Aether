@@ -17,6 +17,130 @@ pub(super) struct Input {
     max_images: usize,
     #[serde(default = "default_work_limit")]
     max_works: i64,
+    /// Automatic job started by the server itself: `single` (one image of each enabled
+    /// kind) or `pool` (multi-image mode). Manual jobs leave it empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    auto: Option<String>,
+}
+/// A work handled by an automatic pass is asked again after this delay at most, so
+/// images published later by the providers are still picked up.
+const AUTO_RETRY_AFTER: i64 = 30 * 86_400;
+/// Images already present for a work: provider pool, files beside the media, legacy poster.
+async fn present_kinds(
+    auth: &AuthState,
+    work: &str,
+) -> Result<std::collections::HashSet<String>, Error> {
+    let kinds: Vec<String> = query_scalar("SELECT kind FROM work_image_entries WHERE work_id=? UNION SELECT i.role FROM inventory_images i LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id WHERE i.work_id=? AND i.available=1 AND h.image_id IS NULL UNION SELECT 'poster' FROM work_posters WHERE work_id=?")
+        .bind(work).bind(work).bind(work).fetch_all(auth.store.pool()).await.map_err(db)?;
+    Ok(kinds.into_iter().collect())
+}
+const IMAGE_KINDS: [&str; 6] = ["poster", "backdrop", "logo", "thumb", "banner", "disc"];
+/// Next identified film or series of an automatic job that still needs the providers.
+/// Works with nothing missing are marked done here without any network call.
+async fn next_auto_work(
+    auth: &AuthState,
+    job: &Job,
+    mode: &str,
+) -> Result<(Option<String>, String), Error> {
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&job.library_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
+        .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    let mut cursor = job.cursor_work.clone();
+    for _ in 0..50 {
+        let next: Option<String> = query_scalar("SELECT w.id FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) ORDER BY w.id LIMIT 1")
+            .bind(&job.library_id).bind(&job.library_id).bind(&cursor).bind(mode).bind(now() - AUTO_RETRY_AFTER)
+            .fetch_optional(auth.store.pool()).await.map_err(db)?;
+        let Some(work) = next else {
+            return Ok((None, cursor));
+        };
+        if mode == "single" {
+            let present = present_kinds(auth, &work).await?;
+            if IMAGE_KINDS
+                .iter()
+                .all(|kind| !options.image_enabled(kind) || present.contains(*kind))
+            {
+                mark_auto_attempt(auth, &work, mode).await?;
+                cursor = work;
+                continue;
+            }
+        }
+        return Ok((Some(work), cursor));
+    }
+    Ok((None, cursor))
+}
+async fn mark_auto_attempt(auth: &AuthState, work: &str, mode: &str) -> Result<(), Error> {
+    query("INSERT INTO artwork_auto_attempts(work_id,mode,attempted_at) VALUES(?,?,?) ON CONFLICT(work_id,mode) DO UPDATE SET attempted_at=excluded.attempted_at")
+        .bind(work).bind(mode).bind(now()).execute(auth.store.pool()).await.map_err(db)?;
+    Ok(())
+}
+static LAST_AUTO_CHECK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+/// Asks the next worker tick to look for works to fill (new identification, saved settings).
+pub(crate) fn request_automatic_check() {
+    LAST_AUTO_CHECK.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+/// Queues an automatic image pass for every film or series library that has identified
+/// works not handled yet in the library's current mode. Runs at most every ten minutes
+/// unless `force` (library settings just saved).
+pub(crate) async fn ensure_automatic(auth: &AuthState, force: bool) -> Result<(), Error> {
+    let checked = LAST_AUTO_CHECK.load(std::sync::atomic::Ordering::Relaxed);
+    if !force && now() - checked < 600 {
+        return Ok(());
+    }
+    LAST_AUTO_CHECK.store(now(), std::sync::atomic::Ordering::Relaxed);
+    let owner: Option<String> = query_scalar("SELECT id FROM users WHERE role='administrator' AND disabled_at IS NULL ORDER BY id LIMIT 1")
+        .fetch_optional(auth.store.pool()).await.map_err(db)?;
+    let Some(owner) = owner else {
+        return Ok(());
+    };
+    let libraries: Vec<(String, String)> = query_as("SELECT l.id,l.options_json FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND l.kind IN ('films','series') AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id AND f.active=1) AND NOT EXISTS(SELECT 1 FROM artwork_collection_jobs j WHERE j.library_id=l.id AND j.status IN ('queued','running','paused'))")
+        .fetch_all(auth.store.pool()).await.map_err(db)?;
+    for (library, options) in libraries {
+        let Ok(options) = serde_json::from_str::<crate::library_options::LibraryOptions>(&options)
+        else {
+            continue;
+        };
+        if !IMAGE_KINDS.iter().any(|kind| options.image_enabled(kind)) {
+            continue;
+        }
+        let mode = if options.artwork_pool_enabled {
+            "pool"
+        } else {
+            "single"
+        };
+        let pending: i64 = query_scalar("SELECT COUNT(*) FROM (SELECT 1 FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) LIMIT 1) pending")
+            .bind(&library).bind(&library).bind(mode).bind(now() - AUTO_RETRY_AFTER)
+            .fetch_one(auth.store.pool()).await.map_err(db)?;
+        if pending == 0 {
+            continue;
+        }
+        let languages = if options.artwork_languages.is_empty() {
+            vec!["fr".into(), "en".into()]
+        } else {
+            options.artwork_languages.clone()
+        };
+        let parameters = Input {
+            library_id: library.clone(),
+            after: None,
+            languages,
+            include_neutral: options.artwork_include_neutral,
+            max_images: usize::from(options.artwork_max_images).clamp(1, 12),
+            max_works: 100_000,
+            auto: Some(mode.into()),
+        };
+        let parameters = serde_json::to_string(&parameters)
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_parameters"))?;
+        // The partial unique index keeps a single active job per library even if two
+        // passes race; the loser's insert is simply ignored.
+        let _ = query("INSERT INTO artwork_collection_jobs(id,library_id,owner,parameters,cursor_work,created_at,updated_at) VALUES(?,?,?,?,'',?,?)")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(&library).bind(&owner).bind(parameters).bind(now()).bind(now())
+            .execute(auth.store.pool()).await;
+    }
+    query("DELETE FROM artwork_collection_jobs WHERE status IN ('completed','cancelled') AND id NOT IN (SELECT id FROM artwork_collection_jobs ORDER BY created_at DESC,id DESC LIMIT 1000)").execute(auth.store.pool()).await.map_err(db)?;
+    Ok(())
 }
 fn default_work_limit() -> i64 {
     1000
@@ -157,6 +281,7 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
     let Ok(_worker) = WORKER.try_lock() else {
         return Ok(());
     };
+    ensure_automatic(auth, false).await?;
     let token = uuid::Uuid::new_v4().to_string();
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write_serialized(&mut conn, 0x4152544a4f42)
@@ -178,10 +303,16 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
         .map_err(db)?;
     let parameters: Input = serde_json::from_str(&job.parameters)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_collection_parameters"))?;
-    let work: Option<String> = query_scalar("SELECT id FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT 1")
-        .bind(&job.library_id).bind(&job.library_id).bind(&job.cursor_work).fetch_optional(auth.store.pool()).await.map_err(db)?;
+    let auto = parameters.auto.clone();
+    let (work, cursor) = if let Some(mode) = auto.as_deref() {
+        next_auto_work(auth, &job, mode).await?
+    } else {
+        let work: Option<String> = query_scalar("SELECT id FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT 1")
+            .bind(&job.library_id).bind(&job.library_id).bind(&job.cursor_work).fetch_optional(auth.store.pool()).await.map_err(db)?;
+        (work, job.cursor_work.clone())
+    };
     let Some(work) = work.filter(|_| job.processed < parameters.max_works) else {
-        query("UPDATE artwork_collection_jobs SET status='completed',lease_until=0,updated_at=? WHERE id=? AND lease_token=? AND status='running'").bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
+        query("UPDATE artwork_collection_jobs SET status='completed',cursor_work=?,lease_until=0,updated_at=? WHERE id=? AND lease_token=? AND status='running'").bind(&cursor).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
         return Ok(());
     };
     let result = image_collection::collect_with_context(
@@ -192,6 +323,7 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
             languages: Some(parameters.languages),
             include_neutral: Some(parameters.include_neutral),
             max_images: Some(parameters.max_images),
+            one_per_kind: auto.as_deref() == Some("single"),
         },
         Some(super::run::Background::Artwork(&job)),
     )
@@ -207,15 +339,26 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
             status == StatusCode::FORBIDDEN,
         ),
     };
+    // An automatic pass skips a work the providers cannot identify yet: it is taken
+    // again by a later pass once its identifiers are known.
+    let unidentified = error_code == "external_ids_required";
     let retry = !denied
+        && !unidentified
         && job.work_attempts < 2
         && (value["partial"] == true
             || !error_code.is_empty()
             || value["errors"].as_array().is_some_and(|v| !v.is_empty()));
     query("UPDATE artwork_collection_jobs SET status=?,cursor_work=?,processed=processed+?,downloaded=downloaded+?,duplicates=duplicates+?,skipped=skipped+?,errors=errors+?,work_attempts=?,last_error=?,lease_until=0,next_run_at=?,updated_at=? WHERE id=? AND lease_token=? AND status='running'")
-        .bind(if denied {"paused"} else {"queued"}).bind(if retry||denied {&job.cursor_work} else {&work}).bind(i64::from(!retry&&!denied))
+        .bind(if denied {"paused"} else {"queued"}).bind(if retry||denied {&cursor} else {&work}).bind(i64::from(!retry&&!denied))
         .bind(value["downloaded"].as_i64().unwrap_or(0)).bind(value["duplicates"].as_i64().unwrap_or(0)).bind(value["skipped"].as_i64().unwrap_or(0))
         .bind(i64::from(!error_code.is_empty())+value["errors"].as_array().map_or(0,|v|v.len() as i64)).bind(if retry {job.work_attempts+1} else {0}).bind(error_code)
         .bind(now()+15).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
+    if let Some(mode) = auto.as_deref()
+        && !retry
+        && !denied
+        && !unidentified
+    {
+        mark_auto_attempt(auth, &work, mode).await?;
+    }
     Ok(())
 }

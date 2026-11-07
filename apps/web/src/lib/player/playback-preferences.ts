@@ -39,12 +39,28 @@ export function trackPreferences(value: Preferences) {
   const language = audioLanguage(audioTrack?.language ?? defaults.audio);
   const subtitleDefault: SubtitlePreference | undefined = value.subtitles === 'off' ? { enabled: false }
     : value.subtitles === 'always' ? { enabled: true, language: defaults.subtitle, forced: false } : undefined;
+  // Original-language audio (VO) has its own default and its own remembered choice: turning
+  // subtitles on for one film in VO turns them on for every film in VO, never in the
+  // person's own language. Accounts that never chose in VO keep their single old choice.
+  const foreignDefault: SubtitlePreference | undefined = value.subtitles === 'foreign'
+    ? { enabled: true, language: defaults.subtitle, forced: false } : subtitleDefault;
+  const rememberedForeign = rememberSubtitleSelections
+    ? value.subtitlePreferenceForeign ?? (value.subtitles === 'foreign' ? undefined : value.subtitlePreference)
+    : undefined;
   return {
     rememberAudioSelections, rememberSubtitleSelections,
     playDefaultAudioTrack: value.playDefaultAudioTrack === true,
     audioTrack,
     audioLanguage: language && language !== 'und' ? language : defaults.audio,
     subtitleLanguage: defaults.subtitle,
-    subtitlePreference: rememberSubtitleSelections ? value.subtitlePreference ?? subtitleDefault : subtitleDefault
+    subtitlePreference: rememberSubtitleSelections ? value.subtitlePreference ?? subtitleDefault : subtitleDefault,
+    foreignSubtitlePreference: rememberedForeign ?? foreignDefault
   };
+}
+
+/** The audio is in another language than the one the person reads subtitles in: original version. */
+export function isForeignAudio(audio: string | undefined, readingLanguage: string): boolean {
+  const spoken = audioLanguage(audio ?? '');
+  const read = audioLanguage(readingLanguage);
+  return Boolean(spoken && spoken !== 'und' && read && read !== 'und' && spoken !== read);
 }

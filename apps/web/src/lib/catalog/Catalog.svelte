@@ -33,6 +33,8 @@
   } from './api';
   import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
+  import { START_WATCH_PARTY, partyFromLocation, type StartWatchPartyDetail } from '../syncplay/launch';
+  import { joinParty as joinPartyRequest } from '../syncplay/party-api';
   import { t } from '../i18n';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
@@ -241,6 +243,24 @@
       : resolve(`films/?work=${encodeURIComponent(work.id)}`);
   }
 
+  async function joinFromLink(partyId: string, mediaId?: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('party'); url.searchParams.delete('media');
+    history.replaceState(history.state, '', url);
+    try {
+      await joinPartyRequest(partyId, $session?.csrfToken ?? '');
+      let target = mediaId;
+      if (!target) {
+        const response = await fetch(`/api/v1/parties/${encodeURIComponent(partyId)}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) throw new Error($t('party_join_failed'));
+        target = ((await response.json()) as { party?: { mediaId?: string } }).party?.mediaId;
+      }
+      await launchWatchParty(partyId, target);
+    } catch (cause) {
+      mediaError = cause instanceof Error ? cause.message : $t('party_join_failed');
+    }
+  }
+
   async function launchWatchParty(partyId: string, targetMediaId?: string) {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
     const targetId = targetMediaId || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
@@ -370,16 +390,21 @@
     };
     window.addEventListener('media-artwork-updated',artworkChanged);
     const onStartParty = (e: Event) => {
-      const d = (e as CustomEvent<{ partyId: string; mediaId?: string; workId?: string }>).detail;
+      // Taken here: the launcher does not fall back to the home page.
+      e.preventDefault();
+      const d = (e as CustomEvent<StartWatchPartyDetail>).detail;
       void launchWatchParty(d.partyId, d.mediaId || d.workId);
     };
-    window.addEventListener('start-watch-party', onStartParty);
-    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener('start-watch-party', onStartParty);};
+    window.addEventListener(START_WATCH_PARTY, onStartParty);
+    // Invitation link or a session started from a page without the player: `?party=`.
+    const requested = partyFromLocation(window.location.search);
+    if (requested) void joinFromLink(requested.partyId, requested.mediaId);
+    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener(START_WATCH_PARTY, onStartParty);};
   });
 
   function savePreference(key: string, value: string) {
     if (key === 'media_pref_audio') savePreferences({ audioLanguage: value });
-    if (key === 'media_pref_subtitles' && (value === 'forced' || value === 'always' || value === 'off')) savePreferences({ subtitles: value });
+    if (key === 'media_pref_subtitles' && (value === 'forced' || value === 'foreign' || value === 'always' || value === 'off')) savePreferences({ subtitles: value });
     try {
       localStorage.setItem(key, value);
     } catch {

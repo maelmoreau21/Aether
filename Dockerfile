@@ -131,7 +131,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # FFmpeg/ffprobe 9.0.2: same verified source as CI, packet-copy runtime profile.
 FROM debian:bookworm-slim AS probe-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates curl pkg-config nasm xz-utils libdav1d-dev \
+        build-essential ca-certificates cmake curl pkg-config nasm xz-utils libdav1d-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
 RUN bash /tmp/build-ffmpeg.sh /probe runtime

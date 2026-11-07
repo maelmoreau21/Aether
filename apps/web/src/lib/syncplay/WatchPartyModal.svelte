@@ -440,6 +440,7 @@
             <span>{$t('pause_automatically_if_a_participant_is')}</span>
           </label>
 
+          <p class="expiry-note">{$t('party_expiry_note')}</p>
           <div class="modal-actions">
             <button type="button" class="btn-secondary" onclick={onClose}>{$t('sched_cancel')}</button>
             <button
@@ -533,6 +534,7 @@
 </div>
 
 <style>
+  .expiry-note { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--mu, #9aa3b2); }
   /* Halo — dialogue d'application (suit le thème clair/sombre) */
   .modal-backdrop {
     position: fixed;

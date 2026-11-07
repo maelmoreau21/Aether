@@ -75,7 +75,7 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   no_outline_shadow: 'No outline / shadow',
   no_matching_setting: 'No matching setting.',
   administrative_content: 'Skip to administrative content',
-  administration: 'Administration',
+  administration: 'Dashboard',
   back_to_library: 'Back to media library',
   create_user: 'Create user',
   close: 'Close',

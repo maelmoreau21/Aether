@@ -297,6 +297,7 @@
             onchange={() => onSavePreference('media_pref_subtitles', prefSubtitles)}
           >
             <option value="forced">{$t('settings_sub_forced')}</option>
+            <option value="foreign">{$t('settings_sub_foreign')}</option>
             <option value="always">{$t('settings_sub_all')}</option>
             <option value="off">{$t('settings_sub_none')}</option>
           </select>

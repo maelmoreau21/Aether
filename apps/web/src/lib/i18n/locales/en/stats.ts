@@ -220,7 +220,7 @@ export const stats: Readonly<Record<keyof typeof source, string>> = {
   details_expired: 'Detailed events expired or were purged. The summary is kept.',
   more_events: 'Load more events',
   origin_manual: 'Manual',
-  origin_sync: 'Watch Party',
+  origin_sync: 'Watch together',
   origin_auto: 'Automatic',
   from_position: 'from {position}',
   hour_label: '{hour}:00',

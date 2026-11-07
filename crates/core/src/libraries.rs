@@ -588,7 +588,10 @@ async fn update(
     Json(input): Json<LibraryInput>,
 ) -> Result<Json<Library>, StatusCode> {
     administrator(&state, &headers, true).await?;
-    Ok(Json(save(&state, id, input, true).await?))
+    let saved = save(&state, id, input, true).await?;
+    // Image settings may have changed (kinds, multi-image mode): fill on the next pass.
+    crate::extensions::request_artwork_check();
+    Ok(Json(saved))
 }
 /// Removes a library from Aether without touching the media files: the library
 /// and its folders are disabled, every grant is revoked and it is hidden.

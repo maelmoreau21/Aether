@@ -13,7 +13,7 @@
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
-  import { languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
+  import { isForeignAudio, languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   import { failoverHelps, failureKindOf, type PlaybackFailureKind } from './diagnostics';
@@ -22,6 +22,7 @@
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
   import { applyPartyPlayback } from '../syncplay/player-sync';
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
+  import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { t } from '../i18n';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
@@ -92,9 +93,16 @@
   let subtitleOffset = $state(0);
   let subtitle = $state<string | null>(null);
   let subtitlePreference: SubtitlePreference | undefined;
+  /** Subtitles for an original-version audio (another language than the subtitle language). */
+  let foreignSubtitlePreference: SubtitlePreference | undefined;
+  let manualForeignSubtitle: SubtitlePreference | undefined;
+  /** Whether the audio being played is an original version, for remembering subtitle choices. */
+  let foreignAudio = false;
   let subtitleStyle = $state<SubtitleStyle | undefined>();
   const activeSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
   let menu = $state<Menu>(null);
+  /** "Watch together" started from the player on the item being watched. */
+  let partyModal = $state(false);
   let fullscreen = $state(false);
   let visible = $state(true);
   let keyboardPinned = $state(false);
@@ -315,7 +323,8 @@
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
-      const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference, subtitleLanguage);
+      foreignAudio = isForeignAudio(source.language, subtitleLanguage);
+      const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -358,7 +367,7 @@
   }
   function readPlaybackPreferences() {
     const languages = languageDefaults(preferences());
-    preferredLanguage = languages.audio; subtitleLanguage = languages.subtitle; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
+    preferredLanguage = languages.audio; subtitleLanguage = languages.subtitle; subtitlePreference = undefined; foreignSubtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
       const defaults = playbackPreferences(account);
@@ -375,6 +384,7 @@
       preferredLanguage = language && language !== 'und' ? language : languages.audio;
       playDefaultAudio = policy.playDefaultAudioTrack && !manualAudio;
       subtitlePreference = manualSubtitle ?? policy.subtitlePreference;
+      foreignSubtitlePreference = manualForeignSubtitle ?? policy.foreignSubtitlePreference;
       subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
@@ -420,7 +430,7 @@
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
     generation++; const current = generation;
-    manualAudio = undefined; manualSubtitle = undefined;
+    manualAudio = undefined; manualSubtitle = undefined; manualForeignSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -469,7 +479,7 @@
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
     collector?.stop(); collector = undefined; collectorWork = '';
-    manualAudio = undefined; manualSubtitle = undefined;
+    manualAudio = undefined; manualSubtitle = undefined; manualForeignSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
@@ -480,6 +490,20 @@
     void prepare(media);
   }
   export function reportError(message: string) { fail(message); }
+  /** The host keeps the scene: once the new session is connected, it starts where playback was. */
+  function startPartyFromPlayer(partyId: string) {
+    partyModal = false;
+    const current = active;
+    if (!current) return;
+    const position = playback.position;
+    joinParty(partyId, current);
+    const client = syncClient;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (syncClient !== client || !client || Date.now() - started > 15000) { clearInterval(timer); return; }
+      if (client.connected) { clearInterval(timer); if (position > 1) client.seek(position); }
+    }, 250);
+  }
   export function joinParty(partyId: string, media: Media | Promise<Media>) {
     if (syncClient) {
       syncClient.leave();
@@ -573,6 +597,7 @@
       if (info?.audio) collector?.track('audio', info.audio, 'manual');
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
+      foreignAudio = isForeignAudio(language, subtitleLanguage);
       manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
       preferredAudio = manualAudio;
       if (preferences().rememberAudioSelections !== false) savePreferences({ audioTrack: manualAudio });
@@ -593,9 +618,15 @@
     subtitle = id;
     trackSubtitle(id, 'manual');
     const track = active?.subtitles.find(track => track.id === id);
-    subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
-    manualSubtitle = subtitlePreference;
-    if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreference });
+    const chosen: SubtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
+    // A choice made in VO applies to every VO; one made in the person's language, to the others.
+    if (foreignAudio) {
+      foreignSubtitlePreference = chosen; manualForeignSubtitle = chosen;
+      if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreferenceForeign: chosen });
+    } else {
+      subtitlePreference = chosen; manualSubtitle = chosen;
+      if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreference: chosen });
+    }
   }); }
   function offset(kind: 'audio' | 'subtitle', value: number) {
     if (!Number.isFinite(value) || Math.abs(value) > 30) return;
@@ -701,6 +732,7 @@
       <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
       {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
+      {#if active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
       {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>{$t('fix_markers')}</button>{/if}
     </div>
     {#if markerEditor && active?.episode}
@@ -746,6 +778,9 @@
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if syncClient}
       <WatchPartyOverlay client={syncClient} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
+    {/if}
+    {#if partyModal && active}
+      <WatchPartyModal mediaId={active.workId ?? active.id} mediaTitle={active.title} onClose={() => partyModal = false} onJoinParty={partyId => startPartyFromPlayer(partyId)} />
     {/if}
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       {skipBackSeconds} {skipForwardSeconds}
@@ -958,6 +993,10 @@
   .return:hover { background: rgb(255 255 255 / 0.14); border-color: transparent; transform: none; box-shadow: none; }
   .title > span { font-weight: 800; }
   .next-episode label { font-size: 13px; font-weight: 700; }
+  .watch-together { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 16px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .watch-together:hover { background: rgb(255 255 255 / 0.22); }
+  .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  @media (max-width: 640px) { .watch-together span { display: none; } .watch-together { padding: 0 10px; } }
   .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
   .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
   .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }

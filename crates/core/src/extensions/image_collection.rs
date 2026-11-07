@@ -107,6 +107,10 @@ pub(super) struct Collect {
     pub(super) include_neutral: Option<bool>,
     #[serde(default)]
     pub(super) max_images: Option<usize>,
+    /// Single-image mode: at most one image of each enabled kind, and only the kinds
+    /// the work does not have yet (local file, provider image or legacy poster).
+    #[serde(default)]
+    pub(super) one_per_kind: bool,
 }
 fn default_languages() -> Vec<String> {
     vec!["fr".into(), "en".into()]
@@ -276,6 +280,7 @@ pub(super) async fn collect_batch(
             languages: Some(input.languages.clone()),
             include_neutral: Some(input.include_neutral),
             max_images: Some(input.max_images),
+            one_per_kind: false,
         };
         let item = match collect(State(auth.clone()), headers.clone(), Json(request)).await {
             Ok(Json(result)) => json!({"workId":work_id,"title":title,"result":result}),
@@ -511,10 +516,16 @@ pub(super) async fn collect_with_context(
     let include_neutral = input
         .include_neutral
         .unwrap_or(options.artwork_include_neutral);
-    let max_images = input
-        .max_images
-        .unwrap_or(usize::from(options.artwork_max_images))
-        .clamp(1, 12);
+    let one_per_kind = input.one_per_kind;
+    let max_images = if one_per_kind {
+        // One image of each of the six kinds at most.
+        6
+    } else {
+        input
+            .max_images
+            .unwrap_or(usize::from(options.artwork_max_images))
+            .clamp(1, 12)
+    };
     let mut ordered = languages(&json!({
         "languages": input.languages.clone().unwrap_or_else(|| options.artwork_languages.clone())
     }))?;
@@ -676,8 +687,26 @@ pub(super) async fn collect_with_context(
     .map_err(db)?
     .into_iter()
     .collect();
+    let legacy_poster: i64 = query_scalar("SELECT COUNT(*) FROM work_posters WHERE work_id=?")
+        .bind(&input.work_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
     for (provider, image) in queue {
         let image_kind = kind(image.image_type);
+        // Kinds switched off in the library settings (Images) are never fetched.
+        if !options.image_enabled(image_kind) {
+            skipped += 1;
+            continue;
+        }
+        if one_per_kind
+            && (local_kinds.contains(image_kind)
+                || counts.get(image_kind).copied().unwrap_or(0) > 0
+                || (image_kind == "poster" && legacy_poster > 0))
+        {
+            skipped += 1;
+            continue;
+        }
         if image_kind != "backdrop" && local_kinds.contains(image_kind) {
             skipped += 1;
             continue;

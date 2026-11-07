@@ -1104,6 +1104,9 @@ pub async fn apply_missing_metadata(
             None
         };
 
+        // The background image filler completes the other kinds (logo, banner…) or the
+        // multi-image pool of this newly identified work on its next pass.
+        crate::extensions::request_artwork_check();
         if (poster_url.is_some() || backdrop_url.is_some())
             && let Some(store) = crate::identity::active_store()
         {
@@ -1369,7 +1372,9 @@ pub(crate) async fn complete_with_marker_sources(
                     .is_none_or(|options| options.intro_detection_enabled);
             if let Some(source) = source.filter(|_| intro_enabled) {
                 let key = format!("fp:{}", hash(&(&job.target_id, &source, "chromaprint-v1"))?);
-                query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'fingerprint',20,?,?,?) ON CONFLICT(owner,idempotency_key) DO NOTHING")
+                // A fingerprint that failed earlier (e.g. a Node without the chromaprint
+                // muxer) is queued again instead of blocking detection for good.
+                query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'fingerprint',20,?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',failure_count=0,error='',finished_at=NULL,available_at=excluded.available_at,updated_at=excluded.updated_at WHERE durable_tasks.status IN ('error','cancelled') AND durable_tasks.lease_until IS NULL")
                     .bind(uuid::Uuid::new_v4().to_string()).bind(&job.library_id).bind(&job.owner).bind(key).bind(&job.node_id).bind(&job.target_id).bind(now).bind(now).bind(now).execute(&mut *tx).await?;
             }
         }

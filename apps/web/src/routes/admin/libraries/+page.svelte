@@ -34,7 +34,6 @@
   import AdminGroups from '../../../lib/admin/AdminGroups.svelte';
   import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
   import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
-  import AdminArtwork from '../../../lib/admin/AdminArtwork.svelte';
   import type { UserGroup } from '../../../lib/admin/request';
   import { t } from '../../../lib/i18n';
 
@@ -507,9 +506,6 @@
               <AvatarCollections />
             </div>
           {/if}
-          <div hidden={currentHash !== '#artwork-section'}>
-            <AdminArtwork {libraries} />
-          </div>
           <AdminCapabilities section={currentHash.slice(1)} />
           {#if currentHash === '#requests-section'}<div class="extension-application"><Requests embedded /></div>{/if}
           {#if currentHash === '#reports-section'}<div class="extension-application"><Reports embedded /></div>{/if}

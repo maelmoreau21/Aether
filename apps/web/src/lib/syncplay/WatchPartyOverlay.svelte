@@ -5,6 +5,7 @@
   import type { ControlMode } from './types';
   import { initials, partyInviteUrl } from './party-api';
   import { t, fmt } from '../i18n';
+  import { resolve } from '$app/paths';
 
   let {
     client,
@@ -74,7 +75,7 @@
 
   function copyInviteLink() {
     if (typeof window === 'undefined' || !client.party) return;
-    const url = partyInviteUrl(window.location.origin, client.party.id);
+    const url = partyInviteUrl(`${window.location.origin}${resolve('/')}`, client.party.id);
     if (navigator?.clipboard) {
       void navigator.clipboard.writeText(url);
     }

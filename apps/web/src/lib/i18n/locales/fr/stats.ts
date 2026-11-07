@@ -218,7 +218,7 @@ export const stats = {
   details_expired: 'Les événements détaillés ont expiré ou ont été purgés. Le bilan est conservé.',
   more_events: 'Charger les événements suivants',
   origin_manual: 'Manuel',
-  origin_sync: 'Watch Party',
+  origin_sync: 'Regarder ensemble',
   origin_auto: 'Automatique',
   from_position: 'depuis {position}',
   hour_label: '{hour} h',

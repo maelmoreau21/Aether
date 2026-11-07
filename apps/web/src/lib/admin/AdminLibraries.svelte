@@ -76,6 +76,17 @@
   }
   function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? $t('local_node') : id); }
   let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
+  // Intro/credits analysis of a whole series library (fingerprints queued again where they failed).
+  let markersBusy = $state(false), markersNotice = $state(''), markersError = $state('');
+  async function analyzeLibraryMarkers(library: Library) {
+    if (markersBusy) return;
+    markersBusy = true; markersNotice = ''; markersError = '';
+    try {
+      const result = await adminRequest<{ episodesCount: number; tasksQueued: number }>(`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/analyze-markers`, { method: 'POST' });
+      markersNotice = $t('intro_analysis_queued', { episodes: result.episodesCount, queued: result.tasksQueued });
+    } catch (cause) { markersError = cause instanceof Error ? cause.message : $t('operation_not_possible_try_again'); }
+    finally { markersBusy = false; }
+  }
   async function deleteLibrary() {
     if (!editedLibrary || deleting) return;
     deleting = true; deleteError = '';
@@ -200,8 +211,12 @@
                 <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; editor?.close(); refreshLibrary(library); }}><Icon name="refresh" size={16} /> {$t('refresh_the_library')}</button>
                 <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; target = library; mode = 'missing_metadata'; editor?.close(); refresher?.showModal(); }}>{$t('look_for_missing_metadata')}</button>
                 <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}>{$t('edit_artwork')}</button>
+                {#if editedLibrary.kind === 'series'}<button type="button" disabled={busyLibrary || markersBusy} onclick={() => { if (editedLibrary) void analyzeLibraryMarkers(editedLibrary); }}>{markersBusy ? $t('analysing') : $t('analyse_library_intros')}</button>{/if}
                 <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(editedLibrary.id)}`)} onclick={() => editor?.close()}>{$t('schedule_refresh')}</a>
               </div>
+              {#if editedLibrary.kind === 'series'}<p class="field-hint">{$t('intro_analysis_hint')}</p>{/if}
+              {#if markersNotice}<p role="status" class="field-hint">{markersNotice}</p>{/if}
+              {#if markersError}<p role="alert" class="editor-error">{markersError}</p>{/if}
             </div>
             <div class="danger-zone">
               <h4>{$t('delete_the_library')}</h4>

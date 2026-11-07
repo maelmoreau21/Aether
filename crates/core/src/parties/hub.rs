@@ -177,12 +177,45 @@ pub struct WatchPartyHub {
     rooms: Arc<RwLock<HashMap<String, Arc<RwLock<PartyRoom>>>>>,
 }
 
+/// Rooms of the server's hub, read by the expiry pass to spare parties someone is watching.
+static LIVE_ROOMS: std::sync::OnceLock<Arc<RwLock<HashMap<String, Arc<RwLock<PartyRoom>>>>>> =
+    std::sync::OnceLock::new();
+
+/// Drops ended parties from memory so they cannot be joined again.
+pub async fn forget_rooms(ids: &[String]) {
+    if let Some(rooms) = LIVE_ROOMS.get() {
+        let mut rooms = rooms.write().await;
+        for id in ids {
+            rooms.remove(id);
+        }
+    }
+}
+
+/// Parties with at least one connected member right now.
+pub async fn live_party_ids() -> HashSet<String> {
+    let Some(rooms) = LIVE_ROOMS.get() else {
+        return HashSet::new();
+    };
+    let rooms: Vec<(String, Arc<RwLock<PartyRoom>>)> = rooms
+        .read()
+        .await
+        .iter()
+        .map(|(id, room)| (id.clone(), room.clone()))
+        .collect();
+    let mut live = HashSet::new();
+    for (id, room) in rooms {
+        if !room.read().await.online_user_ids.is_empty() {
+            live.insert(id);
+        }
+    }
+    live
+}
+
 impl WatchPartyHub {
     pub fn new(store: IdentityStore) -> Self {
-        Self {
-            store,
-            rooms: Arc::new(RwLock::new(HashMap::new())),
-        }
+        let rooms = Arc::new(RwLock::new(HashMap::new()));
+        let _ = LIVE_ROOMS.set(rooms.clone());
+        Self { store, rooms }
     }
 
     /// Retrieve or load an active room from DB into memory.

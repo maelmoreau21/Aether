@@ -202,6 +202,8 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
 }
 
 /// Checksummed text of the one-shot translation backfill; bump it only with the step's meaning.
+const COMPAT_FINGERPRINT_REQUEUE: &str =
+    "failed audio fingerprints queued again once the Node ships the chromaprint muxer";
 const COMPAT_SEARCH_TITLES_BACKFILL: &str =
     "search_titles_backfill v1: translated and original titles -> work_search_titles";
 const COMPAT_TRANSLATIONS_BACKFILL: &str = "translations_backfill v1: editorial_json/manual_json 'translations' -> work_translations (source legacy, ON CONFLICT DO NOTHING)";
@@ -256,6 +258,10 @@ const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
     (
         "artwork_webp",
         include_str!("../migrations/artwork_webp.sql"),
+    ),
+    (
+        "artwork_auto",
+        include_str!("../migrations/artwork_auto.sql"),
     ),
 ];
 /// Depend on the role-group seed that Rust performs between the two lists.
@@ -555,6 +561,20 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
             "compat:translations_backfill",
             "compat",
             COMPAT_TRANSLATIONS_BACKFILL,
+        )
+        .await?;
+    }
+    // Older Node images had no chromaprint muxer, so every audio fingerprint failed and
+    // intro detection never ran. Give those tasks one fresh start with the fixed runtime.
+    if !journal::recorded(&mut tx, "compat:fingerprint_requeue").await? {
+        query("UPDATE durable_tasks SET status='queued',failure_count=0,error='',finished_at=NULL,updated_at=available_at WHERE category='analyze' AND component='fingerprint' AND status='error' AND lease_until IS NULL")
+            .execute(&mut *tx)
+            .await?;
+        journal::record(
+            &mut tx,
+            "compat:fingerprint_requeue",
+            "compat",
+            COMPAT_FINGERPRINT_REQUEUE,
         )
         .await?;
     }

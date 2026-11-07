@@ -7,10 +7,6 @@ export interface AdminDestination { hash: string; label: string; labelKey: Label
 /** A sidebar entry. Entries with tabs group related sections behind one destination. */
 export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[]; extensionId?: 'media-requests' | 'media-reports' }
 
-const artworkTabs: AdminDestination[] = [
-  { hash: '#artwork-section', label: 'Images', labelKey: 'admin_artwork_tab', icon: 'image' },
-  { hash: '#avatars-section', label: 'Avatars', labelKey: 'admin_avatars_tab', icon: 'image' }
-];
 /** Scheduled tasks first; durable operations and automation stay one click away. */
 const taskTabs: AdminDestination[] = [
   { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock' },
@@ -30,7 +26,7 @@ export const adminNavigation: { label: string; labelKey: LabelKey; links: AdminE
   { label: 'Médiathèque', labelKey: 'admin_group_media', links: [
     { hash: '#libraries-section', label: 'Bibliothèques', labelKey: 'admin_nav_libraries', icon: 'film' },
     { hash: '#nodes-section', label: 'Media Nodes', labelKey: 'admin_nav_nodes', icon: 'server' },
-    { hash: '#artwork-section', label: 'Métadonnées et images', labelKey: 'admin_artwork', icon: 'image', tabs: artworkTabs }
+    { hash: '#avatars-section', label: 'Avatars', labelKey: 'admin_avatars_tab', icon: 'image' }
   ] },
   { label: 'Accès', labelKey: 'admin_group_access', links: [
     { hash: '#users-section', label: 'Utilisateurs', labelKey: 'admin_nav_users', icon: 'users' },
@@ -59,7 +55,8 @@ export function adminEntryFor(hash: string): AdminEntry | undefined {
 }
 export function parseAdminHash(hash: string): { section: string; task: string | null } {
   const [requested, query = ''] = hash.split('?', 2);
-  const candidate = requested === '#trickplay-section' ? '#libraries-section' : requested;
+  // Former sections: trickplay and the image collection now live in each library's settings.
+  const candidate = requested === '#trickplay-section' || requested === '#artwork-section' ? '#libraries-section' : requested;
   const section = adminSectionHashes.has(candidate) ? candidate : '#overview';
   return { section, task: section === '#tasks-section' ? new URLSearchParams(query).get('task') || null : null };
 }
@@ -74,9 +71,8 @@ export function adminDestinationLabel(link: AdminDestination, translate: (key: L
 export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#statistics-section': ['Statistiques', 'Collecte', 'Conservation', 'Historique de lecture', 'Audio et sous-titres', 'Temps consommé', 'Exporter en CSV', 'Sessions', 'Musique'],
   '#overview': ['Tableau de bord', 'Qui regarde quoi ?', 'Lecteurs ouverts', 'Indexations en cours', 'Actualiser l’activité', 'Informations techniques', 'Version serveur', 'Versions des nœuds', 'Erreurs des derniers scans'],
-  '#libraries-section': ['Langue des métadonnées', 'Langue préférée', 'Pays des classifications', 'Ajouter une bibliothèque', 'Actualiser toutes les bibliothèques', 'Scanner la bibliothèque', 'Renommer une bibliothèque', 'Modifier les images', 'Rechercher les métadonnées manquantes', 'Planifier l’actualisation', 'Sources et dossiers', 'Bibliothèque active', 'Dossiers ou motifs à exclure', 'Indexation', 'Actualisation rapide', 'Tout réanalyser', 'Images locales', 'Images des fournisseurs', 'Utiliser les fichiers NFO locaux', 'Sous-titres intégrés', 'Fournisseurs et enrichissement', 'Détection d’intro', 'Images des chapitres', 'Téléchargement des sous-titres', 'Surveiller les modifications', 'Ajouter automatiquement aux collections', 'Trickplay', 'Miniatures de la barre de lecture', 'Génération automatique pendant l’analyse', 'Qualité JPEG', 'Largeur des vignettes', 'Intervalle des miniatures'],
+  '#libraries-section': ['Langue des métadonnées', 'Langue préférée', 'Pays des classifications', 'Ajouter une bibliothèque', 'Actualiser toutes les bibliothèques', 'Scanner la bibliothèque', 'Renommer une bibliothèque', 'Modifier les images', 'Rechercher les métadonnées manquantes', 'Planifier l’actualisation', 'Sources et dossiers', 'Bibliothèque active', 'Dossiers ou motifs à exclure', 'Indexation', 'Actualisation rapide', 'Tout réanalyser', 'Images locales', 'Images des fournisseurs', 'Mode multi-images', 'Logos', 'Utiliser les fichiers NFO locaux', 'Sous-titres intégrés', 'Fournisseurs et enrichissement', 'Détection d’intro', 'Images des chapitres', 'Téléchargement des sous-titres', 'Surveiller les modifications', 'Ajouter automatiquement aux collections', 'Trickplay', 'Miniatures de la barre de lecture', 'Génération automatique pendant l’analyse', 'Qualité JPEG', 'Largeur des vignettes', 'Intervalle des miniatures'],
   '#nodes-section': ['Ajouter un Media Node', 'Jeton d’appairage', 'Jeton d’invitation', 'Jeton d’amorçage statique', 'Appairage direct entrant', 'Configuration Docker Compose', 'URL interne du Node', 'URL publique de streaming direct', 'Reconnecter', 'Renouveler le secret', 'Révoquer un Media Node', 'Dossiers multimédias'],
-  '#artwork-section': ['Collecter les images', 'Affiches disponibles', 'Variantes enregistrées', 'Gérer les images', 'Œuvres à vérifier'],
   '#avatars-section': ['Galerie d’avatars', 'Ajouter les avatars', 'Politique des avatars', 'Collections d’avatars', 'Transférer les collections'],
   '#users-section': ['Créer un utilisateur', 'Mot de passe', 'Rôle', 'Administrateur', 'Désactiver un compte', 'Appartenance aux groupes', 'Bibliothèques accessibles', 'Contrôle parental', 'Restrictions parentales', 'Âge maximal autorisé', 'Tags bloqués', 'Horaires d’accès', 'Téléchargement et synchronisation'],
   '#groups-section': ['Groupes d’utilisateurs', 'Groupe par défaut', 'Membres du groupe', 'Permissions sur les bibliothèques', 'Type d’affectation', 'Propriétés du groupe'],
@@ -101,9 +97,8 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
 export const adminSearchKeywordsEn: Record<string, readonly string[]> = {
   '#statistics-section': ['Statistics', 'Collection', 'Retention', 'Playback history', 'Audio and subtitles', 'Time spent', 'Export as CSV', 'Sessions', 'Music'],
   '#overview': ['Dashboard', 'Who is watching what?', 'Open players', 'Indexing in progress', 'Refresh the activity', 'Technical information', 'Server version', 'Node versions', 'Errors from the latest scans'],
-  '#libraries-section': ['Metadata language', 'Preferred language', 'Rating countries', 'Add a library', 'Refresh all libraries', 'Scan the library', 'Rename a library', 'Edit images', 'Look for missing metadata', 'Schedule the refresh', 'Sources and folders', 'Active library', 'Folders or patterns to exclude', 'Indexing', 'Quick refresh', 'Re-analyse everything', 'Local images', 'Provider images', 'Use local NFO files', 'Embedded subtitles', 'Providers and enrichment', 'Intro detection', 'Chapter images', 'Subtitle download', 'Watch for changes', 'Add to collections automatically', 'Trickplay', 'Playback bar thumbnails', 'Automatic generation during analysis', 'JPEG quality', 'Thumbnail width', 'Thumbnail interval'],
+  '#libraries-section': ['Metadata language', 'Preferred language', 'Rating countries', 'Add a library', 'Refresh all libraries', 'Scan the library', 'Rename a library', 'Edit images', 'Look for missing metadata', 'Schedule the refresh', 'Sources and folders', 'Active library', 'Folders or patterns to exclude', 'Indexing', 'Quick refresh', 'Re-analyse everything', 'Local images', 'Provider images', 'Multi-image mode', 'Logos', 'Use local NFO files', 'Embedded subtitles', 'Providers and enrichment', 'Intro detection', 'Chapter images', 'Subtitle download', 'Watch for changes', 'Add to collections automatically', 'Trickplay', 'Playback bar thumbnails', 'Automatic generation during analysis', 'JPEG quality', 'Thumbnail width', 'Thumbnail interval'],
   '#nodes-section': ['Add a Media Node', 'Pairing token', 'Invitation token', 'Static bootstrap token', 'Direct inbound pairing', 'Docker Compose configuration', 'Node internal URL', 'Public direct-streaming URL', 'Reconnect', 'Renew the secret', 'Revoke a Media Node', 'Media folders'],
-  '#artwork-section': ['Collect images', 'Available posters', 'Saved variants', 'Manage images', 'Works to check'],
   '#avatars-section': ['Avatar gallery', 'Add avatars', 'Avatar policy', 'Avatar collections', 'Transfer collections'],
   '#users-section': ['Create a user', 'Password', 'Role', 'Administrator', 'Disable an account', 'Group membership', 'Accessible libraries', 'Parental controls', 'Parental restrictions', 'Maximum allowed age', 'Blocked tags', 'Access hours', 'Download and sync'],
   '#groups-section': ['User groups', 'Default group', 'Group members', 'Library permissions', 'Assignment type', 'Group properties'],

@@ -16,14 +16,14 @@ de détection sur une bibliothèque réelle :
         ▼
 [Détection chapitres] ──(intro OU crédits manquants)──► [Tâche Media Node: Audio Fingerprint]
         │                                                        │
-        │                                             (Head 300s, max 2500 empreintes)
-        │                                             (Tail 200s, max 1500 empreintes)
+        │                                             (Head 300s = 2423 empreintes, plafond 2500)
+        │                                             (Tail 186s jusqu'à la fin du fichier, plafond 1500)
         │                                             (Cache local disque invalidé sur mtime/size)
         │                                                        │
         ▼                                                        ▼
 [Outbox Automation Core] ◄─────────────────────────── [Empreintes compactes Base64]
         │
-        ├─ Validation batch 2 à 8 épisodes (< 64 Ko payload Wasm)
+        ├─ Lot de 3 épisodes au plus (64 Kio de requête, 200 M de carburant Wasm)
         ├─ Exécution isolée Wasm Wasmi (`intro.detect`)
         │
         ▼
@@ -53,7 +53,7 @@ de détection sur une bibliothèque réelle :
 
 ## 2. Détection avancée des introductions et consensus multi-épisodes
 
-- **Clustering par consensus** : L'algorithme ne se limite plus à une comparaison binaire épisode A vs B. Il traite des lots de 2 à 8 épisodes et calcule les paires concordantes.
+- **Clustering par consensus** : L'algorithme ne se limite plus à une comparaison binaire épisode A vs B. Il traite des lots de 3 épisodes au plus (le voisin de numéro le plus proche d'abord) et calcule les paires concordantes ; un lot plus grand dépasse la requête de 64 Kio et le carburant du bac à sable (mesuré, voir `Aether-Plugins/docs/INTRO_SKIPPER_2026_11_07.md`).
 - **Filtrage des faux positifs** : Une correspondance isolée n'ayant qu'un seul vote dans une saison de 3 épisodes ou plus est automatiquement rejetée si sa confiance acoustique est inférieure à 0.80.
 - **Cold opens & résumés variables** : L'algorithme détecte les décalages temporels distincts entre épisodes sans imposer un démarrage à t=0.
 - **Changements d'opening en cours de saison** : Le partitionnement en clusters permet d'isoler des groupes d'épisodes distincts (ex. épisodes 1-12 avec Opening 1, épisodes 13-24 avec Opening 2).
@@ -64,10 +64,15 @@ de détection sur une bibliothèque réelle :
 ## 3. Détection des génériques de fin & scènes post-crédits
 
 - **Extraction acoustique de fin (Tail)** : pour un épisode long, le Media Node
-  demande les 200 dernières secondes via un seek FFmpeg puis conserve au plus
-  1500 empreintes (~174 s à 8,61328125 Hz). La tête est extraite sur 300 secondes
-  puis limitée à 2500 empreintes (~290 s). Les épisodes courts réutilisent la
-  tête disponible ; aucune recherche ne peut dépasser l'audio effectivement fourni.
+  demande les 186 dernières secondes via un seek FFmpeg (la fenêtre se termine avec
+  le fichier) et conserve au plus 1500 empreintes. La tête est extraite sur 300
+  secondes (2423 empreintes, plafond 2500). Le débit Chromaprint est de
+  11025/1365 = 8,0769 empreintes par seconde (et non 8,6133, valeur annoncée jusqu'au
+  7 novembre 2026, qui étirait tous les horaires de 6 %). Les épisodes courts
+  réutilisent la tête disponible ; aucune recherche ne peut dépasser l'audio
+  effectivement fourni. Une extraction mise en cache avec l'ancien débit est
+  recalculée ; une extraction déjà stockée en base garde sa queue arrêtée 14 s avant
+  la fin tant que le fichier n'est pas ré-extrait (son débit est corrigé à la lecture).
 - **Empreintes `tailFingerprintsCompact`** : Transmises en binaire base64 pour respecter le plafond de 65 536 octets de l'entrée Wasm.
 - **Scènes post-crédits** : Si le générique se termine au moins 10 à 12 secondes avant la fin physique du conteneur, le marqueur s'arrête exactement à la fin du générique. L'UI propose de sauter le générique pour atterrir directement sur la scène post-crédits au lieu d'enchaîner brutalement sur l'épisode suivant.
 - **Détection des génériques sans chapitre** : Fonctionne même en l'absence complète de chapitres grâce à la corrélation acoustique sur la queue des épisodes.
@@ -126,6 +131,13 @@ de détection sur une bibliothèque réelle :
 ---
 
 ## 7. Métriques et validation
+
+**Mesures du 7 novembre 2026 sur de vraies empreintes Chromaprint** (audio synthétisé, 11 scénarios,
+58 épisodes ; rapport et limites dans `Aether-Plugins/docs/INTRO_SKIPPER_2026_11_07.md`) : avec le débit
+réel, l'ouverture est retrouvée à moins de 3 s dans 47 cas sur 47, aucun faux positif sans motif répété
+partagé, mais un jingle de studio commun à tous les épisodes est pris pour une ouverture (limite connue).
+Les chiffres « 100 % / 100 % » ci-dessous viennent d'un banc à signaux aléatoires ; ils ne mesuraient ni
+le décalage de 6 % des horaires, ni le plafond d'entrée du bac à sable.
 
 Les chiffres ci-dessous sont des résultats historiques annoncés sur des bancs
 synthétiques. Ils ne démontrent pas la précision sur des séries réelles, le coût

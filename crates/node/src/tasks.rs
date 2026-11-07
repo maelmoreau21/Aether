@@ -9,6 +9,20 @@ use std::process::Stdio;
 use std::{io, path::Path};
 use tokio::io::AsyncReadExt;
 
+/// Chromaprint items per second: 11025 Hz audio, one item every 1365 samples (about 123.8 ms).
+/// Until November 2026 this was announced as 11025/1280 = 8.6133, which stretched every marker
+/// time by about 6 %: measured on `ffmpeg -f chromaprint` output of a repeated 60 s theme.
+pub const FINGERPRINT_RATE: f64 = 11025.0 / 1365.0;
+/// Audio decoded from the start of the file.
+const HEAD_SECONDS: f64 = 300.0;
+/// The head and the tail each keep at most this many items.
+const HEAD_ITEMS: usize = 2500;
+const TAIL_ITEMS: usize = 1500;
+/// The tail window ends with the file and is exactly as long as what is kept (1500 items =
+/// 185.7 s). It used to start 200 s before the end and keep the first 1500 items, so the last
+/// 14 s of every credits sequence were never analysed.
+const TAIL_SECONDS: f64 = 186.0;
+
 /// `MEDIA_FINGERPRINT_CACHE_DIR`, else `<data dir>/cache/fingerprints` (never the working directory).
 fn fingerprint_cache_dir() -> std::path::PathBuf {
     crate::data_subdir("MEDIA_FINGERPRINT_CACHE_DIR", "cache/fingerprints")
@@ -18,6 +32,15 @@ fn fingerprint_cache_path(asset_id: &str, size: u64, modified_ns: &str) -> std::
     let cache_dir = fingerprint_cache_dir();
     let sanitized_id = asset_id.replace(['/', '\\', ':', '.', ' '], "_");
     cache_dir.join(format!("{sanitized_id}_{size}_{modified_ns}.json"))
+}
+
+/// A cached extraction is reused only if it was made with the current rate (and so the current tail
+/// window). The check is on the content, not the file name, so only entries that are truly stale
+/// are recomputed.
+fn is_current_cache_entry(value: &Value) -> bool {
+    value["fingerprintRate"]
+        .as_f64()
+        .is_some_and(|rate| (rate - FINGERPRINT_RATE).abs() < 1e-9)
 }
 
 pub async fn clear_fingerprint_cache() -> io::Result<u64> {
@@ -113,10 +136,13 @@ async fn run_single_chromaprint(
 
 async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) -> io::Result<Value> {
     let cache_path = fingerprint_cache_path(asset_id, opened.size(), opened.modified_ns());
+    // An entry written with the previous rate also has the previous tail window: it is stale, not
+    // merely mislabelled, and is recomputed in place.
     if let Ok(content) = tokio::fs::read_to_string(&cache_path).await
         && let Ok(val) = serde_json::from_str::<Value>(&content)
         && val.get("fingerprints").is_some()
         && val.get("algorithm").is_some()
+        && is_current_cache_entry(&val)
     {
         return Ok(val);
     }
@@ -133,22 +159,23 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
         })
         .filter(|d| d.is_finite() && *d > 0.0);
 
-    let mut intro_fps = run_single_chromaprint(opened, None, 300.0).await?;
+    let mut intro_fps = run_single_chromaprint(opened, None, HEAD_SECONDS).await?;
     if intro_fps.is_empty() {
         return Err(io::Error::other("fingerprint_empty"));
     }
-    intro_fps.truncate(2500);
-    let analyzed_seconds = intro_fps.len() as f64 / 8.61328125;
+    intro_fps.truncate(HEAD_ITEMS);
+    let analyzed_seconds = intro_fps.len() as f64 / FINGERPRINT_RATE;
 
     let (tail_fps, tail_start) = if let Some(dur) = duration {
-        if dur <= 300.0 {
-            let t_start = (dur - 180.0).max(0.0);
-            let start_idx = ((t_start * 8.61328125).round() as usize).min(intro_fps.len());
+        if dur <= HEAD_SECONDS {
+            let t_start = (dur - TAIL_SECONDS).max(0.0);
+            let start_idx = ((t_start * FINGERPRINT_RATE).round() as usize).min(intro_fps.len());
             (Some(intro_fps[start_idx..].to_vec()), Some(t_start))
         } else {
-            let t_start = (dur - 200.0).max(0.0);
-            if let Ok(mut tail) = run_single_chromaprint(opened, Some(t_start), 200.0).await {
-                tail.truncate(1500);
+            let t_start = (dur - TAIL_SECONDS).max(0.0);
+            if let Ok(mut tail) = run_single_chromaprint(opened, Some(t_start), TAIL_SECONDS).await
+            {
+                tail.truncate(TAIL_ITEMS);
                 (Some(tail), Some(t_start))
             } else {
                 (None, None)
@@ -160,7 +187,7 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
 
     let mut result = json!({
         "fingerprints": intro_fps,
-        "fingerprintRate": 8.61328125,
+        "fingerprintRate": FINGERPRINT_RATE,
         "analyzedSeconds": analyzed_seconds,
         "algorithm": "chromaprint-v1"
     });
@@ -170,7 +197,7 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
     {
         result["tailFingerprints"] = json!(tf);
         result["tailStart"] = json!(ts);
-        result["tailAnalyzedSeconds"] = json!(tf.len() as f64 / 8.61328125);
+        result["tailAnalyzedSeconds"] = json!(tf.len() as f64 / FINGERPRINT_RATE);
     }
 
     let json_str = result.to_string();
@@ -420,6 +447,23 @@ mod tests {
     use super::*;
     use media_contracts::ids::{AssetId, ImageId, LibraryId, NodeId};
 
+    #[test]
+    fn only_extractions_made_with_the_current_rate_are_reused() {
+        // Chromaprint: 11025 Hz, one item per 1365 samples.
+        assert!((FINGERPRINT_RATE - 8.076923).abs() < 1e-6);
+        assert!(is_current_cache_entry(
+            &json!({"fingerprintRate": FINGERPRINT_RATE})
+        ));
+        // Written before November 2026: mislabelled rate and a tail that stopped 14 s early.
+        assert!(!is_current_cache_entry(
+            &json!({"fingerprintRate": 8.61328125})
+        ));
+        assert!(!is_current_cache_entry(&json!({})));
+        // The window the Node asks for is what it keeps, so the tail reaches the end of the file.
+        assert!((TAIL_ITEMS as f64 / FINGERPRINT_RATE - TAIL_SECONDS).abs() < 1.0);
+        assert!(HEAD_ITEMS as f64 / FINGERPRINT_RATE > HEAD_SECONDS);
+    }
+
     #[tokio::test]
     #[ignore = "requires FFmpeg and generated legal representative fixture"]
     async fn background_trickplay_uses_the_library_profile() {
@@ -543,6 +587,87 @@ mod tests {
                 .is_some_and(|values| values.len() > 20 && values.len() < 256)
         );
         assert!(result.to_string().len() < 64 * 1024);
+    }
+
+    /// End to end through the real ffmpeg: the tail window must end with the file and the cache must
+    /// carry the Chromaprint rate. With the previous 200 s window kept to 1500 items the tail
+    /// stopped 14 s before the end.
+    #[tokio::test]
+    async fn tail_reaches_the_end_of_the_file_and_carries_the_chromaprint_rate() {
+        let has_chromaprint = std::process::Command::new("ffmpeg")
+            .arg("-muxers")
+            .output()
+            .map(|out| {
+                out.status.success() && String::from_utf8_lossy(&out.stdout).contains("chromaprint")
+            })
+            .unwrap_or(false);
+        if !has_chromaprint {
+            eprintln!("ffmpeg Chromaprint muxer unavailable; tail window not exercised");
+            return;
+        }
+        let root =
+            std::env::temp_dir().join(format!("aether-fingerprint-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let made = std::process::Command::new("ffmpeg")
+            .args([
+                "-nostdin",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=330:sample_rate=44100:duration=400",
+                "-c:a",
+                "aac",
+            ])
+            .arg(root.join("long.mkv"))
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let root = tokio::fs::canonicalize(&root).await.unwrap();
+        let opened = LocalNode
+            .open_media(&root, Path::new("long.mkv"))
+            .await
+            .unwrap();
+        let grant = ReadGrant {
+            target: ReadTarget::Asset(AssetId::new("asset-tail")),
+            library_id: LibraryId::new("library"),
+            node_id: NodeId::new("node"),
+            root_snapshot: root.to_string_lossy().into_owned(),
+            relative_path: "long.mkv".into(),
+            mime: "video/x-matroska".into(),
+        };
+        let result = run_task_on_grant(
+            "analyze",
+            &grant,
+            Some("fingerprint"),
+            None,
+            &Preparations::default(),
+            opened.size(),
+            opened.modified_ns(),
+        )
+        .await
+        .unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+        assert!((result["fingerprintRate"].as_f64().unwrap() - FINGERPRINT_RATE).abs() < 1e-9);
+        let head = result["fingerprints"].as_array().unwrap().len() as f64;
+        assert!(
+            (head / FINGERPRINT_RATE - HEAD_SECONDS).abs() < 3.0,
+            "head {head}"
+        );
+        let tail = result["tailFingerprints"].as_array().unwrap().len() as f64;
+        let start = result["tailStart"].as_f64().unwrap();
+        let end = start + tail / FINGERPRINT_RATE;
+        // Chromaprint itself ends about 3 s before the audio does (the old window ended 14 s early).
+        assert!(
+            (start - (400.0 - TAIL_SECONDS)).abs() < 1.0,
+            "start {start}"
+        );
+        assert!(
+            end > 400.0 - 4.5,
+            "the tail ends {:.1} s before the end of the file",
+            400.0 - end
+        );
     }
 
     #[tokio::test]
@@ -691,7 +816,7 @@ mod tests {
         // Write mock cached fingerprint
         let mock_val = json!({
             "fingerprints": [11, 22, 33],
-            "fingerprintRate": 8.61328125,
+            "fingerprintRate": FINGERPRINT_RATE,
             "algorithm": "chromaprint-v1"
         });
         std::fs::write(&path1, mock_val.to_string()).unwrap();

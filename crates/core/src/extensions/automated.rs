@@ -19,6 +19,38 @@ pub(super) type TargetResolution = (
 /// Durable error code for a search that found no single trustworthy candidate.
 pub(crate) const UNIDENTIFIED_ERROR: &str = "metadata_unidentified";
 
+/// Episodes sent together to one `intro.detect`, the target included. Measured with real Chromaprint
+/// output run in this Core's wasmi runtime: three episodes with a full head and tail use about
+/// 105 M of the guest's 200 M fuel and 63 KB of its 64 KiB request; a fourth exceeds both. The
+/// Core used to send up to eight (170 KB), which the runtime refuses as `input_too_large`.
+const MARKER_BATCH_MAX: usize = 3;
+/// JSON added by the keys, ids and numbers of one episode besides its two base64 fingerprints.
+const MARKER_EPISODE_OVERHEAD: usize = 320;
+/// Left free in the request for the extension settings' growth and the envelope.
+const MARKER_REQUEST_MARGIN: usize = 1024;
+
+/// Order the candidates of one season for a detection: the target first, then the episodes whose
+/// number is closest to it (neighbours most often share the same opening), keeping the incoming
+/// order between equals. Returns indices into `episodes`: `(is_target, number)`.
+pub(super) fn marker_peer_order(episodes: &[(bool, Option<i64>)]) -> Vec<usize> {
+    let target = episodes.iter().find(|e| e.0).and_then(|e| e.1);
+    let mut order: Vec<usize> = (0..episodes.len()).collect();
+    order.sort_by_key(|&i| {
+        let (is_target, number) = episodes[i];
+        let distance = match (target, number) {
+            (Some(t), Some(n)) => (t - n).abs(),
+            _ => i64::MAX,
+        };
+        (!is_target, distance)
+    });
+    order
+}
+
+/// Whether one more episode of `size` bytes still fits the request.
+pub(super) fn marker_request_fits(used: usize, size: usize, budget: usize) -> bool {
+    used.saturating_add(size) <= budget
+}
+
 fn unidentified_search(non_music: bool, operation: &str, value: &Value) -> bool {
     non_music && operation == "metadata.search" && value.is_array()
 }
@@ -167,10 +199,25 @@ pub(crate) async fn run_automated(
             .bind(work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
         let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=a.library_id JOIN automation_observations obs ON obs.asset_id=a.id JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' AND t.component='fingerprint' AND t.status='completed' WHERE ep.season_id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id LIMIT 12")
             .bind(&scope.0).bind(&job.library_id).bind(&job.target_id).fetch_all(auth.store.pool()).await.map_err(db)?;
+        let order = marker_peer_order(
+            &candidates
+                .iter()
+                .map(|c| (c.0 == job.target_id, c.6.parse::<i64>().ok()))
+                .collect::<Vec<_>>(),
+        );
+        let mut candidates: Vec<Option<_>> = candidates.into_iter().map(Some).collect();
+        let candidates: Vec<_> = order
+            .into_iter()
+            .filter_map(|i| candidates[i].take())
+            .collect();
+        let request_budget = media_extension_sdk::MAX_JSON.saturating_sub(
+            serde_json::to_vec(&settings).map_or(0, |bytes| bytes.len()) + MARKER_REQUEST_MARGIN,
+        );
+        let mut request_bytes = 0usize;
         let mut episodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for (asset, raw, key, source, probe, episode_work, number) in candidates {
-            if episodes.len() >= 8 {
+            if episodes.len() >= MARKER_BATCH_MAX {
                 break;
             }
             if seen.contains(&episode_work) {
@@ -236,6 +283,13 @@ pub(crate) async fn run_automated(
             else {
                 continue;
             };
+            let size = bytes.len().div_ceil(3) * 4
+                + tail_compact.as_ref().map_or(0, String::len)
+                + MARKER_EPISODE_OVERHEAD;
+            if !episodes.is_empty() && !marker_request_fits(request_bytes, size, request_budget) {
+                continue;
+            }
+            request_bytes += size;
             seen.insert(episode_work);
             marker_sources.push((asset.clone(), source));
             let mut ep_val = json!({
@@ -245,7 +299,9 @@ pub(crate) async fn run_automated(
                 "episodeNumber": number.parse::<u32>().ok(),
                 "duration": duration,
                 "fingerprintsCompact": STANDARD.encode(bytes),
-                "fingerprintRate": result["fingerprintRate"]
+                // The words are Chromaprint's; results stored before November 2026 carry a mislabelled
+                // rate (8.6133), so the rate is the algorithm's, never the stored one.
+                "fingerprintRate": media_node::tasks::FINGERPRINT_RATE
             });
             if let Some(compact) = tail_compact {
                 ep_val["tailFingerprintsCompact"] = json!(compact);
@@ -523,4 +579,50 @@ pub(crate) async fn run_automated(
         value: result,
         marker_sources,
     })
+}
+
+#[cfg(test)]
+mod marker_batch_tests {
+    use super::*;
+
+    #[test]
+    fn target_first_then_neighbours_in_incoming_order() {
+        // (is_target, episode number): the target is episode 6, listed after two newer results.
+        let episodes = [
+            (false, Some(1)),
+            (false, Some(12)),
+            (true, Some(6)),
+            (false, Some(7)),
+            (false, Some(5)),
+            (false, Some(7)),
+            (false, None),
+        ];
+        // Distances 5, 6, -, 1, 1, 1, unknown: ties keep the order the Core listed them in.
+        assert_eq!(marker_peer_order(&episodes), vec![2, 3, 4, 5, 0, 1, 6]);
+        // Without a numbered target nothing is reordered except that the target leads.
+        assert_eq!(
+            marker_peer_order(&[(false, Some(2)), (true, None), (false, Some(1))]),
+            vec![1, 0, 2]
+        );
+    }
+
+    #[test]
+    fn three_full_episodes_fit_the_guest_request_and_four_do_not() {
+        // Real Chromaprint output: a 300 s head is 2402 items, a 186 s tail 1481 items.
+        let head: usize = 2402 * 4;
+        let tail: usize = 1481 * 4;
+        let size = head.div_ceil(3) * 4 + tail.div_ceil(3) * 4 + MARKER_EPISODE_OVERHEAD;
+        let budget = media_extension_sdk::MAX_JSON - 400 - MARKER_REQUEST_MARGIN;
+        let mut used = 0;
+        let mut fitted = 0;
+        while marker_request_fits(used, size, budget) {
+            used += size;
+            fitted += 1;
+        }
+        assert_eq!(fitted, 3, "{size} bytes each, budget {budget}");
+        assert_eq!(fitted, MARKER_BATCH_MAX);
+        // Episodes with no tail leave room, but the batch size stays capped by the fuel measurement.
+        assert!(marker_request_fits(0, size, budget));
+        assert!(!marker_request_fits(usize::MAX, 1, budget));
+    }
 }

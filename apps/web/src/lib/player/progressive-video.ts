@@ -3,6 +3,7 @@ import {mp4TimelineOffset} from './mp4-timeline';
 import {Mp4Fragments,mp4Timescale,mp4RandomAccess} from './mp4-fragments';
 import {EncodedVideoBuffer} from './encoded-video-buffer';
 
+import { tr } from '../i18n';
 // A packet-copy fallback inside NativePlayer. One continuous FFmpeg response
 // avoids replacing a playing GOP with overlapping independently muxed windows.
 export class ProgressiveVideo {
@@ -36,7 +37,7 @@ export class ProgressiveVideo {
   }
   async load(position: number | Promise<number>) {
     const [saved]=await Promise.race([Promise.all([position,this.opened]),this.failure]);
-    if(this.closed)throw new Error('Lecteur fermé.');
+    if(this.closed)throw new Error(tr('player_closed'));
     const target=Number.isFinite(saved)?Math.max(0,Math.min(saved,Math.max(0,this.duration-.05))):0;
     await this.start(target,false);
   }
@@ -54,12 +55,12 @@ export class ProgressiveVideo {
     const next=this.operation.catch(()=>{}).then(work);this.operation=next;return next;
   }
   private idle(signal: AbortSignal) {
-    if(signal.aborted)return Promise.reject(new Error('Lecture vidéo annulée.'));
+    if(signal.aborted)return Promise.reject(new Error(tr('video_playback_cancelled')));
     if(!this.buffer?.updating)return Promise.resolve();
     const buffer=this.buffer;
     return new Promise<void>((resolve,reject)=>{
       const finish=(error?:Error)=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);signal.removeEventListener('abort',abort);if(error)reject(error);else resolve();};
-      const done=()=>finish(),fail=()=>finish(new Error('Fragment AV1 rejeté par le navigateur.')),abort=()=>finish(new Error('Lecture vidéo annulée.'));
+      const done=()=>finish(),fail=()=>finish(new Error(tr('av1_fragment_rejected_by_the_browser'))),abort=()=>finish(new Error(tr('video_playback_cancelled')));
       buffer.addEventListener('updateend',done,{once:true});buffer.addEventListener('error',fail,{once:true});buffer.addEventListener('abort',fail,{once:true});signal.addEventListener('abort',abort,{once:true});
     });
   }
@@ -67,7 +68,7 @@ export class ProgressiveVideo {
     if(bufferedAhead(this.video)<=12)return Promise.resolve();
     return new Promise<void>((resolve,reject)=>{
       const finish=(error?:Error)=>{clearInterval(timer);this.video.removeEventListener('timeupdate',check);this.video.removeEventListener('seeking',check);signal.removeEventListener('abort',abort);if(error)reject(error);else resolve();};
-      const check=()=>{if(bufferedAhead(this.video)<=12)finish();},abort=()=>finish(new Error('Lecture vidéo annulée.'));
+      const check=()=>{if(bufferedAhead(this.video)<=12)finish();},abort=()=>finish(new Error(tr('video_playback_cancelled')));
       const timer=setInterval(check,200);this.video.addEventListener('timeupdate',check);this.video.addEventListener('seeking',check);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();else check();
     });
   }
@@ -76,7 +77,7 @@ export class ProgressiveVideo {
     this.controller?.abort();const controller=new AbortController();this.controller=controller;const signal=controller.signal,epoch=++this.epoch;
     let ready!:()=>void, rejectFirst!:(error:Error)=>void;
     const first=new Promise<void>((resolve,reject)=>{ready=resolve;rejectFirst=reject;});
-    const cancelled=()=>rejectFirst(new Error('Lecture vidéo annulée.'));
+    const cancelled=()=>rejectFirst(new Error(tr('video_playback_cancelled')));
     signal.addEventListener('abort',cancelled,{once:true});
     const current=()=>!this.closed && epoch===this.epoch && !signal.aborted;
     const run=async()=>{
@@ -99,21 +100,21 @@ export class ProgressiveVideo {
           } catch {}
         }
         const messages: Record<string, string> = {
-          node_unavailable: 'Media Node indisponible ou déconnecté',
-          node_revoked: 'Media Node révoqué',
-          asset_changed_rescan_required: 'Fichier source introuvable ou modifié sur disque (réanalyse requise)',
-          source_changed_rescan_required: 'Fichier source modifié sur disque (réanalyse requise)',
-          preparation_tool_or_source_unavailable: 'FFmpeg ou fichier source introuvable sur le Media Node',
-          preparation_busy: 'Media Node occupé',
-          preparation_cache_limit_reached: 'Limite du cache de préparation atteinte',
-          preparation_timeout: 'Délai de préparation dépassé',
-          unsupported_preparation: 'Format non supporté sans réencodage',
-          video_stream_capacity_reached: 'Capacité de flux vidéo simultanés atteinte'
+          node_unavailable: tr('media_node_unavailable_or_disconnected'),
+          node_revoked: tr('media_node_revoked'),
+          asset_changed_rescan_required: tr('source_file_not_found_or_modified'),
+          source_changed_rescan_required: tr('source_file_modified_on_disk_rescan'),
+          preparation_tool_or_source_unavailable: tr('ffmpeg_or_source_file_not_found'),
+          preparation_busy: tr('media_node_busy'),
+          preparation_cache_limit_reached: tr('preparation_cache_limit_reached'),
+          preparation_timeout: tr('preparation_delay_exceeded'),
+          unsupported_preparation: tr('format_not_supported_without_re_encoding'),
+          video_stream_capacity_reached: tr('simultaneous_video_stream_capacity_reached')
         };
-        const hint = messages[detail ?? ''] ?? detail ?? 'Media Node indisponible';
-        throw new Error(`Préparation vidéo progressive : HTTP ${response.status} (${hint}).`);
+        const hint = messages[detail ?? ''] ?? detail ?? tr('media_node_unavailable');
+        throw new Error(tr('progressive_video_preparation_http', { status: response.status, hint }));
       }
-      const reader=response.body?.getReader();if(!reader)throw new Error('Flux vidéo progressif vide.');
+      const reader=response.body?.getReader();if(!reader)throw new Error(tr('empty_progressive_video_stream'));
       let offset: number|undefined,scale=0,prefix=new Uint8Array(),appended=false,received=0,complete=false,raps:{time:number;start:number}[]=[];
       const index=new Mp4Fragments((type,bytes,start)=>{
         if(type==='moov'){offset=mp4TimelineOffset(bytes);scale=mp4Timescale(bytes);}
@@ -135,7 +136,7 @@ export class ProgressiveVideo {
           for(let at=0;at<value.byteLength;at+=65536){
             if(!current())return;const part=value.subarray(at,Math.min(value.byteLength,at+65536));received+=part.byteLength;index.push(part);
             if(!appended){
-              if(prefix.byteLength+part.byteLength>1024*1024)throw new Error('Initialisation vidéo supérieure à 1 Mio.');
+              if(prefix.byteLength+part.byteLength>1024*1024)throw new Error(tr('video_initialisation_larger_than_1_mib'));
               const joined=new Uint8Array(prefix.byteLength+part.byteLength);joined.set(prefix);joined.set(part,prefix.byteLength);prefix=joined;
               if(offset===undefined)continue;
               await this.exclusive(async()=>{if(current()&&this.buffer)this.buffer.timestampOffset=offset!;});
@@ -145,7 +146,7 @@ export class ProgressiveVideo {
           }
         }
         if(!current())return;index.finishStream();
-        if(!appended || !this.buffer?.buffered.length || this.buffer.buffered.end(this.buffer.buffered.length-1)<this.duration-.25)throw new Error('Flux vidéo interrompu avant la fin du média.');
+        if(!appended || !this.buffer?.buffered.length || this.buffer.buffered.end(this.buffer.buffered.length-1)<this.duration-.25)throw new Error(tr('video_stream_interrupted_before_the_end'));
         await this.exclusive(async()=>{if(current()){await this.idle(signal);if(this.source.readyState==='open')this.source.endOfStream();}});
         complete=true;
       }finally{if(!complete||!current())await reader.cancel().catch(()=>{});reader.releaseLock();}
@@ -158,7 +159,7 @@ export class ProgressiveVideo {
   }
   destroy() {
     if(this.closed)return;this.closed=true;this.epoch++;this.controller?.abort();this.video.removeEventListener('seeking',this.seeked);
-    this.rejectOpen?.(new Error('Lecteur fermé.'));this.rejectFailure(new Error('Lecteur fermé.'));
+    this.rejectOpen?.(new Error(tr('player_closed')));this.rejectFailure(new Error(tr('player_closed')));
     if(this.buffer?.updating){try{this.buffer.abort();}catch{/* The media element may already be detached. */}}
     URL.revokeObjectURL(this.url);
     this.retained.clear();

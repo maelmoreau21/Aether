@@ -557,6 +557,253 @@ async fn invalid_rows_are_rejected_without_touching_the_cache(backend: &Backend)
     assert_eq!(before, after);
 }
 
+/// Several films in one library, in the order given. Their stored titles are the library
+/// language (French); returns the work ids in the same order.
+async fn films(store: &IdentityStore, titles: &[&str]) -> Vec<String> {
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
+        .execute(&store.pool).await.unwrap();
+    let files = titles
+        .iter()
+        .enumerate()
+        .map(|(index, title)| ScannedFile {
+            relative_path: format!("{index}.mp4"),
+            size: 42 + index as u64,
+            modified_ns: "1".into(),
+            title: (*title).into(),
+            identity_key: title.to_lowercase(),
+            mime: "video/mp4".into(),
+            probe: serde_json::from_value(
+                json!({"streams":[{"index":0,"codec_type":"video","codec_name":"h264"}],"format":{}}),
+            )
+            .unwrap(),
+            ..Default::default()
+        })
+        .collect();
+    ingest(
+        store,
+        "lib",
+        Path::new("/movies"),
+        &ScanReport {
+            files,
+            complete: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let mut ids = Vec::new();
+    for title in titles {
+        ids.push(
+            query_scalar("SELECT id FROM inventory_works WHERE title=?")
+                .bind(*title)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap(),
+        );
+    }
+    ids
+}
+
+/// Titles of a catalogue page as `user` sees them, for a search text and a sort.
+async fn titles_for(store: &IdentityStore, user: &str, search: &str, sort: &str) -> Vec<String> {
+    let chain = locale_chain(store, Some(user), None).await.unwrap();
+    let filter = CatalogueFilter {
+        locale_chain: chain,
+        user_id: Some(user.into()),
+        ..Default::default()
+    };
+    let page = catalogue_page(
+        store,
+        &["lib".to_owned()],
+        None,
+        search,
+        sort,
+        0,
+        50,
+        &filter,
+        true,
+    )
+    .await
+    .unwrap();
+    page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["title"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+async fn a_work_is_found_by_translated_and_original_titles_without_being_duplicated(
+    backend: &Backend,
+) {
+    let store = backend.open().await;
+    let work = film(&store).await;
+    account(&store, "ana", json!({"locale": "fr"})).await;
+    put(
+        &store,
+        &work,
+        "fr-FR",
+        "provider:tmdb",
+        "Les Évadés",
+        "Un banquier.",
+    )
+    .await;
+    put(
+        &store,
+        &work,
+        "en-GB",
+        "provider:tmdb",
+        "The Shawshank Redemption",
+        "A banker.",
+    )
+    .await;
+    set_json(
+        &store,
+        &work,
+        "editorial_json",
+        json!({"original_title": "Rita Hayworth Prison Story"}),
+    )
+    .await;
+    {
+        let mut conn = store.pool.acquire().await.unwrap();
+        crate::consolidation::sync_work_summary_tx(&mut conn, &work)
+            .await
+            .unwrap();
+    }
+
+    // The French reader finds the work by its library title, its English title and its original title.
+    for text in ["shawshank", "évadés", "redemption", "rita hayworth", "RITA"] {
+        assert_eq!(
+            titles_for(&store, "ana", text, "title-asc").await.len(),
+            1,
+            "{text}"
+        );
+    }
+    assert!(
+        titles_for(&store, "ana", "inexistant", "title-asc")
+            .await
+            .is_empty()
+    );
+    // Two-letter searches take the non-indexed path and behave the same.
+    assert_eq!(titles_for(&store, "ana", "év", "title-asc").await.len(), 1);
+
+    // A work is stored once, whatever the number of titles that lead to it.
+    let works: i64 = query_scalar("SELECT COUNT(*) FROM inventory_works")
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(works, 1);
+    let indexed: i64 = query_scalar("SELECT COUNT(*) FROM work_search_titles WHERE work_id=?")
+        .bind(&work)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+    assert_eq!(indexed, 3);
+
+    // Removing a correction removes its searchable title.
+    let mut tx = store.pool.begin().await.unwrap();
+    assert_eq!(
+        delete_work_source(&mut tx, &work, "fr-FR", "provider:tmdb")
+            .await
+            .unwrap(),
+        1
+    );
+    tx.commit().await.unwrap();
+    assert!(
+        titles_for(&store, "ana", "évadés", "title-asc")
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        titles_for(&store, "ana", "redemption", "title-asc")
+            .await
+            .len(),
+        1
+    );
+}
+
+async fn the_search_index_is_filled_for_databases_that_predate_it(backend: &Backend) {
+    let store = backend.open().await;
+    let work = film(&store).await;
+    account(&store, "ana", json!({"locale": "fr"})).await;
+    put(
+        &store,
+        &work,
+        "en-US",
+        "provider:tmdb",
+        "Redemption Song",
+        "A banker.",
+    )
+    .await;
+    query("DELETE FROM work_search_titles")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    assert!(
+        titles_for(&store, "ana", "redemption", "title-asc")
+            .await
+            .is_empty()
+    );
+    let mut conn = store.pool.acquire().await.unwrap();
+    assert_eq!(search::backfill(&mut conn).await.unwrap(), 1);
+    // A second run changes nothing.
+    assert_eq!(search::backfill(&mut conn).await.unwrap(), 1);
+    drop(conn);
+    assert_eq!(
+        titles_for(&store, "ana", "redemption", "title-asc")
+            .await
+            .len(),
+        1
+    );
+}
+
+async fn titles_sort_in_the_readers_language_and_fall_back_to_the_library_title(backend: &Backend) {
+    let store = backend.open().await;
+    let ids = films(&store, &["Alpha", "Bravo", "Charlie"]).await;
+    account(&store, "ana", json!({"locale": "fr"})).await;
+    account(
+        &store,
+        "bob",
+        json!({"locale": "en", "metadataLocale": "en-GB"}),
+    )
+    .await;
+    account(
+        &store,
+        "uli",
+        json!({"locale": "fr", "metadataLocale": "es"}),
+    )
+    .await;
+    for (id, english) in ids.iter().zip(["Zulu", "Mike", "Echo"]) {
+        put(&store, id, "en-US", "provider:tmdb", english, "").await;
+    }
+    assert_eq!(
+        titles_for(&store, "ana", "", "title-asc").await,
+        ["Alpha", "Bravo", "Charlie"]
+    );
+    assert_eq!(
+        titles_for(&store, "bob", "", "title-asc").await,
+        ["Echo", "Mike", "Zulu"]
+    );
+    assert_eq!(
+        titles_for(&store, "bob", "", "title-desc").await,
+        ["Zulu", "Mike", "Echo"]
+    );
+    // No Spanish translation exists: the library-language order is kept.
+    assert_eq!(
+        titles_for(&store, "uli", "", "title-asc").await,
+        ["Alpha", "Bravo", "Charlie"]
+    );
+    // The same search finds each work by either title and shows the reader's title.
+    assert_eq!(
+        titles_for(&store, "bob", "zulu", "title-asc").await,
+        ["Zulu"]
+    );
+    assert_eq!(
+        titles_for(&store, "bob", "alpha", "title-asc").await,
+        ["Zulu"]
+    );
+}
+
 on_both_engines!(
     two_accounts_read_the_same_work_in_their_own_language_at_the_same_time,
     regions_missing_languages_and_explicit_request,
@@ -565,4 +812,7 @@ on_both_engines!(
     legacy_blobs_are_materialised_once_and_survive_a_restart,
     seasons_and_episodes_are_localized_in_one_pass,
     invalid_rows_are_rejected_without_touching_the_cache,
+    a_work_is_found_by_translated_and_original_titles_without_being_duplicated,
+    the_search_index_is_filled_for_databases_that_predate_it,
+    titles_sort_in_the_readers_language_and_fall_back_to_the_library_title,
 );

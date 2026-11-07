@@ -5,7 +5,7 @@
   import type { Media } from '../player/types';
   import Icon from '../ui/Icon.svelte';
   import { subtitleErrorText, subtitleMatchText, subtitleRequest, type SubtitleInventory, type SubtitleResult } from './subtitle-download-api';
-  import { t } from '../i18n';
+  import { t, fmt } from '../i18n';
 
   let { work, selectedMedia, onclose }: { work: Work; selectedMedia?: Media; onclose: () => void } = $props();
   const copies = $derived.by(() => {
@@ -13,7 +13,7 @@
     const items: { id: string; label: string }[] = [];
     if (selectedMedia) {
       seen.push(selectedMedia.id);
-      items.push({ id: selectedMedia.id, label: selectedMedia.title || 'Copie sélectionnée' });
+      items.push({ id: selectedMedia.id, label: selectedMedia.title || $t('copy_selected') });
     }
     for (const edition of work.editions ?? []) for (const version of edition.versions) for (const source of version.sources) {
       const id = source.playbackMediaId;
@@ -131,7 +131,7 @@
       {#if !inventory.enabled}<p role="status">{subtitleErrorText(inventory.unavailableCode ?? '')}</p>{/if}
       {#if inventory.providers.length === 0}<p role="status">{$t('no_subtitle_provider')}</p>{/if}
       {#if quota}
-        <p role="status">Quota du fournisseur : {quota.remaining === null ? 'solde inconnu' : `${quota.remaining} téléchargement(s) restant(s)`}.{quota.resetTimeUtc ? ` Réinitialisation annoncée : ${quota.resetTimeUtc}.` : ''}{quota.nextAllowedAt > Date.now() / 1000 ? ` Prochaine tentative au plus tôt : ${new Date(quota.nextAllowedAt * 1000).toLocaleString('fr-FR')}.` : ''}</p>
+        <p role="status">{$t('provider_quota_prefix')} {quota.remaining === null ? $t('unknown_balance') : $t('download_s_left', { remaining: quota.remaining })}.{quota.resetTimeUtc ? $t('reset_announced', { resetTimeUtc: quota.resetTimeUtc }) : ''}{quota.nextAllowedAt > Date.now() / 1000 ? ` ${$t('next_attempt_earliest', { date: $fmt.dateTime(quota.nextAllowedAt) })}` : ''}</p>
       {/if}
       <form onchange={() => { searched = false; items = []; searchId = ''; }} onsubmit={event => { event.preventDefault(); void search(); }}>
         <label>{$t('subtitle_provider')}<select bind:value={providerId} disabled={busy || !inventory.enabled}>{#each inventory.providers as provider (provider.id)}<option value={provider.id}>{provider.name}</option>{/each}</select></label>
@@ -144,13 +144,13 @@
       {#if searched}
         <h4>{$t('results')}</h4>
         {#each items as item (item.id)}
-          <div class="subtitle-row"><div><strong>{item.label}</strong><p>{item.language}{item.forced ? ' · Forcés' : ''}{item.sdh ? ' · SDH' : ''}</p><p>{subtitleMatchText(item.match)}</p></div><button type="button" disabled={busy || !inventory.enabled || inventory.downloads.some(entry => entry.providerId === providerId && entry.fileId === item.id && entry.status === 'completed')} onclick={() => void download(item)}>Télécharger</button></div>
+          <div class="subtitle-row"><div><strong>{item.label}</strong><p>{item.language}{item.forced ? $t('catalog_forced') : ''}{item.sdh ? ' · SDH' : ''}</p><p>{subtitleMatchText(item.match)}</p></div><button type="button" disabled={busy || !inventory.enabled || inventory.downloads.some(entry => entry.providerId === providerId && entry.fileId === item.id && entry.status === 'completed')} onclick={() => void download(item)}>{$t('download')}</button></div>
         {:else}<p>{$t('no_results_search')}</p>{/each}
         {#if totalPages > 1}<nav aria-label={$t('results')}><button type="button" disabled={busy || page <= 1} onclick={() => void search(page - 1)}>{$t('previous_page')}</button><span>{page} / {totalPages}</span><button type="button" disabled={busy || page >= totalPages} onclick={() => void search(page + 1)}>{$t('next_page')}</button></nav>{/if}
       {/if}
       <h4>{$t('downloaded_subtitles')}</h4>
       {#each inventory.downloads as entry (entry.id)}
-        <div class="subtitle-row"><div><strong>{entry.label}</strong><p>{entry.language}{entry.forced ? ' · Forcés' : ''}{entry.sdh ? ' · SDH' : ''} · {entry.status === 'completed' ? 'Disponible dans le lecteur' : entry.status === 'failed' ? 'Échec' : entry.status === 'interrupted' ? 'Interrompu — supprimer avant de réessayer' : 'En attente ou en cours'}</p>{#if entry.errorCode}<p class="error">{subtitleErrorText(entry.errorCode)}</p>{/if}</div><button type="button" disabled={busy} onclick={() => void remove(entry.id)}>Supprimer le téléchargement</button></div>
+        <div class="subtitle-row"><div><strong>{entry.label}</strong><p>{entry.language}{entry.forced ? $t('catalog_forced') : ''}{entry.sdh ? ' · SDH' : ''} · {entry.status === 'completed' ? $t('available_in_player') : entry.status === 'failed' ? 'Échec' : entry.status === 'interrupted' ? $t('interrupted_remove_retry') : $t('pending_or_running')}</p>{#if entry.errorCode}<p class="error">{subtitleErrorText(entry.errorCode)}</p>{/if}</div><button type="button" disabled={busy} onclick={() => void remove(entry.id)}>{$t('remove_download')}</button></div>
       {:else}<p>{$t('no_downloaded_subtitles')}</p>{/each}
     {/if}
     {#if assetId}<button type="button" disabled={busy} onclick={() => void refresh()}>{$t('refresh_list')}</button>{/if}

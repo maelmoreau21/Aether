@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { adminRequest } from './request';
+  import { t } from '../i18n';
   let {extensionId}:{extensionId?:string}=$props();
   type Pack={id:string;name:string;count:number};
   let packs=$state<Pack[]>([]);
@@ -8,11 +9,11 @@
   let policy=$state<Policy>({allowCustom:true,allowGravatar:false,assignOnCreate:true,requireAvatar:true});
   let policyReady=$state(false);
   async function loadPolicy(){policy=await adminRequest<Policy>('/api/v1/admin/avatar-policy');policyReady=true;}
-  async function savePolicy(){busy=true;error='';notice='';try{await adminRequest('/api/v1/admin/avatar-policy',{method:'PUT',body:JSON.stringify(policy)});await loadPolicy();notice='Paramètres enregistrés.';}catch(e){error=e instanceof Error?e.message:'Enregistrement impossible.';}finally{busy=false;}}
+  async function savePolicy(){busy=true;error='';notice='';try{await adminRequest('/api/v1/admin/avatar-policy',{method:'PUT',body:JSON.stringify(policy)});await loadPolicy();notice=$t('settings_saved');}catch(e){error=e instanceof Error?e.message:$t('saving_failed');}finally{busy=false;}}
   let busy=$state(false),error=$state(''),notice=$state('');
   let legacy=$state({packs:0,images:0});
   async function loadLegacy(){legacy=await adminRequest<typeof legacy>('/api/v1/admin/avatars/migrate-legacy');}
-  async function migrateLegacy(){busy=true;error='';notice='';try{const result=await adminRequest<typeof legacy>('/api/v1/admin/avatars/migrate-legacy',{method:'POST'});await load();await loadLegacy();notice=`${result.packs} collection(s) et ${result.images} image(s) transférées.`;}catch(e){error=e instanceof Error?e.message:'Transfert impossible.';}finally{busy=false;}}
+  async function migrateLegacy(){busy=true;error='';notice='';try{const result=await adminRequest<typeof legacy>('/api/v1/admin/avatars/migrate-legacy',{method:'POST'});await load();await loadLegacy();notice=$t('and_transferred', { packs: result.packs, images: result.images });}catch(e){error=e instanceof Error?e.message:$t('transfer_failed');}finally{busy=false;}}
   let uploadName=$state('Mes avatars'),uploadTarget=$state(''),uploadFiles=$state<File[]>([]);
   let uploadInput=$state<HTMLInputElement>();
   const endpoint=$derived(extensionId ? `/api/v1/admin/extensions/${encodeURIComponent(extensionId)}/avatar-packs` : `/api/v1/admin/avatar-packs`);
@@ -21,59 +22,59 @@
   let selected=$state(''),images=$state<Avatar[]>([]),renaming=$state('');
   async function showPack(id:string){selected=id;renaming=packs.find(pack=>pack.id===id)?.name??'';images=[];if(!id)return;const result=await adminRequest<{images:Avatar[]}>(`${endpoint}/${encodeURIComponent(id)}/images`);if(selected===id)images=result.images;}
   async function load(){packs=(await adminRequest<{packs:Pack[]}>(endpoint)).packs;if(uploadTarget&&!packs.some(pack=>pack.id===uploadTarget))uploadTarget='';await showPack(packs.some(pack=>pack.id===selected)?selected:packs[0]?.id??'');}
-  async function galleryAction(action:()=>Promise<unknown>,message:string){busy=true;error='';notice='';try{await action();await load();notice=message;}catch(e){error=e instanceof Error?e.message:'Action impossible.';}finally{busy=false;}}
-  async function assignMissing(){busy=true;error='';notice='';try{const result=await adminRequest<{count:number}>(assignMissingEndpoint,{method:'POST'});notice=`${result.count} compte${result.count>1?'s':''} ${result.count>1?'ont':'a'} reçu un avatar.`;}catch(e){error=e instanceof Error?e.message:'Attribution impossible.';}finally{busy=false;}}
+  async function galleryAction(action:()=>Promise<unknown>,message:string){busy=true;error='';notice='';try{await action();await load();notice=message;}catch(e){error=e instanceof Error?e.message:$t('action_impossible');}finally{busy=false;}}
+  async function assignMissing(){busy=true;error='';notice='';try{const result=await adminRequest<{count:number}>(assignMissingEndpoint,{method:'POST'});notice=`${result.count} compte${result.count>1?'s':''} ${result.count>1?'ont':'a'} reçu un avatar.`;}catch(e){error=e instanceof Error?e.message:$t('assignment_failed');}finally{busy=false;}}
 
-  onMount(()=>{void load().catch(()=>error='Collections indisponibles.');if(!extensionId){void loadPolicy().catch(()=>error='Paramètres indisponibles.');void loadLegacy().catch(()=>error='État des anciennes collections indisponible.');}});
-  async function remove(id:string){if(!window.confirm('Supprimer cette collection de la galerie ? Les photos déjà choisies par les comptes sont conservées.'))return;busy=true;error='';try{await adminRequest(endpoint+'/'+encodeURIComponent(id),{method:'DELETE'});await load();notice='Collection retirée.';}catch(e){error=e instanceof Error?e.message:'Suppression impossible.';}finally{busy=false;}}
+  onMount(()=>{void load().catch(()=>error=$t('collections_unavailable'));if(!extensionId){void loadPolicy().catch(()=>error=$t('settings_unavailable'));void loadLegacy().catch(()=>error=$t('status_of_former_collections_unavailable'));}});
+  async function remove(id:string){if(!window.confirm('Supprimer cette collection de la galerie ? Les photos déjà choisies par les comptes sont conservées.'))return;busy=true;error='';try{await adminRequest(endpoint+'/'+encodeURIComponent(id),{method:'DELETE'});await load();notice=$t('collection_removed');}catch(e){error=e instanceof Error?e.message:$t('deletion_failed');}finally{busy=false;}}
   async function upload(){
-    if(!uploadFiles.length||uploadFiles.length>500||uploadFiles.some(file=>file.size>2*1024*1024)||uploadFiles.reduce((sum,file)=>sum+file.size,0)>64*1024*1024){error='Choisissez de 1 à 500 images de 2 Mo maximum, 64 Mo au total.';return;}
+    if(!uploadFiles.length||uploadFiles.length>500||uploadFiles.some(file=>file.size>2*1024*1024)||uploadFiles.reduce((sum,file)=>sum+file.size,0)>64*1024*1024){error=$t('choose_1_to_500_images_of');return;}
     busy=true;error='';notice='';
-    try{const form=new FormData();if(uploadTarget)form.append('packId',uploadTarget);else form.append('name',uploadName);for(const file of uploadFiles)form.append('images',file);const result=await adminRequest<{id:string;count:number}>(endpoint+'/upload',{method:'POST',body:form});selected=result.id;await load();notice=`${result.count} avatar${result.count>1?'s':''} envoyé${result.count>1?'s':''} au serveur.`;uploadFiles=[];if(uploadInput)uploadInput.value='';}catch(e){error=e instanceof Error?e.message:'Envoi impossible.';}finally{busy=false;}
+    try{const form=new FormData();if(uploadTarget)form.append('packId',uploadTarget);else form.append('name',uploadName);for(const file of uploadFiles)form.append('images',file);const result=await adminRequest<{id:string;count:number}>(endpoint+'/upload',{method:'POST',body:form});selected=result.id;await load();notice=`${result.count} avatar${result.count>1?'s':''} envoyé${result.count>1?'s':''} au serveur.`;uploadFiles=[];if(uploadInput)uploadInput.value='';}catch(e){error=e instanceof Error?e.message:$t('upload_failed');}finally{busy=false;}
   }
 
 </script>
-<section class="avatar-collections" class:embedded={!!extensionId} aria-label="Collections d’avatars" aria-busy={busy}>
+<section class="avatar-collections" class:embedded={!!extensionId} aria-label={$t('avatar_collections')} aria-busy={busy}>
   {#if extensionId}
-    <p>Cette collection appartient à une ancienne extension. Les avatars sont désormais gérés nativement dans Administration → Avatars. Les anciennes collections ne sont pas transférées automatiquement : les supprimer ou désinstaller l’extension peut les retirer.</p>
+    <p>{$t('this_collection_belongs_to_a_former')}</p>
   {:else}
-    <p>Gérez les images proposées dans les profils des utilisateurs.</p>
+    <p>{$t('manage_the_images_offered_in_user')}</p>
   {/if}
   {#if !extensionId}
     {#if legacy.packs > 0}
-      <div class="legacy-notice"><strong>Collections à transférer</strong><p>{legacy.packs} collection(s) et {legacy.images} image(s) proviennent d’une ancienne installation. Transférez-les pour les gérer ici et les conserver après sa suppression.</p><button disabled={busy} onclick={()=>void migrateLegacy()}>Transférer les collections</button></div>
+      <div class="legacy-notice"><strong>{$t('collections_to_transfer')}</strong><p>{$t('and_come_from_a_former_installation', { packs: legacy.packs, images: legacy.images })}</p><button disabled={busy} onclick={()=>void migrateLegacy()}>{$t('transfer_collections')}</button></div>
     {/if}
     <form class="avatar-rules" onsubmit={event=>{event.preventDefault();void savePolicy();}}>
-      <h3>Paramètres des avatars</h3>
-      <label class="toggle"><input type="checkbox" bind:checked={policy.requireAvatar} disabled={busy||!policyReady} />Rendre les avatars obligatoires</label>
-      <p>Activé par défaut. Chaque compte conserve un avatar ; une image locale est utilisée si la galerie est vide. L’import personnel reste configurable séparément.</p>
-      <label class="toggle"><input type="checkbox" bind:checked={policy.allowCustom} disabled={busy||!policyReady} />Permettre l’importation d’images personnelles</label>
-      <label class="toggle"><input type="checkbox" bind:checked={policy.assignOnCreate} disabled={busy||!policyReady||policy.requireAvatar} />Attribuer automatiquement un avatar aux nouveaux comptes</label>
-      <p>Lorsque les avatars sont obligatoires, l’attribution automatique est toujours appliquée.</p>
-      <button disabled={busy||!policyReady}>Enregistrer les paramètres</button>
+      <h3>{$t('avatar_settings')}</h3>
+      <label class="toggle"><input type="checkbox" bind:checked={policy.requireAvatar} disabled={busy||!policyReady} />{$t('make_avatars_mandatory')}</label>
+      <p>{$t('enabled_by_default_each_account_keeps')}</p>
+      <label class="toggle"><input type="checkbox" bind:checked={policy.allowCustom} disabled={busy||!policyReady} />{$t('allow_importing_personal_images')}</label>
+      <label class="toggle"><input type="checkbox" bind:checked={policy.assignOnCreate} disabled={busy||!policyReady||policy.requireAvatar} />{$t('automatically_assign_an_avatar_to_new')}</label>
+      <p>{$t('when_avatars_are_mandatory_automatic')}</p>
+      <button disabled={busy||!policyReady}>{$t('save_extension_settings')}</button>
     </form>
   {/if}
-  <h3>Votre galerie d’avatars</h3><p>Ajoutez vos images et organisez-les en collections. Les utilisateurs choisissent ensuite leur avatar dans leur profil.</p>
-  <button disabled={busy || (!!extensionId && !packs.some(pack=>pack.count>0))} onclick={()=>void assignMissing()}>Attribuer les avatars manquants maintenant</button>
-  {#if !extensionId && !packs.some(pack=>pack.count>0)}<p>La galerie de secours locale reste disponible pour tous les profils.</p>{/if}
-  <details class="upload" open><summary>Ajouter des images</summary>
+  <h3>{$t('your_avatar_gallery')}</h3><p>{$t('add_your_images_and_organise_them')}</p>
+  <button disabled={busy || (!!extensionId && !packs.some(pack=>pack.count>0))} onclick={()=>void assignMissing()}>{$t('assign_missing_avatars_now')}</button>
+  {#if !extensionId && !packs.some(pack=>pack.count>0)}<p>{$t('the_local_fallback_gallery_remains_available')}</p>{/if}
+  <details class="upload" open><summary>{$t('add_images')}</summary>
     <form onsubmit={event=>{event.preventDefault();void upload();}}>
-      <label>Destination<select bind:value={uploadTarget} disabled={busy}><option value="">Nouvelle collection</option>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count} avatars</option>{/each}</select></label>
-      {#if !uploadTarget}<label>Nom de la collection<input required maxlength="100" bind:value={uploadName} disabled={busy} /></label>{/if}
-      <label>Images<input type="file" bind:this={uploadInput} required multiple accept="image/png,image/jpeg,image/webp" disabled={busy} onchange={event=>uploadFiles=Array.from(event.currentTarget.files??[])} /></label>
-      <button class="primary" disabled={busy||!uploadFiles.length}>Ajouter les avatars</button>
-    </form><small>PNG, JPEG, WebP · 2 Mo par image · 64 Mo par import · 500 images par collection.</small>
+      <label>{$t('destination')}<select bind:value={uploadTarget} disabled={busy}><option value="">{$t('new_collection')}</option>{#each packs as pack (pack.id)}<option value={pack.id}>{$t('avatars', { name: pack.name, count: pack.count })}</option>{/each}</select></label>
+      {#if !uploadTarget}<label>{$t('collection_name')}<input required maxlength="100" bind:value={uploadName} disabled={busy} /></label>{/if}
+      <label>{$t('admin_artwork_tab')}<input type="file" bind:this={uploadInput} required multiple accept="image/png,image/jpeg,image/webp" disabled={busy} onchange={event=>uploadFiles=Array.from(event.currentTarget.files??[])} /></label>
+      <button class="primary" disabled={busy||!uploadFiles.length}>{$t('add_avatars')}</button>
+    </form><small>{$t('png_jpeg_webp_2_mb_per')}</small>
   </details>
-  {#if busy}<p role="status">Traitement en cours…</p>{/if}
+  {#if busy}<p role="status">{$t('processing')}</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}
   {#if packs.length}
-    <label class="collection-picker">Collection<select disabled={busy} value={selected} onchange={event=>void showPack(event.currentTarget.value).catch(()=>error='Galerie indisponible.')}>{#each packs as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count} avatar{pack.count>1?'s':''}</option>{/each}</select></label>
-    <form onsubmit={event=>{event.preventDefault();void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}`,{method:'PUT',body:JSON.stringify({name:renaming})}),'Collection renommée.');}}>
-      <label>Nom de la collection<input required maxlength="100" bind:value={renaming} disabled={busy} /></label><button disabled={busy}>Renommer</button>
-      <button type="button" class="danger" disabled={busy} onclick={()=>void remove(selected)}>Supprimer la collection</button>
+    <label class="collection-picker">{$t('collection')}<select disabled={busy} value={selected} onchange={event=>void showPack(event.currentTarget.value).catch(()=>error=$t('gallery_unavailable'))}>{#each packs as pack (pack.id)}<option value={pack.id}>{$t('pack_option', { count: pack.count, name: pack.name })}</option>{/each}</select></label>
+    <form onsubmit={event=>{event.preventDefault();void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}`,{method:'PUT',body:JSON.stringify({name:renaming})}),$t('collection_renamed'));}}>
+      <label>{$t('collection_name')}<input required maxlength="100" bind:value={renaming} disabled={busy} /></label><button disabled={busy}>{$t('rename')}</button>
+      <button type="button" class="danger" disabled={busy} onclick={()=>void remove(selected)}>{$t('delete_the_collection')}</button>
     </form>
-    <div class="gallery">{#each images as avatar (avatar.id)}<article><img src={avatar.url} alt={avatar.name} loading="lazy" width="112" height="112" /><span>{avatar.name}</span><button class="danger" aria-label={`Supprimer ${avatar.name}`} disabled={busy} onclick={()=>{if(window.confirm(`Retirer « ${avatar.name} » de la galerie ? Les photos déjà choisies sont conservées.`))void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}/images/${encodeURIComponent(avatar.id)}`,{method:'DELETE'}),'Avatar supprimé de la galerie.');}}>Supprimer</button></article>{:else}<p>Cette collection est vide.</p>{/each}</div>
-  {:else}<p>Aucun avatar pour le moment. Ajoutez des images.</p>{/if}
+    <div class="gallery">{#each images as avatar (avatar.id)}<article><img src={avatar.url} alt={avatar.name} loading="lazy" width="112" height="112" /><span>{avatar.name}</span><button class="danger" aria-label={$t('admin_delete', { name: avatar.name })} disabled={busy} onclick={()=>{if(window.confirm(`Retirer « ${avatar.name} » de la galerie ? Les photos déjà choisies sont conservées.`))void galleryAction(()=>adminRequest(`${endpoint}/${encodeURIComponent(selected)}/images/${encodeURIComponent(avatar.id)}`,{method:'DELETE'}),$t('avatar_removed_from_the_gallery'));}}>{$t('delete')}</button></article>{:else}<p>{$t('this_collection_is_empty')}</p>{/each}</div>
+  {:else}<p>{$t('no_avatars_yet_add_images')}</p>{/if}
 </section>
 <style>
   .avatar-collections { display: grid; gap: 16px; min-width: 0; margin-top: 8px; font-family: var(--font-sans); color: var(--color-text); }

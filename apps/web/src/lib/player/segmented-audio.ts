@@ -1,5 +1,6 @@
 import { ExternalAudio } from './external-audio';
 
+import { tr } from '../i18n';
 const MIME = 'audio/mp4; codecs="opus"';
 const SECONDS = 10;
 export interface AudioTimeline { duration?: number; position?: number; mode?: 'absolute' | 'rebased'; trackId?: string }
@@ -36,7 +37,7 @@ export class SegmentedAudio extends ExternalAudio {
   private duration() { return this.timeline?.duration ?? this.element.duration; }
   async preload(prefix: string, position: number | Promise<number>) {
     const saved = await position;
-    if (this.closed) throw new Error('Lecteur fermé.');
+    if (this.closed) throw new Error(tr('player_closed'));
     this.timeline = { ...this.timeline, position: Number.isFinite(saved) ? Math.max(0, Math.min(saved, Math.max(0, this.duration() - .05))) : 0 };
     await this.load(prefix, false);
   }
@@ -70,7 +71,7 @@ export class SegmentedAudio extends ExternalAudio {
     const mediaLoad = super.load(this.objectUrl, false, MIME, this.timeline?.position);
     try {
       await Promise.race([Promise.all([mediaLoad, (async()=>{await opened;await this.fill(true);})()]), failed]);
-      if (this.closed) throw new Error('Lecteur fermé.');
+      if (this.closed) throw new Error(tr('player_closed'));
       this.loading = false; this.rejectLoad = undefined;
       if (activate) this.activate();
     } catch (error) { this.destroy(); throw error; }
@@ -111,15 +112,15 @@ export class SegmentedAudio extends ExternalAudio {
     finally { this.rejectBuffer = undefined; }
   }
   private async idle(signal?: AbortSignal) {
-    if (signal?.aborted) throw new Error('Seek audio remplacé.');
+    if (signal?.aborted) throw new Error(tr('audio_seek_replaced'));
     if (!this.buffer?.updating) return;
     const buffer = this.buffer;
     await new Promise<void>((resolve,reject)=>{
       const done=()=>{cleanup();resolve();};
-      const fail=()=>{cleanup();reject(new Error('Segment Opus rejeté par le navigateur.'));};
-      const cancel=()=>{cleanup();reject(new Error('Lecteur fermé.'));};
-      const superseded=()=>{cleanup();reject(new Error('Seek audio remplacé.'));};
-      const timeout=setTimeout(()=>{cleanup();reject(new Error('Mise en tampon du segment Opus expirée après 10 secondes.'));},10000);
+      const fail=()=>{cleanup();reject(new Error(tr('opus_segment_rejected_by_the_browser')));};
+      const cancel=()=>{cleanup();reject(new Error(tr('player_closed')));};
+      const superseded=()=>{cleanup();reject(new Error(tr('audio_seek_replaced')));};
+      const timeout=setTimeout(()=>{cleanup();reject(new Error(tr('opus_segment_buffering_timed_out_after')));},10000);
       const cleanup=()=>{clearTimeout(timeout);this.pendingUpdates.delete(cancel);buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);signal?.removeEventListener('abort',superseded);};
       this.pendingUpdates.add(cancel);
       buffer.addEventListener('updateend',done,{once:true});buffer.addEventListener('error',fail,{once:true});buffer.addEventListener('abort',fail,{once:true});
@@ -160,19 +161,19 @@ export class SegmentedAudio extends ExternalAudio {
           if (!response.ok) throw new Error(`Préparation audio segment ${chunk} : HTTP ${response.status} (${response.headers.get('x-media-preparation-error') ?? 'source indisponible'}).`);
           const length = response.headers.get('content-length');
           const size = length === null ? undefined : Number(length);
-          if (size !== undefined && (!Number.isFinite(size) || size <= 0 || size > 16*1024*1024)) throw new Error('Taille de segment audio invalide.');
-          const reader=response.body?.getReader();if(!reader)throw new Error('Segment audio vide.');
+          if (size !== undefined && (!Number.isFinite(size) || size <= 0 || size > 16*1024*1024)) throw new Error(tr('invalid_audio_segment_size'));
+          const reader=response.body?.getReader();if(!reader)throw new Error(tr('empty_audio_segment'));
           const parts:Uint8Array[]=[];let total=0;
           try {
             while(true){const {done,value}=await reader.read();if(done)break;total+=value.byteLength;
-              if(total>16*1024*1024){await reader.cancel();throw new Error('Segment audio trop volumineux.');}parts.push(value);}
+              if(total>16*1024*1024){await reader.cancel();throw new Error(tr('audio_segment_too_large'));}parts.push(value);}
           } finally {reader.releaseLock();}
-          if(total===0 || (size!==undefined && total!==size))throw new Error('Segment audio tronqué.');
+          if(total===0 || (size!==undefined && total!==size))throw new Error(tr('audio_segment_truncated'));
           const data=new Uint8Array(total);let cursor=0;for(const part of parts){data.set(part,cursor);cursor+=part.byteLength;}bytes=data.buffer;
           console.info('[media audio]', {stage:'segment-ready',chunk,bytes:total,elapsedMs:Math.round(performance.now()-started)});
         } catch (error) {
           if(this.closed || epoch!==this.seekEpoch)return;
-          if(controller.signal.aborted) throw new Error('Préparation du segment audio annulée ou expirée (20 s).');
+          if(controller.signal.aborted) throw new Error(tr('audio_segment_preparation_cancelled_or_timed'));
           throw error;
         } finally {clearTimeout(timeout);if(this.controller===controller)this.controller=undefined;}
         if (this.closed || epoch !== this.seekEpoch) return;
@@ -222,9 +223,9 @@ export class SegmentedAudio extends ExternalAudio {
     for(const cancel of this.pendingUpdates)cancel();
     this.element.removeEventListener('seeking',this.seekChanged);
     if(this.opened)this.mediaSource.removeEventListener('sourceopen',this.opened);
-    this.rejectOpen?.(new Error('Lecteur fermé.'));this.rejectOpen=undefined;
-    this.rejectLoad?.(new Error('Lecteur fermé.'));this.rejectLoad=undefined;
-    this.rejectBuffer?.(new Error('Lecteur fermé.'));this.rejectBuffer=undefined;
+    this.rejectOpen?.(new Error(tr('player_closed')));this.rejectOpen=undefined;
+    this.rejectLoad?.(new Error(tr('player_closed')));this.rejectLoad=undefined;
+    this.rejectBuffer?.(new Error(tr('player_closed')));this.rejectBuffer=undefined;
     if(this.buffer?.updating){try{this.buffer.abort();}catch{/* MSE can already be closed. */}}
     super.destroy();URL.revokeObjectURL(this.objectUrl);
   }

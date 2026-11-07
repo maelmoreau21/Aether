@@ -1,17 +1,18 @@
 <script lang="ts">
   import { session } from '../auth/session';
+  import { t, type TranslationKey } from '../i18n';
   type Window = { day: number; startMinute: number; endMinute: number };
   let { userId }: { userId: string } = $props();
   // Paliers comparables aux classifications normalisées (FR:-16, TV-MA, PG-13…).
-  const ageTiers = [{ value: 0, label: 'Tous publics uniquement' }, { value: 10, label: '10 ans (-10)' }, { value: 12, label: '12 ans (-12)' }, { value: 16, label: '16 ans (-16)' }, { value: 18, label: '18 ans (-18)' }, { value: 21, label: 'Sans limite d’âge' }];
+  const ageTiers = [{ value: 0, get label() { return $t('all_audiences_only'); } }, { value: 10, get label() { return $t('n_10_years_10'); } }, { value: 12, get label() { return $t('n_12_years_12'); } }, { value: 16, get label() { return $t('n_16_years_16'); } }, { value: 18, get label() { return $t('n_18_years_18'); } }, { value: 21, get label() { return $t('no_age_limit'); } }];
   let enabled = $state(false), maximumAge = $state(12), allowUnrated = $state(false);
   let tags = $state(''), windows = $state<Window[]>([]);
   let error = $state(''), notice = $state(''), busy = $state(false), loaded = $state(false);
-  const days = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+  const days = $derived([1, 2, 3, 4, 5, 6, 0].map(day => $t(`sched_day_${day}` as TranslationKey)));
   $effect(() => {
     const id = userId, controller = new AbortController(); loaded = false; error = ''; notice = '';
     fetch(`/api/v1/admin/users/${encodeURIComponent(id)}/parental`, { signal: controller.signal, cache: 'no-store' })
-      .then(async response => { if (!response.ok) throw new Error('Restrictions indisponibles.'); return response.json(); })
+      .then(async response => { if (!response.ok) throw new Error($t('restrictions_unavailable')); return response.json(); })
       .then(value => { if (!controller.signal.aborted) { enabled = value !== null; maximumAge = value?.maximumAge ?? 12; allowUnrated = value?.allowUnrated ?? false; tags = (value?.blockedTags ?? []).join(', '); windows = value?.accessSchedule ?? []; loaded = true; } })
       .catch(cause => { if (!controller.signal.aborted) error = cause.message; });
     return () => controller.abort();
@@ -24,33 +25,33 @@
     const id = userId;
     try {
       const response = await fetch(`/api/v1/admin/users/${encodeURIComponent(id)}/parental`, { method: enabled ? 'PUT' : 'DELETE', headers: { 'content-type':'application/json', 'x-csrf-token': $session?.csrfToken ?? '' }, body: enabled ? JSON.stringify({ maximumAge, allowUnrated, blockedTags: tags.split(',').map(v => v.trim()).filter(Boolean), accessSchedule: windows }) : undefined });
-      if (!response.ok) throw new Error('Restrictions non enregistrées. Vérifiez les horaires et votre session.');
-      if (id === userId) notice = 'Restrictions enregistrées.';
+      if (!response.ok) throw new Error($t('restrictions_not_saved_check_the_schedules'));
+      if (id === userId) notice = $t('restrictions_saved');
     } catch (cause) { if (id === userId) error = cause instanceof Error ? cause.message : 'Erreur'; }
     finally { busy = false; }
   }
 </script>
-<form onsubmit={save}><fieldset disabled={busy || !loaded}><legend>Restrictions parentales</legend>
-  <label><input type="checkbox" bind:checked={enabled} />Limiter ce compte</label>
+<form onsubmit={save}><fieldset disabled={busy || !loaded}><legend>{$t('parental_restrictions')}</legend>
+  <label><input type="checkbox" bind:checked={enabled} />{$t('restrict_this_account')}</label>
   {#if enabled}
-    <label>Âge maximal autorisé<select bind:value={maximumAge}>
+    <label>{$t('maximum_allowed_age')}<select bind:value={maximumAge}>
       {#each ageTiers as tier (tier.value)}<option value={tier.value}>{tier.label}</option>{/each}
-      {#if !ageTiers.some(tier => tier.value === maximumAge)}<option value={maximumAge}>{maximumAge} ans (réglage existant)</option>{/if}
+      {#if !ageTiers.some(tier => tier.value === maximumAge)}<option value={maximumAge}>{$t('years_existing_setting', { maximumAge })}</option>{/if}
     </select></label>
-    <label><input type="checkbox" bind:checked={allowUnrated} />Autoriser les médias sans classification connue</label>
-    <label>Tags bloqués, séparés par des virgules<input bind:value={tags} maxlength="6400" placeholder="horreur, adulte" /></label>
-    <p>Correspondance exacte des tags NFO ou manuels, sans distinction de casse. Les tags d’une série s’appliquent à ses épisodes.</p>
-    <h3>Horaires d’accès (UTC)</h3><p>Sans plage : accès toute la semaine. Sinon, seules ces plages sont autorisées. Les bornes de fin sont exclues ; séparez les plages qui traversent minuit. Les administrateurs gardent leur accès de récupération.</p>
+    <label><input type="checkbox" bind:checked={allowUnrated} />{$t('allow_media_with_no_known_rating')}</label>
+    <label>{$t('blocked_tags_separated_by_commas')}<input bind:value={tags} maxlength="6400" placeholder={$t('horror_adult')} /></label>
+    <p>{$t('exact_match_on_nfo_or_manual')}</p>
+    <h3>{$t('access_hours_utc')}</h3><p>{$t('with_no_range_access_all_week')}</p>
     {#each windows as window, index (window)}
-      <div class="window"><label>Jour<select bind:value={window.day}>{#each days as day, number (day)}<option value={number}>{day}</option>{/each}</select></label>
-      <label>Début<input type="time" required value={time(window.startMinute)} onchange={event => window.startMinute = minutes(event.currentTarget.value)} /></label>
-      <label>Fin<select value={window.endMinute === 1440 ? 'midnight' : 'time'} onchange={event => window.endMinute = event.currentTarget.value === 'midnight' ? 1440 : 1200}><option value="time">Heure</option><option value="midnight">24:00</option></select>{#if window.endMinute !== 1440}<input aria-label="Heure de fin" type="time" required value={time(window.endMinute)} onchange={event => window.endMinute = minutes(event.currentTarget.value)} />{/if}</label>
-      <button type="button" onclick={() => windows = windows.filter((_, i) => i !== index)}>Retirer</button></div>
+      <div class="window"><label>{$t('sched_day')}<select bind:value={window.day}>{#each days as day, number (day)}<option value={number}>{day}</option>{/each}</select></label>
+      <label>{$t('sched_started')}<input type="time" required value={time(window.startMinute)} onchange={event => window.startMinute = minutes(event.currentTarget.value)} /></label>
+      <label>{$t('sched_ended')}<select value={window.endMinute === 1440 ? 'midnight' : 'time'} onchange={event => window.endMinute = event.currentTarget.value === 'midnight' ? 1440 : 1200}><option value="time">{$t('sched_time')}</option><option value="midnight">24:00</option></select>{#if window.endMinute !== 1440}<input aria-label={$t('end_time')} type="time" required value={time(window.endMinute)} onchange={event => window.endMinute = minutes(event.currentTarget.value)} />{/if}</label>
+      <button type="button" onclick={() => windows = windows.filter((_, i) => i !== index)}>{$t('remove')}</button></div>
     {/each}
-    <button type="button" disabled={windows.length >= 56} onclick={() => windows = [...windows, {day:0,startMinute:480,endMinute:1200}]}>Ajouter une plage</button>
-    <p>Les âges minimum peuvent être corrigés dans les fiches des médias. Les médias non classifiés sont bloqués par défaut.</p>
+    <button type="button" disabled={windows.length >= 56} onclick={() => windows = [...windows, {day:0,startMinute:480,endMinute:1200}]}>{$t('add_a_range')}</button>
+    <p>{$t('minimum_ages_can_be_corrected_in')}</p>
   {/if}
-  <button disabled={busy}>Enregistrer les restrictions</button>
+  <button disabled={busy}>{$t('save_restrictions')}</button>
 </fieldset>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</form>
 <style>
 form { display: grid; gap: 16px; font-family: var(--font-sans); color: var(--color-text); }

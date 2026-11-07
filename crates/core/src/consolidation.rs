@@ -465,6 +465,9 @@ pub async fn sync_work_summary_tx(
     .execute(&mut *tx)
     .await?;
 
+    // Original titles feed the search index next to the translated ones.
+    crate::translations::search::refresh(&mut *tx, work_id).await?;
+
     // Sync normalized external IDs table
     query("DELETE FROM media_work_external_ids WHERE work_id = ?")
         .bind(work_id)

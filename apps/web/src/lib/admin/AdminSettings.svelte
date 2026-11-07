@@ -38,7 +38,7 @@
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
         welcome = data.welcomeMessage;
-        ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO';
+        ssoLabel = data.ssoButtonLabel ?? $t('sign_in_with_sso');
         minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
@@ -87,7 +87,7 @@
     <div class="settings-panel">
     <label>{$t('server_name')}<input bind:value={name} required maxlength="80" autocomplete="off" /></label>
     <label>{$t('welcome_message')}<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
-    <label>{$t('sso_button_label')}<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
+    <label>{$t('sso_button_label')}<input bind:value={ssoLabel} required maxlength="80" placeholder={$t('sign_in_with_authentik')} /></label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />{$t('block_sso_local')}</label>
     </div>
 
@@ -118,7 +118,7 @@
         <p>{$t('extension_log_note')}</p>
         <div class="settings-grid">
           <label>{$t('log_retention')}<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
-          <label>{$t('allowed_cors')}<input bind:value={corsHosts} placeholder="https://app.example.com, http://localhost:3000" /></label>
+          <label>{$t('allowed_cors')}<input bind:value={corsHosts} placeholder={$t('https_app_example_com_http_localhost')} /></label>
         </div>
       </fieldset>
     </details>
@@ -130,7 +130,7 @@
 <section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">{$t('network')}</h2>
   {#if network}<dl><div><dt>{$t('public_address')}</dt><dd>{network.publicUrl}</dd></div><div><dt>{$t('web_interface')}</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>{$t('secure_session_cookies')}</dt><dd>{network.secureCookies ? $t('enabled') : $t('disabled_local_http')}</dd></div></dl>{/if}
   <details><summary>{$t('edit_connection')}</summary><p>{$t('network_note')}</p>
-  <p>Les adresses des Media Nodes se gèrent dans Nœuds de stockage.</p></details>
+  <p>{$t('media_node_addresses_are_managed_under')}</p></details>
 </section>
 {/if}
 {#if ['#general-section','#network-section'].includes(section)}

@@ -9,6 +9,7 @@
   import ClientIcon from '../ui/ClientIcon.svelte';
   import Icon from '../ui/Icon.svelte';
   import { clientInfo, clock } from '../ui/client-info';
+  import { t, fmt } from '../i18n';
   let {coreHealth,nodes,libraries,scans,nodesError='',active=true}:{coreHealth:CoreHealth|null;nodes:AdminNode[];libraries:Library[];scans:Record<string,Scan>;nodesError?:string;active?:boolean}=$props();
   type Activity={userId:string;name:string;device:string;lastSeenAt:number;playbackId:string|null;title:string|null;workId?:string|null;workKind?:string|null;year?:number|null;seriesId?:string|null;seriesTitle?:string|null;seasonNumber?:number|null;episodeNumber?:number|null;position:number|null;duration:number|null;paused:boolean|null};
   /** Backgrounds in fallback order (episode, then series); the card moves on when one fails. */
@@ -24,7 +25,7 @@
   const playing=$derived(sessions.filter(item=>item.playbackId));
   // Playback first, then the most recent browsing sessions.
   const ordered=$derived([...sessions].sort((a,b)=>Number(!!b.playbackId)-Number(!!a.playbackId)||b.lastSeenAt-a.lastSeenAt));
-  async function refresh(){if(!active||loading)return;loading=true;try{sessions=(await adminRequest<{sessions:Activity[]}>('/api/v1/admin/activity')).sessions;activityError='';updated=new Date().toLocaleTimeString();for(const item of sessions)if(item.workId)void loadArt(item);}catch{activityError='Activité indisponible. Réessayez.';sessions=[];}finally{loading=false;}}
+  async function refresh(){if(!active||loading)return;loading=true;try{sessions=(await adminRequest<{sessions:Activity[]}>('/api/v1/admin/activity')).sessions;activityError='';updated=$fmt.time(new Date());for(const item of sessions)if(item.workId)void loadArt(item);}catch{activityError=$t('activity_unavailable_try_again');sessions=[];}finally{loading=false;}}
   const keyOf=(item:Activity)=>item.workId?`${item.workId}:${item.seriesId??''}`:'';
   async function images(id:string|null|undefined,kinds:string[]):Promise<{urls:string[];logo:string|null}>{
     if(!id)return{urls:[],logo:null};
@@ -45,34 +46,34 @@
   $effect(()=>{if(active)untrack(()=>void refresh());});
   onMount(()=>{const timer=setInterval(()=>void refresh(),10000);return()=>clearInterval(timer);});
   const percent=(item:Activity)=>item.duration?Math.min(100,Math.max(0,((item.position??0)/item.duration)*100)):0;
-  const ago=(seconds:number)=>{const delta=Math.max(0,Math.floor(Date.now()/1000-seconds));return delta<60?'à l’instant':`il y a ${Math.floor(delta/60)} min`;};
+  const ago=(seconds:number)=>{const delta=Math.max(0,Math.floor(Date.now()/1000-seconds));return delta<60?$t('sched_ago_now'):`il y a ${Math.floor(delta/60)} min`;};
 </script>
 
 <section id="overview" aria-labelledby="overview-heading" class="overview">
   <header class="page-head">
-    <div><h2 id="overview-heading">Vue d’ensemble</h2><p>L’essentiel de votre serveur.</p></div>
-    <button class="ghost" disabled={loading} onclick={()=>void refresh()}>Actualiser</button>
+    <div><h2 id="overview-heading">{$t('admin_nav_overview')}</h2><p>{$t('the_essentials_of_your_server')}</p></div>
+    <button class="ghost" disabled={loading} onclick={()=>void refresh()}>{$t('refresh')}</button>
   </header>
 
   <div class="stats">
-    <div class="stat"><span class="dot" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}></span><div><small>Serveur</small><strong>{coreHealth?.status==='ok'?'Actif':coreHealth?'À vérifier':'—'}</strong></div></div>
-    <div class="stat"><span class="dot" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}></span><div><small>Nœuds</small><strong>{nodesError?'—':`${connected} / ${nodes.length}`}</strong></div></div>
-    <div class="stat"><span class="dot" class:ok={playing.length>0}></span><div><small>Lectures</small><strong>{activityError||!updated?'—':playing.length}</strong></div></div>
-    <div class="stat"><span class="dot" class:ok={running>0}></span><div><small>Indexations</small><strong>{running}</strong></div></div>
+    <div class="stat"><span class="dot" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}></span><div><small>{$t('admin_group_server')}</small><strong>{coreHealth?.status==='ok'?'Actif':coreHealth?$t('to_check'):'—'}</strong></div></div>
+    <div class="stat"><span class="dot" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}></span><div><small>{$t('nodes')}</small><strong>{nodesError?'—':`${connected} / ${nodes.length}`}</strong></div></div>
+    <div class="stat"><span class="dot" class:ok={playing.length>0}></span><div><small>{$t('stats_kpi_plays')}</small><strong>{activityError||!updated?'—':playing.length}</strong></div></div>
+    <div class="stat"><span class="dot" class:ok={running>0}></span><div><small>{$t('admin_indexing')}</small><strong>{running}</strong></div></div>
   </div>
 
   {#if issues.length}
     <div class="callout" role="status">
-      <strong>{issues.length} bibliothèque(s) avec des fichiers refusés au dernier scan.</strong>
-      <a href="#libraries-section">Voir les bibliothèques</a>
+      <strong>{$t('with_files_rejected_in_the_last', { count: issues.length })}</strong>
+      <a href="#libraries-section">{$t('view_libraries')}</a>
     </div>
   {/if}
   {#if offline}
-    <div class="callout" role="status"><strong>{offline} nœud(s) hors ligne.</strong><a href="#nodes-section">Gérer les nœuds</a></div>
+    <div class="callout" role="status"><strong>{$t('offline', { offline })}</strong><a href="#nodes-section">{$t('admin_manage_nodes')}</a></div>
   {/if}
 
   <section class="block" aria-labelledby="activity-heading">
-    <div class="block-head"><h3 id="activity-heading">En ce moment</h3>{#if updated&&!activityError}<small>Actualisé à {updated}</small>{/if}</div>
+    <div class="block-head"><h3 id="activity-heading">{$t('right_now')}</h3>{#if updated&&!activityError}<small>{$t('updated_at', { updated })}</small>{/if}</div>
     {#if activityError}<p class="empty" role="alert">{activityError}</p>
     {:else if sessions.length}
       <ul class="session-grid">
@@ -98,12 +99,12 @@
                   <span class="time">{clock(item.position)} / {clock(item.duration)}</span>
                 </div>
               {:else}
-                <div class="now browsing"><Icon name="globe" size={16} /><span>Navigation · {ago(item.lastSeenAt)}</span></div>
+                <div class="now browsing"><Icon name="globe" size={16} /><span>{$t('browsing', { value: ago(item.lastSeenAt) })}</span></div>
               {/if}
             </div>
-            {#if item.playbackId}<div class="progress" role="progressbar" aria-label={`Progression de ${item.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent(item))}><span style:width={`${percent(item)}%`}></span></div>{/if}
+            {#if item.playbackId}<div class="progress" role="progressbar" aria-label={$t('progress_of', { name: item.name })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent(item))}><span style:width={`${percent(item)}%`}></span></div>{/if}
             <div class="session-foot">
-              <span class="state" title={item.playbackId?(item.paused?'En pause':'En lecture'):'Navigation'}>
+              <span class="state" title={item.playbackId?(item.paused?$t('paused'):$t('playing')):'Navigation'}>
                 <Icon name={item.playbackId?(item.paused?'pause':'play'):'eye'} size={15} />
               </span>
               <span class="avatar" aria-hidden="true">{item.name.slice(0,1).toLocaleUpperCase()}</span>
@@ -112,15 +113,15 @@
           </li>
         {/each}
       </ul>
-    {:else}<p class="empty">{loading?'Chargement…':'Aucun utilisateur actif récemment.'}</p>{/if}
+    {:else}<p class="empty">{loading?'Chargement…':$t('no_recently_active_users')}</p>{/if}
   </section>
 
   <section class="block technical" aria-labelledby="technical-heading">
-    <div class="block-head"><h3 id="technical-heading">Informations techniques</h3></div>
+    <div class="block-head"><h3 id="technical-heading">{$t('technical_information')}</h3></div>
     <div class="tech-grid">
-      <div class="tech"><Icon name="server" size={20} /><div><small>Version serveur</small><strong>{coreHealth?.version??'Non communiquée'}</strong></div></div>
-      <div class="tech"><Icon name="shield" size={20} /><div><small>Mode</small><strong>{coreHealth?.mode??'Non communiqué'}</strong></div></div>
-      <div class="tech"><Icon name="tv" size={20} /><div><small>Nœuds</small><strong>{nodesError?'Indisponible':nodes.length?`${connected} connecté(s) sur ${nodes.length}`:'Aucun nœud'}</strong></div></div>
+      <div class="tech"><Icon name="server" size={20} /><div><small>{$t('server_version')}</small><strong>{coreHealth?.version??$t('not_reported')}</strong></div></div>
+      <div class="tech"><Icon name="shield" size={20} /><div><small>{$t('mode')}</small><strong>{coreHealth?.mode??$t('not_communicated')}</strong></div></div>
+      <div class="tech"><Icon name="tv" size={20} /><div><small>{$t('nodes')}</small><strong>{nodesError?'Indisponible':nodes.length?$t('connected_out_of', { connected, count: nodes.length }):$t('admin_no_nodes')}</strong></div></div>
     </div>
     {#if nodes.length}
       <ul class="node-list">
@@ -129,7 +130,7 @@
             <span class="dot" class:ok={node.status==='connected'} class:warn={node.status==='disconnected'}></span>
             <strong>{node.name}</strong>
             <span class="pill">{node.kind==='local'?'Local':'Distant'}</span>
-            <span class="node-version">{node.version||'Version non communiquée'}</span>
+            <span class="node-version">{node.version||$t('admin_version_not_reported')}</span>
           </li>
         {/each}
       </ul>

@@ -1,5 +1,6 @@
 import type { IconName } from '../ui/Icon.svelte';
 import type { TranslationKey } from '../i18n';
+import { messages } from '../i18n/messages';
 
 type LabelKey = TranslationKey;
 export interface AdminDestination { hash: string; label: string; labelKey: LabelKey; icon: IconName }
@@ -92,6 +93,33 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#network-section': ['Adresse publique', 'MEDIA_PUBLIC_URL', 'Interface Web', 'API', 'Cookies sécurisés', 'Cookies de session sécurisés (HTTPS)', 'HTTPS']
 };
 
+/**
+ * The same keywords in English, in the same order. The sidebar search looks in both languages so a
+ * setting is found whichever language the administrator types, and the interface language only
+ * decides which label is displayed.
+ */
+export const adminSearchKeywordsEn: Record<string, readonly string[]> = {
+  '#statistics-section': ['Statistics', 'Collection', 'Retention', 'Playback history', 'Audio and subtitles', 'Time spent', 'Export as CSV', 'Sessions', 'Music'],
+  '#overview': ['Dashboard', 'Who is watching what?', 'Open players', 'Indexing in progress', 'Refresh the activity', 'Technical information', 'Server version', 'Node versions', 'Errors from the latest scans'],
+  '#libraries-section': ['Metadata language', 'Preferred language', 'Rating countries', 'Add a library', 'Refresh all libraries', 'Scan the library', 'Rename a library', 'Edit images', 'Look for missing metadata', 'Schedule the refresh', 'Sources and folders', 'Active library', 'Folders or patterns to exclude', 'Indexing', 'Quick refresh', 'Re-analyse everything', 'Local images', 'Provider images', 'Use local NFO files', 'Embedded subtitles', 'Providers and enrichment', 'Intro detection', 'Chapter images', 'Subtitle download', 'Watch for changes', 'Add to collections automatically', 'Trickplay', 'Playback bar thumbnails', 'Automatic generation during analysis', 'JPEG quality', 'Thumbnail width', 'Thumbnail interval'],
+  '#nodes-section': ['Add a Media Node', 'Pairing token', 'Invitation token', 'Static bootstrap token', 'Direct inbound pairing', 'Docker Compose configuration', 'Node internal URL', 'Public direct-streaming URL', 'Reconnect', 'Renew the secret', 'Revoke a Media Node', 'Media folders'],
+  '#artwork-section': ['Library images', 'Collect images', 'Available posters', 'Saved variants', 'Manage images', 'Works to check'],
+  '#avatars-section': ['Avatar gallery', 'Add avatars', 'Avatar policy', 'Avatar collections', 'Transfer collections'],
+  '#users-section': ['Create a user', 'Password', 'Role', 'Administrator', 'Disable an account', 'Group membership', 'Accessible libraries', 'Parental controls', 'Parental restrictions', 'Maximum allowed age', 'Blocked tags', 'Access hours', 'Download and sync'],
+  '#groups-section': ['User groups', 'Default group', 'Group members', 'Library permissions', 'Assignment type', 'Group properties'],
+  '#api-keys-section': ['Create a key', 'Expiry in days', 'Revoke a key', 'Key owner', 'Access tokens'],
+  '#tasks-section': ['Scheduling', 'Scheduled tasks', 'Add a trigger', 'Every day', 'Weekly', 'Interval', 'At server startup', 'Time limit', 'Clear the cache', 'Clear the extension log', 'Scheduled backup'],
+  '#operations-section': ['Operations tracking', 'Task queue', 'Distributed operations', 'Technical analysis', 'Media preparation', 'Resume an operation', 'Cancel an operation'],
+  '#automation-section': ['Automations', 'Automation policies', 'Automation history', 'Provider quotas', 'Metadata sources'],
+  '#backups-section': ['Automatic backup', 'Enable automatic backups', 'Automatic scheduling', 'Archives', 'Download a backup', 'Database', 'Memory usage', 'Linux disk cache'],
+  '#extensions-section': ['Installed extensions', 'Catalogue', 'Repositories', 'Repository address', 'Update an extension', 'Extension versions', 'Requested access', 'Extension settings', 'Plugins'],
+  '#requests-section': ['Requests', 'Approve a request', 'Acquisition', 'Pin requests'],
+  '#acquisition-section': ['Acquisition servers', 'Radarr', 'Sonarr', 'Lidarr', 'Imports', 'Approval rules'],
+  '#reports-section': ['Reports', 'Playback problems', 'Resolve a report', 'Pin reports'],
+  '#general-section': ['Server name', 'Welcome message', 'SSO sign-in button text', 'OIDC', 'SSO', 'Local credentials', 'Playback resume', 'Counted as watched', 'Minimum time to resume', 'Audio fingerprints', 'Extension log', 'Allowed CORS origins', 'Playlist sharing'],
+  '#network-section': ['Public address', 'MEDIA_PUBLIC_URL', 'Web interface', 'API', 'Secure cookies', 'Secure session cookies (HTTPS)', 'HTTPS']
+};
+
 export interface AdminSearchResult {
   /** Destination hash, navigated to exactly like a sidebar link. */
   hash: string;
@@ -117,7 +145,13 @@ export function searchAdmin(query: string): AdminSearchResult[] {
   let order = 0;
   for (const entry of adminEntries) {
     for (const destination of entry.tabs ?? [entry]) {
-      const candidates = [destination.label, ...(destination.hash === entry.hash && entry.label !== destination.label ? [entry.label] : []), ...(adminSearchKeywords[destination.hash] ?? [])];
+      // French and English labels and keywords are searched together: the interface language only
+      // decides how a result is displayed, not whether it can be found.
+      const candidates = [
+        destination.label, messages.en[destination.labelKey],
+        ...(destination.hash === entry.hash && entry.label !== destination.label ? [entry.label, messages.en[entry.labelKey]] : []),
+        ...(adminSearchKeywords[destination.hash] ?? []), ...(adminSearchKeywordsEn[destination.hash] ?? [])
+      ];
       const seen = new Set<string>();
       for (const candidate of candidates) {
         const normalized = normalizeAdminSearch(candidate);

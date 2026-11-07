@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adminDestinations, adminSearchKeywords, adminSectionHashes, parseAdminHash, searchAdmin } from './navigation';
+import { adminDestinations, adminSearchKeywords, adminSearchKeywordsEn, adminSectionHashes, parseAdminHash, searchAdmin } from './navigation';
 
 describe('administration task navigation', () => {
   it('opens task details and preserves encoded task identifiers', () => {
@@ -77,5 +77,19 @@ describe('administration settings search', () => {
     for (const destination of adminDestinations) expect(adminSearchKeywords[destination.hash]?.length).toBeGreaterThan(0);
     for (const hash of Object.keys(adminSearchKeywords)) expect(adminSectionHashes.has(hash)).toBe(true);
     expect(searchAdmin('zzz introuvable')).toEqual([]);
+  });
+});
+
+describe('administration settings search in both languages', () => {
+  it('keeps the English keywords aligned with the French ones', () => {
+    expect(Object.keys(adminSearchKeywordsEn).sort()).toEqual(Object.keys(adminSearchKeywords).sort());
+    for (const hash of Object.keys(adminSearchKeywords)) expect(adminSearchKeywordsEn[hash], hash).toHaveLength(adminSearchKeywords[hash].length);
+  });
+  it('finds a setting by its English or its French name', () => {
+    expect(searchAdmin('parental controls').map(result => result.hash)).toContain('#users-section');
+    expect(searchAdmin('contrôle parental').map(result => result.hash)).toContain('#users-section');
+    expect(searchAdmin('Pairing token').map(result => result.hash)).toContain('#nodes-section');
+    expect(searchAdmin('server settings').map(result => result.hash)).toContain('#general-section');
+    expect(searchAdmin('jpeg quality')[0]?.hash).toBe('#libraries-section');
   });
 });

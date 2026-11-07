@@ -5,7 +5,7 @@
   import ChapterImages from './ChapterImages.svelte';
   import { imagePreviewUrl } from './image-url';
   import { request, type Work, localizedTitle, localizedPlot } from './api';
-  import { locale } from '../i18n';
+  import { locale, t } from '../i18n';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
   import SimilarWorks from './SimilarWorks.svelte';
@@ -68,12 +68,12 @@
       });
       if (res.ok) {
         const body = await res.json().catch(() => ({}));
-        analyzeFeedback = body.message || 'Analyse des marqueurs lancée.';
+        analyzeFeedback = body.message || $t('marker_analysis_started');
       } else {
-        analyzeFeedback = `Erreur (${res.status})`;
+        analyzeFeedback = $t('catalog_error', { status: res.status });
       }
     } catch {
-      analyzeFeedback = 'Analyse indisponible.';
+      analyzeFeedback = $t('analysis_unavailable');
     } finally {
       analyzingSeason = false;
     }
@@ -98,7 +98,7 @@
       episodesLoading = true;
       void request<Work>(`/api/v1/catalog/${encodeURIComponent(currentWork.id)}?` + new URLSearchParams({ season: String(selectedSeason), episodeOffset: String(offset), episodeLimit: String(episodePageSize) }), controller.signal)
         .then(result => { if (!controller.signal.aborted) pageEpisodes = result.seasons?.find(item => item.number === selectedSeason)?.episodes ?? []; })
-        .catch(cause => { if (!controller.signal.aborted) episodesError = cause instanceof Error ? cause.message : 'Épisodes indisponibles.'; })
+        .catch(cause => { if (!controller.signal.aborted) episodesError = cause instanceof Error ? cause.message : $t('episodes_unavailable'); })
         .finally(() => { if (!controller.signal.aborted) episodesLoading = false; });
     }
     return () => controller.abort();
@@ -111,9 +111,9 @@
         const heading = document.getElementById('episodes-shelf-title');
         heading?.focus({ preventScroll: true });
         heading?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
-      }}><Icon name="play" size={20} />Voir les épisodes</button>
+      }}><Icon name="play" size={20} />{$t('view_episodes')}</button>
       {#if !work.synthetic}
-        <div class="personal-actions" aria-label="Mon suivi">
+        <div class="personal-actions" aria-label={$t('my_tracking')}>
           <WatchStatus workId={work.id} compact />
           <PersonalFeedback workId={work.id} compact />
         </div>
@@ -126,14 +126,14 @@
 
   <section class="series-shelf" aria-labelledby="episodes-shelf-title">
     <div class="section-heading">
-      <h2 id="episodes-shelf-title" tabindex="-1">Épisodes</h2>
+      <h2 id="episodes-shelf-title" tabindex="-1">{$t('request_episodes')}</h2>
       {#if work.seasons?.length}
         <div class="season-heading">
           <span class="episode-count">{seasonLabel(activeSeason)} · {episodeCount} {episodeCount > 1 ? 'épisodes' : 'épisode'}</span>
           {#if $session?.user.role === 'administrator' && activeSeason}
-            <button type="button" class="analyze-markers-btn" disabled={analyzingSeason} onclick={triggerAnalyzeSeason} title="Analyser les intros et génériques de cette saison">
+            <button type="button" class="analyze-markers-btn" disabled={analyzingSeason} onclick={triggerAnalyzeSeason} title={$t('analyse_the_intros_and_credits_of')}>
               <Icon name="search" size={15} />
-              <span>{analyzingSeason ? 'Analyse...' : 'Analyser intros & génériques'}</span>
+              <span>{analyzingSeason ? 'Analyse...' : $t('analyse_intros_credits')}</span>
             </button>
             {#if analyzeFeedback}<span class="analyze-feedback" role="status">{analyzeFeedback}</span>{/if}
           {/if}
@@ -142,7 +142,7 @@
     </div>
     {#if work.seasons?.length}
       <!-- seasonNN-poster.jpg : chaque saison est choisie par son affiche (repli : affiche de la série) -->
-      <div class="season-cards" role="tablist" aria-label="Saisons">
+      <div class="season-cards" role="tablist" aria-label={$t('catalog_seasons')}>
         {#each work.seasons as item (item.id)}
           {@const seasonImage = imagePreviewUrl(artwork[`season${item.number}`] || artwork.poster, 320)}
           {@const count = item.episodeCount ?? item.episodes.length}
@@ -160,8 +160,8 @@
         {/each}
       </div>
     {/if}
-    {#if episodesLoading}<p role="status">Chargement des épisodes…</p>{/if}
-    {#if episodesError}<p class="error-banner" role="alert">{episodesError}</p><button class="retry" onclick={() => { episodeOffset = 0; season = work.seasons?.[0]?.number ?? 1; }}>Revenir à la première saison</button>{/if}
+    {#if episodesLoading}<p role="status">{$t('loading_episodes')}</p>{/if}
+    {#if episodesError}<p class="error-banner" role="alert">{episodesError}</p><button class="retry" onclick={() => { episodeOffset = 0; season = work.seasons?.[0]?.number ?? 1; }}>{$t('back_to_the_first_season')}</button>{/if}
     <div class="episodes-list" aria-busy={episodesLoading}>
       {#each visibleEpisodes as episode (episode.id)}
         {@const epTitle = localizedTitle(episode, $locale)}
@@ -171,13 +171,13 @@
         {@const progress = $history.find(item => item.workId === episode.id)}
         {@const descriptor = media.find(item => item.workId === episode.id)}
         {@const duration = descriptor?.sources[0]?.durationSeconds}
-        <article class="episode" aria-label={`Épisode ${episode.number ?? ''} — ${epTitle}`}>
+        <article class="episode" aria-label={$t('episode_aria', { number: episode.number ?? '', title: epTitle })}>
           <div class="episode-artwork">
             {#if thumbnail && !failedImages.includes(thumbnail)}<img class="episode-thumb" src={thumbnail} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => failedImages = [...failedImages, thumbnail]} />{:else}<Icon name="tv" size={32} />{/if}
-            {#if progress && isResumable(progress, $serverPresentation) && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={`Progression de ${epTitle}`}></progress>{/if}
+            {#if progress && isResumable(progress, $serverPresentation) && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={$t('progress_of_3', { epTitle })}></progress>{/if}
           </div>
           <div class="episode-content">
-            <p class="episode-meta">Épisode {episode.number ?? '—'}{duration && duration > 0 ? ` · ${Math.ceil(duration / 60)} min` : ''}{progress?.watched ? ' · Vu' : progress && isResumable(progress, $serverPresentation) ? ' · En cours' : ''}</p>
+            <p class="episode-meta">{$t('episode_meta', { number: episode.number ?? '—', duration: duration && duration > 0 ? ` · ${$t('minutes_short', { count: Math.ceil(duration / 60) })}` : '', state: progress?.watched ? ` · ${$t('seen_short')}` : progress && isResumable(progress, $serverPresentation) ? ` · ${$t('stats_kpi_active')}` : '' })}</p>
             <h3>{epTitle}</h3>
             {#if epDesc}<p class="episode-desc">{epDesc}</p>{/if}
             <div class="episode-actions-row">
@@ -188,13 +188,13 @@
             </div>
           </div>
         </article>
-      {:else}{#if !episodesLoading && !episodesError}<p class="empty-episodes-box">Aucun épisode disponible pour cette saison.</p>{/if}{/each}
+      {:else}{#if !episodesLoading && !episodesError}<p class="empty-episodes-box">{$t('no_episodes_available_for_this_season')}</p>{/if}{/each}
     </div>
     {#if episodeCount > episodePageSize}
-      <nav class="episode-pagination" aria-label="Pagination des épisodes">
-        <button disabled={episodesLoading || episodeOffset === 0} onclick={() => { episodeOffset = Math.max(0, episodeOffset - episodePageSize); document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>Précédents</button>
-        <span role="status">{episodeOffset + 1}–{Math.min(episodeOffset + episodePageSize, episodeCount)} sur {episodeCount}</span>
-        <button disabled={episodesLoading || episodeOffset + episodePageSize >= episodeCount} onclick={() => { episodeOffset += episodePageSize; document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>Suivants</button>
+      <nav class="episode-pagination" aria-label={$t('episode_pagination')}>
+        <button disabled={episodesLoading || episodeOffset === 0} onclick={() => { episodeOffset = Math.max(0, episodeOffset - episodePageSize); document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>{$t('previous_page')}</button>
+        <span role="status">{$t('range_of_total', { from: episodeOffset + 1, to: Math.min(episodeOffset + episodePageSize, episodeCount), total: episodeCount })}</span>
+        <button disabled={episodesLoading || episodeOffset + episodePageSize >= episodeCount} onclick={() => { episodeOffset += episodePageSize; document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>{$t('next_page')}</button>
       </nav>
     {/if}
   </section>

@@ -6,6 +6,7 @@
   import { login, bootstrapAdmin } from '../../lib/auth/session';
   import Icon from '../../lib/ui/Icon.svelte';
   import QuickConnect from '../../lib/auth/QuickConnect.svelte';
+  import { t } from '../../lib/i18n';
 
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
@@ -28,37 +29,37 @@
   function mapError(code: string): string {
     switch (code) {
       case 'local_login_disabled':
-        return 'La connexion locale est désactivée. Veuillez vous connecter avec le SSO.';
+        return $t('local_sign_in_is_disabled_please');
       case 'local_administrator_required':
-        return "Un compte administrateur local de secours doit être créé avant d'utiliser le SSO.";
+        return $t('a_local_fallback_administrator_account_must');
       case 'oidc_invalid_response':
-        return 'La réponse du fournisseur SSO est invalide ou la session de connexion a expiré.';
+        return $t('the_sso_provider_s_response_is');
       case 'oidc_group_denied':
-        return 'Accès refusé : votre compte SSO ne dispose pas des droits requis (groupe non autorisé).';
+        return $t('access_denied_your_sso_account_does');
       case 'oidc_account_disabled':
-        return 'Votre compte utilisateur a été désactivé par un administrateur.';
+        return $t('your_user_account_has_been_disabled');
       case 'oidc_provider_unavailable':
-        return 'Le fournisseur d’identité SSO est indisponible ou injoignable.';
+        return $t('the_sso_identity_provider_is_unavailable');
       case 'oidc_disabled':
-        return 'L’authentification SSO (OpenID Connect) n’est pas activée sur ce serveur.';
+        return $t('sso_openid_connect_authentication_is_not');
       case 'oidc_identity_already_linked':
-        return 'Cette identité SSO est déjà liée à un autre compte utilisateur.';
+        return $t('this_sso_identity_is_already_linked');
       case 'link_session_expired':
-        return 'La session temporaire de liaison de compte a expiré.';
+        return $t('the_temporary_account_linking_session_has');
       case 'try_later':
-        return 'Trop de tentatives récentes. Veuillez patienter avant de réessayer.';
+        return $t('too_many_recent_attempts_please_wait');
       case 'session_expired':
-        return 'Votre session a expiré. Veuillez vous reconnecter.';
+        return $t('your_session_has_expired_please_sign');
       case 'authentication_required':
-        return 'Authentification requise pour accéder à votre médiathèque.';
+        return $t('authentication_required_to_access_your');
       case 'bootstrap_closed':
-        return "L'initialisation du serveur est déjà clôturée.";
+        return $t('server_initialisation_is_already_closed');
       case 'invalid_bootstrap_token':
-        return "Code d'initialisation invalide. Consultez la console du serveur ou le fichier .bootstrap_token.";
+        return $t('invalid_initialisation_code_check_the_server');
       case 'http_bootstrap_disabled':
-        return "L'initialisation via le Web est désactivée. Utilisez la commande locale 'media-bootstrap'.";
+        return $t('web_initialisation_is_disabled_use_the');
       default:
-        return code ? decodeURIComponent(code) : 'Une erreur est survenue lors de l’authentification.';
+        return code ? decodeURIComponent(code) : $t('an_error_occurred_during_authentication');
     }
   }
 
@@ -76,13 +77,13 @@
       if (!response.ok) {
         const data = await response.json().catch(() => null);
         const code = data?.error;
-        throw new Error(code ? mapError(code) : 'Le SSO est indisponible. Réessayez ou utilisez votre compte local.');
+        throw new Error(code ? mapError(code) : $t('sso_is_unavailable_try_again_or'));
       }
       const data: { url: string } = await response.json();
-      if (!data.url) throw new Error('URL de redirection SSO invalide.');
+      if (!data.url) throw new Error($t('invalid_sso_redirect_url'));
       window.location.assign(data.url);
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Connexion SSO indisponible.';
+      error = failure instanceof Error ? failure.message : $t('sso_sign_in_unavailable');
       busy = false;
     }
   }
@@ -97,7 +98,7 @@
       password = '';
       await goto(resolve('/'), { replaceState: true });
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'La connexion est indisponible. Réessayez.';
+      error = failure instanceof Error ? failure.message : $t('sign_in_is_unavailable_try_again');
     } finally {
       password = '';
       busy = false;
@@ -108,15 +109,15 @@
     event.preventDefault();
     if (busy) return;
     if (!bootstrapToken.trim()) {
-      error = "Veuillez renseigner le code d'initialisation affiché dans la console du serveur.";
+      error = $t('please_enter_the_initialisation_code_shown');
       return;
     }
     if (bootstrapPassword.length < 15) {
-      error = 'Le mot de passe doit comporter au moins 15 caractères.';
+      error = $t('the_password_must_be_at_least');
       return;
     }
     if (bootstrapPassword !== bootstrapConfirm) {
-      error = 'La confirmation du mot de passe ne correspond pas.';
+      error = $t('the_password_confirmation_does_not_match');
       return;
     }
     busy = true;
@@ -128,7 +129,7 @@
       bootstrapToken = '';
       await goto(resolve('/'), { replaceState: true });
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : "Échec de l'initialisation.";
+      error = failure instanceof Error ? failure.message : $t('initialisation_failed');
     } finally {
       bootstrapPassword = '';
       bootstrapConfirm = '';
@@ -199,17 +200,17 @@
         </svg>
         <span class="brand-title">{name}</span>
       </div>
-      <p class="brand-tagline">VOTRE CINÉMA, CHEZ VOUS</p>
+      <p class="brand-tagline">{$t('your_cinema_at_home')}</p>
     </header>
 
     {#if needsBootstrap}
       <!-- Premier démarrage : création de l'administrateur initial -->
       <section class="login-card" aria-labelledby="setup-title">
         <div class="card-intro">
-          <span class="badge-setup">Premier démarrage</span>
-          <h1 id="setup-title">Créer l'administrateur</h1>
+          <span class="badge-setup">{$t('first_start')}</span>
+          <h1 id="setup-title">{$t('create_the_administrator')}</h1>
           <p class="card-desc">
-            Bienvenue ! Aucun compte n'a encore été configuré. Définissez votre compte administrateur local de secours pour initialiser Aether (requis avant d'activer le SSO).
+            {$t('welcome_no_account_has_been_configured')}
           </p>
         </div>
 
@@ -224,14 +225,14 @@
           <div class="error-banner" role="alert">
             <Icon name="alert" size={18} />
             <p class="error-text">
-              L'initialisation via le Web est désactivée. Veuillez exécuter la commande locale <code>media-bootstrap</code> dans un terminal pour créer l'administrateur.
+              {$t('web_initialisation_is_disabled_please_run')} <code>media-bootstrap</code> {$t('in_a_terminal_to_create_the')}
             </p>
           </div>
         {:else}
         <form class="login-form" onsubmit={submitBootstrap} aria-busy={busy}>
           <div class="field-group">
             <label for="bootstrap-token" class="field-label">
-              <span>Code d'initialisation (Jeton serveur)</span>
+              <span>{$t('initialisation_code_server_token')}</span>
             </label>
             <div class="input-container">
               <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
@@ -244,15 +245,15 @@
                 required
                 bind:value={bootstrapToken}
                 disabled={busy}
-                placeholder="Code affiché dans la console du serveur"
+                placeholder={$t('code_shown_in_the_server_console')}
               />
             </div>
-            <span class="field-hint">Consultez les journaux du serveur ou le fichier .bootstrap_token.</span>
+            <span class="field-hint">{$t('check_the_server_logs_or_the')}</span>
           </div>
 
           <div class="field-group">
             <label for="bootstrap-login" class="field-label">
-              <span>Identifiant administrateur</span>
+              <span>{$t('administrator_username')}</span>
             </label>
             <div class="input-container">
               <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
@@ -266,15 +267,15 @@
                 required
                 bind:value={bootstrapLogin}
                 disabled={busy}
-                placeholder="Ex. admin"
+                placeholder={$t('e_g_admin')}
               />
             </div>
-            <span class="field-hint">Lettres minuscules, chiffres, tirets et points.</span>
+            <span class="field-hint">{$t('lowercase_letters_digits_hyphens_and_dots')}</span>
           </div>
 
           <div class="field-group">
             <label for="bootstrap-password" class="field-label">
-              <span>Mot de passe (15 caractères min.)</span>
+              <span>{$t('password_15_characters_min')}</span>
             </label>
             <div class="input-container">
               <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
@@ -291,12 +292,12 @@
                 placeholder="••••••••••••••••"
               />
             </div>
-            <span class="field-hint">Exigence de sécurité du Core : au moins 15 caractères.</span>
+            <span class="field-hint">{$t('core_security_requirement_at_least_15')}</span>
           </div>
 
           <div class="field-group">
             <label for="bootstrap-confirm" class="field-label">
-              <span>Confirmer le mot de passe</span>
+              <span>{$t('confirm_the_password')}</span>
             </label>
             <div class="input-container">
               <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
@@ -316,7 +317,7 @@
           </div>
 
           <button type="submit" class="btn-submit" disabled={busy}>
-            <span class="btn-submit-text">{busy ? 'Initialisation en cours…' : 'Initialiser le serveur'}</span>
+            <span class="btn-submit-text">{busy ? $t('initialising') : $t('initialise_the_server')}</span>
             <span class="arrow-glyph" aria-hidden="true">→</span>
           </button>
         </form>
@@ -324,7 +325,7 @@
 
         <footer class="card-footer">
           <p class="help-text">
-            Ce compte est unique et définitif. Conservez précieusement ces identifiants pour les opérations de maintenance.
+            {$t('this_account_is_unique_and_permanent')}
           </p>
         </footer>
       </section>
@@ -333,8 +334,8 @@
       <!-- Connexion standard (SSO ou compte local) -->
       <section class="login-card" aria-labelledby="login-title">
         <div class="card-intro">
-          <h1 id="login-title">Bienvenue chez vous.</h1>
-          <p class="card-desc">Connectez-vous pour retrouver vos films, séries et votre progression.</p>
+          <h1 id="login-title">{$t('welcome_home')}</h1>
+          <p class="card-desc">{$t('sign_in_to_find_your_films')}</p>
         </div>
 
         {#if error}
@@ -369,7 +370,7 @@
           {#if localLoginEnabled}
             <div class="divider" role="separator">
               <span class="divider-line"></span>
-              <span class="divider-text">ou avec un identifiant local</span>
+              <span class="divider-text">{$t('or_with_a_local_username')}</span>
               <span class="divider-line"></span>
             </div>
           {/if}
@@ -379,7 +380,7 @@
           <form class="login-form" onsubmit={submit} aria-busy={busy}>
             <div class="field-group">
               <label for="login" class="field-label">
-                <span>Identifiant</span>
+                <span>{$t('auth_username')}</span>
               </label>
               <div class="input-container">
                 <span class="input-icon" aria-hidden="true"><Icon name="profile" size={17} /></span>
@@ -393,14 +394,14 @@
                   required
                   bind:value={identifier}
                   disabled={busy}
-                  placeholder="Ex. nom d’utilisateur"
+                  placeholder={$t('e_g_username')}
                 />
               </div>
             </div>
 
             <div class="field-group">
               <label for="password" class="field-label">
-                <span>Mot de passe</span>
+                <span>{$t('password')}</span>
               </label>
               <div class="input-container">
                 <span class="input-icon" aria-hidden="true"><Icon name="settings" size={17} /></span>
@@ -419,7 +420,7 @@
             </div>
 
             <button type="submit" class="btn-submit" disabled={busy}>
-              <span class="btn-submit-text">{busy ? 'Connexion en cours…' : 'Se connecter'}</span>
+              <span class="btn-submit-text">{busy ? $t('signing_in') : $t('sign_in')}</span>
               <span class="arrow-glyph" aria-hidden="true">→</span>
             </button>
           </form>
@@ -430,15 +431,15 @@
         <footer class="card-footer">
           {#if !localLoginEnabled}
             <p class="help-text">
-              La connexion locale est désactivée. Utilisez votre fournisseur SSO ({ssoProvider}) ou autorisez la connexion depuis un appareil déjà connecté.
+              {$t('local_sign_in_is_disabled_use', { ssoProvider })}
             </p>
           {:else if ssoEnabled}
             <p class="help-text">
-              Authentification unique (SSO) activée. Le compte local d'administration reste toujours disponible en secours.
+              {$t('single_sign_on_sso_is_enabled')}
             </p>
           {:else}
             <p class="help-text">
-              Utilisez le compte local créé lors de l’installation de votre serveur.
+              {$t('use_the_local_account_created_when')}
             </p>
           {/if}
         </footer>
@@ -446,7 +447,7 @@
     {/if}
 
     <footer class="site-footer">
-      <span>{name} · Votre cinéma, autrement.</span>
+      <span>{$t('your_cinema_differently', { name })}</span>
     </footer>
   </div>
 </main>

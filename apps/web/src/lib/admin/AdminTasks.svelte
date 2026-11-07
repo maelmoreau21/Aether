@@ -4,7 +4,7 @@
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
   import type { AdminNode, Library, Scan } from './types';
-  import { t } from '../i18n';
+  import { t, fmt } from '../i18n';
   import {
     type ScheduledTask, type TaskTrigger, type TriggerDraft, type TriggerType,
     categoryLabel, categoryOrder, clockLabel, dayLabel, durationLabel, intervalLabel, intervalOptions,
@@ -45,7 +45,7 @@
 
   function nameOf(task: ScheduledTask) { return taskName(task, task.libraryId ? libraryNames[task.libraryId] : undefined, $t); }
   function taskHref(id?: string) { return resolve(`admin/libraries/#tasks-section${id ? `?task=${encodeURIComponent(id)}` : ''}`); }
-  function date(value: number) { return new Date(value * 1000).toLocaleString(); }
+  function date(value: number) { return $fmt.dateTime(value); }
   function running(task: ScheduledTask) { return task.state !== 'idle' || (task.libraryId !== null && pending.includes(task.libraryId)); }
   function message(cause: unknown) { return cause instanceof Error ? cause.message : $t('sched_action_failed'); }
 

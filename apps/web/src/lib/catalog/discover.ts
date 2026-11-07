@@ -1,5 +1,6 @@
 import type { Work } from './api';
 
+import { tr, currentFormat } from '../i18n';
 export type DiscoverSort = 'added-desc' | 'added-asc' | 'year-desc' | 'year-asc' | 'title-asc';
 export type DiscoverSpec = { key: string; title: string; kind: 'film' | 'series'; sort: DiscoverSort; genre?: string };
 
@@ -37,7 +38,7 @@ function topGenres(works: Work[], seed: string, limit: number): string[] {
       else counts.set(key, { label, count: 1 });
     }
   }
-  const ranked = [...counts.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  const ranked = [...counts.values()].sort((a, b) => b.count - a.count || currentFormat().compare(a.label, b.label));
   // Les genres les plus fréquents restent en tête, mais l'ordre varie d'une visite à l'autre.
   const head = shuffleWithSeed(ranked.slice(0, 4), `${seed}:head`);
   const tail = shuffleWithSeed(ranked.slice(4), `${seed}:tail`);
@@ -54,7 +55,7 @@ export function buildDiscoverPlan(works: Work[], seed: string): DiscoverSpec[] {
   const sorts: DiscoverSort[] = ['added-desc', 'year-desc', 'title-asc'];
   const genreSpec = (kind: 'film' | 'series', genre: string, index: number): DiscoverSpec => ({
     key: `${kind}:genre:${genre.toLowerCase()}`,
-    title: `${kind === 'film' ? 'Films' : 'Séries'} · ${genre}`,
+    title: `${kind === 'film' ? tr('films') : tr('series')} · ${genre}`,
     kind,
     genre,
     sort: sorts[(hash(`${seed}:${kind}:${genre}`) + index) % sorts.length]
@@ -63,13 +64,13 @@ export function buildDiscoverPlan(works: Work[], seed: string): DiscoverSpec[] {
   const seriesGenres = series.length ? topGenres(series, `${seed}:series`, 12).map((genre, index) => genreSpec('series', genre, index)) : [];
   const extras: DiscoverSpec[] = [
     ...(films.length ? [
-      { key: 'film:rediscover', title: 'Films à redécouvrir', kind: 'film', sort: 'added-asc' },
-      { key: 'film:recent-release', title: 'Les films les plus récents', kind: 'film', sort: 'year-desc' },
-      { key: 'film:classics', title: 'Les classiques de votre médiathèque', kind: 'film', sort: 'year-asc' }
+      { key: 'film:rediscover', title: tr('films_to_rediscover'), kind: 'film', sort: 'added-asc' },
+      { key: 'film:recent-release', title: tr('the_most_recent_films'), kind: 'film', sort: 'year-desc' },
+      { key: 'film:classics', title: tr('the_classics_of_your_library'), kind: 'film', sort: 'year-asc' }
     ] satisfies DiscoverSpec[] : []),
     ...(series.length ? [
-      { key: 'series:rediscover', title: 'Séries à redécouvrir', kind: 'series', sort: 'added-asc' },
-      { key: 'series:recent-release', title: 'Les séries les plus récentes', kind: 'series', sort: 'year-desc' }
+      { key: 'series:rediscover', title: tr('series_to_rediscover'), kind: 'series', sort: 'added-asc' },
+      { key: 'series:recent-release', title: tr('the_most_recent_series'), kind: 'series', sort: 'year-desc' }
     ] satisfies DiscoverSpec[] : [])
   ];
   const genres: DiscoverSpec[] = [];

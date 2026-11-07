@@ -202,7 +202,7 @@ describe('media descriptor cache and deferred loading', () => {
           resolvePreloadA = resolve;
         });
       }
-      if (url === '/api/v1/catalog/work-1') {
+      if (url === '/api/v1/catalog/work-1?locale=fr') {
         return new Promise<Response>(resolve => {
           resolveCatalogA = resolve;
         });
@@ -454,5 +454,14 @@ describe('media descriptor cache and deferred loading', () => {
     };
     expect(playbackIds(work)).toEqual(['a1', 'a2']);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('catalogue requests carry the metadata language', () => {
+  it('asks the server for the interface language by default and never overrides an explicit one', async () => {
+    const { withMetadataLocale } = await import('./cache-scope');
+    expect(withMetadataLocale('/api/v1/catalog?kind=film&q=')).toBe('/api/v1/catalog?kind=film&q=&locale=fr');
+    expect(withMetadataLocale('/api/v1/catalog/work-1?locale=en-GB')).toBe('/api/v1/catalog/work-1?locale=en-GB');
+    expect(withMetadataLocale('/api/v1/media/media-1')).toBe('/api/v1/media/media-1');
   });
 });

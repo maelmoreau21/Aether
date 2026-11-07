@@ -3,6 +3,7 @@ import { session, getSessionGeneration, onSessionGenerationChange } from '../aut
 import { serverPresentation } from '../config/presentation';
 import type { PlaybackState } from './types';
 
+import { tr } from '../i18n';
 export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string }
 
 const warmed = new Map<string, { at: number; value: Promise<Progress> }>();
@@ -30,21 +31,21 @@ export async function readProgress(work: string): Promise<Progress> {
 
 async function fetchProgress(work: string): Promise<Progress> {
   const response = await fetch(`/api/v1/progress/${encodeURIComponent(work)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(2500) });
-  if (!response.ok) throw new Error('Reprise indisponible : progression non chargée.');
+  if (!response.ok) throw new Error(tr('resume_unavailable_progress_not_loaded'));
   return response.json();
 }
 
 export async function writeProgress(progress: Progress, keepalive = false): Promise<Progress> {
   warmed.delete(progress.workId);
   const current = get(session);
-  if (!current) throw new Error('Session requise pour enregistrer la progression.');
+  if (!current) throw new Error(tr('session_required_to_save_progress'));
   const response = await fetch(`/api/v1/progress/${encodeURIComponent(progress.workId)}`, {
     method: 'PUT', credentials: 'same-origin', keepalive, signal: AbortSignal.timeout(10000),
     headers: { 'content-type': 'application/json', 'x-csrf-token': current.csrfToken },
     body: JSON.stringify({ position: progress.position, duration: progress.duration, watched: progress.watched, expectedRevision: progress.revision })
   });
-  if (response.status === 409) throw new Error('La progression a changé dans une autre session. Fermez puis rouvrez le lecteur pour la synchroniser.');
-  if (!response.ok) throw new Error('Progression non enregistrée. Vérifiez votre connexion et vos droits.');
+  if (response.status === 409) throw new Error(tr('progress_changed_in_another_session_close'));
+  if (!response.ok) throw new Error(tr('progress_not_saved_check_your_connection'));
   const saved: Progress = await response.json();
   window.dispatchEvent(new Event('media-progress-updated'));
   return saved;
@@ -101,9 +102,9 @@ export class ProgressTracker {
       const cfg = get(serverPresentation);
       if (!isResumable(progress, cfg)) return 0;
       return progress.position;
-    } catch (error) { this.fail(error instanceof DOMException && error.name==='TimeoutError' ? new Error('Reprise indisponible après 2,5 secondes. Lecture depuis le début ; progression conservée sur le serveur.') : error); return 0; }
+    } catch (error) { this.fail(error instanceof DOMException && error.name==='TimeoutError' ? new Error(tr('resume_unavailable_after_2_5_seconds')) : error); return 0; }
   }
-  private fail(error: unknown) { this.failed = true; this.onError(error instanceof Error ? error.message : 'Progression indisponible.'); }
+  private fail(error: unknown) { this.failed = true; this.onError(error instanceof Error ? error.message : tr('progress_unavailable')); }
   save(state: PlaybackState, force = false, ended = false) {
     if (this.failed || this.generation !== getSessionGeneration() || !Number.isFinite(state.duration) || state.duration <= 0 || (state.position <= 0 && !force)) return;
     if (!force && Date.now() - this.lastSave < 5000) return;

@@ -3,12 +3,18 @@ import { session, getSessionGeneration, onSessionGenerationChange } from './auth
 import type { SubtitlePreference } from './player/subtitle-preference';
 import { sanitizeSubtitleStyle, type SubtitleStyle } from './player/subtitle-style';
 import type { ArtworkRotationPolicy } from './catalog/artwork-rotation-policy.svelte';
-import type { SupportedLocale } from './i18n';
+import { registerLocalePersistence, tr, type SupportedLocale } from './i18n';
 
 export type HomeSection = 'hero' | 'continue' | 'tonight' | 'films' | 'series' | 'rated';
 export const DEFAULT_HOME_SECTIONS: HomeSection[] = ['hero', 'continue', 'tonight', 'films', 'series', 'rated'];
 export type Preferences = {
   theme?: 'light' | 'dark' | 'system'; locale?: SupportedLocale; audioLanguage?: string;
+  /** Titles, summaries and taglines. Absent: follow the interface language. */
+  metadataLocale?: string; metadataFallbackLocales?: string[];
+  /** Posters and other artwork. Absent: follow the metadata language. */
+  artworkLocale?: string;
+  /** Subtitles selected by default. Absent: the metadata language. */
+  subtitleLanguage?: string;
   subtitles?: 'forced' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };
   rememberAudioSelections?: boolean; rememberSubtitleSelections?: boolean; playDefaultAudioTrack?: boolean;
   hidePlayedInLatest?: boolean;
@@ -22,6 +28,15 @@ export type Preferences = {
   autoplayNextEpisode?: boolean; skipBackSeconds?: number; skipForwardSeconds?: number;
   artworkRotation?: ArtworkRotationPolicy;
 };
+/** A `null` value removes the preference on the server and here (back to its default). */
+export type PreferencePatch = { [K in keyof Preferences]?: Preferences[K] | null };
+function applyPatch(base: Preferences, patch: PreferencePatch): Preferences {
+  const next: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null) delete next[key]; else if (value !== undefined) next[key] = value;
+  }
+  return next as Preferences;
+}
 export const preferenceState = writable<Preferences>({});
 let current: Preferences = {};
 let owner: string | null = null;
@@ -127,7 +142,7 @@ async function fetchPreferences(): Promise<Preferences | null> {
   if(generation!==getSessionGeneration())return null;
   const response = await fetch('/api/v1/preferences', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
   if (generation !== getSessionGeneration()) return null;
-  if (!response.ok) throw new Error('Impossible de charger vos préférences.');
+  if (!response.ok) throw new Error(tr('unable_to_load_your_preferences'));
   const loaded: Preferences = await response.json();
   if (generation !== getSessionGeneration()) return null;
   if(started!==revision)return current;
@@ -139,7 +154,7 @@ async function fetchPreferences(): Promise<Preferences | null> {
       headers: { 'content-type': 'application/json', 'x-csrf-token': authenticated.csrfToken }, body: JSON.stringify(migrated)
     });
     if (generation !== getSessionGeneration()) return null;
-    if (!saved.ok) throw new Error('La migration de vos préférences locales a échoué. Les valeurs du navigateur sont conservées. Réessayez pour les enregistrer sur le serveur.');
+    if (!saved.ok) throw new Error(tr('migrating_your_local_preferences_failed'));
   }
   current = { ...loaded, ...migrated }; owner = authenticated.user.id;
   mirror(current, owner);
@@ -147,12 +162,12 @@ async function fetchPreferences(): Promise<Preferences | null> {
   return current;
 }
 
-export function savePreferences(patch: Preferences): Promise<boolean> {
+export function savePreferences(patch: PreferencePatch): Promise<boolean> {
   const authenticated = get(session);
   const generation = getSessionGeneration();
   if (!authenticated || owner !== authenticated.user.id) return Promise.resolve(false);
   revision++;
-  current = { ...current, ...patch }; mirror(current, owner); preferenceState.set(current);
+  current = applyPatch(current, patch); mirror(current, owner); preferenceState.set(current);
   const save = async () => {
     if (generation !== getSessionGeneration()) return false;
     try {
@@ -160,11 +175,11 @@ export function savePreferences(patch: Preferences): Promise<boolean> {
         method: 'PUT', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000),
         headers: { 'content-type': 'application/json', 'x-csrf-token': authenticated.csrfToken }, body: JSON.stringify(patch)
       });
-      if (!response.ok) throw new Error('Vos préférences ne sont pas encore enregistrées sur le serveur. Modifiez à nouveau le réglage pour réessayer.');
+      if (!response.ok) throw new Error(tr('your_preferences_are_not_yet_saved'));
       if (generation === getSessionGeneration()) preferenceSyncError.set('');
       return generation === getSessionGeneration();
     } catch (error) {
-      if (generation === getSessionGeneration()) preferenceSyncError.set(error instanceof Error ? error.message : 'Enregistrement des préférences impossible.');
+      if (generation === getSessionGeneration()) preferenceSyncError.set(error instanceof Error ? error.message : tr('unable_to_save_the_preferences'));
       return false;
     }
   };
@@ -173,3 +188,5 @@ export function savePreferences(patch: Preferences): Promise<boolean> {
   queue = saved.then(() => {}).finally(()=>pendingSaves--);
   return saved;
 }
+
+registerLocalePersistence(locale => savePreferences({ locale }));

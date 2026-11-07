@@ -1,6 +1,7 @@
 import { getContext, setContext } from 'svelte';
 import type { Work } from './api';
 
+import { tr } from '../i18n';
 /** Lets every poster card start playback through the catalogue's own launcher. */
 const KEY = Symbol('quick-play');
 export type QuickPlay = (work: Work) => Promise<void>;
@@ -12,13 +13,13 @@ type Feedback = { favorite: boolean; rating: number | null };
 export async function toggleFavorite(workId: string, csrf: string): Promise<boolean> {
   const url = `/api/v1/feedback/${encodeURIComponent(workId)}`;
   const current = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
-  if (!current.ok) throw new Error('Favori indisponible.');
+  if (!current.ok) throw new Error(tr('favourite_unavailable'));
   const value: Feedback = await current.json();
   const saved = await fetch(url, {
     method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
     body: JSON.stringify({ ...value, favorite: !value.favorite }), signal: AbortSignal.timeout(10000)
   });
-  if (!saved.ok) throw new Error('Favori non enregistré.');
+  if (!saved.ok) throw new Error(tr('favourite_not_saved'));
   return (await saved.json() as Feedback).favorite;
 }
 export async function readFavorite(workId: string): Promise<boolean> {

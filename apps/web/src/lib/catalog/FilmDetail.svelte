@@ -16,6 +16,7 @@
   import Icon from '../ui/Icon.svelte';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import ChapterImages from './ChapterImages.svelte';
+  import { t } from '../i18n';
 
   let { work, playableMedia = [], allowedIds = [], selected = $bindable(''), mediaError = '', similarCandidates = [], onPlay }: {
     work: Work; playableMedia: Media[]; allowedIds: string[]; selected: string; mediaError?: string; similarCandidates?: Work[]; onPlay: () => Promise<void>;
@@ -85,7 +86,7 @@
         {#each playableMedia as item (item.id)}
           {@const vTrack = item.sources[0]?.tracks?.find(t => t.codec_type === 'video')}
           {@const res = videoResolutionBadge(vTrack?.width, vTrack?.height)}
-          <button type="button" class="version-chip" aria-pressed={selected === item.id} aria-label={`Sélectionner la version ${sourceLabel(item)}`} onclick={() => selected = item.id}>
+          <button type="button" class="version-chip" aria-pressed={selected === item.id} aria-label={$t('select_version', { value: sourceLabel(item) })} onclick={() => selected = item.id}>
             {res ? `${res} (${sourceLabel(item)})` : sourceLabel(item)}
           </button>
         {/each}
@@ -94,7 +95,7 @@
 
     <div class="play-action-row">
       <button class="hero-cta" onpointerenter={() => { if (!work.synthetic) preloadProgress(work.id); }} onfocus={() => { if (!work.synthetic) preloadProgress(work.id); }} disabled={work.available === false || (!playableMedia.length && !allowedIds.length)} onclick={onPlay}>
-        <Icon name="play" size={20} /><span>{work.available === false ? 'Temporairement indisponible' : continuing ? 'Reprendre le film' : 'Lancer le film'}</span>
+        <Icon name="play" size={20} /><span>{work.available === false ? $t('temporarily_unavailable') : continuing ? $t('resume_the_film') : $t('play_the_film')}</span>
       </button>
 
       {#if !work.synthetic}

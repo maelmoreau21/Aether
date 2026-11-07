@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session, getSessionGeneration } from '../auth/session';
+  import { t, fmt } from '../i18n';
   type Feedback = {favorite:boolean;rating:number|null};
   let { workId, compact = false }: { workId:string; compact?: boolean } = $props();
   let value = $state<Feedback>({favorite:false,rating:null});
@@ -12,7 +13,7 @@
     const id=workId; const account=$session?.user.id; const abort=new AbortController();
     const current=++epoch; pending=null;processing=false;value={favorite:false,rating:null};confirmed={favorite:false,rating:null};loaded=false;saving=false;error='';preview=null;
     if(account)void fetch(`/api/v1/feedback/${encodeURIComponent(id)}`,{signal:AbortSignal.any([abort.signal,AbortSignal.timeout(10000)]),cache:'no-store'})
-      .then(async response=>{if(!response.ok)throw new Error('Vos préférences sont indisponibles.');return await response.json();})
+      .then(async response=>{if(!response.ok)throw new Error($t('your_preferences_are_unavailable'));return await response.json();})
       .then(result=>{if(!abort.signal.aborted&&current===epoch){value=result;confirmed=result;loaded=true;}})
       .catch(cause=>{if(!abort.signal.aborted&&current===epoch)error=cause.message;});
     return()=>abort.abort();
@@ -28,26 +29,26 @@
         const requested=pending;pending=null;
         try {
           const response=await fetch(`/api/v1/feedback/${encodeURIComponent(id)}`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(requested),signal:AbortSignal.timeout(10000)});
-          if(!response.ok)throw new Error('Préférence non enregistrée. Réessayez.');
+          if(!response.ok)throw new Error($t('preference_not_saved_try_again'));
           const result:Feedback=await response.json();
           if(current!==epoch||generation!==getSessionGeneration())return;
           confirmed=result;if(!pending)value=result;
         } catch(cause) {
           if(current!==epoch||generation!==getSessionGeneration())return;
-          if(!pending){value=confirmed;error=cause instanceof Error?cause.message:'Enregistrement impossible.';}
+          if(!pending){value=confirmed;error=cause instanceof Error?cause.message:$t('saving_failed');}
         }
       }
     } finally { if(current===epoch){processing=false;saving=false;} }
   }
 </script>
-<div class="personal-feedback" class:compact aria-label="Vos préférences privées" aria-busy={saving}>
+<div class="personal-feedback" class:compact aria-label={$t('your_private_preferences')} aria-busy={saving}>
   <button
     type="button"
     class="favorite-btn"
     class:compact
     disabled={!loaded}
-    aria-label={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-    title={value.favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+    aria-label={value.favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}
+    title={value.favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}
     aria-pressed={value.favorite}
     onclick={() => save({ ...value, favorite: !value.favorite })}
   >
@@ -58,7 +59,7 @@
   </button>
 
   <div class="rating-pill" class:rated={Boolean(value.rating)}>
-    <div class="stars" role="group" aria-label="Ma note privée sur 5, par demi-étoile" onpointerleave={() => (preview = null)}>
+    <div class="stars" role="group" aria-label={$t('my_private_rating_out_of_5')} onpointerleave={() => (preview = null)}>
       {#each [1, 2, 3, 4, 5] as star (star)}
         <span class="star">
           <span class="outline" aria-hidden="true">★</span>
@@ -68,8 +69,8 @@
               type="button"
               class="half"
               disabled={!loaded}
-              aria-label={`${rating.toLocaleString('fr-FR')} sur 5`}
-              title={`${rating.toLocaleString('fr-FR')} sur 5 — recliquer pour effacer`}
+              aria-label={$t('rating_out_of_five', { value: $fmt.number(rating) })}
+              title={$t('rating_out_of_five_clear', { value: $fmt.number(rating) })}
               aria-pressed={value.rating === rating}
               onpointerenter={() => (preview = rating)}
               onfocus={() => (preview = rating)}
@@ -84,9 +85,9 @@
       {/each}
     </div>
     {#if shownRating}
-      <span class="rating-value">{shownRating.toLocaleString('fr-FR')}</span>
+      <span class="rating-value">{$fmt.number(shownRating)}</span>
     {:else if !compact}
-      <span class="rating-placeholder">Noter</span>
+      <span class="rating-placeholder">{$t('rate')}</span>
     {/if}
   </div>
   {#if error}<span class="feedback-error" role="alert">{error}</span>{/if}

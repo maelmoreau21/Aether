@@ -2,7 +2,7 @@
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
   import { type Work, localizedTitle } from './api';
-  import { locale } from '../i18n';
+  import { locale, t } from '../i18n';
   import { history } from './watch-state';
   import { isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
@@ -69,7 +69,7 @@
   async function run(kind: 'play' | 'watched' | 'favorite', task: () => Promise<unknown>) {
     if (busy) return;
     busy = kind; actionError = '';
-    try { await task(); } catch (cause) { actionError = cause instanceof Error ? cause.message : 'Action impossible.'; } finally { busy = ''; }
+    try { await task(); } catch (cause) { actionError = cause instanceof Error ? cause.message : $t('action_impossible'); } finally { busy = ''; }
   }
   // eslint-disable-next-line svelte/no-navigation-without-resolve -- href is resolved by the caller.
   const launch = () => run('play', () => play ? play(work) : goto(href));
@@ -109,19 +109,19 @@
     {#if actions}<div class="card-hover-overlay" aria-hidden="true"></div>{/if}
 
     {#if isWatched}
-      <span class="watched-badge" title="Déjà visionné">
+      <span class="watched-badge" title={$t('already_watched')}>
         <Icon name="check" size={14} />
-        <span class="sr-only">Déjà visionné</span>
+        <span class="sr-only">{$t('already_watched')}</span>
       </span>
     {/if}
     {#if work.available === false}
-      <span class="offline-badge">Indisponible</span>
+      <span class="offline-badge">{$t('unavailable')}</span>
     {/if}
     {#if progressRatio > 0}
       <div
         class="poster-progress"
         role="progressbar"
-        aria-label={`Progression de ${displayTitle}`}
+        aria-label={$t('progress_of_2', { displayTitle })}
         aria-valuenow={Math.round(progressRatio)}
         aria-valuemin={0}
         aria-valuemax={100}
@@ -147,18 +147,18 @@
   <!-- Buttons cannot live inside the link: they sit above the poster, beside it. -->
   <div class="card-shell has-actions" class:landscape={wide} role="group" aria-label={displayTitle} onpointerenter={prime} onfocusin={prime}>
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-    <a class="media-card card-link" class:landscape={wide} {href} aria-label={`Voir ${displayTitle}`}>{@render posterBody()}</a>
+    <a class="media-card card-link" class:landscape={wide} {href} aria-label={$t('catalog_view', { displayTitle })}>{@render posterBody()}</a>
     <div class="quick-actions">
-      <button type="button" class="quick-play" aria-label={`Lire ${displayTitle}`} title="Lire" disabled={!!busy || work.available === false} onclick={launch}>
+      <button type="button" class="quick-play" aria-label={$t('catalog_play', { displayTitle })} title={$t('play_action')} disabled={!!busy || work.available === false} onclick={launch}>
         <Icon name="play" size={26} />
       </button>
       <div class="quick-row">
         {#if canMarkWatched}
-          <button type="button" class="quick-button" class:on={isWatched} aria-pressed={isWatched} aria-label={isWatched ? 'Marquer non vu' : 'Marquer comme vu'} title={isWatched ? 'Marquer non vu' : 'Marquer comme vu'} disabled={!!busy} onclick={toggleWatched}>
+          <button type="button" class="quick-button" class:on={isWatched} aria-pressed={isWatched} aria-label={isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')} title={isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')} disabled={!!busy} onclick={toggleWatched}>
             <Icon name="check" size={20} />
           </button>
         {/if}
-        <button type="button" class="quick-button heart" class:on={favorite === true} aria-pressed={favorite === true} aria-label={favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} title={favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'} disabled={!!busy} onclick={toggleFav}>
+        <button type="button" class="quick-button heart" class:on={favorite === true} aria-pressed={favorite === true} aria-label={favorite ? $t('remove_from_favourites') : $t('add_to_favourites')} title={favorite ? $t('remove_from_favourites') : $t('add_to_favourites')} disabled={!!busy} onclick={toggleFav}>
           <Icon name="heart" size={20} />
         </button>
       </div>
@@ -167,7 +167,7 @@
   </div>
 {:else if href}
   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-  <a class="media-card" class:landscape={wide} {href} aria-label={`Voir ${displayTitle}`}>{@render posterBody()}</a>
+  <a class="media-card" class:landscape={wide} {href} aria-label={$t('catalog_view', { displayTitle })}>{@render posterBody()}</a>
 {:else}
   <div class="media-card" class:landscape={wide}>{@render posterBody()}</div>
 {/if}

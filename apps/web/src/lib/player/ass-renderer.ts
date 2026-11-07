@@ -3,6 +3,7 @@
 import JASSUB from 'jassub';
 import fontUrl from 'jassub/dist/default.woff2?url';
 
+import { tr } from '../i18n';
 export async function createAssRenderer(video: HTMLVideoElement, url: string, offset: number) {
   const renderer = new JASSUB({
     video, subUrl: url, timeOffset: -offset, queryFonts: false, fonts: [fontUrl],
@@ -21,7 +22,7 @@ export async function createAssRenderer(video: HTMLVideoElement, url: string, of
   };
   try {
     await Promise.race([(async () => { await renderer.ready; await redraw(); })(), new Promise<never>((_, reject) => {
-      timeout = setTimeout(() => reject(new Error('Initialisation ASS expirée.')), 10000);
+      timeout = setTimeout(() => reject(new Error(tr('ass_initialisation_timed_out'))), 10000);
     })]);
     return { get timeOffset() { return renderer.timeOffset; }, set timeOffset(value: number) { renderer.timeOffset = value; void redraw().catch(() => {}); }, destroy: dispose };
   } catch (error) {

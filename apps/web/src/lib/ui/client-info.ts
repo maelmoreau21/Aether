@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 /** Readable client identity from a session's device label (User-Agent or app label). */
 export type ClientKind = 'apple' | 'android' | 'windows' | 'linux' | 'tv' | 'browser';
 export type ClientInfo = { app: string; system: string; kind: ClientKind };
@@ -12,7 +13,7 @@ export function clientInfo(raw: string | null | undefined): ClientInfo {
     : system === 'Android' ? 'android' : system === 'Windows' ? 'windows' : system === 'Linux' ? 'linux' : 'browser';
   if (!label.startsWith('Mozilla/')) {
     // Native clients send their own label ("Swiftfin iOS 1.6.1", "Aether TV"…).
-    return { app: label.slice(0, 80) || 'Appareil non communiqué', system, kind };
+    return { app: label.slice(0, 80) || tr('device_not_reported'), system, kind };
   }
   const browser = /Edg\//.test(label) ? 'Edge' : /OPR\//.test(label) ? 'Opera' : /Firefox\/|FxiOS/.test(label) ? 'Firefox'
     : /Chrome\/|CriOS/.test(label) ? 'Chrome' : /Safari\//.test(label) ? 'Safari' : 'Navigateur';

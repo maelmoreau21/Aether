@@ -7,6 +7,7 @@
   import type { Work } from './api';
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   let {
     section,
@@ -195,7 +196,7 @@
           type="search"
           name="q"
           bind:value={search}
-          placeholder="Rechercher…"
+          placeholder={$t('admin_search')}
           maxlength="200"
           autocomplete="off"
         />
@@ -203,7 +204,7 @@
           <button
             type="button"
             class="clear-btn"
-            aria-label="Effacer la recherche"
+            aria-label={$t('clear_search')}
             onclick={clearSearch}
           >
             ×
@@ -214,29 +215,29 @@
       {#if section === 'search'}
         <div class="control-select">
           <select
-            aria-label="Filtrer par type de média"
+            aria-label={$t('filter_by_media_type')}
             bind:value={selectedKindFilter}
             onchange={() => handleFilterSubmit()}
           >
-            <option value="all">Tout</option>
-            <option value="film">Films</option>
-            <option value="series">Séries</option>
+            <option value="all">{$t('all')}</option>
+            <option value="film">{$t('films')}</option>
+            <option value="series">{$t('series')}</option>
           </select>
         </div>
       {/if}
 
       <div class="control-select">
         <select
-          aria-label="Trier par"
+          aria-label={$t('sort_by')}
           bind:value={sort}
           onchange={() => handleFilterSubmit()}
         >
-          <option value="title-asc">Titre · A à Z</option>
-          <option value="title-desc">Titre · Z à A</option>
-          <option value="year-desc">Année · Récent</option>
-          <option value="year-asc">Année · Ancien</option>
-          <option value="added-desc">Ajout récent</option>
-          <option value="added-asc">Ajout ancien</option>
+          <option value="title-asc">{$t('title_a_to_z')}</option>
+          <option value="title-desc">{$t('title_z_to_a')}</option>
+          <option value="year-desc">{$t('year_newest')}</option>
+          <option value="year-asc">{$t('year_oldest')}</option>
+          <option value="added-desc">{$t('recently_added')}</option>
+          <option value="added-asc">{$t('added_long_ago')}</option>
         </select>
       </div>
 
@@ -246,10 +247,10 @@
         class:active={showFilters || activeFilterCount > 0}
         onclick={() => (showFilters = !showFilters)}
         aria-expanded={showFilters}
-        aria-label="Filtres avancés"
+        aria-label={$t('stats_advanced_filters')}
       >
         <Icon name="filter" size={15} />
-        <span class="filter-btn-text">Filtres</span>
+        <span class="filter-btn-text">{$t('filters')}</span>
         {#if activeFilterCount > 0}
           <span class="filter-count-badge">{activeFilterCount}</span>
         {/if}
@@ -262,58 +263,58 @@
     <div class="filters-drawer" transition:slide={{ duration: 180 }}>
       <div class="drawer-grid">
         <label class="drawer-field">
-          <span class="drawer-label">Genre</span>
+          <span class="drawer-label">{$t('genre')}</span>
           <input
             bind:value={filterGenre}
-            placeholder="Animation, Drame…"
+            placeholder={$t('animation_drama')}
             maxlength="100"
           />
         </label>
         <label class="drawer-field">
-          <span class="drawer-label">Année</span>
+          <span class="drawer-label">{$t('stats_w_year')}</span>
           <input
             type="number"
             bind:value={filterYear}
-            placeholder="Ex: 2024"
+            placeholder={$t('e_g_2024')}
             min="1800"
             max="2200"
           />
         </label>
         <label class="drawer-field">
-          <span class="drawer-label">Qualité min.</span>
+          <span class="drawer-label">{$t('min_quality')}</span>
           <select bind:value={filterQuality}>
-            <option value="">Toutes</option>
+            <option value="">{$t('all_extensions_filter')}</option>
             <option value="720">720p</option>
             <option value="1080">1080p</option>
-            <option value="2160">2160p (4K)</option>
+            <option value="2160">{$t('n_2160p_4k')}</option>
           </select>
         </label>
         <label class="drawer-field">
-          <span class="drawer-label">Codec</span>
+          <span class="drawer-label">{$t('codec')}</span>
           <select bind:value={filterCodec}>
-            <option value="">Tous</option>
+            <option value="">{$t('stats_all_m')}</option>
             <option value="av1">AV1</option>
             <option value="hevc">HEVC</option>
             <option value="h264">H.264</option>
-            <option value="opus">Opus</option>
+            <option value="opus">{$t('opus')}</option>
           </select>
         </label>
         <label class="drawer-field">
-          <span class="drawer-label">Langue</span>
+          <span class="drawer-label">{$t('catalog_language')}</span>
           <input
             bind:value={filterLanguage}
-            placeholder="fra, eng…"
+            placeholder={$t('fra_eng')}
             maxlength="35"
           />
         </label>
       </div>
       <div class="drawer-actions">
         <button type="button" class="apply-filter-btn" onclick={() => handleFilterSubmit()}>
-          Appliquer
+          {$t('catalog_apply')}
         </button>
         {#if activeFilterCount > 0}
           <button type="button" class="reset-filter-btn" onclick={resetFilters}>
-            Réinitialiser
+            {$t('reset')}
           </button>
         {/if}
       </div>
@@ -322,14 +323,14 @@
 
   <!-- Quick Genre Filters Bar if available -->
   {#if allAvailableGenres.length > 0}
-    <div class="genre-pills-bar" aria-label="Filtrer par genre">
+    <div class="genre-pills-bar" aria-label={$t('filter_by_genre')}>
       <button
         type="button"
         class="genre-chip"
         class:active={activeGenre === null}
         onclick={() => (activeGenre = null)}
       >
-        Tous les genres
+        {$t('all_genres')}
       </button>
       {#each allAvailableGenres as g (g)}
         <button
@@ -349,8 +350,8 @@
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-films-title' : undefined}>
       {#if section === 'search'}
         <div class="section-heading">
-          <h2 id="shelf-films-title">Films</h2>
-          <span class="count-badge">{filmCount} film{filmCount > 1 ? 's' : ''}</span>
+          <h2 id="shelf-films-title">{$t('films')}</h2>
+          <span class="count-badge">{$t('film_count', { count: filmCount })}</span>
         </div>
       {/if}
 
@@ -361,7 +362,7 @@
           <div class="empty-media-box">
             <Icon name="film" size={32} />
             <p>
-              {query ? 'Aucun film ne correspond à votre recherche.' : 'Aucun film dans cette bibliothèque.'}
+              {query ? $t('no_film_matches_your_search') : $t('no_films_in_this_library')}
             </p>
           </div>
         {/each}
@@ -374,8 +375,8 @@
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-series-title' : undefined}>
       {#if section === 'search'}
         <div class="section-heading">
-          <h2 id="shelf-series-title">Séries</h2>
-          <span class="count-badge">{seriesCount} série{seriesCount > 1 ? 's' : ''}</span>
+          <h2 id="shelf-series-title">{$t('series')}</h2>
+          <span class="count-badge">{$t('series_count', { count: seriesCount })}</span>
         </div>
       {/if}
 
@@ -386,7 +387,7 @@
           <div class="empty-media-box">
             <Icon name="tv" size={32} />
             <p>
-              {query ? 'Aucune série ne correspond à votre recherche.' : 'Aucune série dans cette bibliothèque.'}
+              {query ? $t('no_series_matches_your_search') : $t('no_series_in_this_library')}
             </p>
           </div>
         {/each}
@@ -396,7 +397,7 @@
 
   <!-- Pagination -->
   {#if offset > 0 || films.length || series.length}
-    <nav class="pagination" aria-label="Pages du catalogue">
+    <nav class="pagination" aria-label={$t('catalogue_pages')}>
       {#if offset > 0}
         <a
           class="page-nav-btn"
@@ -409,11 +410,11 @@
             })}`
           )}
         >
-          ← Page précédente
+          {$t('catalog_previous_page')}
         </a>
       {/if}
       <span class="page-indicator">
-        Page {Math.floor(offset / 24) + 1}{#if paginationTotal !== null} sur {Math.max(1, Math.ceil(paginationTotal / 24))}{/if}
+        {$t('admin_page', { value: Math.floor(offset / 24) + 1 })}{#if paginationTotal !== null} {$t('page_of_total', { total: Math.max(1, Math.ceil(paginationTotal / 24)) })}{/if}
       </span>
       {#if hasNext || (paginationTotal !== null && paginationTotal > offset + 24)}
         <a
@@ -427,7 +428,7 @@
             })}`
           )}
         >
-          Page suivante →
+          {$t('catalog_next_page')}
         </a>
       {/if}
     </nav>

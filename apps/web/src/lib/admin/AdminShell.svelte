@@ -125,7 +125,7 @@
       </div>
     {/each}
     {#if pinnedPages.length}
-      <div class="sidebar-group"><p class="group-label">Extensions épinglées</p>
+      <div class="sidebar-group"><p class="group-label">{$t('pinned_extensions')}</p>
         {#each pinnedPages as id (id)}
           {@const hash = `#extensions-section?extension=${encodeURIComponent(id)}`}
           <a class="sidebar-nav-item" class:active={currentHash === hash} href={resolve(`admin/libraries/#${hash.slice(1)}`)} aria-current={currentHash === hash ? 'page' : undefined} onclick={event => choose(event, hash)}>
@@ -141,7 +141,7 @@
 <a class="skip-admin" href="#admin-main-content" onclick={event => { event.preventDefault(); content?.focus(); }}>{$t('administrative_content')}</a>
 <header class="admin-header">
   <div class="header-left">
-    <a class="admin-brand" href={resolve('/')} aria-label={`${$serverPresentation.serverName || DEFAULT_NAME}, accueil`}>
+    <a class="admin-brand" href={resolve('/')} aria-label={$t('brand_home_label', { name: $serverPresentation.serverName || DEFAULT_NAME })}>
       <svg viewBox="0 0 256 256" width="28" height="28" aria-hidden="true">
         <defs><linearGradient id="halo-admin-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="logo-stop-a" /><stop offset="1" class="logo-stop-b" /></linearGradient></defs>
         <path d="M64 192 V48 L216 128 L116 180" fill="none" stroke="url(#halo-admin-brand)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
@@ -173,7 +173,7 @@
         <div class="section-heading"><h1>{adminDestinationLabel(currentEntry, $t)}</h1>
         </div>
         {#if currentEntry.tabs}
-          <nav class="section-tabs" aria-label={`Sous-sections : ${adminDestinationLabel(currentEntry, $t)}`}>
+          <nav class="section-tabs" aria-label={$t('subsections', { value: adminDestinationLabel(currentEntry, $t) })}>
             {#each currentEntry.tabs as tab (tab.hash)}
               <a href={resolve(`admin/libraries/#${tab.hash.slice(1)}`)} aria-current={currentHash === tab.hash ? 'page' : undefined} onclick={event => choose(event, tab.hash)}>{adminDestinationLabel(tab, $t)}</a>
             {/each}
@@ -181,7 +181,7 @@
         {/if}
       </header>
     {:else}
-      <h1 class="h-sr">{title} — Administration</h1>
+      <h1 class="h-sr">{$t('admin_administration', { title })}</h1>
     {/if}
     {@render children()}
   </main>

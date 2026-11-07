@@ -202,6 +202,8 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
 }
 
 /// Checksummed text of the one-shot translation backfill; bump it only with the step's meaning.
+const COMPAT_SEARCH_TITLES_BACKFILL: &str =
+    "search_titles_backfill v1: translated and original titles -> work_search_titles";
 const COMPAT_TRANSLATIONS_BACKFILL: &str = "translations_backfill v1: editorial_json/manual_json 'translations' -> work_translations (source legacy, ON CONFLICT DO NOTHING)";
 
 /// Re-run on every start, in this order; each file is additive and idempotent.
@@ -549,6 +551,17 @@ async fn initialize_schema_transaction(conn: &mut AnyConnection) -> Result<(), s
             "compat:translations_backfill",
             "compat",
             COMPAT_TRANSLATIONS_BACKFILL,
+        )
+        .await?;
+    }
+    // Titles that make a work findable by its translated and original names.
+    if !journal::recorded(&mut tx, "compat:search_titles_backfill").await? {
+        crate::translations::search::backfill(&mut tx).await?;
+        journal::record(
+            &mut tx,
+            "compat:search_titles_backfill",
+            "compat",
+            COMPAT_SEARCH_TITLES_BACKFILL,
         )
         .await?;
     }

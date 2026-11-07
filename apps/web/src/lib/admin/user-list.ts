@@ -1,3 +1,5 @@
+import { currentLocale, tr } from '../i18n';
+import { compareText, formatDateTime } from '../i18n/format';
 /** Logique pure de la gestion des comptes (filtre, tri, groupes, messages d'erreur). */
 
 export type UserSortField = 'name' | 'role' | 'status' | 'lastSeen';
@@ -40,9 +42,9 @@ export function filterAndSortUsers<T extends ListedUser>(users: readonly T[], fi
   }).sort((a, b) => {
     let cmp = 0;
     if (filters.sortField === 'name') {
-      cmp = (a.displayName || a.login).localeCompare(b.displayName || b.login);
+      cmp = compareText(currentLocale(), a.displayName || a.login, b.displayName || b.login);
     } else if (filters.sortField === 'role') {
-      cmp = a.role.localeCompare(b.role);
+      cmp = a.role.localeCompare(b.role); // role identifiers, not prose
     } else if (filters.sortField === 'status') {
       cmp = (a.disabledAt != null ? 1 : 0) - (b.disabledAt != null ? 1 : 0);
     } else if (filters.sortField === 'lastSeen') {
@@ -54,11 +56,8 @@ export function filterAndSortUsers<T extends ListedUser>(users: readonly T[], fi
 
 /** Libellé de dernière activité (timestamp en secondes). */
 export function activityLabel(timestamp: number | null | undefined, locale: string): string {
-  if (timestamp == null) return 'Jamais';
-  return new Date(timestamp * 1000).toLocaleString(locale === 'en' ? 'en-GB' : 'fr-FR', {
-    dateStyle: 'short',
-    timeStyle: 'short'
-  });
+  if (timestamp == null) return tr('never');
+  return formatDateTime(locale === 'en' ? 'en' : 'fr', timestamp, 'short');
 }
 
 const MUTATION_ERRORS: Record<string, string> = {
@@ -73,7 +72,7 @@ const MUTATION_ERRORS: Record<string, string> = {
 
 /** Message affichable pour un code d'erreur de l'API comptes. */
 export function userMutationErrorMessage(code: string | undefined): string {
-  return (code !== undefined && MUTATION_ERRORS[code]) || 'Opération refusée ou serveur indisponible.';
+  return (code !== undefined && MUTATION_ERRORS[code]) || tr('operation_refused_or_server_unavailable');
 }
 
 export interface GroupMembershipUpdate {

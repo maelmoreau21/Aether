@@ -7,6 +7,7 @@
     acceptPartyInvite, createParty, fetchActiveParties, fetchPartyInvites, initials, joinParty,
     searchCatalogWorks, searchEligibleUsers, type CatalogWorkOption
   } from './party-api';
+  import { t } from '../i18n';
 
   interface SelectedInvitee {
     id?: string;
@@ -140,7 +141,7 @@
 
   async function handleCreateParty() {
     if (!selectedMediaId) {
-      error = 'Veuillez sélectionner une œuvre ou un épisode à regarder.';
+      error = $t('please_select_a_work_or_an');
       return;
     }
     loading = true;
@@ -164,7 +165,7 @@
       onJoinParty(party.id, selectedMediaId);
       onClose();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Erreur inconnue';
+      error = e instanceof Error ? e.message : $t('unknown_error');
     } finally {
       loading = false;
     }
@@ -178,7 +179,7 @@
       onJoinParty(pId, mId);
       onClose();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Erreur lors de l’acceptation';
+      error = e instanceof Error ? e.message : $t('error_while_accepting');
     } finally {
       loading = false;
     }
@@ -192,24 +193,24 @@
       onJoinParty(pId, mId);
       onClose();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Erreur lors de l’accès';
+      error = e instanceof Error ? e.message : $t('error_while_accessing');
     } finally {
       loading = false;
     }
   }
 </script>
 
-<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label="Séances Watch Party">
+<div class="modal-backdrop" role="dialog" aria-modal="true" aria-label={$t('watch_party_sessions')}>
   <div class="modal-card">
     <header class="modal-header">
       <div class="title-with-icon">
         <Icon name="users" size={24} />
         <div>
-          <h2>Watch Party Aether</h2>
-          <span class="sub-badge">Synchronisation multi-utilisateurs</span>
+          <h2>{$t('aether_watch_party')}</h2>
+          <span class="sub-badge">{$t('multi_user_synchronisation')}</span>
         </div>
       </div>
-      <button type="button" class="btn-close" aria-label="Fermer" onclick={onClose}>
+      <button type="button" class="btn-close" aria-label={$t('close')} onclick={onClose}>
         <Icon name="close" size={20} />
       </button>
     </header>
@@ -222,7 +223,7 @@
         class:active={mode === 'create'}
         onclick={() => (mode = 'create')}
       >
-        Créer une séance
+        {$t('create_a_session')}
       </button>
       <button
         type="button"
@@ -230,7 +231,7 @@
         class:active={mode === 'list'}
         onclick={() => (mode = 'list')}
       >
-        Séances en cours ({activeParties.length})
+        {$t('sessions_in_progress', { count: activeParties.length })}
       </button>
       {#if userInvites.length > 0}
         <button
@@ -239,7 +240,7 @@
           class:active={mode === 'list'}
           onclick={() => (mode = 'list')}
         >
-          Invitations reçues
+          {$t('invitations_received')}
           <span class="count-pill">{userInvites.length}</span>
         </button>
       {/if}
@@ -258,10 +259,9 @@
         <div class="privacy-banner">
           <div class="privacy-icon"><Icon name="shield" size={20} /></div>
           <div class="privacy-text">
-            <strong>Séance privée sur invitation uniquement</strong>
+            <strong>{$t('private_session_by_invitation_only')}</strong>
             <p>
-              Chaque utilisateur invité regarde avec ses propres réglages audio (VF/VO), ses
-              sous-titres et son débit, tout en restant parfaitement synchronisé.
+              {$t('each_invited_user_watches_with_their')}
             </p>
           </div>
         </div>
@@ -276,7 +276,7 @@
           <!-- Media Selection if not preselected -->
           {#if !mediaId}
             <div class="field-group">
-              <label for="media-search">Média à regarder</label>
+              <label for="media-search">{$t('media_to_watch')}</label>
               {#if selectedMediaId && selectedMediaTitle}
                 <div class="selected-media-chip">
                   <span class="media-title"><Icon name="film" size={16} />{selectedMediaTitle}</span>
@@ -288,7 +288,7 @@
                       selectedMediaTitle = undefined;
                     }}
                   >
-                    Changer
+                    {$t('change')}
                   </button>
                 </div>
               {:else}
@@ -298,7 +298,7 @@
                     type="text"
                     bind:value={mediaSearchQuery}
                     oninput={() => void searchCatalogMedia(mediaSearchQuery)}
-                    placeholder="Rechercher un film ou une série dans votre catalogue…"
+                    placeholder={$t('search_for_a_film_or_series')}
                     autocomplete="off"
                   />
                   {#if isSearchingMedia}
@@ -331,13 +331,13 @@
           {:else if selectedMediaTitle}
             <div class="media-preview-bar">
               <Icon name="film" size={16} />
-              <span>Programme : <strong>{selectedMediaTitle}</strong></span>
+              <span>{$t('programme')} <strong>{selectedMediaTitle}</strong></span>
             </div>
           {/if}
 
           <!-- Party Name -->
           <div class="field-group">
-            <label for="party-name">Nom de la séance</label>
+            <label for="party-name">{$t('session_name')}</label>
             <input
               id="party-name"
               type="text"
@@ -346,13 +346,13 @@
               oninput={(e) => {
                 customPartyName = e.currentTarget.value;
               }}
-              placeholder="Ex: Soirée cinéma entre amis"
+              placeholder={$t('e_g_movie_night_with_friends')}
             />
           </div>
 
           <!-- Invite users by username (@pseudo) -->
           <div class="field-group">
-            <label for="invite-pseudo">Inviter des amis par pseudo</label>
+            <label for="invite-pseudo">{$t('invite_friends_by_username')}</label>
             <div class="pseudo-input-row">
               <div class="search-input-wrapper">
                 <input
@@ -361,7 +361,7 @@
                   bind:value={userSearchQuery}
                   oninput={() => void searchUsers(userSearchQuery)}
                   onkeydown={handleUserKeyDown}
-                  placeholder="Tapez un @pseudo ou un nom…"
+                  placeholder={$t('type_a_username_or_a_name')}
                   autocomplete="off"
                 />
                 {#if isSearchingUsers}
@@ -380,7 +380,7 @@
                   }
                 }}
               >
-                Ajouter
+                {$t('sched_add')}
               </button>
             </div>
 
@@ -410,7 +410,7 @@
                     <button
                       type="button"
                       class="btn-remove-chip"
-                      aria-label="Retirer {inv.username}"
+                      aria-label={$t('player_remove', { username: inv.username })}
                       onclick={() => removeInvitee(inv.username)}
                     >
                       <Icon name="close" size={14} />
@@ -420,35 +420,34 @@
               </div>
             {:else}
               <span class="hint-text">
-                Vous pouvez ajouter des invités maintenant ou partager un lien d'invitation après le
-                démarrage.
+                {$t('you_can_add_guests_now_or')}
               </span>
             {/if}
           </div>
 
           <!-- Playback Control Mode -->
           <div class="field-group">
-            <label for="control-mode">Mode de contrôle de lecture</label>
+            <label for="control-mode">{$t('playback_control_mode')}</label>
             <select id="control-mode" bind:value={controlMode}>
-              <option value="host_only">Organisateur uniquement (recommandé)</option>
-              <option value="shared">Contrôles partagés (tous les participants)</option>
-              <option value="request">Contrôle sur demande</option>
+              <option value="host_only">{$t('organiser_only_recommended')}</option>
+              <option value="shared">{$t('shared_controls_all_participants')}</option>
+              <option value="request">{$t('control_on_request')}</option>
             </select>
           </div>
 
           <label class="checkbox-row">
             <input type="checkbox" bind:checked={waitForBuffering} />
-            <span>Mettre en pause automatique si un participant est en cours de chargement</span>
+            <span>{$t('pause_automatically_if_a_participant_is')}</span>
           </label>
 
           <div class="modal-actions">
-            <button type="button" class="btn-secondary" onclick={onClose}>Annuler</button>
+            <button type="button" class="btn-secondary" onclick={onClose}>{$t('sched_cancel')}</button>
             <button
               type="submit"
               class="btn-primary"
               disabled={loading || !selectedMediaId || !partyName.trim()}
             >
-              {loading ? 'Création en cours…' : 'Créer la séance privée'}
+              {loading ? $t('creating') : $t('create_the_private_session')}
             </button>
           </div>
         </form>
@@ -457,17 +456,17 @@
         <div class="parties-list-pane">
           {#if userInvites.length > 0}
             <section class="section-block">
-              <h3>Invitations reçues ({userInvites.length})</h3>
+              <h3>{$t('player_invitations_received', { count: userInvites.length })}</h3>
               <div class="cards-list">
                 {#each userInvites as inv (inv.token)}
                   <div class="party-card invite-card">
                     <div class="party-card-info">
                       <div class="invite-header">
                         <strong>{inv.partyName}</strong>
-                        <span class="badge-invite">Invitation privée</span>
+                        <span class="badge-invite">{$t('private_invitation')}</span>
                       </div>
                       <span class="sub-text">
-                        Média : {inv.mediaTitle} · Invité par <strong>{inv.hostName}</strong>
+                        {$t('media_invited_by', { mediaTitle: inv.mediaTitle })} <strong>{inv.hostName}</strong>
                       </span>
                     </div>
                     <button
@@ -476,7 +475,7 @@
                       disabled={loading}
                       onclick={() => handleAcceptInvite(inv.token, inv.partyId, inv.mediaId)}
                     >
-                      Rejoindre
+                      {$t('join')}
                     </button>
                   </div>
                 {/each}
@@ -485,7 +484,7 @@
           {/if}
 
           <section class="section-block">
-            <h3>Vos séances actives ({activeParties.length})</h3>
+            <h3>{$t('your_active_sessions', { count: activeParties.length })}</h3>
             <div class="cards-list">
               {#each activeParties as p (p.id)}
                 <div class="party-card">
@@ -494,15 +493,14 @@
                       <strong>{p.name}</strong>
                       <span class="badge-status" class:playing={p.state === 'playing'}>
                         {p.state === 'playing'
-                          ? 'En lecture'
+                          ? $t('playing')
                           : p.state === 'paused'
-                            ? 'En pause'
-                            : 'En attente'}
+                            ? $t('paused')
+                            : $t('waiting')}
                       </span>
                     </div>
                     <span class="sub-text">
-                      {p.mediaTitle} · {p.membersCount} participant{p.membersCount > 1 ? 's' : ''} ·
-                      Hôte : {p.hostName}
+                      {$t('party_summary', { title: p.mediaTitle, count: p.membersCount, host: p.hostName })}
                     </span>
                   </div>
                   <button
@@ -511,18 +509,18 @@
                     disabled={loading}
                     onclick={() => handleJoin(p.id, p.mediaId)}
                   >
-                    Rejoindre
+                    {$t('join')}
                   </button>
                 </div>
               {:else}
                 <div class="empty-state">
-                  <p class="empty-text">Aucune séance communautaire en cours actuellement.</p>
+                  <p class="empty-text">{$t('no_community_session_is_running_right')}</p>
                   <button
                     type="button"
                     class="btn-secondary-small"
                     onclick={() => (mode = 'create')}
                   >
-                    Créer une séance privée
+                    {$t('create_a_private_session')}
                   </button>
                 </div>
               {/each}

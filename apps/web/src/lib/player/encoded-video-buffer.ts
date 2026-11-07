@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 // Conservative accounting of encoded bytes submitted to MSE. Browser decoder
 // surfaces and OS allocations are separate and cannot be bounded by this ledger.
 export class EncodedVideoBuffer {
@@ -6,8 +7,8 @@ export class EncodedVideoBuffer {
   constructor(private readonly limit=128*1024*1024) {}
   get bytes(){return this.retained;}
   append(bytes:number,end:number) {
-    if(!Number.isSafeInteger(bytes)||bytes<=0||!Number.isSafeInteger(end)||end<bytes)throw new Error('Comptabilité du tampon vidéo invalide.');
-    if(bytes>this.limit-this.retained)throw new Error('Limite du tampon vidéo encodé atteinte (128 Mio) : aucun point d’accès sûr ne permet de libérer le GOP courant.');
+    if(!Number.isSafeInteger(bytes)||bytes<=0||!Number.isSafeInteger(end)||end<bytes)throw new Error(tr('invalid_video_buffer_accounting'));
+    if(bytes>this.limit-this.retained)throw new Error(tr('encoded_video_buffer_limit_reached_128'));
     const last=this.blocks.at(-1);
     // Highly fragmented HTTP delivery must not create millions of tiny records.
     // Merging delays release, which deliberately overestimates retained bytes.

@@ -5,6 +5,7 @@
  */
 import { colorProfileLabel, containerLabel, languageLabel, videoResolutionBadge } from '../player/track-labels';
 
+import { tr, currentFormat } from '../i18n';
 export interface AssetTrack {
   index: number;
   codecType?: string | null;
@@ -57,14 +58,14 @@ export interface AssetDetails {
 
 export async function fetchAssetDetails(id: string, signal: AbortSignal): Promise<AssetDetails> {
   const response = await fetch(`/api/v1/assets/${encodeURIComponent(id)}/details`, { signal, headers: { accept: 'application/json' } });
-  if (response.status === 401) throw new Error('Votre session a expiré. Connectez-vous à nouveau.');
-  if (response.status === 403) throw new Error('Votre compte n’a pas accès à ce fichier.');
-  if (response.status === 404) throw new Error('Ce fichier n’est plus présent dans l’inventaire.');
-  if (!response.ok) throw new Error(`Informations indisponibles (HTTP ${response.status}).`);
+  if (response.status === 401) throw new Error(tr('catalog_your_session_has_expired_sign_in'));
+  if (response.status === 403) throw new Error(tr('your_account_does_not_have_access'));
+  if (response.status === 404) throw new Error(tr('this_file_is_no_longer_in'));
+  if (!response.ok) throw new Error(tr('information_unavailable_http', { status: response.status }));
   return (await response.json()) as AssetDetails;
 }
 
-const number = (value: number, digits = 1) => value.toLocaleString('fr-FR', { maximumFractionDigits: digits });
+const number = (value: number, digits = 1) => currentFormat().number(value, { maximumFractionDigits: digits });
 
 export function formatBytes(size?: number | null): string {
   if (!size || size < 0) return '—';
@@ -104,7 +105,7 @@ export function formatChannels(track: Pick<AssetTrack, 'channels' | 'channelLayo
 }
 
 export function dynamicRangeLabel(track: Pick<AssetTrack, 'colorTransfer'>): string | null {
-  if (track.colorTransfer === 'smpte2084') return 'HDR10 (PQ)';
+  if (track.colorTransfer === 'smpte2084') return tr('hdr10_pq');
   if (track.colorTransfer === 'arib-std-b67') return 'HLG';
   return null;
 }
@@ -112,8 +113,8 @@ export function dynamicRangeLabel(track: Pick<AssetTrack, 'colorTransfer'>): str
 /** Rôles de piste lisibles (par défaut, forcés, SDH…), dans un ordre stable. */
 export function trackRoles(disposition?: Record<string, boolean>): string[] {
   const labels: [string, string][] = [
-    ['default', 'Par défaut'], ['forced', 'Forcés'], ['hearingImpaired', 'Malentendants (SDH)'],
-    ['visualImpaired', 'Audiodescription'], ['comment', 'Commentaire'], ['original', 'Version originale'], ['dub', 'Doublage']
+    ['default', tr('default')], ['forced', tr('forced')], ['hearingImpaired', tr('hard_of_hearing_sdh')],
+    ['visualImpaired', tr('audio_description')], ['comment', tr('commentary')], ['original', tr('catalog_original_version')], ['dub', tr('dubbed')]
   ];
   return labels.filter(([key]) => disposition?.[key]).map(([, label]) => label);
 }
@@ -136,12 +137,12 @@ export function audioSummary(track: AssetTrack): string[] {
 
 export function codecLabel(track: Pick<AssetTrack, 'codecName' | 'codecLongName'>): string {
   const name = track.codecName?.toUpperCase();
-  if (!name) return 'Codec inconnu';
+  if (!name) return tr('unknown_codec');
   return track.codecLongName && track.codecLongName.toUpperCase() !== name ? `${name} — ${track.codecLongName}` : name;
 }
 
 export function trackLanguage(track: Pick<AssetTrack, 'language'>): string {
-  return track.language ? languageLabel(track.language) : 'Langue non renseignée';
+  return track.language ? languageLabel(track.language) : tr('language_not_specified');
 }
 
 export function groupTracks(tracks: AssetTrack[]) {
@@ -168,11 +169,11 @@ export function shortContainer(mime?: string): string {
 }
 
 export function nodeStatusLabel(status?: string): { label: string; tone: 'online' | 'offline' | 'revoked' } {
-  if (status === 'connected') return { label: 'Connecté', tone: 'online' };
-  if (status === 'revoked') return { label: 'Révoqué', tone: 'revoked' };
-  return { label: 'Déconnecté', tone: 'offline' };
+  if (status === 'connected') return { label: tr('connected'), tone: 'online' };
+  if (status === 'revoked') return { label: tr('revoked'), tone: 'revoked' };
+  return { label: tr('common_disconnected'), tone: 'offline' };
 }
 
 export function nodeKindLabel(kind?: string): string {
-  return kind === 'local' ? 'Media Node local' : kind === 'remote' ? 'Media Node distant' : 'Media Node';
+  return kind === 'local' ? tr('local_media_node') : kind === 'remote' ? tr('remote_media_node') : tr('media_node');
 }

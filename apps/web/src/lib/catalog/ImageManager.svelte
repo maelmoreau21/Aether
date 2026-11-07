@@ -7,6 +7,7 @@
   import { onMount } from 'svelte';
   import { session } from '../auth/session';
   import type { Library } from '../admin/types';
+  import { t } from '../i18n';
 
   type Entry = {
     id: string;
@@ -102,7 +103,7 @@
       return;
     }
     const response = await fetch(base, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error('Images indisponibles.');
+    if (!response.ok) throw new Error($t('images_unavailable'));
     const result = await response.json();
     const incoming: Entry[] = result.images;
     originalLanguage = result.originalLanguage ?? null;
@@ -131,7 +132,7 @@
     const file = (event.currentTarget as HTMLInputElement).files?.[0];
     if (!file || busy) return;
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 2 * 1024 * 1024) {
-      error = 'Choisissez une image PNG, JPEG ou WebP de 2 Mio maximum.';
+      error = $t('catalog_choose_a_png_jpeg_or_webp');
       if (fileInput) fileInput.value = '';
       return;
     }
@@ -146,7 +147,7 @@
         body: file,
         signal: AbortSignal.timeout(20000)
       });
-      if (!response.ok) throw new Error(response.status === 422 ? 'Image trop grande, corrompue ou dimensions non acceptées (4096 px maximum).' : `Image non enregistrée (HTTP ${response.status}).`);
+      if (!response.ok) throw new Error(response.status === 422 ? $t('image_too_large_corrupted_or_dimensions') : $t('image_not_saved_http', { status: response.status }));
       if (library) {
         entries = [...entries.filter(e => e.kind !== kind), { id: kind, kind, url: `${base}/${kind}?v=${crypto.randomUUID()}`, origin: 'manual' }];
       } else await load();
@@ -172,7 +173,7 @@
         headers: { 'x-csrf-token': $session?.csrfToken ?? '' },
         signal: AbortSignal.timeout(8000)
       });
-      if (!response.ok) throw new Error('Image non retirée.');
+      if (!response.ok) throw new Error($t('image_not_removed'));
       if (library) entries = entries.filter(e => e.id !== entry.id);
       else await load();
       similarPairs = null;
@@ -192,7 +193,7 @@
         method: 'PUT', headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' },
         body: JSON.stringify({ pinned: !entry.pinned }), signal: AbortSignal.timeout(8000)
       });
-      if (!response.ok) throw new Error('Épinglage non enregistré.');
+      if (!response.ok) throw new Error($t('pin_not_saved'));
       await load(); await onchanged();
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Erreur'; }
     finally { busy = false; }
@@ -212,7 +213,7 @@
         body: JSON.stringify({ ids: images.map(e => e.id) }),
         signal: AbortSignal.timeout(8000)
       });
-      if (!response.ok) throw new Error('Ordre non enregistré.');
+      if (!response.ok) throw new Error($t('order_not_saved'));
       entries = [...entries.filter(e => e.kind !== 'backdrop'), ...images];
       await onchanged();
     } catch (cause) {
@@ -258,16 +259,16 @@
   }
 
   function provenance(entry: Entry) {
-    if (entry.origin === 'manual' || entry.origin === 'legacy') return 'Image manuelle · prioritaire';
-    if (entry.origin === 'local') return 'Image locale';
-    return [entry.language || 'Langue non déclarée', entry.provider || 'Fournisseur'].join(' · ');
+    if (entry.origin === 'manual' || entry.origin === 'legacy') return $t('manual_image_priority');
+    if (entry.origin === 'local') return $t('local_image');
+    return [entry.language || $t('language_not_declared'), entry.provider || 'Fournisseur'].join(' · ');
   }
 
   async function collect() {
     if (busy || !workId) return;
     busy = true;
     error = '';
-    collectionMessage = 'Recherche et téléchargement auprès des fournisseurs activés…';
+    collectionMessage = $t('searching_and_downloading_from_enabled');
     try {
       const response = await fetch('/api/v1/admin/extensions/images/collect', {
         method: 'POST',
@@ -275,7 +276,7 @@
         body: JSON.stringify({ workId }),
         signal: AbortSignal.timeout(70000)
       });
-      if (!response.ok) throw new Error(`Collecte indisponible (HTTP ${response.status}). Vérifiez les fournisseurs activés et les identifiants du média.`);
+      if (!response.ok) throw new Error($t('collection_unavailable_http_check_the', { status: response.status }));
       const result = await response.json();
       collectionMessage = `${result.downloaded ?? 0} images téléchargées · ${result.duplicates ?? 0} doublons évités · ${result.skipped ?? 0} ignorées · ${Array.isArray(result.errors) ? result.errors.length : result.errors ?? 0} erreurs.${result.partial ? ' Collecte partielle : relancez pour continuer.' : ''}`;
       await load();
@@ -283,7 +284,7 @@
       await onchanged();
     } catch (cause) {
       collectionMessage = '';
-      error = cause instanceof Error ? cause.message : 'Collecte indisponible.';
+      error = cause instanceof Error ? cause.message : $t('catalog_collection_unavailable');
     } finally {
       busy = false;
     }
@@ -321,9 +322,9 @@
       if (!response.ok) {
         const detail = await response.json().catch(() => null);
         if (detail?.error === 'external_ids_required') {
-          throw new Error('Ce média n’a pas encore d’identifiant externe (TMDb ou IMDb). Utilisez l’option "Identifier" dans le menu d’actions (...) pour lier la fiche et récupérer ses images officielles.');
+          throw new Error($t('this_media_item_has_no_external'));
         }
-        throw new Error(`Recherche indisponible (HTTP ${response.status}).`);
+        throw new Error($t('search_unavailable_http', { status: response.status }));
       }
       const data = await response.json();
       candidates = data.images ?? [];
@@ -332,7 +333,7 @@
         searchError = data.errors.map((failure: {provider: string; providerName?: string; error?: string; status: number}) => `${failure.providerName ?? failure.provider} : ${failure.error ? providerErrorText(failure.error) : `HTTP ${failure.status}`}`).join(' · ');
       }
     } catch (cause) {
-      searchError = cause instanceof Error ? cause.message : 'Erreur lors de la recherche.';
+      searchError = cause instanceof Error ? cause.message : $t('error_during_the_search');
     } finally {
       searching = false;
     }
@@ -355,13 +356,13 @@
         }),
         signal: AbortSignal.timeout(30000)
       });
-      if (response.status === 409) throw new Error('Cette œuvre a atteint la limite de 64 images : rien n’a été téléchargé. Supprimez-en une pour en ajouter une autre.');
-      if (!response.ok) throw new Error(`Échec de l’enregistrement (HTTP ${response.status}).`);
+      if (response.status === 409) throw new Error($t('this_work_has_reached_the_limit'));
+      if (!response.ok) throw new Error($t('saving_failed_http', { status: response.status }));
       appliedUrls = new Set([...appliedUrls, candidate.url]);
       await load();
       await onchanged();
     } catch (cause) {
-      searchError = cause instanceof Error ? cause.message : 'Erreur de téléchargement.';
+      searchError = cause instanceof Error ? cause.message : $t('download_error');
     } finally {
       applyingUrl = null;
     }
@@ -375,13 +376,13 @@
     similarVisible = 20;
     try {
       const response = await fetch(`${base}/similar`, { cache: 'no-store', signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error('Comparaison des images indisponible.');
+      if (!response.ok) throw new Error($t('image_comparison_unavailable'));
       const result = await response.json() as { pairs: { first: string; second: string }[]; uncompared: number; truncated: boolean };
       similarPairs = result.pairs;
       uncompared = result.uncompared;
       similarTruncated = result.truncated;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Comparaison impossible.';
+      error = cause instanceof Error ? cause.message : $t('comparison_failed');
     } finally {
       busy = false;
     }
@@ -395,29 +396,29 @@
 
 <dialog bind:this={dialog} class="image-manager" aria-labelledby="image-manager-title" onclose={onclose} oncancel={event => { if (busy) event.preventDefault(); }}>
   <header>
-    <button type="button" aria-label="Fermer l’éditeur d’images" disabled={busy} onclick={() => dialog.close()}>←</button>
-    <h2 id="image-manager-title">Modifier les images · {title}</h2>
+    <button type="button" aria-label={$t('close_the_image_editor')} disabled={busy} onclick={() => dialog.close()}>←</button>
+    <h2 id="image-manager-title">{$t('edit_images', { title })}</h2>
   </header>
   <div class="manager-content">
     {#if error}<p role="alert" class="alert-box">{error}</p>{/if}
-    {#if loading}<p role="status">Chargement des images…</p>{/if}
+    {#if loading}<p role="status">{$t('loading_images')}</p>{/if}
 
     {#if workId && $session?.user.role === 'administrator'}
-      <div class="toolbar" role="group" aria-label="Outils d’images">
-        <button type="button" disabled={busy || loading} onclick={collect} title="Ajoute des images des fournisseurs selon les options de la bibliothèque">Collecter les images</button>
-        <button type="button" disabled={busy || loading} onclick={findSimilar} title="Compare toutes les images enregistrées, sans rien supprimer">Repérer les doublons</button>
-        <span class="toolbar-hint">Langues, nombre d’images et tolérance se règlent dans les options de la bibliothèque, section Images.</span>
+      <div class="toolbar" role="group" aria-label={$t('image_tools')}>
+        <button type="button" disabled={busy || loading} onclick={collect} title={$t('adds_provider_images_according_to_the')}>{$t('collect_images')}</button>
+        <button type="button" disabled={busy || loading} onclick={findSimilar} title={$t('compares_every_saved_image_without_deleting')}>{$t('find_duplicates')}</button>
+        <span class="toolbar-hint">{$t('languages_number_of_images_and_tolerance')}</span>
       </div>
       {#if collectionMessage}<p role="status" class="toolbar-status">{collectionMessage}</p>{/if}
       {#if similarPairs !== null}
         <section class="similar-panel" aria-labelledby="similar-title">
           <div class="section-heading">
-            <h3 id="similar-title">Doublons probables<span class="count">{similarPairs.length}</span></h3>
-            <button type="button" class="ghost" onclick={() => similarPairs = null}>Fermer</button>
+            <h3 id="similar-title">{$t('likely_duplicates')}<span class="count">{similarPairs.length}</span></h3>
+            <button type="button" class="ghost" onclick={() => similarPairs = null}>{$t('close')}</button>
           </div>
-          {#if uncompared}<p>{uncompared} image{uncompared > 1 ? 's' : ''} sans empreinte non comparée{uncompared > 1 ? 's' : ''}.</p>{/if}
-          {#if similarTruncated}<p>Liste limitée à 128 paires : relancez après avoir retiré des images.</p>{/if}
-          {#if !similarPairs.length}<p>Aucune image similaire.</p>{/if}
+          {#if uncompared}<p>{$t('uncompared_images', { count: uncompared })}</p>{/if}
+          {#if similarTruncated}<p>{$t('list_limited_to_128_pairs_run')}</p>{/if}
+          {#if !similarPairs.length}<p>{$t('no_similar_images')}</p>{/if}
           <div class="similar-list">
             {#each similarPairs.slice(0, similarVisible) as pair (`${pair.first}:${pair.second}`)}
               <div class="similar-pair">
@@ -427,7 +428,7 @@
                     <div>
                       <img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" />
                       <p>{provenance(entry)}</p>
-                      <button type="button" class="ghost danger" disabled={busy} onclick={() => removeSimilar(id)}>Retirer</button>
+                      <button type="button" class="ghost danger" disabled={busy} onclick={() => removeSimilar(id)}>{$t('remove')}</button>
                     </div>
                   {/if}
                 {/each}
@@ -435,7 +436,7 @@
             {/each}
           </div>
           {#if similarVisible < similarPairs.length}
-            <button type="button" onclick={() => similarVisible += 20}>Afficher davantage</button>
+            <button type="button" onclick={() => similarVisible += 20}>{$t('show_more')}</button>
           {/if}
         </section>
       {/if}
@@ -444,16 +445,16 @@
     {#if adding}
       <form class="upload-panel" onsubmit={event => event.preventDefault()}>
         <fieldset disabled={busy}>
-          <legend>{replacing ? 'Remplacer une image' : 'Ajouter une image'}</legend>
-          <label for="artwork-type">Type d’image</label>
+          <legend>{replacing ? $t('replace_an_image') : $t('add_an_image')}</legend>
+          <label for="artwork-type">{$t('image_type')}</label>
           <select id="artwork-type" bind:value={kind} disabled={!!replacing}>
             {#each kinds as type(type)}<option value={type}>{labels[type]}</option>{/each}
           </select>
-          <label for="artwork-file">PNG, JPEG ou WebP · 2 Mio maximum</label>
-          {#if workId}<label>Langue de l’image (facultatif, ex. fr-CA)<input bind:value={uploadLanguage} maxlength="35" placeholder="Inconnue" /></label>{/if}
+          <label for="artwork-file">{$t('png_jpeg_or_webp_2_mib')}</label>
+          {#if workId}<label>{$t('image_language_optional_e_g_fr')}<input bind:value={uploadLanguage} maxlength="35" placeholder={$t('stats_res_unknown')} /></label>{/if}
           <input id="artwork-file" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" onchange={upload} />
-          <p>Les images sont conservées dans les données applicatives. Les fichiers de vos médias restent intacts.</p>
-          <button type="button" onclick={() => adding = false}>Annuler</button>
+          <p>{$t('images_are_kept_in_the_application')}</p>
+          <button type="button" onclick={() => adding = false}>{$t('sched_cancel')}</button>
         </fieldset>
       </form>
     {/if}
@@ -466,19 +467,19 @@
             <h3 id={`images-${group.id}`}>{group.title}{#if items.length}<span class="count">{items.length}</span>{/if}</h3>
             <div class="heading-actions">
               {#if workId && $session?.user.role === 'administrator'}
-                <button class="round" type="button" disabled={busy} title={`Rechercher en ligne : ${group.title.toLowerCase()}`} aria-label={`Rechercher en ligne : ${group.title.toLowerCase()}`} onclick={() => openSearch(group.kinds[0])}>
+                <button class="round" type="button" disabled={busy} title={$t('search_online', { value: group.title.toLowerCase() })} aria-label={$t('search_online', { value: group.title.toLowerCase() })} onclick={() => openSearch(group.kinds[0])}>
                   <Icon name="search" size={18} />
                 </button>
               {/if}
-              <button class="round" type="button" disabled={busy} aria-label={`Ajouter : ${group.title.toLowerCase()}`} title="Ajouter un fichier" onclick={() => add(group.kinds[0])}>+</button>
+              <button class="round" type="button" disabled={busy} aria-label={$t('add', { value: group.title.toLowerCase() })} title={$t('add_a_file')} onclick={() => add(group.kinds[0])}>+</button>
             </div>
           </div>
           <div class="image-grid">
             {#each items as entry (entry.id)}
               <article class="image-card" data-kind={entry.kind}>
-                <button class="image-preview" type="button" aria-label={`Agrandir ${labels[entry.kind]}`} onclick={() => { selected = entry; preview.showModal(); }}>
+                <button class="image-preview" type="button" aria-label={$t('enlarge', { value: labels[entry.kind] })} onclick={() => { selected = entry; preview.showModal(); }}>
                   <img src={imageUrl(entry)} alt={`${labels[entry.kind]} de ${title}`} loading="lazy" decoding="async" onload={event => dimensions(event, entry)} />
-                  {#if entry.pinned}<span class="badge pin-badge">Épinglée</span>{/if}
+                  {#if entry.pinned}<span class="badge pin-badge">{$t('pinned')}</span>{/if}
                   {#if group.id === 'other'}<span class="badge kind-badge">{labels[entry.kind]}</span>{/if}
                 </button>
                 <p class="meta" title={provenance(entry)}>
@@ -486,26 +487,26 @@
                 </p>
                 <div class="card-actions">
                   {#if workId && $session?.user.role === 'administrator'}
-                    <button type="button" disabled={busy} aria-label={entry.pinned ? 'Désépingler cette image' : 'Épingler cette image'} title={entry.pinned ? 'Désépingler' : 'Épingler pour tous les utilisateurs'} onclick={() => togglePin(entry)}>{entry.pinned ? '◆' : '◇'}</button>
+                    <button type="button" disabled={busy} aria-label={entry.pinned ? $t('unpin_this_image') : $t('pin_this_image')} title={entry.pinned ? 'Désépingler' : $t('pin_for_all_users')} onclick={() => togglePin(entry)}>{entry.pinned ? '◆' : '◇'}</button>
                   {/if}
-                  <button type="button" disabled={busy} aria-label={`Remplacer ${labels[entry.kind]}`} title="Remplacer par un fichier" onclick={() => add(entry.kind, entry)}>↥</button>
+                  <button type="button" disabled={busy} aria-label={$t('replace', { value: labels[entry.kind] })} title={$t('replace_with_a_file')} onclick={() => add(entry.kind, entry)}>↥</button>
                   {#if entry.kind === 'backdrop' && workId}
-                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop')[0]?.id === entry.id} aria-label="Déplacer l’arrière-plan à gauche" onclick={() => move(entry, -1)}>‹</button>
-                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop').at(-1)?.id === entry.id} aria-label="Déplacer l’arrière-plan à droite" onclick={() => move(entry, 1)}>›</button>
+                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop')[0]?.id === entry.id} aria-label={$t('move_the_backdrop_left')} onclick={() => move(entry, -1)}>‹</button>
+                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop').at(-1)?.id === entry.id} aria-label={$t('move_the_backdrop_right')} onclick={() => move(entry, 1)}>›</button>
                   {/if}
-                  <button type="button" class="danger" disabled={busy} aria-label={`Supprimer ${labels[entry.kind]}`} title={entry.origin === 'local' ? 'Masquer cette image dans le catalogue, sans supprimer le fichier' : 'Supprimer cette image personnalisée'} onclick={() => remove(entry)}>
+                  <button type="button" class="danger" disabled={busy} aria-label={$t('catalog_delete', { value: labels[entry.kind] })} title={entry.origin === 'local' ? $t('hide_this_image_in_the_catalogue') : $t('delete_this_custom_image')} onclick={() => remove(entry)}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>
                   </button>
                 </div>
               </article>
             {:else}
-              <p class="empty">{loading ? 'Chargement…' : 'Aucune image.'}</p>
+              <p class="empty">{loading ? 'Chargement…' : $t('no_images')}</p>
             {/each}
           </div>
         </section>
       {/if}
     {/each}
-    {#if busy}<p role="status">Enregistrement…</p>{/if}
+    {#if busy}<p role="status">{$t('saving')}</p>{/if}
   </div>
 </dialog>
 
@@ -513,31 +514,31 @@
 <dialog bind:this={searchDialog} class="search-modal" aria-labelledby="search-modal-title">
   <header class="search-header">
     <div class="search-title-bar">
-      <button type="button" class="back-btn" aria-label="Retour" onclick={() => searchDialog.close()}>←</button>
-      <h3 id="search-modal-title">Rechercher des images</h3>
+      <button type="button" class="back-btn" aria-label={$t('back')} onclick={() => searchDialog.close()}>←</button>
+      <h3 id="search-modal-title">{$t('search_for_images')}</h3>
     </div>
     <div class="search-controls">
-      <label><span>Source</span>
+      <label><span>{$t('source')}</span>
         <select bind:value={searchProvider} onchange={fetchCandidates}>
-          <option value="all">Tout</option>
+          <option value="all">{$t('all')}</option>
           {#each providersList as p (p.id)}
             <option value={p.id}>{p.name}</option>
           {/each}
         </select>
       </label>
-      <label><span>Type</span>
+      <label><span>{$t('request_type')}</span>
         <select bind:value={searchType} onchange={fetchCandidates}>
-          <option value="all">Tous types</option>
-          <option value="poster">Affiche (Principal)</option>
-          <option value="backdrop">Arrière-plan</option>
-          <option value="logo">Logo</option>
-          <option value="banner">Bannière</option>
-          <option value="thumb">Vignette</option>
+          <option value="all">{$t('all_types')}</option>
+          <option value="poster">{$t('poster_main')}</option>
+          <option value="backdrop">{$t('backdrop')}</option>
+          <option value="logo">{$t('logo')}</option>
+          <option value="banner">{$t('banner')}</option>
+          <option value="thumb">{$t('thumbnail')}</option>
         </select>
       </label>
       <label class="all-lang-toggle">
         <input type="checkbox" bind:checked={searchAllLanguages} onchange={fetchCandidates} />
-        Toutes les langues
+        {$t('all_languages')}
       </label>
       <span class="count-badge">
         {candidates.length > 0 ? `1-${candidates.length} de ${candidates.length}` : '0 image'}
@@ -552,16 +553,16 @@
     {#if searching}
       <div class="search-loading" role="status">
         <div class="spinner"></div>
-        <p>Recherche d’images auprès des fournisseurs…</p>
+        <p>{$t('searching_providers_for_images')}</p>
       </div>
     {:else if candidates.length === 0}
-      <p class="search-empty">Aucune image trouvée pour ces critères auprès des fournisseurs configurés.</p>
+      <p class="search-empty">{$t('no_images_found_for_these_criteria')}</p>
     {:else}
       <div class="candidates-grid">
         {#each candidates as candidate(candidate.url)}
           <article class="candidate-card">
             <div class="candidate-preview" class:is-backdrop={candidate.imageType === 'backdrop'}>
-              <img src={providerImagePreview(candidate.provider, workId ?? '', candidate.url)} alt={`Aperçu ${candidate.imageType}`} loading="lazy" />
+              <img src={providerImagePreview(candidate.provider, workId ?? '', candidate.url)} alt={$t('preview', { imageType: candidate.imageType })} loading="lazy" />
             </div>
             <div class="candidate-meta">
               <h4>{candidate.providerName || candidate.provider}</h4>
@@ -574,15 +575,15 @@
               {/if}
               <div class="candidate-action">
                 {#if applyingUrl === candidate.url}
-                  <span class="applying-tag">Téléchargement…</span>
+                  <span class="applying-tag">{$t('downloading')}</span>
                 {:else if appliedUrls.has(candidate.url)}
-                  <span class="applied-tag">✓ Enregistré</span>
+                  <span class="applied-tag">{$t('catalog_saved')}</span>
                 {:else}
                   <button
                     type="button"
                     class="download-btn"
-                    title="Télécharger et appliquer cette image"
-                    aria-label="Télécharger et appliquer"
+                    title={$t('download_and_apply_this_image')}
+                    aria-label={$t('download_and_apply')}
                     onclick={() => applyCandidate(candidate)}
                   >
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -599,8 +600,8 @@
   </div>
 </dialog>
 
-<dialog class="zoom" bind:this={preview} aria-label="Aperçu de l’image">
-  <button type="button" onclick={() => preview.close()}>Fermer</button>
+<dialog class="zoom" bind:this={preview} aria-label={$t('image_preview')}>
+  <button type="button" onclick={() => preview.close()}>{$t('close')}</button>
   {#if selected}<img src={imageUrl(selected, false)} alt={`${labels[selected.kind]} de ${title}`} />{/if}
 </dialog>
 

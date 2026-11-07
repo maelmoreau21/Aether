@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { type Work, localizedTitle, localizedPlot, localizedTagline } from './api';
-  import { locale, t } from '../i18n';
+  import { locale, t, fmt } from '../i18n';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
@@ -24,14 +24,14 @@
   let failedClearart = $state('');
   const hasBackdrop = $derived(Boolean(backdrop));
   const hasClearart = $derived((!hasBackdrop || ambient) && Boolean(clearart) && failedClearart !== clearart);
-  const meaningful = (value?: string | null) => Boolean(value?.trim() && !['Média local indexé', 'Média local'].includes(value.trim()));
+  const meaningful = (value?: string | null) => Boolean(value?.trim() && ![$t('indexed_local_media'), $t('local_media')].includes(value.trim()));
   const displayTitle = $derived(localizedTitle(work, $locale));
   const displayPlot = $derived(localizedPlot(work, $locale));
   const displayTagline = $derived(localizedTagline(work, $locale));
   const synopsis = $derived(meaningful(displayPlot) ? displayPlot : 'Synopsis non renseigné.');
   const formattedRating = $derived(
     work.rating !== null && work.rating !== undefined && Number.isFinite(Number(work.rating))
-      ? Number(work.rating).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      ? $fmt.decimal(Number(work.rating), 1)
       : null
   );
   const hasImdb = $derived(
@@ -45,7 +45,7 @@
   );
 </script>
 
-<section class="detail" aria-label={`Présentation de ${displayTitle}`}>
+<section class="detail" aria-label={$t('about', { displayTitle })}>
   <div class="stage" class:has-clearart={hasClearart}>
     <div class="hero" class:has-backdrop={hasBackdrop}>
       {#if hasBackdrop}
@@ -56,7 +56,7 @@
         <div class="essential-meta">
           <span class="badge">{work.kind === 'series' ? $t('kind_series') : $t('kind_movie')}{work.synthetic ? ` · ${$t('demonstration')}` : ''}</span>
           {#if work.year}<span>{work.year}</span>{/if}
-          {#if duration && Number.isFinite(duration) && duration > 0}<span>{Math.ceil(duration / 60)} min</span>{/if}
+          {#if duration && Number.isFinite(duration) && duration > 0}<span>{$t('minutes_short', { count: Math.ceil(duration / 60) })}</span>{/if}
           {#if work.kind === 'series' && work.seasonCount}<span>{work.seasonCount} {work.seasonCount > 1 ? $t('seasons') : $t('season')}</span>{/if}
           {#if work.genres?.length}<span>{work.genres.slice(0, 3).join(', ')}</span>{/if}
           {#if work.mpaa}<span class="badge">{work.mpaa}</span>{/if}
@@ -83,7 +83,7 @@
   <div class="body" class:has-backdrop={hasBackdrop && !ambient}>
     <div class="main">
       {#if work.available === false}
-        <p class="availability" role="status">Ce contenu est temporairement indisponible. Le serveur qui l’héberge est hors ligne.</p>
+        <p class="availability" role="status">{$t('this_content_is_temporarily_unavailable_the')}</p>
       {/if}
 
       {@render children()}
@@ -92,20 +92,20 @@
 
       {#if work.tags?.length}
         <p class="tags-line">
-          <span class="tags-label">Étiquettes :</span>
+          <span class="tags-label">{$t('tags')}</span>
           <strong>{work.tags.join(', ')}</strong>
         </p>
       {/if}
 
       {#if hasImdb || hasTmdb || hasTvdb || work.ratings?.length}
-        <div class="provider-badges-row" aria-label="Sources et notes externes">
-          {#if hasImdb}<span class="provider-logo">IMDb</span>{/if}
+        <div class="provider-badges-row" aria-label={$t('external_sources_and_ratings')}>
+          {#if hasImdb}<span class="provider-logo">{$t('imdb')}</span>{/if}
           {#if hasTmdb}<span class="provider-logo">TMDB</span>{/if}
           {#if hasTvdb}<span class="provider-logo">TVDB</span>{/if}
           {#each work.ratings ?? [] as r, idx (idx)}
             <span class="provider-score-pill">
               <strong>{r.provider.toUpperCase()}</strong>
-              {Number(r.value).toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} / {r.max}
+              {$fmt.decimal(Number(r.value), 1)} / {r.max}
             </span>
           {/each}
         </div>
@@ -127,13 +127,13 @@
           {/if}
           {#if work.genres?.length}
             <div class="meta-row">
-              <dt>Genres</dt>
+              <dt>{$t('stats_genres_title')}</dt>
               <dd>{work.genres.join(', ')}</dd>
             </div>
           {/if}
           {#if work.originalTitle && work.originalTitle !== work.title}
             <div class="meta-row">
-              <dt>Titre original</dt>
+              <dt>{$t('original_title')}</dt>
               <dd>{work.originalTitle}</dd>
             </div>
           {/if}
@@ -143,7 +143,7 @@
       {#if below}<div class="below">{@render below()}</div>{/if}
     </div>
     <!-- folder.jpg : l’affiche reste visible à côté des informations -->
-    <aside class="side" aria-label="Affiche"><Poster {work} showMetadata={false} /></aside>
+    <aside class="side" aria-label={$t('poster')}><Poster {work} showMetadata={false} /></aside>
   </div>
 </section>
 

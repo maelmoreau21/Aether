@@ -4,6 +4,7 @@
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
   import { buildDiscoverPlan, shuffleWithSeed, type DiscoverSpec } from './discover';
+  import { t } from '../i18n';
 
   // Fil sans fin de l'accueil : des rangées thématiques chargées au fil du défilement,
   // puis tout le catalogue en grille paginée. Aucune requête tant que l'utilisateur
@@ -148,13 +149,13 @@
 
   <div class="sentinel" bind:this={sentinel} aria-hidden="true"></div>
   {#if loading}
-    <div class="loading-row" role="status" aria-label="Chargement d’autres suggestions">
+    <div class="loading-row" role="status" aria-label={$t('loading_more_suggestions')}>
       {#each Array.from({ length: 6 }, (_, index) => index) as index (index)}<span class="ghost"></span>{/each}
     </div>
   {:else if failed}
-    <p class="feed-note" role="status">Impossible de charger d’autres suggestions. <button type="button" onclick={() => { failed = false; void loadMore(); }}>Réessayer</button></p>
+    <p class="feed-note" role="status">{$t('unable_to_load_more_suggestions')} <button type="button" onclick={() => { failed = false; void loadMore(); }}>{$t('request_retry')}</button></p>
   {:else if gridDone && (shelves.length || gridItems.length)}
-    <p class="feed-note">Vous avez fait le tour de votre médiathèque.</p>
+    <p class="feed-note">{$t('you_have_reached_the_end_of')}</p>
   {/if}
 </div>
 

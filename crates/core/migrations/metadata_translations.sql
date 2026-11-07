@@ -33,3 +33,14 @@ CREATE TABLE IF NOT EXISTS season_translations (
  PRIMARY KEY(season_id, locale, source)
 );
 CREATE INDEX IF NOT EXISTS season_translations_language ON season_translations(season_id, language);
+
+-- Searching by any translated or original title without duplicating works: one row per distinct
+-- folded title, rebuilt for a work whenever its translations or metadata change (see
+-- translations/search.rs) and filled once for existing databases by a journaled Rust step.
+CREATE TABLE IF NOT EXISTS work_search_titles (
+ work_id TEXT NOT NULL REFERENCES inventory_works(id) ON DELETE CASCADE,
+ title_search TEXT NOT NULL,
+ PRIMARY KEY(work_id, title_search)
+);
+-- Lets the catalogue ask "does anyone have a translation in this language?" without a table scan.
+CREATE INDEX IF NOT EXISTS work_translations_by_language ON work_translations(language, work_id);

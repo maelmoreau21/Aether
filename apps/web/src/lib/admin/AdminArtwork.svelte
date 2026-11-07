@@ -4,6 +4,7 @@
   import ImageManager from '../catalog/ImageManager.svelte';
   import { onDestroy } from 'svelte';
   import type { Library } from './types';
+  import { t } from '../i18n';
 
   let { libraries }: { libraries: Library[] } = $props();
   type Item = { workId: string; title?: string };
@@ -24,12 +25,12 @@
       if (appliedSearch) params.set('q', appliedSearch);
       if (appliedFilter !== 'all') params.set('posters', appliedFilter);
       const response = await fetch(`/api/v1/admin/artwork/works?${params}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error(`Liste des médias indisponible (HTTP ${response.status}).`);
+      if (!response.ok) throw new Error($t('media_list_unavailable_http', { status: response.status }));
       const result = await response.json() as WorkPage;
-      if (!Array.isArray(result.items)) throw new Error('Liste des médias invalide.');
+      if (!Array.isArray(result.items)) throw new Error($t('invalid_media_list'));
       if (generation === pageGeneration) { page = result; pageCursor = after; return true; }
     } catch (cause) {
-      if (generation === pageGeneration) pageError = cause instanceof Error ? cause.message : 'Liste des médias indisponible.';
+      if (generation === pageGeneration) pageError = cause instanceof Error ? cause.message : $t('media_list_unavailable');
     } finally { if (generation === pageGeneration) pageLoading = false; }
     return false;
   }
@@ -37,7 +38,7 @@
   async function nextPage() { if (!page?.nextCursor) return; const current = pageCursor; if (await loadPage(page.nextCursor)) previousCursors = [...previousCursors, current]; }
   function applyFilters() {
     const query = search.trim();
-    if (new TextEncoder().encode(query).length > 100) { filterError = 'Le titre recherché dépasse 100 octets. Réduisez sa longueur.'; return; }
+    if (new TextEncoder().encode(query).length > 100) { filterError = $t('the_searched_title_exceeds_100_bytes'); return; }
     filterError = ''; appliedSearch = query; appliedFilter = posterFilter; page = null; previousCursors = []; pageCursor = null; void loadPage();
   }
   function changeLibrary() {
@@ -48,13 +49,13 @@
 </script>
 
 <section class="artwork-admin" aria-labelledby="artwork-admin-title">
-  <header><h2 id="artwork-admin-title">Images des médiathèques</h2><p>Enrichissez les films et séries avec les images des fournisseurs activés. Les fichiers de vos médias restent inchangés.</p></header>
+  <header><h2 id="artwork-admin-title">{$t('library_images')}</h2><p>{$t('enrich_films_and_series_with_images')}</p></header>
   <div class="panel">
-    <label>Bibliothèque<select bind:value={libraryId} onchange={changeLibrary}><option value="">Choisir une bibliothèque</option>{#each videoLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
-    {#if libraryId}<form class="filters" onsubmit={(event) => { event.preventDefault(); applyFilters(); }}><label>Rechercher un titre<input type="search" bind:value={search} maxlength="100" /></label><label>Variantes enregistrées<select bind:value={posterFilter}><option value="all">Toutes les œuvres</option><option value="with">Avec variante</option><option value="without">Sans variante</option></select></label><button type="submit" disabled={pageLoading}>Rechercher</button></form>{#if filterError}<p class="error" role="alert">{filterError}</p>{/if}<p>Pour certains titres, respectez la casse et les accents.</p>{/if}
-    {#if pageLoading}<p role="status">Chargement des médias…</p>{/if}
-    {#if pageError}<p class="error" role="alert">{pageError}</p><button type="button" onclick={() => void loadPage(pageCursor)}>Réessayer</button>{/if}
-    {#if page && !pageError}<h3>Affiches disponibles</h3><p>Ouvrez un média pour consulter, ajouter ou retirer ses images. Le compteur indique les variantes enregistrées dans Aether ; les affiches locales ne sont pas comptées.</p><ul class="works">{#each page.items as item (item.workId)}<li><span><strong>{item.title}</strong><small>{item.posterCount} variante{item.posterCount > 1 ? 's' : ''} enregistrée{item.posterCount > 1 ? 's' : ''}</small></span><button type="button" onclick={() => selected = item}>Gérer les images</button></li>{:else}<li>Aucun média dans cette bibliothèque.</li>{/each}</ul><div class="actions"><button type="button" disabled={pageLoading || !previousCursors.length} onclick={() => void previousPage()}>Page précédente</button><button type="button" disabled={pageLoading || !page.nextCursor} onclick={() => void nextPage()}>Page suivante</button></div>{/if}
+    <label>{$t('library')}<select bind:value={libraryId} onchange={changeLibrary}><option value="">{$t('choose_a_library')}</option>{#each videoLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
+    {#if libraryId}<form class="filters" onsubmit={(event) => { event.preventDefault(); applyFilters(); }}><label>{$t('search_for_a_title')}<input type="search" bind:value={search} maxlength="100" /></label><label>{$t('saved_variants')}<select bind:value={posterFilter}><option value="all">{$t('all_works')}</option><option value="with">{$t('with_variant')}</option><option value="without">{$t('without_variant')}</option></select></label><button type="submit" disabled={pageLoading}>{$t('filter_extensions')}</button></form>{#if filterError}<p class="error" role="alert">{filterError}</p>{/if}<p>{$t('for_some_titles_match_case_and')}</p>{/if}
+    {#if pageLoading}<p role="status">{$t('loading_media')}</p>{/if}
+    {#if pageError}<p class="error" role="alert">{pageError}</p><button type="button" onclick={() => void loadPage(pageCursor)}>{$t('request_retry')}</button>{/if}
+    {#if page && !pageError}<h3>{$t('available_posters')}</h3><p>{$t('open_a_media_item_to_view')}</p><ul class="works">{#each page.items as item (item.workId)}<li><span><strong>{item.title}</strong><small>{$t('saved_variants_count', { count: item.posterCount })}</small></span><button type="button" onclick={() => selected = item}>{$t('manage_images')}</button></li>{:else}<li>{$t('no_media_in_this_library')}</li>{/each}</ul><div class="actions"><button type="button" disabled={pageLoading || !previousCursors.length} onclick={() => void previousPage()}>{$t('admin_previous_page')}</button><button type="button" disabled={pageLoading || !page.nextCursor} onclick={() => void nextPage()}>{$t('admin_next_page')}</button></div>{/if}
   </div>
   {#if libraryId}<div class="panel"><ArtworkCollection {libraryId} options={videoLibraries.find(library => library.id === libraryId)?.options} /></div>{/if}
 </section>

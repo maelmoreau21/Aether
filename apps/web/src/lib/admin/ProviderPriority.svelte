@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ProviderPreference } from './types';
+  import { t } from '../i18n';
   let { value = $bindable(), label, id, description = '', suggestions = [] }: {
     value: ProviderPreference[]; label: string; id: string; description?: string; suggestions?: { id: string; name: string }[];
   } = $props();
@@ -19,23 +20,23 @@
   }
 </script>
 <section aria-labelledby={`${id}-heading`}>
-  <div class="heading"><h4 id={`${id}-heading`}>{label}</h4>{#if value.length}<button type="button" class="reset" onclick={() => value = []}>Ordre par défaut</button>{/if}</div>
+  <div class="heading"><h4 id={`${id}-heading`}>{label}</h4>{#if value.length}<button type="button" class="reset" onclick={() => value = []}>{$t('default_order')}</button>{/if}</div>
   {#if description}<p>{description}</p>{/if}
   {#if rows.length}
     <ol>
       {#each rows as provider, index (provider.id)}
         <li class:off={!provider.enabled}>
           <span class="rank">{index + 1}</span>
-          <label class="name"><input type="checkbox" checked={provider.enabled} onchange={event => toggle(index, event.currentTarget.checked)} /><span>{nameOf(provider.id)}{#if !installed(provider.id)}<small>Extension non installée</small>{/if}</span></label>
+          <label class="name"><input type="checkbox" checked={provider.enabled} onchange={event => toggle(index, event.currentTarget.checked)} /><span>{nameOf(provider.id)}{#if !installed(provider.id)}<small>{$t('extension_not_installed')}</small>{/if}</span></label>
           <div class="row-actions">
-            <button type="button" aria-label={`Monter ${nameOf(provider.id)}`} disabled={index === 0} onclick={() => move(index, -1)}>↑</button>
-            <button type="button" aria-label={`Descendre ${nameOf(provider.id)}`} disabled={index === rows.length - 1} onclick={() => move(index, 1)}>↓</button>
-            {#if !installed(provider.id)}<button type="button" class="remove" onclick={() => commit(rows.filter((_, i) => i !== index))}>Retirer</button>{/if}
+            <button type="button" aria-label={$t('move_up', { value: nameOf(provider.id) })} disabled={index === 0} onclick={() => move(index, -1)}>↑</button>
+            <button type="button" aria-label={$t('move_down', { value: nameOf(provider.id) })} disabled={index === rows.length - 1} onclick={() => move(index, 1)}>↓</button>
+            {#if !installed(provider.id)}<button type="button" class="remove" onclick={() => commit(rows.filter((_, i) => i !== index))}>{$t('remove')}</button>{/if}
           </div>
         </li>
       {/each}
     </ol>
-  {:else}<p class="empty">Aucune extension de ce type n’est installée. Ajoutez-en dans Extensions.</p>{/if}
+  {:else}<p class="empty">{$t('no_extension_of_this_type_is')}</p>{/if}
 </section>
 <style>
   section { min-width: 0; padding: 18px 0; border-bottom: 1px solid var(--color-line-subtle); font-family: var(--font); color: var(--tx); }

@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 export interface SubtitleResult {
   id: string;
   language: string;
@@ -29,26 +30,26 @@ export interface SubtitleInventory {
 }
 
 export function subtitleErrorText(code: string, status = 0): string {
-  if (status === 401) return 'Votre session a expiré. Connectez-vous à nouveau.';
-  if (status === 403) return 'Action non autorisée pour ce compte ou ce média.';
-  if (status === 429 || /quota|rate_limit/.test(code)) return 'Quota ou limite de requêtes atteint. Attendez avant de réessayer manuellement.';
-  if (/hash_required|hash_unavailable/.test(code)) return 'Cette bibliothèque exige une correspondance par hash, indisponible pour ce parcours. Vérifiez sa politique de sous-titres.';
-  if (/download_disabled|subtitles_disabled/.test(code)) return 'Le téléchargement de sous-titres est désactivé pour cette bibliothèque.';
-  if (/auth|credential|configuration/.test(code)) return 'Vérifiez la configuration et les identifiants du fournisseur dans Extensions.';
-  if (/timeout|deadline/.test(code)) return 'Le fournisseur a dépassé le délai. Réessayez manuellement plus tard.';
-  if (/already_downloaded|duplicate|already_exists/.test(code)) return 'Ce sous-titre est déjà téléchargé pour cette copie.';
-  if (/attempt_exists/.test(code)) return 'Une tentative existe déjà. Actualisez son état ; supprimez une tentative interrompue ou échouée avant de réessayer manuellement.';
-  if (/stale|media_changed|source_changed/.test(code)) return 'Le média a changé. Supprimez le téléchargement périmé puis lancez une nouvelle recherche.';
-  if (/search_expired|search_not_found/.test(code)) return 'Cette recherche a expiré. Lancez une nouvelle recherche.';
-  if (status === 404) return 'La copie ou le téléchargement est introuvable.';
-  return 'Les sous-titres sont indisponibles. Vérifiez les réglages de la bibliothèque et du fournisseur.';
+  if (status === 401) return tr('catalog_your_session_has_expired_sign_in');
+  if (status === 403) return tr('action_not_allowed_for_this_account');
+  if (status === 429 || /quota|rate_limit/.test(code)) return tr('quota_or_request_limit_reached_wait');
+  if (/hash_required|hash_unavailable/.test(code)) return tr('this_library_requires_a_hash_match');
+  if (/download_disabled|subtitles_disabled/.test(code)) return tr('subtitle_download_is_disabled_for_this');
+  if (/auth|credential|configuration/.test(code)) return tr('check_the_provider_s_configuration_and');
+  if (/timeout|deadline/.test(code)) return tr('the_provider_timed_out_try_again');
+  if (/already_downloaded|duplicate|already_exists/.test(code)) return tr('this_subtitle_is_already_downloaded_for');
+  if (/attempt_exists/.test(code)) return tr('an_attempt_already_exists_refresh_its');
+  if (/stale|media_changed|source_changed/.test(code)) return tr('the_media_has_changed_delete_the');
+  if (/search_expired|search_not_found/.test(code)) return tr('this_search_has_expired_start_a');
+  if (status === 404) return tr('the_copy_or_download_was_not');
+  return tr('subtitles_are_unavailable_check_the_library');
 }
 
 export function subtitleMatchText(match: string): string {
-  if (['identity', 'imdb', 'external_id', 'externalId'].includes(match)) return 'Correspondance par identifiant ; synchronisation non garantie.';
-  if (['title', 'query', 'title_search'].includes(match)) return 'Recherche par titre ; correspondance et synchronisation à vérifier.';
-  if (match === 'hash') return 'Correspondance par hash annoncée par le fournisseur.';
-  return 'Correspondance non vérifiée.';
+  if (['identity', 'imdb', 'external_id', 'externalId'].includes(match)) return tr('match_by_identifier_synchronisation_not');
+  if (['title', 'query', 'title_search'].includes(match)) return tr('title_search_match_and_synchronisation_to');
+  if (match === 'hash') return tr('hash_match_reported_by_the_provider');
+  return tr('match_not_verified');
 }
 
 export async function subtitleRequest<T>(

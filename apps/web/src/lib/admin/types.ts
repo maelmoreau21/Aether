@@ -1,22 +1,9 @@
-export const scanLabels = {
-  idle: 'Jamais scanné',
-  queued: 'En attente',
-  running: 'En cours',
-  completed: 'Terminé',
-  error: 'Erreur'
-} as const;
+import { translatedLabels } from '../i18n';
+export const scanLabels = translatedLabels({ idle: 'never_scanned', queued: 'waiting', running: 'stats_kpi_active', completed: 'done', error: 'admin_error' });
 
-export const nodeStatusLabels = {
-  connected: 'Connecté',
-  disconnected: 'Hors ligne',
-  revoked: 'Révoqué'
-} as const;
+export const nodeStatusLabels = translatedLabels({ connected: 'connected', disconnected: 'disconnected', revoked: 'revoked' });
 
-export const connectionModeLabels: Record<string, string> = {
-  outbound: 'Relais sortant (NAT)',
-  direct: 'Direct HTTPS',
-  inbound: 'Entrant direct (Legacy)'
-};
+export const connectionModeLabels: Readonly<Record<string, string>> = translatedLabels({ outbound: 'outbound_relay_nat', direct: 'direct_https', inbound: 'direct_inbound_legacy' });
 
 export interface EnrollmentToken {
   tokenId: string;

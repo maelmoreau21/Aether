@@ -133,24 +133,55 @@ fn push_search_filter(
     if search_clean.is_empty() {
         return;
     }
+    // A work is also found by its translated and original titles. They live in
+    // `work_search_titles` (one row per distinct folded title), so a work is never duplicated.
+    const ALTERNATE_TITLES: &str =
+        " OR w.id IN (SELECT st.work_id FROM work_search_titles st WHERE instr(st.title_search, ";
     if use_fts && search_clean.chars().count() >= 3 {
         let fts_query = format!("\"{}\"", search_clean.replace('"', "\"\""));
         builder
-            .push(" AND w.id IN (SELECT work_id FROM inventory_works_fts WHERE inventory_works_fts.search_text MATCH ")
+            .push(" AND (w.id IN (SELECT work_id FROM inventory_works_fts WHERE inventory_works_fts.search_text MATCH ")
             .push_bind(fts_query)
-            .push(") ");
+            .push(")")
+            .push(ALTERNATE_TITLES)
+            .push_bind(search_clean.to_owned())
+            .push(") > 0)) ");
         return;
     }
     if fast_avail {
         builder
-            .push(" AND instr(w.display_title_sort, ")
+            .push(" AND (instr(w.display_title_sort, ")
             .push_bind(search_clean.to_owned())
-            .push(") > 0 ");
+            .push(") > 0")
+            .push(ALTERNATE_TITLES)
+            .push_bind(search_clean.to_owned())
+            .push(") > 0)) ");
     } else {
         builder
-            .push(" AND instr(CASE WHEN w.display_title_sort != '' THEN w.display_title_sort ELSE lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) END, ")
+            .push(" AND (instr(CASE WHEN w.display_title_sort != '' THEN w.display_title_sort ELSE lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) END, ")
             .push_bind(search_clean.to_owned())
-            .push(") > 0 ");
+            .push(") > 0")
+            .push(ALTERNATE_TITLES)
+            .push_bind(search_clean.to_owned())
+            .push(") > 0)) ");
+    }
+}
+
+/// The title a work sorts under: its best translation in `language` (manual corrections first,
+/// then by source priority) or the stored library-language key.
+fn push_title_key(builder: &mut sqlx::QueryBuilder<sqlx::Any>, language: Option<&str>) {
+    match language {
+        Some(language) => {
+            builder
+                .push("COALESCE((SELECT COALESCE(NULLIF(t.sort_title,''), lower(t.title)) FROM work_translations t WHERE t.work_id=w.id AND t.title IS NOT NULL AND t.title<>'' AND (t.language=")
+                .push_bind(language.to_owned())
+                .push(" OR (t.locale='und' AND t.source='manual')) ORDER BY t.priority DESC, CASE WHEN t.language=")
+                .push_bind(language.to_owned())
+                .push(" THEN 0 ELSE 1 END, t.locale LIMIT 1), w.display_title_sort)");
+        }
+        None => {
+            builder.push("w.display_title_sort");
+        }
     }
 }
 
@@ -666,28 +697,54 @@ pub async fn catalogue_page(
         use_fts,
     );
 
+    // Titles sort in the reader's own language when translations exist for it; otherwise the
+    // library-language title keeps its place and the index-friendly column is used as before.
+    let sort_language = match filter.locale_chain.first() {
+        Some(first) => {
+            let language = crate::metadata_locale::language_of(first);
+            let translated = query_scalar::<_, i64>(
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
+            )
+            .bind(language)
+            .fetch_one(&store.pool)
+            .await
+            .unwrap_or(0)
+                != 0;
+            translated.then_some(language)
+        }
+        None => None,
+    };
+    let language = sort_language;
     match sort {
         "title-desc" => {
-            id_builder.push("ORDER BY w.display_title_sort DESC, w.id DESC ");
+            id_builder.push("ORDER BY ");
+            push_title_key(&mut id_builder, language);
+            id_builder.push(" DESC, w.id DESC ");
         }
         "year-asc" => {
-            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year ASC, w.display_title_sort ASC, w.id ASC ");
+            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year ASC, ");
+            push_title_key(&mut id_builder, language);
+            id_builder.push(" ASC, w.id ASC ");
         }
         "year-desc" => {
-            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year DESC, w.display_title_sort ASC, w.id ASC ");
+            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year DESC, ");
+            push_title_key(&mut id_builder, language);
+            id_builder.push(" ASC, w.id ASC ");
         }
         "added-desc" => {
-            id_builder.push(
-                "ORDER BY w.added_at IS NULL, w.added_at DESC, w.display_title_sort ASC, w.id ASC ",
-            );
+            id_builder.push("ORDER BY w.added_at IS NULL, w.added_at DESC, ");
+            push_title_key(&mut id_builder, language);
+            id_builder.push(" ASC, w.id ASC ");
         }
         "added-asc" => {
-            id_builder.push(
-                "ORDER BY w.added_at IS NULL, w.added_at ASC, w.display_title_sort ASC, w.id ASC ",
-            );
+            id_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, ");
+            push_title_key(&mut id_builder, language);
+            id_builder.push(" ASC, w.id ASC ");
         }
         _ => {
-            id_builder.push("ORDER BY w.display_title_sort ASC, w.id ASC ");
+            id_builder.push("ORDER BY ");
+            push_title_key(&mut id_builder, language);
+            id_builder.push(" ASC, w.id ASC ");
         }
     }
 

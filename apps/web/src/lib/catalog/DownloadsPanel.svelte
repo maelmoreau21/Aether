@@ -22,7 +22,7 @@
     }
   }
   onMount(() => {
-    void load().catch(() => error = 'Impossible d’ouvrir les téléchargements de cet appareil.').finally(() => loading = false);
+    void load().catch(() => error = $t('unable_to_open_this_device_s')).finally(() => loading = false);
     const respond = (event: MessageEvent) => { if (event.data?.type === 'offline-key' && event.ports[0]) event.ports[0].postMessage(keys.get(event.data.id)); };
     navigator.serviceWorker?.addEventListener('message', respond);
     return () => { navigator.serviceWorker?.removeEventListener('message', respond); stop(); keys.clear(); };
@@ -34,7 +34,7 @@
         try { const key = await offlineKey(phrase, item.salt); const value = await unlockDetails(item, key); keys.set(item.id, key); details[item.id] = value; opened++; }
         catch { /* Legacy copies can have different passphrases. */ }
       }
-      if (!opened) error = 'Aucun ancien téléchargement ne correspond à cette phrase.';
+      if (!opened) error = $t('no_former_download_matches_this_passphrase');
     } finally { phrase = ''; busy = false; }
   }
   async function remove(id: string) { if (selected === id) stop(); await removeOffline(id); keys.delete(id); delete details[id]; await load(); }
@@ -44,24 +44,24 @@
   {#if embedded}
     <h2>{$t('downloads')}</h2>
   {:else}
-    <a class="back" href={resolve('/')}>Retour à la médiathèque</a>
+    <a class="back" href={resolve('/')}>{$t('back_to_library')}</a>
     <h1>{$t('downloads')}</h1>
   {/if}
-  <p class="intro">Vos médias disponibles sur cet appareil, même hors connexion.</p>
+  <p class="intro">{$t('your_media_available_on_this_device')}</p>
   {#if loading}<p role="status">{$t('loading')}</p>{/if}
   {#if items.length}
     <ul class="items">
       {#each items as item (item.id)}
         <li>
-          <div><strong>{details[item.id]?.title ?? (item.complete ? (item.deviceKey ? 'Copie locale indisponible' : 'Ancien téléchargement verrouillé') : 'Téléchargement incomplet')}</strong><p>{Math.round(item.size / 1024 ** 2)} Mio</p></div>
-          <button class="play" disabled={!details[item.id]} onclick={() => { stop(); selected = item.id; }}>Lire</button>
-          <button class="remove" onclick={() => remove(item.id).catch(() => error = 'Suppression impossible.')}>{$t('delete')}</button>
+          <div><strong>{details[item.id]?.title ?? (item.complete ? (item.deviceKey ? $t('local_copy_unavailable') : $t('former_locked_download')) : $t('catalog_incomplete_download'))}</strong><p>{$t('mib', { value: Math.round(item.size / 1024 ** 2) })}</p></div>
+          <button class="play" disabled={!details[item.id]} onclick={() => { stop(); selected = item.id; }}>{$t('play_action')}</button>
+          <button class="remove" onclick={() => remove(item.id).catch(() => error = $t('deletion_failed'))}>{$t('delete')}</button>
         </li>
       {/each}
     </ul>
-  {:else if !loading}<p class="empty">Aucun téléchargement enregistré.</p>{/if}
-  {#if legacyItems.length}<details class="legacy"><summary>Récupérer mes anciens téléchargements</summary><p>Les copies créées avec l’ancien système conservent leur phrase. Les nouveaux téléchargements s’ouvrent directement.</p><form onsubmit={unlock}><label>Ancienne phrase de déverrouillage<input type="password" autocomplete="current-password" required bind:value={phrase} /></label><button disabled={busy}>Ouvrir les anciennes copies</button></form></details>{/if}
-  {#if selected && details[selected]}<video bind:this={video} controls autoplay playsinline src={`/app/offline-media/${selected}`} onerror={() => error = 'Ce fichier ne peut pas être lu dans ce navigateur.'}><track kind="captions" /></video>{/if}
+  {:else if !loading}<p class="empty">{$t('no_downloads_saved')}</p>{/if}
+  {#if legacyItems.length}<details class="legacy"><summary>{$t('recover_my_old_downloads')}</summary><p>{$t('copies_created_with_the_former_system')}</p><form onsubmit={unlock}><label>{$t('former_unlock_passphrase')}<input type="password" autocomplete="current-password" required bind:value={phrase} /></label><button disabled={busy}>{$t('open_former_copies')}</button></form></details>{/if}
+  {#if selected && details[selected]}<video bind:this={video} controls autoplay playsinline src={`/app/offline-media/${selected}`} onerror={() => error = $t('this_file_cannot_be_played_in')}><track kind="captions" /></video>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
 </div>
 

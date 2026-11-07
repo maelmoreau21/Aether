@@ -117,6 +117,27 @@ Non destructive et identique sur SQLite et PostgreSQL :
 Retour arrière : une version précédente ignore les tables ; elle relit le JSON
 conservé. Les traductions écrites après la mise à niveau ne lui sont pas visibles.
 
+## Recherche et tri
+
+* **Recherche** : une œuvre est trouvée par son titre de la langue de la bibliothèque, par **chacune de
+  ses traductions** et par son **titre original**, sans être dupliquée. Les titres repliés (minuscules)
+  sont dans `work_search_titles(work_id, title_search)`, reconstruits pour une œuvre à chaque écriture
+  de traduction ou consolidation des métadonnées et remplis une fois pour les bases existantes
+  (étape journalisée `compat:search_titles_backfill`). Le prédicat existant (FTS5 trigramme sur SQLite,
+  `instr` sur PostgreSQL) est conservé ; la table n'est lue que par `IN (SELECT work_id …)`.
+* **Tri** : les tris par titre utilisent la meilleure traduction dans la première langue de la chaîne du
+  compte (même ordre de priorité que l'affichage : correction manuelle, puis priorité de la source) et
+  retombent sur le titre de la bibliothèque. L'expression n'est employée que si au moins une traduction
+  existe dans cette langue (index `work_translations_by_language`) ; sinon la colonne indexée habituelle
+  est utilisée, sans coût.
+* Limites : pas de repli des accents (comme avant), tri par `sort_title` ou titre en minuscules.
+
+## Préférences de langue
+
+`PUT /api/v1/preferences` accepte aussi `artworkLocale` (langue des illustrations) et
+`subtitleLanguage` ; une valeur `null` supprime une préférence (retour à son défaut). Voir
+[I18N.md](I18N.md) pour la séparation interface / métadonnées / illustrations / audio / sous-titres.
+
 ## Illustrations
 
 Déjà en place et non dupliqué : `work_image_entries.language`, le tri par langues
@@ -128,10 +149,6 @@ sur 3 lettres.
 
 ## Limites connues
 
-- La **recherche** et le **tri** du catalogue utilisent toujours le titre de la
-  langue de la bibliothèque (FTS5 sur SQLite, `display_title_sort`). `sort_title`
-  est stocké pour une étape ultérieure. Rechercher le titre anglais d'une œuvre
-  indexée en français ne fonctionne pas encore.
 - Genres, noms de rôles et biographies ne sont pas traduits.
 - Une œuvre déjà identifiée n'a de traduction supplémentaire qu'après un
   rafraîchissement avec une version du fournisseur qui supporte le contrat 2.
@@ -139,14 +156,14 @@ sur 3 lettres.
   quand l'administrateur pensait corriger le titre français.
 - Épisodes TMDb : une requête saison par langue supplémentaire (borné).
 - Validé sur SQLite et PostgreSQL 18 (Docker). Non validé : fournisseurs réels,
-  NAS, multi-Core réel, interface graphique (aucune page ne propose encore
-  `metadataLocale` ; l'API et les préférences l'acceptent).
+  NAS, multi-Core réel (y compris la table de recherche). L'interface (Paramètres → Langues) propose `metadataLocale`.
 
 ## Tests
 
 ```powershell
 cargo test --locked -p media-poc --lib metadata_locale translations::
 cargo test --locked -p media-extension-sdk
+cargo test --locked -p media-poc --lib preferences::
 $env:MEDIA_TEST_POSTGRES_URL = 'postgres://…'
 cargo test --locked --all-features -p media-poc --lib translations::store_tests::postgres -- --ignored
 cargo test --locked --all-features -p media-poc --test schema_upgrade -- --ignored

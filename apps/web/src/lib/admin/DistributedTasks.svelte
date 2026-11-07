@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { adminRequest } from './request';
   import type { AdminNode, Library } from './types';
+  import { t, fmt, translatedLabels } from '../i18n';
 
   let { active, libraries, nodes }: { active: boolean; libraries: Library[]; nodes: AdminNode[] } = $props();
   type Job = {
@@ -13,8 +14,8 @@
   };
   type Page = { jobs: Job[]; limit: number; offset: number };
   const limit = 50;
-  const labels: Record<string, string> = { queued: 'En attente', running: 'En cours', paused: 'Suspendue', completed: 'Terminée', cancelled: 'Annulée', error: 'Échec' };
-  const categories: Record<string, string> = { scan: 'Scan incrémental', analyze: 'Analyse technique', prepare: 'Préparation multimédia', image: 'Traitement d’image' };
+  const labels: Readonly<Record<string, string>> = translatedLabels({ queued: 'waiting', running: 'stats_kpi_active', paused: 'suspended', completed: 'stats_status_completed', cancelled: 'sched_outcome_cancelled', error: 'sched_outcome_failed' });
+  const categories: Readonly<Record<string, string>> = translatedLabels({ scan: 'incremental_scan', analyze: 'technical_analysis', prepare: 'media_preparation', image: 'image_processing' });
   let jobs = $state<Job[]>([]);
   let offset = $state(0);
   let libraryId = $state('');
@@ -48,7 +49,7 @@
       resultErrors = Object.fromEntries(Object.entries(resultErrors).filter(([id]) => visible.has(id)));
       resultLoading = Object.fromEntries(Object.entries(resultLoading).filter(([id]) => visible.has(id)));
       offset = nextOffset; observedAt = Math.floor(Date.now() / 1000); loaded = true; loadError = '';
-    } catch (cause) { loadError = cause instanceof Error ? cause.message : 'Le suivi des tâches est indisponible.'; }
+    } catch (cause) { loadError = cause instanceof Error ? cause.message : $t('task_tracking_is_unavailable'); }
     finally { loading = false; }
   }
   $effect(() => {
@@ -70,9 +71,9 @@
       if (submission?.signature !== signature) submission = { signature, key: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('') };
       await adminRequest<Job>('/api/v1/admin/tasks/jobs', { method: 'POST', body: JSON.stringify({ ...input, idempotencyKey: submission.key }) });
       submission = null;
-      notice = category === 'scan' ? 'Scan ajouté à la file persistante.' : 'Tâche ajoutée à la file persistante.';
+      notice = category === 'scan' ? $t('scan_added_to_the_persistent_queue') : $t('task_added_to_the_persistent_queue');
       await refresh(0);
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Impossible de planifier la tâche.'; }
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('unable_to_schedule_the_task'); }
     finally { mutating = false; }
   }
   async function control(job: Job, action: 'pause' | 'resume' | 'cancel') {
@@ -80,9 +81,9 @@
     mutating = true; error = ''; notice = '';
     try {
       await adminRequest(`/api/v1/admin/tasks/jobs/${encodeURIComponent(job.id)}/${action}`, { method: 'POST' });
-      notice = action === 'pause' ? 'Suspension demandée.' : action === 'resume' ? 'Tâche remise en attente.' : 'Annulation demandée.';
+      notice = action === 'pause' ? $t('suspension_requested') : action === 'resume' ? $t('task_put_back_on_hold') : $t('cancellation_requested');
       await refresh();
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Action impossible.'; }
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('action_impossible'); }
     finally { mutating = false; }
   }
   async function loadResult(job: Job) {
@@ -91,59 +92,59 @@
     try {
       const detail = await adminRequest<Job>(`/api/v1/admin/tasks/jobs/${encodeURIComponent(job.id)}`);
       if (jobs.some(item => item.id === job.id)) results[job.id] = detail.resultJson ?? '{}';
-    } catch (cause) { resultErrors[job.id] = cause instanceof Error ? cause.message : 'Résultat indisponible.'; }
+    } catch (cause) { resultErrors[job.id] = cause instanceof Error ? cause.message : $t('result_unavailable'); }
     finally { resultLoading[job.id] = false; }
   }
-  function date(value: number) { return new Date(value * 1000).toLocaleString(); }
+  function date(value: number) { return $fmt.dateTime(value); }
   function duration(job: Job) {
-    if (job.startedAt === null) return 'Pas encore démarrée';
+    if (job.startedAt === null) return $t('not_started_yet');
     const seconds = Math.max(0, (job.finishedAt ?? observedAt) - job.startedAt);
     return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
   }
 </script>
 
 <section aria-labelledby="distributed-tasks-heading">
-  <header><h3 id="distributed-tasks-heading">Suivi des opérations</h3><button disabled={loading} onclick={() => void refresh()}>Actualiser la file</button></header>
-  <p class="explanation">Indexations et traitements sur vos serveurs. La suspension et l’annulation prennent effet aux points d’arrêt du traitement.</p>
-  <details class="enqueue"><summary>Ajouter une tâche</summary><p class="form-help">Choisissez une bibliothèque. Les traitements avancés utilisent les identifiants déjà présents dans l’inventaire.</p>
+  <header><h3 id="distributed-tasks-heading">{$t('admin_operations_tab')}</h3><button disabled={loading} onclick={() => void refresh()}>{$t('refresh_the_queue')}</button></header>
+  <p class="explanation">{$t('indexing_and_processing_on_your_servers')}</p>
+  <details class="enqueue"><summary>{$t('add_a_task')}</summary><p class="form-help">{$t('choose_a_library_advanced_tasks_use')}</p>
   <form onsubmit={enqueue}>
-    <label>Bibliothèque<select aria-label="Bibliothèque cible" bind:value={libraryId} disabled={mutating}><option value="">Choisir une bibliothèque</option>{#each availableLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
-    <label>Type de tâche<select aria-label="Type de tâche" bind:value={category} disabled={mutating}>{#each Object.entries(categories) as [value, title] (value)}<option {value}>{title}</option>{/each}</select></label>
-    {#if category !== 'scan'}<label>{category === 'image' ? 'Identifiant de l’image inventoriée' : 'Identifiant de l’asset inventorié'}<input aria-label="Identifiant cible" required maxlength="128" bind:value={targetId} disabled={mutating} placeholder={category === 'image' ? 'ID de l’image' : 'ID de l’asset'} /></label>{/if}
-    {#if category === 'prepare'}<label>Composant à préparer<input aria-label="Composant à préparer" required maxlength="64" pattern="video|audio-[0-9]+|subtitle-[0-9]+" bind:value={component} disabled={mutating} placeholder="video" /></label><p class="form-help">Formats : video, audio-1 ou subtitle-2. Utilisez l’index réel de la piste dans l’inventaire. La préparation ne réencode pas la vidéo.</p>{/if}
-    {#if category === 'image'}<label>Largeur<select aria-label="Largeur de l’image" bind:value={width} disabled={mutating}><option value={320}>320 px</option><option value={640}>640 px</option><option value={1280}>1280 px</option></select></label>{/if}
-    <button type="submit" disabled={!libraryId || mutating || (category !== 'scan' && !targetId.trim())}>{category === 'scan' ? 'Planifier un scan' : 'Planifier la tâche'}</button>
+    <label>{$t('library')}<select aria-label={$t('target_library')} bind:value={libraryId} disabled={mutating}><option value="">{$t('choose_a_library')}</option>{#each availableLibraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
+    <label>{$t('task_type')}<select aria-label={$t('task_type')} bind:value={category} disabled={mutating}>{#each Object.entries(categories) as [value, title] (value)}<option {value}>{title}</option>{/each}</select></label>
+    {#if category !== 'scan'}<label>{category === 'image' ? $t('inventoried_image_identifier') : $t('inventoried_asset_identifier')}<input aria-label={$t('target_identifier')} required maxlength="128" bind:value={targetId} disabled={mutating} placeholder={category === 'image' ? $t('image_id') : $t('asset_id')} /></label>{/if}
+    {#if category === 'prepare'}<label>{$t('component_to_prepare')}<input aria-label={$t('component_to_prepare')} required maxlength="64" pattern="video|audio-[0-9]+|subtitle-[0-9]+" bind:value={component} disabled={mutating} placeholder={$t('video')} /></label><p class="form-help">{$t('formats_video_audio_1_or_subtitle')}</p>{/if}
+    {#if category === 'image'}<label>{$t('width')}<select aria-label={$t('image_width')} bind:value={width} disabled={mutating}><option value={320}>{$t('n_320_px')}</option><option value={640}>{$t('n_640_px')}</option><option value={1280}>{$t('n_1280_px')}</option></select></label>{/if}
+    <button type="submit" disabled={!libraryId || mutating || (category !== 'scan' && !targetId.trim())}>{category === 'scan' ? $t('schedule_a_scan') : $t('schedule_the_task')}</button>
   </form>
   </details>
   {#if error}<p class="error queue-action-error" role="alert">{error}</p>{/if}
-  {#if loadError}<div class="error queue-load-error" role="alert"><p>{loadError}</p>{#if loaded}<p>Les données affichées proviennent de la dernière actualisation réussie.</p>{/if}<button disabled={loading} onclick={() => void refresh()}>Réessayer le chargement</button></div>{/if}
+  {#if loadError}<div class="error queue-load-error" role="alert"><p>{loadError}</p>{#if loaded}<p>{$t('the_data_shown_comes_from_the')}</p>{/if}<button disabled={loading} onclick={() => void refresh()}>{$t('retry_loading')}</button></div>{/if}
   {#if notice}<p class="notice" role="status">{notice}</p>{/if}
   {#if loaded}
-    <div class="queue-tools"><label>État des tâches<select bind:value={statusFilter}><option value="all">Tous les états</option>{#each Object.entries(labels) as [value, title] (value)}<option {value}>{title}</option>{/each}</select></label><p>{visibleJobs.length} sur {jobs.length} tâches de cette page{#if observedAt}<span>Actualisé à {new Date(observedAt * 1000).toLocaleTimeString()}</span>{/if}</p></div>
+    <div class="queue-tools"><label>{$t('task_status')}<select bind:value={statusFilter}><option value="all">{$t('all_statuses')}</option>{#each Object.entries(labels) as [value, title] (value)}<option {value}>{title}</option>{/each}</select></label><p>{$t('of_tasks_on_this_page', { count: visibleJobs.length, count2: jobs.length })}{#if observedAt}<span>{$t('admin_updated_at', { value: new Date(observedAt * 1000).toLocaleTimeString() })}</span>{/if}</p></div>
     <div class="jobs" aria-busy={loading}>
       {#each visibleJobs as job (job.id)}
-        <article aria-label={`Tâche ${job.id}`}>
+        <article aria-label={$t('task', { id: job.id })}>
           <div class="job-heading"><div><h4>{categories[job.category] ?? job.category}</h4><p>{libraries.find(library => library.id === job.libraryId)?.name ?? job.libraryId}</p></div><span class="status" data-status={job.status} class:failed={job.status === 'error'}>{labels[job.status] ?? job.status}</span></div>
           <dl>
-            <div><dt>Nœud exécutant</dt><dd>{nodes.find(node => node.id === job.nodeId)?.name ?? (job.nodeId === 'local' ? 'Nœud local' : job.nodeId || 'En attente d’attribution')}</dd></div>
-            <div><dt>Durée</dt><dd>{duration(job)}</dd></div>
+            <div><dt>{$t('executing_node')}</dt><dd>{nodes.find(node => node.id === job.nodeId)?.name ?? (job.nodeId === 'local' ? $t('admin_local_node') : job.nodeId || $t('awaiting_assignment'))}</dd></div>
+            <div><dt>{$t('sched_duration')}</dt><dd>{duration(job)}</dd></div>
           </dl>
-          {#if !['error', 'cancelled'].includes(job.status) && (job.processedItems === undefined || job.progress === 100)}<div class="progress"><progress max="100" value={job.progress} aria-label="Progression de la tâche"></progress><span>{job.progress} %</span></div>{/if}
-          {#if job.processedItems !== undefined}<p class="processed">{job.processedItems} éléments traités{job.progress < 100 ? ' · Total encore inconnu' : ''}</p>{/if}
+          {#if !['error', 'cancelled'].includes(job.status) && (job.processedItems === undefined || job.progress === 100)}<div class="progress"><progress max="100" value={job.progress} aria-label={$t('task_progress')}></progress><span>{job.progress} %</span></div>{/if}
+          {#if job.processedItems !== undefined}<p class="processed">{$t('processed_items', { count: job.processedItems, unknown: job.progress < 100 ? $t('total_unknown') : '' })}</p>{/if}
           {#if job.error}<p class="job-error">{job.error}</p>{/if}
           {#if ['queued', 'running', 'paused'].includes(job.status)}
             <div class="actions">
-              {#if job.status === 'paused'}<button disabled={mutating || job.leaseUntil !== null} onclick={() => void control(job, 'resume')}>{job.leaseUntil !== null ? 'Arrêt en cours…' : 'Reprendre'}</button>{:else}<button disabled={mutating} onclick={() => void control(job, 'pause')}>Suspendre</button>{/if}
-              <button disabled={mutating} onclick={() => void control(job, 'cancel')}>Annuler</button>
+              {#if job.status === 'paused'}<button disabled={mutating || job.leaseUntil !== null} onclick={() => void control(job, 'resume')}>{job.leaseUntil !== null ? $t('stopping') : 'Reprendre'}</button>{:else}<button disabled={mutating} onclick={() => void control(job, 'pause')}>{$t('suspend')}</button>{/if}
+              <button disabled={mutating} onclick={() => void control(job, 'cancel')}>{$t('sched_cancel')}</button>
             </div>
           {/if}
-          <details><summary>Détails de la tâche</summary><p>Identifiant : {job.id}</p><p>Propriétaire : {job.owner} · Tentatives : {job.attempt} · Échecs : {job.failureCount ?? '—'} / {job.maxAttempts}</p><p>Créée le {date(job.createdAt)} · Mise à jour le {date(job.updatedAt)}</p><p>Catégorie : {categories[job.category] ?? job.category} · Priorité : {job.priority}</p>{#if job.targetId}<p>Cible : {job.targetId}</p>{/if}{#if job.leaseUntil}<p>Attribution valable jusqu’au {date(job.leaseUntil)}</p>{/if}</details>
-          {#if job.category !== 'scan'}<details ontoggle={(event) => { if (event.currentTarget.open) void loadResult(job); }}><summary>Résultat du traitement</summary>{#if resultLoading[job.id]}<p role="status">Chargement du résultat…</p>{:else if resultErrors[job.id]}<p class="job-error" role="alert">{resultErrors[job.id]}</p><button onclick={() => void loadResult(job)}>Réessayer</button>{:else if results[job.id]}<pre>{results[job.id]}</pre>{/if}</details>{/if}
+          <details><summary>{$t('task_details')}</summary><p>{$t('admin_identifier', { id: job.id })}</p><p>{$t('job_owner_line', { owner: job.owner, attempts: job.attempt, failures: job.failureCount ?? '—', max: job.maxAttempts })}</p><p>{$t('created_on_updated_on', { value: date(job.createdAt), value2: date(job.updatedAt) })}</p><p>{$t('job_category_line', { category: categories[job.category] ?? job.category, priority: job.priority })}</p>{#if job.targetId}<p>{$t('target', { targetId: job.targetId })}</p>{/if}{#if job.leaseUntil}<p>{$t('assignment_valid_until', { value: date(job.leaseUntil) })}</p>{/if}</details>
+          {#if job.category !== 'scan'}<details ontoggle={(event) => { if (event.currentTarget.open) void loadResult(job); }}><summary>{$t('run_result')}</summary>{#if resultLoading[job.id]}<p role="status">{$t('loading_result')}</p>{:else if resultErrors[job.id]}<p class="job-error" role="alert">{resultErrors[job.id]}</p><button onclick={() => void loadResult(job)}>{$t('request_retry')}</button>{:else if results[job.id]}<pre>{results[job.id]}</pre>{/if}</details>{/if}
         </article>
-      {:else}<div class="empty"><p>{jobs.length ? 'Aucune tâche de cette page ne correspond à cet état.' : 'Aucune tâche sur cette page.'}</p>{#if statusFilter !== 'all'}<button onclick={() => statusFilter = 'all'}>Afficher tous les états</button>{/if}</div>{/each}
+      {:else}<div class="empty"><p>{jobs.length ? $t('no_task_on_this_page_matches') : $t('no_tasks_on_this_page')}</p>{#if statusFilter !== 'all'}<button onclick={() => statusFilter = 'all'}>{$t('show_all_statuses')}</button>{/if}</div>{/each}
     </div>
-    <nav aria-label="Pages des tâches"><button disabled={loading || offset === 0} onclick={() => void refresh(Math.max(0, offset - limit))}>Précédent</button><span>Page {Math.floor(offset / limit) + 1}</span><button disabled={loading || jobs.length < limit} onclick={() => void refresh(offset + limit)}>Suivant</button></nav>
-  {:else if loading}<p role="status">Chargement des tâches…</p>{/if}
+    <nav aria-label={$t('task_pages')}><button disabled={loading || offset === 0} onclick={() => void refresh(Math.max(0, offset - limit))}>{$t('previous')}</button><span>{$t('admin_page', { value: Math.floor(offset / limit) + 1 })}</span><button disabled={loading || jobs.length < limit} onclick={() => void refresh(offset + limit)}>{$t('next')}</button></nav>
+  {:else if loading}<p role="status">{$t('sched_loading')}</p>{/if}
 </section>
 
 <style>

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { adminRequest } from './request';
   import type { Library } from './types';
+  import { t } from '../i18n';
   let { active = false, libraries }: { active?: boolean; libraries: Library[] } = $props();
   type Policy = { extensionId: string; libraryId: string; mode: string; priority: number; operation: string; configRevision: string; algorithmVersion: string; intervalSeconds: number; nextRunAt: number; maxConcurrent: number };
   type Extension = { manifest: { id: string; name: string; permissions: string[]; httpHosts?: string[] }; enabled: boolean };
@@ -23,7 +24,8 @@
   let error = $state('');
   let notice = $state('');
   const usable = $derived(libraries.filter(l => !l.id.startsWith('fixture-')));
-  const statuses: Record<string, string> = { queued:'En attente', running:'En cours', completed:'Terminée', succeeded:'Réussie', error:'Échec', failed:'Échec', cancelled:'Annulée', paused:'Suspendue', interrupted:'Interrompue' };
+  const statusKeys = {'queued': 'waiting', 'running': 'stats_kpi_active', 'completed': 'stats_status_completed', 'succeeded': 'sched_outcome_succeeded', 'error': 'sched_outcome_failed', 'failed': 'sched_outcome_failed', 'cancelled': 'sched_outcome_cancelled', 'paused': 'suspended', 'interrupted': 'sched_outcome_interrupted'} as const;
+  const statuses = $derived(Object.fromEntries(Object.entries(statusKeys).map(([status, label]) => [status, $t(label)])) as Record<string, string>);
   async function refresh() {
     busy = true; error = '';
     try {
@@ -36,7 +38,7 @@
       policies = configured.policies;
       history = recent.tasks; quotas = recent.quotas; sources = recent.sources;
       loaded = true;
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Chargement impossible.'; }
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
     finally { busy = false; }
   }
   $effect(() => { if (active && !attempted) { attempted = true; void refresh(); } });
@@ -55,45 +57,45 @@
     try {
       await adminRequest('/api/v1/admin/tasks/automation/policies', { method: 'PUT', body: JSON.stringify(policy) });
       policies = [...policies.filter(p => p.extensionId !== extensionId || p.libraryId !== libraryId), policy];
-      notice = 'Déclencheur enregistré.';
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Enregistrement impossible.'; }
+      notice = $t('trigger_saved');
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('saving_failed'); }
     finally { busy = false; }
   }
   async function run(missingOnly = false) {
     busy = true; error = ''; notice = '';
     try {
       await adminRequest('/api/v1/admin/tasks/automation/run', { method: 'POST', body: JSON.stringify({ extensionId, libraryId, idempotencyKey: crypto.randomUUID(), missingOnly }) });
-      notice = missingOnly ? 'Traitements manquants planifiés.' : 'Demande enregistrée dans la file. Les résultats inchangés sont réutilisés.';
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Admission impossible.'; }
+      notice = missingOnly ? $t('missing_items_scheduled') : $t('request_added_to_the_queue_unchanged');
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('admission_failed'); }
     finally { busy = false; }
   }
 </script>
 <section aria-labelledby="automation-heading">
-  <h3 id="automation-heading">Automatisation des métadonnées</h3>
-  <p>Les extensions actives et autorisées traitent les nouveaux médias. Les corrections manuelles et la langue de la bibliothèque restent prioritaires.</p>
-  {#if !loaded && busy}<p role="status">Chargement…</p>{/if}
-  {#if loaded && !extensions.length}<p>Aucune extension de métadonnées active.</p>{/if}
+  <h3 id="automation-heading">{$t('metadata_automation')}</h3>
+  <p>{$t('active_authorised_extensions_process_new')}</p>
+  {#if !loaded && busy}<p role="status">{$t('loading_settings_short')}</p>{/if}
+  {#if loaded && !extensions.length}<p>{$t('no_active_metadata_extension')}</p>{/if}
   <form onsubmit={(event) => { event.preventDefault(); void save(); }}>
-    <label>Extension<select bind:value={extensionId} onchange={selectPolicy} disabled={busy} required><option value="">Choisir</option>{#each extensions as e (e.manifest.id)}<option value={e.manifest.id}>{e.manifest.name}</option>{/each}</select></label>
-    <label>Bibliothèque<select bind:value={libraryId} onchange={selectPolicy} disabled={busy} required><option value="">Choisir</option>{#each usable as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
-    <label>Déclenchement<select bind:value={mode} disabled={busy}><option value="automatic">Automatique après changement</option><option value="manual">Manuel</option><option value="scheduled">Programmé</option><option value="disabled">Désactivé</option></select></label>
-    <label>Priorité<input type="number" min="0" max="1000" step="1" bind:value={priority} required disabled={busy} /></label>
-    {#if mode === 'scheduled'}<label>Intervalle en heures<input type="number" min="1" max="8760" step="1" bind:value={hours} required disabled={busy} /></label>{/if}
-    <button type="submit" disabled={busy || !extensionId || !libraryId}>Enregistrer</button>
-    <button type="button" disabled={busy || !extensionId || !libraryId || mode === 'disabled'} onclick={() => void run()}>Exécuter maintenant</button>
-    <button type="button" disabled={busy || !extensionId || !libraryId || mode === 'disabled'} onclick={() => void run(true)}>Relancer les manquants</button>
-    <button type="button" disabled={busy} onclick={() => void refresh()}>Actualiser</button>
+    <label>{$t('extension')}<select bind:value={extensionId} onchange={selectPolicy} disabled={busy} required><option value="">{$t('choose')}</option>{#each extensions as e (e.manifest.id)}<option value={e.manifest.id}>{e.manifest.name}</option>{/each}</select></label>
+    <label>{$t('library')}<select bind:value={libraryId} onchange={selectPolicy} disabled={busy} required><option value="">{$t('choose')}</option>{#each usable as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
+    <label>{$t('trigger')}<select bind:value={mode} disabled={busy}><option value="automatic">{$t('automatic_after_change')}</option><option value="manual">{$t('stats_origin_manual')}</option><option value="scheduled">{$t('scheduled')}</option><option value="disabled">{$t('tv_mode_off')}</option></select></label>
+    <label>{$t('priority')}<input type="number" min="0" max="1000" step="1" bind:value={priority} required disabled={busy} /></label>
+    {#if mode === 'scheduled'}<label>{$t('interval_in_hours')}<input type="number" min="1" max="8760" step="1" bind:value={hours} required disabled={busy} /></label>{/if}
+    <button type="submit" disabled={busy || !extensionId || !libraryId}>{$t('save')}</button>
+    <button type="button" disabled={busy || !extensionId || !libraryId || mode === 'disabled'} onclick={() => void run()}>{$t('run_now')}</button>
+    <button type="button" disabled={busy || !extensionId || !libraryId || mode === 'disabled'} onclick={() => void run(true)}>{$t('re_run_missing_items')}</button>
+    <button type="button" disabled={busy} onclick={() => void refresh()}>{$t('refresh')}</button>
   </form>
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if history.length}
-    <h4>Derniers traitements</h4>
-    <div class="history-list" role="region" aria-label="Derniers traitements des métadonnées">
-      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? 'Traitement de métadonnées'}</strong><span class="history-status" data-status={task.status}>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{task.attempt} tentative(s) · Durée : {task.durationSeconds == null ? 'indisponible' : `${task.durationSeconds} s`}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>Détails du traitement</summary><p>Extension : {task.extensionId}</p><p>Identifiant : {task.id} · Opération : {task.operation} · Priorité : {task.priority}</p></details></article>{/each}
+    <h4>{$t('latest_runs')}</h4>
+    <div class="history-list" role="region" aria-label={$t('latest_metadata_runs')}>
+      {#each history.slice(0, 25) as task (task.id)}<article><header><strong>{extensions.find(extension => extension.manifest.id === task.extensionId)?.manifest.name ?? $t('metadata_processing')}</strong><span class="history-status" data-status={task.status}>{statuses[task.status] ?? task.status}</span></header><p>{libraries.find(library => library.id === task.libraryId)?.name ?? task.libraryId}</p><p class="history-meta">{$t('attempts_duration', { count: task.attempt, duration: task.durationSeconds == null ? $t('unavailable_lower') : `${task.durationSeconds} s` })}</p>{#if task.error}<p class="history-error">{task.error}</p>{/if}<details><summary>{$t('run_details')}</summary><p>{$t('admin_extension', { extensionId: task.extensionId })}</p><p>{$t('identifier_operation_priority', { id: task.id, operation: task.operation, priority: task.priority })}</p></details></article>{/each}
     </div>
   {/if}
-  {#if quotas.length}<h4>Quotas fournisseurs</h4><ul>{#each quotas as quota (quota.provider)}<li>{quota.provider} : intervalle {quota.minIntervalSeconds} s, {quota.maxConcurrent} en parallèle ; prochain appel après {new Date(quota.nextAllowedAt * 1000).toLocaleString()}</li>{/each}</ul>{/if}
-  {#if sources.length}<h4>Provenance récente</h4><ul>{#each sources.slice(0, 15) as source (`${source.workId}:${source.field}`)}<li>{source.workId} · {source.field} : {source.extensionId}{source.providerId ? ` (${source.providerId})` : ''}, priorité {source.priority}</li>{/each}</ul>{/if}
+  {#if quotas.length}<h4>{$t('provider_quotas')}</h4><ul>{#each quotas as quota (quota.provider)}<li>{$t('interval_s_in_parallel_next_call', { provider: quota.provider, minIntervalSeconds: quota.minIntervalSeconds, maxConcurrent: quota.maxConcurrent, value: new Date(quota.nextAllowedAt * 1000).toLocaleString() })}</li>{/each}</ul>{/if}
+  {#if sources.length}<h4>{$t('recent_provenance')}</h4><ul>{#each sources.slice(0, 15) as source (`${source.workId}:${source.field}`)}<li>{$t('provenance_line', { workId: source.workId, field: source.field, extensionId: source.extensionId, provider: source.providerId ? ` (${source.providerId})` : '', priority: source.priority })}</li>{/each}</ul>{/if}
 </section>
 <style>
   section { display: grid; gap: 16px; min-width: 0; padding-bottom: 8px; color: var(--color-text); font-family: var(--font-sans); }

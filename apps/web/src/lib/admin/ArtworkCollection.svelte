@@ -3,6 +3,7 @@
   import { session } from '../auth/session';
   import { invalidateCatalog } from '../catalog/page-cache';
   import type { LibraryOptions } from './types';
+  import { t } from '../i18n';
   let { libraryId, options }: { libraryId: string; options?: LibraryOptions } = $props();
   type Job = { id: string; status: string; processed: number; downloaded: number; duplicates: number; skipped: number; errors: number; lastError: string; cursorWork: string };
   let job = $state<Job | null>(null), error = $state(''), busy = $state(false);
@@ -14,7 +15,7 @@
     if (!requestedLibrary) { job = null; return; }
     try {
       const response = await fetch(`/api/v1/admin/artwork/jobs?libraryId=${encodeURIComponent(requestedLibrary)}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
-      if (!response.ok) throw new Error('Progression indisponible.');
+      if (!response.ok) throw new Error($t('progress_unavailable'));
       const jobs: Job[] = await response.json();
       if (alive && requestedLibrary === libraryId && request === generation) {
         const previous = job?.downloaded;
@@ -38,28 +39,28 @@
         body: JSON.stringify(action ? { action } : { libraryId, after: job?.status === 'completed' ? job.cursorWork : undefined, languages, includeNeutral, maxImages, maxWorks }),
         signal: AbortSignal.timeout(10000)
       });
-      if (!response.ok) throw new Error(`Collecte non enregistrée (HTTP ${response.status}).`);
+      if (!response.ok) throw new Error($t('collection_not_saved_http', { status: response.status }));
       await refresh();
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Erreur'; }
     finally { busy = false; }
   }
 </script>
-<section aria-label="Collecte durable des images">
-  <h3>Collecter les images</h3>
-  <p>La collecte continue après la fermeture de cette page et reprend après un redémarrage. Langues et nombre d’images se règlent dans les paramètres de la bibliothèque (Images).</p>
+<section aria-label={$t('durable_image_collection')}>
+  <h3>{$t('collect_images')}</h3>
+  <p>{$t('collection_continues_after_this_page_is')}</p>
   <form onsubmit={event => { event.preventDefault(); void submit(); }}>
     <fieldset disabled={busy || !!active}>
-      <label>Budget d’œuvres par collecte<input type="number" min="1" max="100000" bind:value={maxWorks} required /></label>
+      <label>{$t('works_budget_per_collection')}<input type="number" min="1" max="100000" bind:value={maxWorks} required /></label>
     </fieldset>
-    {#if !active}<button type="submit" disabled={busy || !libraryId}>{job?.status === 'completed' ? 'Continuer la collecte' : 'Lancer la collecte'}</button>{/if}
+    {#if !active}<button type="submit" disabled={busy || !libraryId}>{job?.status === 'completed' ? $t('continue_the_collection') : $t('start_the_collection')}</button>{/if}
   </form>
   {#if job}
-    <p role="status">{({ queued: 'En attente', running: 'En cours', paused: 'En pause', completed: 'Collecte terminée', cancelled: 'Annulée' })[job.status] ?? job.status} · {job.processed} œuvres examinées · {job.downloaded} images ajoutées · {job.duplicates} similaires écartées · {job.skipped} ignorées · {job.errors} erreurs</p>
+    <p role="status">{$t('collection_progress', { status: ({ queued: $t('waiting'), running: $t('stats_kpi_active'), paused: $t('paused'), completed: $t('collection_complete'), cancelled: $t('sched_outcome_cancelled') })[job.status] ?? job.status, processed: job.processed, downloaded: job.downloaded, duplicates: job.duplicates, skipped: job.skipped, errors: job.errors })}</p>
     {#if active}<div class="actions">
-      <button type="button" disabled={busy} onclick={() => void submit(job?.status === 'paused' ? 'resume' : 'pause')}>{job.status === 'paused' ? 'Reprendre la collecte' : 'Mettre en pause'}</button>
-      <button type="button" disabled={busy} onclick={() => void submit('cancel')}>Annuler la collecte</button>
+      <button type="button" disabled={busy} onclick={() => void submit(job?.status === 'paused' ? 'resume' : 'pause')}>{job.status === 'paused' ? $t('resume_the_collection') : $t('stats_w_pause')}</button>
+      <button type="button" disabled={busy} onclick={() => void submit('cancel')}>{$t('cancel_collection')}</button>
     </div>{/if}
-    {#if job.lastError}<p>Dernier résultat : {job.lastError}</p>{/if}
+    {#if job.lastError}<p>{$t('admin_last_result', { lastError: job.lastError })}</p>{/if}
   {/if}
   {#if error}<p role="alert">{error}</p>{/if}
 </section>

@@ -6,6 +6,7 @@
   import { onMount } from 'svelte';
   import type { LibraryOptions } from './types';
   import ProviderPriority from './ProviderPriority.svelte';
+  import { t } from '../i18n';
   let { options = $bindable(), kind, section, excludedPatterns = $bindable('') }: { options: LibraryOptions; kind: string; section: LibraryOptionsSection; excludedPatterns?: string } = $props();
   const languages = [{ value: 'fr', label: 'Français' }, { value: 'fr-CA', label: 'Français (Canada)' }, { value: 'en', label: 'Anglais' }, { value: 'de', label: 'Allemand' }, { value: 'es', label: 'Espagnol' }, { value: 'it', label: 'Italien' }, { value: 'pt', label: 'Portugais' }, { value: 'ja', label: 'Japonais' }, { value: 'ko', label: 'Coréen' }, { value: 'zh', label: 'Chinois' }];
   const images = [['fetchPoster', 'Affiches'], ['fetchBackdrop', 'Fonds'], ['fetchLogo', 'Logos'], ['fetchThumb', 'Miniatures'], ['fetchBanner', 'Bannières'], ['fetchDisc', 'Disques']] as const;
@@ -27,107 +28,107 @@
         const extensions = (data.extensions ?? []) as { manifest: { id: string; name: string; permissions?: string[] } }[];
         const having = (permission: string) => extensions.filter(entry => entry.manifest.permissions?.includes(permission)).map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
         metadataProviders = having('metadata.read'); imageProviders = having('images'); segmentProviders = having('playback.markers'); subtitleProviders = having('subtitles');
-      }).catch(() => { if (!controller.signal.aborted) providerError = 'La liste des extensions est indisponible. Réessayez plus tard.'; });
+      }).catch(() => { if (!controller.signal.aborted) providerError = $t('the_extension_list_is_unavailable_try'); });
     return () => controller.abort();
   });
 </script>
 
 <div class="library-options">
   {#if section === 'metadata'}
-    <h3>Métadonnées</h3><p class="lead">Langue, sources d’identification et fréquence de mise à jour.</p>
+    <h3>{$t('metadata')}</h3><p class="lead">{$t('language_identification_sources_and_update')}</p>
     <div class="group">
-      <label for="library-metadata-language">Langue des métadonnées</label>
+      <label for="library-metadata-language">{$t('metadata_language')}</label>
       {#if customLanguage}
-        <input id="library-metadata-language" bind:value={options.preferredMetadataLanguage} required minlength="2" maxlength="35" placeholder="fr-CA" />
-        <button type="button" class="language-back" onclick={() => customLanguage = false}>Choisir dans la liste</button>
+        <input id="library-metadata-language" bind:value={options.preferredMetadataLanguage} required minlength="2" maxlength="35" placeholder={$t('fr_ca')} />
+        <button type="button" class="language-back" onclick={() => customLanguage = false}>{$t('choose_from_the_list')}</button>
       {:else}
         <select id="library-metadata-language" value={options.preferredMetadataLanguage} onchange={event => { if (event.currentTarget.value === '_custom') customLanguage = true; else options.preferredMetadataLanguage = event.currentTarget.value; }}>
           {#if !languages.some(language => language.value === options.preferredMetadataLanguage)}<option value={options.preferredMetadataLanguage}>{options.preferredMetadataLanguage}</option>{/if}
           {#each languages as language (language.value)}<option value={language.value}>{language.label}</option>{/each}
-          <option value="_custom">Autre langue…</option>
+          <option value="_custom">{$t('other_language')}</option>
         </select>
       {/if}
-      <label for="library-metadata-country">Pays des classifications</label><input id="library-metadata-country" bind:value={options.metadataCountryCode} required pattern={'[A-Z]{2}'} maxlength="2" placeholder="FR" />
+      <label for="library-metadata-country">{$t('classification_country')}</label><input id="library-metadata-country" bind:value={options.metadataCountryCode} required pattern={'[A-Z]{2}'} maxlength="2" placeholder="FR" />
     </div>
     {#if kind !== 'music'}
       <div class="group">
-        <h4>Identification</h4>
-        <label class="check"><input type="checkbox" bind:checked={options.readLocalNfo} /><span>Lire les fichiers NFO locaux<small>Les identifiants écrits par Radarr, Sonarr ou Kodi sont utilisés en priorité.</small></span></label>
-        <p class="hint">Un média non reconnu est laissé tel quel puis réessayé automatiquement plus tard. S’il reste inconnu, utilisez « Identifier » sur sa fiche.</p>
-        <p class="hint">L’ordre des fournisseurs se règle dans Fournisseurs.</p>
+        <h4>{$t('identification')}</h4>
+        <label class="check"><input type="checkbox" bind:checked={options.readLocalNfo} /><span>{$t('read_local_nfo_files')}<small>{$t('identifiers_written_by_radarr_sonarr_or')}</small></span></label>
+        <p class="hint">{$t('an_unrecognised_media_item_is_left')}</p>
+        <p class="hint">{$t('provider_order_is_set_under_providers')}</p>
       </div>
       <div class="group">
-        <h4>Mises à jour</h4>
-        <label for="online-refresh">Actualiser les métadonnées en ligne</label>
-        <select id="online-refresh" bind:value={options.onlineRefreshIntervalDays}><option value={0}>Lors des analyses uniquement</option><option value={30}>Tous les 30 jours (recommandé)</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
-        <label for="library-metadata-refresh">Relire les métadonnées locales</label><select id="library-metadata-refresh" bind:value={options.automaticRefreshIntervalDays}><option value={0}>Lors des analyses uniquement</option><option value={30}>Tous les 30 jours</option><option value={60}>Tous les 60 jours</option><option value={90}>Tous les 90 jours</option></select>
-        <p class="hint">Les corrections manuelles sont conservées. Les clés des fournisseurs se configurent dans Extensions.</p>
+        <h4>{$t('updates')}</h4>
+        <label for="online-refresh">{$t('refresh_online_metadata')}</label>
+        <select id="online-refresh" bind:value={options.onlineRefreshIntervalDays}><option value={0}>{$t('during_scans_only')}</option><option value={30}>{$t('every_30_days_recommended')}</option><option value={60}>{$t('every_60_days')}</option><option value={90}>{$t('every_90_days')}</option></select>
+        <label for="library-metadata-refresh">{$t('reread_local_metadata')}</label><select id="library-metadata-refresh" bind:value={options.automaticRefreshIntervalDays}><option value={0}>{$t('during_scans_only')}</option><option value={30}>{$t('every_30_days')}</option><option value={60}>{$t('every_60_days')}</option><option value={90}>{$t('every_90_days')}</option></select>
+        <p class="hint">{$t('manual_corrections_are_kept_provider_keys')}</p>
       </div>
-      {#if kind === 'films'}<div class="group"><h4>Collections</h4><label class="check"><input type="checkbox" bind:checked={options.automaticCollections} /><span>Regrouper automatiquement les films d’une collection</span></label></div>{/if}
-    {:else}<p class="hint">Les informations intégrées aux fichiers musicaux sont lues pendant l’analyse.</p>{/if}
+      {#if kind === 'films'}<div class="group"><h4>{$t('collections')}</h4><label class="check"><input type="checkbox" bind:checked={options.automaticCollections} /><span>{$t('automatically_group_a_collection_s_films')}</span></label></div>{/if}
+    {:else}<p class="hint">{$t('information_embedded_in_music_files_is')}</p>{/if}
   {:else if section === 'images'}
-    <h3>Images</h3><p class="lead">Illustrations récupérées en ligne. Les images déjà présentes dans le dossier du média sont gardées et ne sont pas re-téléchargées.</p>
+    <h3>{$t('admin_artwork_tab')}</h3><p class="lead">{$t('artwork_fetched_online_images_already_in')}</p>
     <div class="group">
-      <h4>Illustrations à récupérer</h4><div class="image-grid">{#each images as [key, label] (key)}<label class="check"><input type="checkbox" bind:checked={options[key]} /><span>{label}</span></label>{/each}</div>
+      <h4>{$t('artwork_to_fetch')}</h4><div class="image-grid">{#each images as [key, label] (key)}<label class="check"><input type="checkbox" bind:checked={options[key]} /><span>{label}</span></label>{/each}</div>
     </div>
     <div class="group">
-      <h4>Pool d’images</h4>
-      <p class="hint">Utilisé par « Collecter les images » pour remplir les variantes affichées en rotation.</p>
-      <label for="artwork-languages">Langues recherchées, dans l’ordre</label>
-      <input id="artwork-languages" maxlength="100" placeholder="fr, en" required bind:value={artworkLanguagesText.value} />
-      <label class="check"><input type="checkbox" bind:checked={() => options.artworkIncludeNeutral ?? true, value => options.artworkIncludeNeutral = value} /><span>Inclure les images sans langue (fonds, scènes)</span></label>
-      <label for="artwork-max-images">Images ajoutées par média et par collecte (1–12)</label>
+      <h4>{$t('image_pool')}</h4>
+      <p class="hint">{$t('used_by_collect_images_to_fill')}</p>
+      <label for="artwork-languages">{$t('languages_searched_in_order')}</label>
+      <input id="artwork-languages" maxlength="100" placeholder={$t('fr_en')} required bind:value={artworkLanguagesText.value} />
+      <label class="check"><input type="checkbox" bind:checked={() => options.artworkIncludeNeutral ?? true, value => options.artworkIncludeNeutral = value} /><span>{$t('include_images_with_no_language_backdrops')}</span></label>
+      <label for="artwork-max-images">{$t('images_added_per_media_item_and')}</label>
       <input id="artwork-max-images" type="number" min="1" max="12" step="1" required bind:value={() => options.artworkMaxImages ?? 12, value => options.artworkMaxImages = value} />
     </div>
     <div class="group">
-      <h4>Doublons et qualité</h4>
-      <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span>Écarter les images similaires à celles déjà enregistrées</span></label>
-      {#if options.artworkDeduplicate}<label for="artwork-similarity">Tolérance aux différences (0–16, utilisée aussi par « Repérer les doublons »)</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
-      <div class="grid"><div><label for="artwork-min-width">Largeur minimale des affiches</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">Hauteur minimale des affiches</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
-      <p class="hint">Une valeur de 0 conserve toutes les tailles disponibles.</p>
+      <h4>{$t('duplicates_and_quality')}</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.artworkDeduplicate} /><span>{$t('skip_images_similar_to_those_already')}</span></label>
+      {#if options.artworkDeduplicate}<label for="artwork-similarity">{$t('difference_tolerance_0_16_also_used')}</label><input id="artwork-similarity" type="number" min="0" max="16" step="1" required bind:value={options.artworkSimilarity} />{/if}
+      <div class="grid"><div><label for="artwork-min-width">{$t('minimum_poster_width')}</label><input id="artwork-min-width" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterWidth} /></div><div><label for="artwork-min-height">{$t('minimum_poster_height')}</label><input id="artwork-min-height" type="number" min="0" max="4096" step="1" required bind:value={options.artworkMinPosterHeight} /></div></div>
+      <p class="hint">{$t('a_value_of_0_keeps_every')}</p>
     </div>
   {:else if section === 'scan'}
     <div class="group">
-      <h4>Analyse des fichiers</h4>
-      <label class="toggle-row"><span><strong>Suivre les changements des dossiers</strong><small>Les nouveaux médias sont analysés automatiquement.</small></span><input type="checkbox" role="switch" bind:checked={options.realtimeMonitoring} /></label>
-      <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="bonus, trailers" autocomplete="off" />
-      <p class="hint">Les dossiers système, .nomedia et .ignore sont déjà pris en compte.</p>
+      <h4>{$t('file_analysis')}</h4>
+      <label class="toggle-row"><span><strong>{$t('watch_folders_for_changes')}</strong><small>{$t('new_media_is_analysed_automatically')}</small></span><input type="checkbox" role="switch" bind:checked={options.realtimeMonitoring} /></label>
+      <label for="library-excluded">{$t('excluded_patterns')}</label><input id="library-excluded" bind:value={excludedPatterns} placeholder={$t('bonus_trailers')} autocomplete="off" />
+      <p class="hint">{$t('system_folders_nomedia_and_ignore_are')}</p>
     </div>
     {#if kind !== 'music'}
-      <div class="group"><label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /><span>Préférer les titres intégrés aux fichiers</span></label></div>
+      <div class="group"><label class="check"><input type="checkbox" bind:checked={options.preferEmbeddedTitles} /><span>{$t('prefer_titles_embedded_in_files')}</span></label></div>
     {/if}
   {:else if section === 'playback'}
-    <h3>Lecture</h3><p class="lead">Aperçus, chapitres et intros.</p>
+    <h3>{$t('play')}</h3><p class="lead">{$t('previews_chapters_and_intros')}</p>
     <div class="group">
-      <label class="toggle-row"><span><strong>Aperçus dans la barre de lecture</strong><small>Miniatures trickplay pour retrouver une scène.</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
+      <label class="toggle-row"><span><strong>{$t('previews_in_the_playback_bar')}</strong><small>{$t('trickplay_thumbnails_to_find_a_scene')}</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
       {#if options.trickplayEnabled}
-        <label class="check"><input type="checkbox" bind:checked={options.trickplayDuringScan} /><span>Préparer les miniatures après l’analyse des médias</span></label>
-        <div class="grid three"><div><label for="trickplay-interval">Intervalle (s)</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">Largeur (px)</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div><div><label for="trickplay-quality">Qualité JPEG (1–31)</label><input id="trickplay-quality" type="number" min="1" max="31" step="1" required bind:value={options.trickplayQuality} /></div></div>
-        <p class="hint">320 px, un aperçu toutes les 10 secondes et une qualité de 7 offrent un bon compromis.</p>
+        <label class="check"><input type="checkbox" bind:checked={options.trickplayDuringScan} /><span>{$t('prepare_thumbnails_after_media_analysis')}</span></label>
+        <div class="grid three"><div><label for="trickplay-interval">{$t('interval_s')}</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">{$t('width_px')}</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div><div><label for="trickplay-quality">{$t('jpeg_quality')}</label><input id="trickplay-quality" type="number" min="1" max="31" step="1" required bind:value={options.trickplayQuality} /></div></div>
+        <p class="hint">{$t('n_320_px_one_preview_every_10')}</p>
       {/if}
-      <label class="check"><input type="checkbox" bind:checked={options.chapterImagesEnabled} /><span>Afficher les images des chapitres<small>Préparées à la demande à partir des chapitres des fichiers.</small></span></label>
+      <label class="check"><input type="checkbox" bind:checked={options.chapterImagesEnabled} /><span>{$t('show_chapter_images')}<small>{$t('prepared_on_demand_from_the_files')}</small></span></label>
     </div>
     <div class="group">
-      <h4>Intros et génériques</h4>
-      <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>Détecter les intros avec les extensions activées<small>L’ordre des extensions se règle dans Fournisseurs.</small></span></label>
+      <h4>{$t('intros_credits')}</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>{$t('detect_intros_with_enabled_extensions')}<small>{$t('extension_order_is_set_under_providers')}</small></span></label>
     </div>
   {:else if section === 'providers'}
-    <h3>Fournisseurs</h3><p class="lead">Cochez les extensions à utiliser et classez-les par ordre de préférence : la première qui répond est utilisée. Les clés et réglages des extensions se configurent dans Extensions.</p>
+    <h3>{$t('providers')}</h3><p class="lead">{$t('tick_the_extensions_to_use_and')}</p>
     {#if providerError}<p role="status">{providerError}</p>{/if}
-    <ProviderPriority id="metadata-providers" label="Métadonnées" description="Titres, résumés, distribution et identifiants." bind:value={options.metadataProviders} suggestions={metadataProviders} />
-    <ProviderPriority id="image-providers" label="Images" description="Affiches, fonds, logos et miniatures." bind:value={options.imageProviders} suggestions={imageProviders} />
-    <ProviderPriority id="segment-providers" label="Intros et génériques" description="Détection des intros, récapitulatifs et génériques." bind:value={options.segmentProviders} suggestions={segmentProviders} />
-    <ProviderPriority id="subtitle-providers" label="Sous-titres" description="Recherche manuelle depuis la fiche d’un média." bind:value={options.subtitleProviders} suggestions={subtitleProviders} />
+    <ProviderPriority id="metadata-providers" label={$t('metadata')} description={$t('titles_summaries_cast_and_identifiers')} bind:value={options.metadataProviders} suggestions={metadataProviders} />
+    <ProviderPriority id="image-providers" label="Images" description={$t('posters_backdrops_logos_and_thumbnails')} bind:value={options.imageProviders} suggestions={imageProviders} />
+    <ProviderPriority id="segment-providers" label={$t('intros_credits')} description={$t('detection_of_intros_recaps_and_credits')} bind:value={options.segmentProviders} suggestions={segmentProviders} />
+    <ProviderPriority id="subtitle-providers" label="Sous-titres" description={$t('manual_search_from_a_media_item')} bind:value={options.subtitleProviders} suggestions={subtitleProviders} />
   {:else if section === 'subtitles'}
-    <h3>Sous-titres</h3><p class="lead">Sous-titres intégrés aux fichiers et recherche en ligne.</p>
+    <h3>{$t('report_category_subtitles')}</h3><p class="lead">{$t('subtitles_embedded_in_files_and_online')}</p>
     <div class="group">
-      <label for="embedded-subtitles">Sous-titres intégrés</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">Tous les sous-titres</option><option value="allow_text">Sous-titres texte uniquement</option><option value="block_all">Aucun sous-titre intégré</option></select>
+      <label for="embedded-subtitles">{$t('admin_embedded_subtitles')}</label><select id="embedded-subtitles" bind:value={options.embeddedSubtitlePolicy}><option value="allow_all">{$t('all_subtitles')}</option><option value="allow_text">{$t('admin_text_subtitles_only')}</option><option value="block_all">{$t('admin_no_embedded_subtitles')}</option></select>
     </div>
     <div class="group">
-      <h4>Sous-titres en ligne</h4>
-      <label class="check"><input type="checkbox" bind:checked={options.subtitleDownloadEnabled} /><span>Autoriser la recherche manuelle de sous-titres<small>Depuis la fiche d’un média, avec une extension configurée.</small></span></label>
+      <h4>{$t('online_subtitles')}</h4>
+      <label class="check"><input type="checkbox" bind:checked={options.subtitleDownloadEnabled} /><span>{$t('allow_manual_subtitle_search')}<small>{$t('from_a_media_item_s_page')}</small></span></label>
       {#if options.subtitleDownloadEnabled}
-        <label class="check"><input type="checkbox" bind:checked={options.subtitleRequireHash} /><span>Exiger une correspondance exacte du fichier (hash)<small>Indisponible actuellement : cette exigence bloque les recherches.</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={options.subtitleRequireHash} /><span>{$t('require_an_exact_file_match_hash')}<small>{$t('currently_unavailable_this_requirement')}</small></span></label>
       {/if}
     </div>
   {/if}

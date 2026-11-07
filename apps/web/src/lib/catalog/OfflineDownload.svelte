@@ -1,6 +1,7 @@
 <script lang="ts">
   import { session } from '../auth/session';
   import { downloadUrl } from '../download-url';
+  import { t } from '../i18n';
   let { url, title, mime, options = [] }: { url:string; title:string; mime:string; options?:{url:string;label:string;mime:string}[] } = $props();
   let choosing = $state(false);
   let allowed = $state(false);
@@ -22,15 +23,15 @@
 {#snippet icon()}<svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5" /></svg>{/snippet}
 {#if allowed && downloadUrl(url,mime)}<div class="download-action">
   {#if options.length > 1}
-    <button type="button" class="download-icon" aria-label="Télécharger" title="Télécharger le fichier" aria-expanded={choosing} onclick={() => choosing = !choosing}>{@render icon()}</button>
+    <button type="button" class="download-icon" aria-label={$t('download')} title={$t('download_the_file')} aria-expanded={choosing} onclick={() => choosing = !choosing}>{@render icon()}</button>
   {:else}
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Protected same-origin content URL; download is a file, not a SvelteKit route. -->
-    <a class="download-icon" href={downloadUrl(url,mime)!} download={filename(mime)} aria-label="Télécharger" title="Télécharger le fichier">{@render icon()}</a>
+    <a class="download-icon" href={downloadUrl(url,mime)!} download={filename(mime)} aria-label={$t('download')} title={$t('download_the_file')}>{@render icon()}</a>
   {/if}
-  {#if choosing}<div class="download-choices"><strong>Version à télécharger</strong>{#each options as source(source.url)}
+  {#if choosing}<div class="download-choices"><strong>{$t('version_to_download')}</strong>{#each options as source(source.url)}
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Protected same-origin content URL; native file download. -->
     {#if downloadUrl(source.url,source.mime)}<a href={downloadUrl(source.url,source.mime)!} download={filename(source.mime)}>{source.label}</a>{/if}
-  {/each}<button type="button" onclick={() => choosing = false}>Fermer</button></div>{/if}
+  {/each}<button type="button" onclick={() => choosing = false}>{$t('close')}</button></div>{/if}
 </div>{/if}
 <style>
   .download-action {

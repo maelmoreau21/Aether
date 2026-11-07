@@ -5,6 +5,7 @@
   import type { Work } from './api';
   import Poster from './Poster.svelte';
   import MediaShelf from '../ui/MediaShelf.svelte';
+  import { t } from '../i18n';
   let items = $state<(Work & { recommendationReason: string })[]>([]);
   let enabled = $state(false);
   let mode = $state('');
@@ -21,7 +22,7 @@
       const result = await response.json();
       if (current.signal.aborted) return;
       enabled = result.enabled; mode = result.mode; items = result.items;
-    } catch { if (!current.signal.aborted) error = 'Les recommandations sont temporairement indisponibles.'; }
+    } catch { if (!current.signal.aborted) error = $t('recommendations_are_temporarily_unavailable'); }
   }
   $effect(() => {
     const next = $session?.user.id ?? '';
@@ -35,12 +36,12 @@
   });
 </script>
 {#if enabled && items.length}
-  <MediaShelf title={mode === 'personalized' ? 'Recommandé pour vous' : 'À découvrir dans votre catalogue'}>
+  <MediaShelf title={mode === 'personalized' ? $t('recommended_for_you') : $t('to_discover_in_your_catalogue')}>
     {#each items as item (item.id)}
       <div class="recommendation"><Poster work={item} href={item.kind === 'series' ? resolve(`series/?work=${encodeURIComponent(item.id)}`) : resolve(`films/?work=${encodeURIComponent(item.id)}`)} /><small>{item.recommendationReason}</small></div>
     {/each}
   </MediaShelf>
-{:else if enabled}<p role="status">Aucun autre titre accessible à proposer pour le moment.</p>{/if}
+{:else if enabled}<p role="status">{$t('no_other_accessible_titles_to_suggest')}</p>{/if}
 {#if error}<p role="status">{error}</p>{/if}
 <style>
   .recommendation { min-width: 0; }

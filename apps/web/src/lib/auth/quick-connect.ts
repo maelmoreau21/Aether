@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 export const PENDING_DEVICE_CODE = 'media.pending-device-code';
 export function normalizeDeviceCode(value: string): string | null {
   const code = value.trim().replace(/[ \u2010-\u2015-]/g, '').toUpperCase();
@@ -11,14 +12,14 @@ export async function deviceRequest<T>(action: string, body: object, csrfToken?:
   });
   if (!response.ok) {
     const messages: Record<number, string> = {
-      400: 'Saisissez les 8 caractères du code affiché sur le nouvel appareil.',
-      401: 'Reconnectez-vous avant d’autoriser cet appareil.',
-      403: 'Cette connexion n’est pas autorisée. Actualisez la page et réessayez.',
-      404: 'Ce code est introuvable, a expiré ou a déjà été utilisé.',
-      410: 'Ce QR code a expiré. Générez un nouveau code.',
-      429: 'Trop de tentatives. Patientez une minute avant de réessayer.'
+      400: tr('enter_the_8_characters_of_the'),
+      401: tr('sign_in_again_before_authorising_this'),
+      403: tr('this_sign_in_is_not_allowed'),
+      404: tr('this_code_was_not_found_has'),
+      410: tr('auth_this_qr_code_has_expired_generate'),
+      429: tr('too_many_attempts_wait_a_minute')
     };
-    throw new Error(messages[response.status] ?? 'Connexion à cet appareil indisponible. Réessayez.');
+    throw new Error(messages[response.status] ?? tr('signing_in_to_this_device_is'));
   }
   return response.status === 204 ? undefined as T : await response.json() as T;
 }

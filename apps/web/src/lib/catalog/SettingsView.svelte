@@ -16,6 +16,7 @@
   import Reports from '../applications/Reports.svelte';
   import Statistics from '../statistics/Statistics.svelte';
   import DownloadsPanel from './DownloadsPanel.svelte';
+  import LanguagePreferences from './LanguagePreferences.svelte';
   import Icon from '../ui/Icon.svelte';
   import type { IconName } from '../ui/Icon.svelte';
   import { t, locale, localeOptions, setLocale, type TranslationKey, type SupportedLocale } from '../i18n';
@@ -108,6 +109,7 @@
     { id: 'downloads', labelKey: 'downloads', icon: 'download', groupKey: 'settings_group_me' },
     { id: 'playback', labelKey: 'settings_nav_playback', icon: 'play', groupKey: 'settings_group_experience' },
     { id: 'display', labelKey: 'settings_nav_display', icon: 'image', groupKey: 'settings_group_experience' },
+    { id: 'languages', labelKey: 'lang_nav', icon: 'globe', groupKey: 'settings_group_experience' },
     { id: 'security', labelKey: 'settings_nav_security', icon: 'shield', groupKey: 'settings_group_security' },
     { id: 'devices', labelKey: 'settings_nav_devices', icon: 'server', groupKey: 'settings_group_security' },
     { id: 'about', labelKey: 'settings_nav_about', icon: 'info', groupKey: 'settings_group_security' }
@@ -240,7 +242,7 @@
       </div>
 </section>
 
-      <section class="card profile-card" aria-label="Informations du compte">
+      <section class="card profile-card" aria-label={$t('account_information')}>
         <div class="profile-info-list">
           <div class="info-row">
             <span class="label">{$t('settings_unique_id')}</span>
@@ -278,6 +280,7 @@
           {#if artworkError}<p role="alert">{artworkError}</p>{/if}
         </form>
       </div>
+      <div hidden={current !== 'languages'}><LanguagePreferences /></div>
       <!-- Data panels mount only while shown: nothing is fetched for hidden pages. -->
       <div class="embedded-panel" hidden={current !== 'requests'}>{#if current === 'requests'}<h2>{$t('settings_requests')}</h2><Requests embedded />{/if}</div>
       <div class="embedded-panel" hidden={current !== 'reports'}>{#if current === 'reports'}<h2>{$t('settings_reports')}</h2><Reports embedded />{/if}</div>
@@ -287,18 +290,6 @@
       <div hidden={current !== 'devices'}><section class="card"><h2>{$t('settings_nav_devices')}</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">{$t('playback')}</h2><p class="muted">{$t('playback_account_note')}</p>
       <div class="pref-fields">
-        <label>
-          <span>{$t('settings_pref_audio')}</span>
-          <select
-            bind:value={prefAudio}
-            onchange={() => onSavePreference('media_pref_audio', prefAudio)}
-          >
-            <option value="fr">{$t('audio_default')}</option>
-            <option value="original">{$t('original_version')}</option>
-            <option value="en">{$t('language_en')}</option>
-          </select>
-        </label>
-
         <label>
           <span>{$t('settings_pref_subtitles')}</span>
           <select
@@ -447,10 +438,10 @@
       </section></div>
       <div hidden={current !== 'about'}>
         <section class="card" aria-labelledby="about-heading">
-          <h2 id="about-heading" class="card-title">À propos de {serverConfig?.name || 'Aether'}</h2>
+          <h2 id="about-heading" class="card-title">{$t('about_server', { name: serverConfig?.name || 'Aether' })}</h2>
           <div class="profile-info-list">
             <div class="info-row">
-              <span class="label">Version</span>
+              <span class="label">{$t('version')}</span>
               <span class="val">
                 <strong>{serverConfig?.version || '0.1.0'}</strong>
                 {#if serverConfig?.channel}
@@ -462,29 +453,29 @@
             </div>
             {#if serverConfig?.commit}
               <div class="info-row">
-                <span class="label">Commit Git</span>
+                <span class="label">{$t('git_commit')}</span>
                 <span class="val"><code>{serverConfig.commit}</code></span>
               </div>
             {/if}
             {#if serverConfig?.build_date}
               <div class="info-row">
-                <span class="label">Date de compilation</span>
+                <span class="label">{$t('build_date')}</span>
                 <span class="val">{serverConfig.build_date}</span>
               </div>
             {/if}
             {#if serverConfig?.release_url}
               <div class="info-row">
-                <span class="label">Notes de version</span>
+                <span class="label">{$t('release_notes')}</span>
                 <span class="val">
                   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
                   <a href={serverConfig.release_url} target="_blank" rel="noopener noreferrer">
-                    Consulter la release {serverConfig.version} sur GitHub
+                    {$t('view_release_on_github', { version: serverConfig.version })}
                   </a>
                 </span>
               </div>
             {/if}
             <div class="info-row">
-              <span class="label">Mode d'exécution</span>
+              <span class="label">{$t('runtime_mode')}</span>
               <span class="val"><code>{serverConfig?.mode || 'standalone'}</code></span>
             </div>
           </div>

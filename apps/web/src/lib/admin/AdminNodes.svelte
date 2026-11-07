@@ -2,7 +2,7 @@
   import type { AdminNode, EnrollmentToken } from './types';
   import { nodeStatusLabels, connectionModeLabels } from './types';
   import Icon from '../ui/Icon.svelte';
-  import { t } from '../i18n';
+  import { t, fmt } from '../i18n';
 
   interface Props {
     nodes: AdminNode[];
@@ -38,9 +38,9 @@
   let copiedCompose = $state(false);
 
   function formatTimestamp(ts?: number | null): string {
-    if (!ts) return 'Jamais';
+    if (!ts) return $t('never');
     try {
-      return new Date(ts * 1000).toLocaleString('fr-FR');
+      return $fmt.dateTime(ts);
     } catch {
       return String(ts);
     }
@@ -65,7 +65,7 @@
     try {
       activeToken = await ongeneratetoken();
     } catch (e) {
-      tokenError = e instanceof Error ? e.message : 'Erreur lors de la génération du jeton';
+      tokenError = e instanceof Error ? e.message : $t('error_while_generating_the_token');
     } finally {
       generatingToken = false;
     }
@@ -115,7 +115,7 @@
       <div>
         <h2 id="nodes-heading" class="section-title">{$t('manage_nodes')}</h2>
         <p class="section-subtitle">
-          Supervisez vos nœuds multimédias distants (connexions sortantes NAT-proof) et locaux.
+          {$t('monitor_your_remote_media_nodes_nat')}
         </p>
       </div>
     </div>
@@ -140,14 +140,14 @@
               <p class="modal-desc">{$t('automatic_pairing')}</p>
             </div>
           </div>
-          <button class="icon-close-btn" onclick={() => (showEnrollModal = false)} aria-label="Fermer">✕</button>
+          <button class="icon-close-btn" onclick={() => (showEnrollModal = false)} aria-label={$t('close')}>✕</button>
         </div>
 
         <div class="modal-body">
           <div class="info-callout">
             <Icon name="info" size={16} />
             <span>
-              {$t('node_https_note')} Le jeton d'invitation est <strong>unique, temporaire et à usage unique</strong>.
+              {$t('node_https_note')} {$t('invitation_token_is')} <strong>{$t('unique_temporary_and_single_use')}</strong>.
             </span>
           </div>
 
@@ -159,7 +159,7 @@
             <div class="token-loading">{$t('secure_token_generating')}</div>
           {:else if activeToken}
             <div class="token-section">
-              <label for="enroll-token-display">Jeton d'invitation (valide jusqu'à {formatTimestamp(activeToken.expiresAt)}) :</label>
+              <label for="enroll-token-display">{$t('invitation_token_valid_until', { value: formatTimestamp(activeToken.expiresAt) })}</label>
               <div class="token-input-row">
                 <input
                   id="enroll-token-display"
@@ -173,20 +173,20 @@
                   onclick={() => copyToClipboard(activeToken!.token, 'token')}
                 >
                   <Icon name={copiedToken ? 'check' : 'server'} size={14} />
-                  <span>{copiedToken ? 'Copié !' : 'Copier'}</span>
+                  <span>{copiedToken ? $t('copied') : 'Copier'}</span>
                 </button>
               </div>
             </div>
 
             <div class="compose-section">
               <div class="compose-header">
-                <label for="compose-snippet">Configuration Docker Compose recommandée :</label>
+                <label for="compose-snippet">{$t('recommended_docker_compose_configuration')}</label>
                 <button
                   class="copy-btn copy-compose"
                   onclick={() => copyToClipboard(getDockerComposeSnippet(activeToken), 'compose')}
                 >
                   <Icon name={copiedCompose ? 'check' : 'film'} size={14} />
-                  <span>{copiedCompose ? 'Copié !' : 'Copier le YAML'}</span>
+                  <span>{copiedCompose ? $t('copied') : $t('copy_the_yaml')}</span>
                 </button>
               </div>
               <textarea
@@ -199,11 +199,11 @@
             </div>
 
             <div class="modal-steps">
-              <p><strong>Étapes de mise en service :</strong></p>
+              <p><strong>{$t('setup_steps')}</strong></p>
               <ol>
-                <li>Lancez le conteneur avec l'URL du Core et ce jeton.</li>
-                <li>Le Node contacte le Core, valide mutuellement l'identité et sauvegarde ses clés durables dans son volume persistant.</li>
-                <li>Le jeton est immédiatement invalidé. Le Node se reconnectera automatiquement à chaque démarrage.</li>
+                <li>{$t('start_the_container_with_the_core')}</li>
+                <li>{$t('the_node_contacts_the_core_mutually')}</li>
+                <li>{$t('the_token_is_invalidated_immediately_the')}</li>
               </ol>
             </div>
           {/if}
@@ -226,9 +226,9 @@
     <!-- Registered Media Nodes List -->
     <section class="card" aria-labelledby="node-list">
       <div class="card-header">
-        <h3 id="node-list">Media Nodes enregistrés ({nodes.length})</h3>
+        <h3 id="node-list">{$t('registered_media_nodes', { count: nodes.length })}</h3>
         <span class="badge count-badge">
-          {nodes.filter(n => n.status === 'connected').length} en ligne / {nodes.length} total
+          {$t('nodes_online_total', { online: nodes.filter(n => n.status === 'connected').length, total: nodes.length })}
         </span>
       </div>
 
@@ -246,43 +246,43 @@
                   {nodeStatusLabels[node.status] || node.status}
                 </span>
                 <span class="badge kind-badge">
-                  {node.kind === 'local' ? 'Local (intégré)' : 'Distant (autonome)'}
+                  {node.kind === 'local' ? $t('local_built_in') : $t('remote_standalone')}
                 </span>
                 {#if node.kind === 'remote'}
                   <span class="badge mode-badge" data-mode={node.connectionMode || 'outbound'}>
-                    {connectionModeLabels[node.connectionMode || 'outbound'] || node.connectionMode || 'Relais sortant'}
+                    {connectionModeLabels[node.connectionMode || 'outbound'] || node.connectionMode || $t('outbound_relay')}
                   </span>
                 {/if}
                 {#if node.version}
-                  <span class="badge version-badge" title={`Version du Media Node : v${node.version}`}>
+                  <span class="badge version-badge" title={$t('media_node_version_v', { version: node.version })}>
                     v{node.version}
                   </span>
                 {:else}
-                  <span class="badge version-badge version-unknown" title="Version non transmise">
+                  <span class="badge version-badge version-unknown" title={$t('version_not_reported')}>
                     v?
                   </span>
                 {/if}
               </div>
 
-              <p class="path"><strong>Identifiant :</strong> <code>{node.id}</code></p>
+              <p class="path"><strong>{$t('identifier')}</strong> <code>{node.id}</code></p>
               {#if node.baseUrl}
-                <p class="path"><strong>URL interne (Core → Node) :</strong> <code>{node.baseUrl}</code></p>
+                <p class="path"><strong>{$t('internal_url_core_node')}</strong> <code>{node.baseUrl}</code></p>
               {/if}
               {#if node.publicUrl}
-                <p class="path"><strong>URL publique directe :</strong> <code>{node.publicUrl}</code></p>
+                <p class="path"><strong>{$t('direct_public_url')}</strong> <code>{node.publicUrl}</code></p>
               {/if}
 
               <p class="node-meta">
-                <strong>Dernière activité :</strong> {formatTimestamp(node.lastSeenAt)} ·
-                <strong>Clé :</strong> <code>{node.keyId}</code>
+                <strong>{$t('last_activity')}</strong> {formatTimestamp(node.lastSeenAt)} ·
+                <strong>{$t('key')}</strong> <code>{node.keyId}</code>
               </p>
 
               {#if node.roots.length > 0}
-                <p class="path"><strong>Dossiers multimédias :</strong> {node.roots.join(', ')}</p>
+                <p class="path"><strong>{$t('media_folders')}</strong> {node.roots.join(', ')}</p>
               {/if}
 
               <p class="node-meta">
-                <strong>Bibliothèques rattachées :</strong>
+                <strong>{$t('attached_libraries')}</strong>
                 {node.libraries.length ? node.libraries.map(l => `${l.name} (${l.kind})`).join(', ') : 'Aucune'}
               </p>
             </div>
@@ -294,7 +294,7 @@
                     class="action-btn"
                     disabled={!!nodeActionBusy}
                     onclick={() => onnodeaction(node, 'reconnect')}
-                    aria-label={`Reconnecter ${node.name}`}
+                    aria-label={$t('admin_reconnect', { name: node.name })}
                   >
                     <Icon name="refresh" size={12} />
                     <span>{$t('reconnect')}</span>
@@ -303,7 +303,7 @@
                     class="action-btn"
                     disabled={!!nodeActionBusy}
                     onclick={() => onnodeaction(node, 'rotate-secret')}
-                    aria-label={`Renouveler le secret de ${node.name}`}
+                    aria-label={$t('renew_the_secret_of', { name: node.name })}
                   >
                     <Icon name="shield" size={12} />
                     <span>{$t('renew_secret')}</span>
@@ -312,7 +312,7 @@
                     class="action-btn danger-btn"
                     disabled={!!nodeActionBusy}
                     onclick={() => onnodeaction(node, 'revoke')}
-                    aria-label={`Révoquer ${node.name}`}
+                    aria-label={$t('admin_revoke', { name: node.name })}
                   >
                     <span>{$t('revoke')}</span>
                   </button>
@@ -332,7 +332,7 @@
       </div>
 
       <p class="muted">
-        Pour les nœuds disposant d'un port ouvert et accessible directement par le Core. Pour les machines derrière un NAT, utilisez le bouton <strong>Ajouter un Node</strong> en haut.
+        {$t('for_nodes_with_an_open_port')} <strong>{$t('add_node')}</strong> {$t('at_the_top')}
       </p>
 
       <form onsubmit={onpair}>
@@ -343,7 +343,7 @@
             bind:value={pairName}
             required
             maxlength="100"
-            placeholder="Ex. Node NAS Films"
+            placeholder={$t('e_g_films_nas_node')}
             autocomplete="off"
           />
 
@@ -375,7 +375,7 @@
 
           <div class="actions">
             <button class="primary" type="submit">
-              {pairing ? 'Appairage en cours…' : 'Appairer en direct'}
+              {pairing ? $t('pairing_in_progress') : $t('pair_live')}
             </button>
           </div>
         </fieldset>

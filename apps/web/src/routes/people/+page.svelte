@@ -7,6 +7,7 @@
   import { creditPeople, initials } from '../../lib/catalog/credits';
   import type { Work } from '../../lib/catalog/api';
   import { getSessionGeneration, session } from '../../lib/auth/session';
+  import { t } from '../../lib/i18n';
 
   const name = $derived((page.url.searchParams.get('name') ?? '').trim());
   const sourceId = $derived(page.url.searchParams.get('work') ?? '');
@@ -39,9 +40,9 @@
     try {
       const search = new URLSearchParams({ person: personName, offset: String(nextOffset), limit: '24', count: 'false' });
       const response = await fetch(`/api/v1/catalog?${search}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(15000)]) });
-      if (!response.ok) throw new Error('Impossible de charger les œuvres. Réessayez.');
+      if (!response.ok) throw new Error($t('unable_to_load_the_works_try'));
       const result: { items: Work[]; hasMore?: boolean; offset: number; limit: number } = await response.json();
-      if (!Array.isArray(result.items)) throw new Error('Impossible de charger les œuvres. Réessayez.');
+      if (!Array.isArray(result.items)) throw new Error($t('unable_to_load_the_works_try'));
       if (current.signal.aborted || generation !== getSessionGeneration()) return;
       items = append ? [...items, ...result.items.filter(item => !items.some(existing => existing.id === item.id))] : result.items;
       offset = result.offset + result.limit;
@@ -56,7 +57,7 @@
         } catch { /* The list remains useful if the source portrait is unavailable. */ }
       }
     } catch (cause) {
-      if (!current.signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : 'Le serveur met trop de temps à répondre. Réessayez.';
+      if (!current.signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : $t('the_server_is_taking_too_long');
     } finally {
       if (!current.signal.aborted && generation === getSessionGeneration()) loading = false;
     }
@@ -74,34 +75,34 @@
   onDestroy(() => controller?.abort());
 </script>
 
-<svelte:head><title>{name ? `${name} — Distribution et équipe` : 'Distribution et équipe'}</title></svelte:head>
+<svelte:head><title>{name ? $t('catalog_cast_and_crew', { name }) : $t('cast_and_crew')}</title></svelte:head>
 <Navbar />
 <main class="person-view">
   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- returnHref is resolved above. -->
-  <a class="back" href={returnHref}>← Retour à la fiche</a>
+  <a class="back" href={returnHref}>{$t('back_to_the_page')}</a>
   {#if name}
     <header class="person-header">
       <div class="portrait">
         <span aria-hidden="true">{initials(name)}</span>
         {#if photo && !photoFailed}<img src={photo} alt="" width="240" height="240" onerror={() => photoFailed = true} />{/if}
       </div>
-      <div><p class="eyebrow">Distribution &amp; équipe</p><h1>{name}</h1><p class="subtitle">Œuvres présentes dans votre médiathèque</p></div>
+      <div><p class="eyebrow">{$t('cast_crew')}</p><h1>{name}</h1><p class="subtitle">{$t('works_in_your_library')}</p></div>
     </header>
     <section aria-labelledby="works-title">
-      <h2 id="works-title">Films et séries</h2>
-      <p class="explanation">Les crédits de même nom sont regroupés ; des personnes homonymes peuvent apparaître ensemble.</p>
-      {#if error}<p class="status error" role="alert">{error} <button onclick={() => void load(name, sourceId, items.length > 0)}>Réessayer</button></p>{/if}
+      <h2 id="works-title">{$t('films_and_series')}</h2>
+      <p class="explanation">{$t('credits_with_the_same_name_are')}</p>
+      {#if error}<p class="status error" role="alert">{error} <button onclick={() => void load(name, sourceId, items.length > 0)}>{$t('request_retry')}</button></p>{/if}
       {#if items.length}
         <div class="works-grid">
           {#each items as work (work.id)}
             <Poster {work} href={work.kind === 'series' ? resolve(`series/?work=${encodeURIComponent(work.id)}` as 'series/') : resolve(`films/?work=${encodeURIComponent(work.id)}` as 'films/')} />
           {/each}
         </div>
-      {:else if !loading && !error}<p class="status">Aucune œuvre accessible pour cette personne.</p>{/if}
-      {#if loading}<p class="status" role="status">Chargement des œuvres…</p>{/if}
-      {#if hasMore && !loading}<button class="more" onclick={() => void load(name, sourceId, true)}>Afficher plus</button>{/if}
+      {:else if !loading && !error}<p class="status">{$t('no_accessible_work_for_this_person')}</p>{/if}
+      {#if loading}<p class="status" role="status">{$t('loading_works')}</p>{/if}
+      {#if hasMore && !loading}<button class="more" onclick={() => void load(name, sourceId, true)}>{$t('catalog_show_more')}</button>{/if}
     </section>
-  {:else}<p class="status">Aucune personne sélectionnée.</p>{/if}
+  {:else}<p class="status">{$t('no_person_selected')}</p>{/if}
 </main>
 
 <style>

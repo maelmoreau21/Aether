@@ -12,6 +12,8 @@ use serde_json::{Map, Value, json};
 use sqlx::{Execute, Row};
 use std::collections::HashMap;
 
+pub mod search;
+
 const MAX_TITLE: usize = 1_000;
 const MAX_OVERVIEW: usize = 20_000;
 
@@ -112,6 +114,9 @@ async fn upsert(
         .bind(now())
         .execute(&mut **tx)
         .await?;
+    if matches!(table, Table::Work) {
+        search::refresh(tx, id).await?;
+    }
     Ok(true)
 }
 
@@ -160,6 +165,7 @@ pub async fn delete_work_source(
         .await?
         .rows_affected();
     if removed > 0 {
+        search::refresh(tx, work_id).await?;
         bump_generation(tx).await?;
     }
     Ok(removed)

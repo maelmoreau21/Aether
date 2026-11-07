@@ -1,6 +1,6 @@
 <script lang="ts">
   import { session } from '../auth/session';
-  import { locale } from '../i18n';
+  import { locale, t } from '../i18n';
   import { type Work, localizedTitle } from './api';
   import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
@@ -29,8 +29,8 @@
 {#if layout}
   <section class="tonight" aria-labelledby="tonight-title">
     <div class="head">
-      <h2 id="tonight-title">Pour ce soir</h2>
-      <p>Ajouts récents de vos bibliothèques</p>
+      <h2 id="tonight-title">{$t('for_tonight')}</h2>
+      <p>{$t('recent_additions_from_your_libraries')}</p>
     </div>
     <ul class="mosaic {gridClass}">
       {#each layout.tiles as tile, index (ordered[index].id)}

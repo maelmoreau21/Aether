@@ -2,6 +2,7 @@
   import { session } from '../auth/session';
   import { avatarRevision } from '../auth/avatar';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   type AvatarItem = {
     id: string;
@@ -13,13 +14,13 @@
   let permissions = $state({uploadAllowed:false,removeAllowed:false});
   let uploadInput = $state<HTMLInputElement>();
   async function loadPermissions(userId:string,signal:AbortSignal){
-    try{const response=await fetch('/api/v1/account/avatar/policy',{credentials:'same-origin',cache:'no-store',signal});if(!response.ok)throw new Error('Paramètres des avatars indisponibles.');const data=await response.json();if($session?.user.id===userId&&!signal.aborted)permissions=data;}catch(cause){if(!signal.aborted)error=cause instanceof Error?cause.message:'Paramètres indisponibles.';}
+    try{const response=await fetch('/api/v1/account/avatar/policy',{credentials:'same-origin',cache:'no-store',signal});if(!response.ok)throw new Error($t('avatar_settings_unavailable'));const data=await response.json();if($session?.user.id===userId&&!signal.aborted)permissions=data;}catch(cause){if(!signal.aborted)error=cause instanceof Error?cause.message:$t('settings_unavailable');}
   }
   async function changePersonal(file?:File){
     const current=$session;if(!current)return;
-    if(file&&(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024)){error='Choisissez une image PNG, JPEG ou WebP de 2 Mo maximum.';return;}
+    if(file&&(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>2*1024*1024)){error=$t('choose_a_png_jpeg_or_webp');return;}
     busy=true;error='';notice='';
-    try{const response=await fetch('/api/v1/account/avatar',{method:file?'PUT':'DELETE',credentials:'same-origin',headers:{'x-csrf-token':current.csrfToken,...(file?{'Content-Type':file.type}:{})},body:file,signal:AbortSignal.timeout(20000)});if(!response.ok)throw new Error('Modification impossible. Vérifiez les autorisations et le format de l’image.');if($session?.user.id===current.user.id&&$session.csrfToken===current.csrfToken){avatarRevision.update(v=>v+1);notice=file?'Photo de profil importée.':'Photo de profil supprimée.';}}catch(cause){if($session?.user.id===current.user.id)error=cause instanceof Error?cause.message:'Modification impossible.';}finally{busy=false;if(uploadInput)uploadInput.value='';}
+    try{const response=await fetch('/api/v1/account/avatar',{method:file?'PUT':'DELETE',credentials:'same-origin',headers:{'x-csrf-token':current.csrfToken,...(file?{'Content-Type':file.type}:{})},body:file,signal:AbortSignal.timeout(20000)});if(!response.ok)throw new Error($t('change_failed_check_the_permissions_and'));if($session?.user.id===current.user.id&&$session.csrfToken===current.csrfToken){avatarRevision.update(v=>v+1);notice=file?$t('profile_picture_imported'):$t('profile_picture_removed');}}catch(cause){if($session?.user.id===current.user.id)error=cause instanceof Error?cause.message:$t('modification_impossible');}finally{busy=false;if(uploadInput)uploadInput.value='';}
   }
   let showModal = $state(false);
   let dialog = $state<HTMLDialogElement>();
@@ -46,7 +47,7 @@
       const response = await fetch('/api/v1/account/avatar/collections', {
         credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(20000)
       });
-      if (!response.ok) throw new Error('Impossible de charger la galerie des avatars.');
+      if (!response.ok) throw new Error($t('unable_to_load_the_avatar_gallery'));
       const data = await response.json() as { packs: typeof collections };
       if ($session?.user.id !== userId || !dialog?.open || generation !== requestGeneration) return;
       collections = data.packs;
@@ -54,7 +55,7 @@
       if (selectedPack) await loadPack(selectedPack);
       else allImages = [];
     } catch (cause) {
-      if ($session?.user.id === userId && dialog?.open && generation === requestGeneration) error = cause instanceof Error ? cause.message : 'Photos indisponibles.';
+      if ($session?.user.id === userId && dialog?.open && generation === requestGeneration) error = cause instanceof Error ? cause.message : $t('pictures_unavailable');
     } finally {
       if (generation === requestGeneration) modalLoading = false;
     }
@@ -68,13 +69,13 @@
       const response = await fetch(`/api/v1/account/avatar/collections/${encodeURIComponent(pack)}`, {
         credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(20000)
       });
-      if (!response.ok) throw new Error('Impossible de charger cette collection.');
+      if (!response.ok) throw new Error($t('unable_to_load_this_collection'));
       const data = await response.json() as { images: { id: string; name: string; url: string }[] };
       if ($session?.user.id === userId && generation === requestGeneration && dialog?.open)
         allImages = data.images.map(img => ({ id: `${pack}-${img.id}`, name: img.name || 'Avatar', url: img.url }));
     } catch (cause) {
       if ($session?.user.id === userId && generation === requestGeneration && dialog?.open)
-        error = cause instanceof Error ? cause.message : 'Collection indisponible.';
+        error = cause instanceof Error ? cause.message : $t('collection_unavailable');
     } finally { if (generation === requestGeneration) modalLoading = false; }
   }
 
@@ -97,14 +98,14 @@
         headers: { 'x-csrf-token': current.csrfToken },
         signal: AbortSignal.timeout(20000)
       });
-      if (!response.ok) throw new Error('Impossible d’enregistrer cet avatar.');
+      if (!response.ok) throw new Error($t('unable_to_save_this_avatar'));
       if ($session?.user.id !== current.user.id || $session.csrfToken !== current.csrfToken) return;
       avatarRevision.update((v) => v + 1);
-      notice = 'Photo de profil enregistrée.';
+      notice = $t('profile_picture_saved');
       dialog?.close();
     } catch (cause) {
       if ($session?.user.id === current.user.id && $session.csrfToken === current.csrfToken)
-        error = cause instanceof Error ? cause.message : 'Modification impossible.';
+        error = cause instanceof Error ? cause.message : $t('modification_impossible');
     } finally {
       busy = false;
     }
@@ -131,17 +132,17 @@
 </script>
 
 <div class="avatar-editor">
-  <p>Choisissez une image dans la galerie du serveur{permissions.uploadAllowed ? ", ou importez votre propre image" : ""}. {permissions.removeAllowed ? "" : "Un avatar est obligatoire."}</p>
+  <p>{$t('avatar_choose_gallery', { upload: permissions.uploadAllowed ? $t('or_upload_own_image') : '' })} {permissions.removeAllowed ? "" : $t('an_avatar_is_required')}</p>
   <div class="avatar-actions">
-    {#if permissions.uploadAllowed}<input hidden type="file" bind:this={uploadInput} accept="image/png,image/jpeg,image/webp" onchange={event=>{const file=event.currentTarget.files?.[0];if(file)void changePersonal(file);}} /><button disabled={busy} onclick={()=>uploadInput?.click()}>Importer une image</button>{/if}
-    {#if permissions.removeAllowed}<button disabled={busy} onclick={()=>void changePersonal()}>Supprimer l’avatar</button>{/if}
+    {#if permissions.uploadAllowed}<input hidden type="file" bind:this={uploadInput} accept="image/png,image/jpeg,image/webp" onchange={event=>{const file=event.currentTarget.files?.[0];if(file)void changePersonal(file);}} /><button disabled={busy} onclick={()=>uploadInput?.click()}>{$t('import_an_image')}</button>{/if}
+    {#if permissions.removeAllowed}<button disabled={busy} onclick={()=>void changePersonal()}>{$t('remove_the_avatar')}</button>{/if}
     <button bind:this={galleryButton} disabled={busy} aria-expanded={showModal} onclick={() => void openModal()}>
-      Choisir dans la galerie
+      {$t('choose_from_the_gallery')}
     </button>
   </div>
 
   {#if busy}
-    <p role="status">Enregistrement…</p>
+    <p role="status">{$t('saving')}</p>
   {/if}
   {#if notice}
     <p role="status">{notice}</p>
@@ -158,21 +159,21 @@
       onclose={() => { requestGeneration++; showModal = false; selectedItem = null; galleryButton?.focus(); }}
     >
         <div class="modal-header">
-          <h3 id="modal-avatar-title">Choisir une photo de profil</h3>
-          <button type="button" class="close-btn" aria-label="Fermer" onclick={closeModal}>
+          <h3 id="modal-avatar-title">{$t('choose_a_profile_picture')}</h3>
+          <button type="button" class="close-btn" aria-label={$t('close')} onclick={closeModal}>
             <Icon name="close" size={18} />
           </button>
         </div>
 
         <div class="modal-body">
           {#if collections.length > 1}
-            <label class="pack-picker">Collection<select value={selectedPack} onchange={(event) => void loadPack(event.currentTarget.value)}>{#each collections as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count}</option>{/each}</select></label>
+            <label class="pack-picker">{$t('collection')}<select value={selectedPack} onchange={(event) => void loadPack(event.currentTarget.value)}>{#each collections as pack (pack.id)}<option value={pack.id}>{pack.name} · {pack.count}</option>{/each}</select></label>
           {/if}
           {#if error}<p role="alert">{error}</p>{/if}
           {#if modalLoading}
-            <p class="loading-state">Chargement des photos…</p>
+            <p class="loading-state">{$t('loading_pictures')}</p>
           {:else if allImages.length === 0}
-            <p class="empty-state">Aucune photo de profil disponible pour le moment.</p>
+            <p class="empty-state">{$t('no_profile_pictures_available_for_now')}</p>
           {:else}
             <div class="avatar-grid">
               {#each allImages as item (item.id)}
@@ -194,7 +195,7 @@
 
         <div class="modal-footer">
           <button type="button" class="cancel-btn" disabled={busy} onclick={closeModal}>
-            Annuler
+            {$t('sched_cancel')}
           </button>
           <button
             type="button"

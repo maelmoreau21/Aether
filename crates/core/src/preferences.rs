@@ -21,6 +21,12 @@ struct Preferences {
     /// Tried in order when `metadata_locale` has no translation (at most four).
     #[serde(skip_serializing_if = "Option::is_none")]
     metadata_fallback_locales: Option<Vec<String>>,
+    /// Language of posters and other artwork, independent of the interface and metadata languages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artwork_locale: Option<String>,
+    /// Language of the subtitles selected by default, independent of the audio language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subtitle_language: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     home_sections: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -210,6 +216,11 @@ impl Preferences {
                         .iter()
                         .all(|v| crate::metadata_locale::normalize(v).is_some())
             })
+            && self
+                .artwork_locale
+                .as_deref()
+                .is_none_or(|v| crate::metadata_locale::normalize(v).is_some())
+            && self.subtitle_language.as_deref().is_none_or(language)
             && self.audio_language.as_deref().is_none_or(language)
             && self
                 .subtitles
@@ -246,6 +257,35 @@ impl Preferences {
                         .is_none_or(|v| matches!(v, "none" | "outline" | "drop-shadow"))
             })
     }
+}
+/// A `null` value removes that preference (back to its default); every other field is validated
+/// as before. Returns the typed patch and the names of the cleared fields, or `None` when the
+/// body is not an object, names an unknown field or carries a malformed value.
+fn split_patch(body: serde_json::Value) -> Option<(Preferences, Vec<String>)> {
+    let serde_json::Value::Object(fields) = body else {
+        return None;
+    };
+    let mut cleared = Vec::new();
+    let mut kept = serde_json::Map::new();
+    for (key, value) in fields {
+        if value.is_null() {
+            cleared.push(key);
+        } else {
+            kept.insert(key, value);
+        }
+    }
+    let input = serde_json::from_value::<Preferences>(serde_json::Value::Object(kept)).ok()?;
+    // A cleared name must be a real preference: `deny_unknown_fields` rejects any other name even
+    // when its value is `null`.
+    let known = |key: &String| {
+        let probe = serde_json::Value::Object(
+            [(key.clone(), serde_json::Value::Null)]
+                .into_iter()
+                .collect(),
+        );
+        serde_json::from_value::<Preferences>(probe).is_ok()
+    };
+    cleared.iter().all(known).then_some((input, cleared))
 }
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -294,10 +334,11 @@ fn tolerant(stored: &str) -> Preferences {
 async fn write(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-    Json(input): Json<Preferences>,
+    Json(body): Json<serde_json::Value>,
 ) -> Result<StatusCode, StatusCode> {
     let identity = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &identity)?;
+    let (input, cleared) = split_patch(body).ok_or(StatusCode::UNPROCESSABLE_ENTITY)?;
     if !input.valid() {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
@@ -330,6 +371,9 @@ async fn write(
             target.insert(key.clone(), value.clone());
         }
     }
+    for key in &cleared {
+        target.remove(key);
+    }
     let encoded = serde_json::to_string(&saved).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if encoded.len() > 4096 {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
@@ -353,5 +397,32 @@ mod tests {
         assert_eq!(kept.card_size, None);
         assert_eq!(kept.auto_skip_intro, Some(true));
         assert!(tolerant("not json").theme.is_none());
+    }
+
+    #[test]
+    fn null_clears_a_preference_and_unknown_names_are_rejected() {
+        let (patch, cleared) =
+            split_patch(serde_json::json!({"metadataLocale": null, "theme": "dark"})).unwrap();
+        assert_eq!(cleared, vec!["metadataLocale".to_owned()]);
+        assert_eq!(patch.theme.as_deref(), Some("dark"));
+        assert!(patch.metadata_locale.is_none());
+        assert!(split_patch(serde_json::json!({"notAPreference": null})).is_none());
+        assert!(split_patch(serde_json::json!({"notAPreference": 1})).is_none());
+        assert!(split_patch(serde_json::json!(["theme"])).is_none());
+    }
+
+    #[test]
+    fn each_language_preference_is_validated_on_its_own() {
+        let ok =
+            |value: serde_json::Value| split_patch(value).is_some_and(|(patch, _)| patch.valid());
+        assert!(ok(
+            serde_json::json!({"locale": "en", "metadataLocale": "fr-CA", "artworkLocale": "en-GB", "subtitleLanguage": "fr", "audioLanguage": "original"})
+        ));
+        assert!(!ok(serde_json::json!({"locale": "de"})));
+        assert!(!ok(serde_json::json!({"artworkLocale": "not a tag"})));
+        assert!(!ok(serde_json::json!({"subtitleLanguage": "x"})));
+        assert!(!ok(
+            serde_json::json!({"metadataFallbackLocales": ["fr", "en", "de", "es", "it"]})
+        ));
     }
 }

@@ -30,14 +30,14 @@
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   let showPathPicker = $state(false);
   const allSections = [
-    { id: 'general', label: 'Général' },
-    { id: 'sources', label: 'Sources et dossiers' },
-    { id: 'metadata', label: 'Métadonnées' },
-    { id: 'images', label: 'Images' },
-    { id: 'playback', label: 'Lecture' },
-    { id: 'subtitles', label: 'Sous-titres' },
-    { id: 'providers', label: 'Fournisseurs' },
-    { id: 'access', label: 'Accès' }
+    { id: 'general', get label() { return $t('admin_general'); } },
+    { id: 'sources', get label() { return $t('sources_folders'); } },
+    { id: 'metadata', get label() { return $t('metadata'); } },
+    { id: 'images', get label() { return $t('admin_artwork_tab'); } },
+    { id: 'playback', get label() { return $t('play'); } },
+    { id: 'subtitles', get label() { return $t('report_category_subtitles'); } },
+    { id: 'providers', get label() { return $t('providers'); } },
+    { id: 'access', get label() { return $t('admin_group_access'); } }
   ] as const;
   type EditorSection = typeof allSections[number]['id'];
   const optionSections: LibraryOptionsSection[] = ['metadata', 'images', 'playback', 'subtitles', 'providers'];
@@ -62,7 +62,7 @@
     editor?.querySelector<HTMLButtonElement>(`#library-tab-${editorSections[next].id}`)?.focus();
   }
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
-  function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? 'Node local' : id); }
+  function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? $t('local_node') : id); }
   let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
   async function deleteLibrary() {
     if (!editedLibrary || deleting) return;
@@ -71,7 +71,7 @@
       await adminRequest(`/api/v1/admin/libraries/${encodeURIComponent(editedLibrary.id)}`, { method: 'DELETE' });
       editor?.close(); onreset(); await onchanged();
     } catch (cause) {
-      deleteError = cause instanceof Error && !cause.message.startsWith('Ce nom') ? cause.message : 'Suppression impossible pendant une analyse. Réessayez après sa fin.';
+      deleteError = cause instanceof Error && !cause.message.startsWith('Ce nom') ? cause.message : $t('deletion_is_not_possible_during_a');
     } finally { deleting = false; confirmDelete = false; }
   }
   function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; presetApplied = false; formError = ''; confirmDelete = false; deleteError = ''; editor?.showModal(); }
@@ -113,7 +113,7 @@
 </script>
 <section id="libraries-section" aria-labelledby="libraries-heading">
   <h2 id="libraries-heading">{$t('libraries')}</h2>
-  <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> Ajouter une bibliothèque</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> Actualiser toutes les bibliothèques</button></div>
+  <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> {$t('add_a_library')}</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> {$t('refresh_all_libraries')}</button></div>
   {#if libraries.length}
   <div class="library-table-panel">
     <table class="library-table">
@@ -130,9 +130,9 @@
       {@const scanErrors = scan ? scan.errorsCount ?? scan.errors.length : 0}
       <tr class="library-row" class:disabled-library={!library.enabled}>
         <th scope="row" class="name-cell">
-          <button class="library-name" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}>
+          <button class="library-name" onclick={() => manage(library)} aria-label={$t('manage', { name: library.name })}>
             <span class="kind-icon"><Icon name={library.kind === 'films' ? 'film' : library.kind === 'music' ? 'playlist' : 'tv'} size={20} /></span>
-            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : ' · Désactivée'} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
+            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : $t('disabled_2')} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
           </button>
         </th>
         <td class="type-cell">{kindLabel}{#if !library.enabled}<span class="badge">{$t('disabled')}</span>{/if}</td>
@@ -141,16 +141,16 @@
         <td class="status-cell">
           {#if scan}
             <div class="scan-status scan-counters" role="status">
-              <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">Scan : </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
-              <span class="counters">{scan.discovered} fichier(s) découvert(s) · {scan.probed} analysé(s) · {scan.reused} réutilisé(s)</span>
+              <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">{$t('admin_scan')} </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
+              <span class="counters">{$t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused })}</span>
             </div>
-            {#if scanning}<progress aria-label={`Scan de ${library.name} en cours`}></progress>{/if}
+            {#if scanning}<progress aria-label={$t('scanning', { name: library.name })}></progress>{/if}
           {:else}<span class="no-scan">—</span>{/if}
         </td>
         <td class="actions-cell">
           <div class="row-actions">
-            <button class="icon-action" disabled={unavailable} aria-label={`Scanner ${library.name}`} title="Scanner la bibliothèque" onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
-            <button class="icon-action" aria-label={`Paramètres de ${library.name}`} title="Gérer la bibliothèque" onclick={() => manage(library)}><Icon name="settings" size={18} /></button>
+            <button class="icon-action" disabled={unavailable} aria-label={$t('scan_2', { name: library.name })} title={$t('scan_the_library')} onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
+            <button class="icon-action" aria-label={$t('extension_settings_for', { name: library.name })} title={$t('manage_the_library')} onclick={() => manage(library)}><Icon name="settings" size={18} /></button>
           </div>
         </td>
       </tr>
@@ -161,11 +161,11 @@
   {:else}<p class="empty-libraries">{$t('first_library_hint')}</p>{/if}
 </section>
 <dialog class="library-editor" bind:this={editor} aria-labelledby="library-form" oncancel={event => { if (saving) event.preventDefault(); }}>
-  <header class="editor-header"><div><p class="eyebrow">{editing ? name : 'Nouvelle bibliothèque'}</p><h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2></div><button type="button" disabled={saving} aria-label="Fermer les réglages de la bibliothèque" onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
+  <header class="editor-header"><div><p class="eyebrow">{editing ? name : $t('new_library')}</p><h2 id="library-form">{editing ? $t('edit_the_library') : $t('add_a_library')}</h2></div><button type="button" disabled={saving} aria-label={$t('close_library_settings')} onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
   <form onsubmit={submit} novalidate><fieldset disabled={saving}>
     <div class="editor-workspace">
       <div class="editor-navigation">
-        <div class="editor-tabs" role="tablist" aria-label="Réglages de la bibliothèque" aria-orientation="vertical">
+        <div class="editor-tabs" role="tablist" aria-label={$t('library_settings')} aria-orientation="vertical">
           {#each editorSections as section, index (section.id)}<button type="button" id={`library-tab-${section.id}`} role="tab" aria-selected={activeSection === section.id} aria-controls={`library-panel-${section.id}`} tabindex={activeSection === section.id ? 0 : -1} onclick={() => chooseEditorSection(section.id)} onkeydown={event => tabKeydown(event, index)}>{section.label}</button>{/each}
         </div>
         <label class="editor-select">{$t('settings_section')}<select aria-label={$t('settings_section')} value={activeSection} onchange={event => chooseEditorSection(event.currentTarget.value as EditorSection)}>{#each editorSections as section (section.id)}<option value={section.id}>{section.label}</option>{/each}</select></label>
@@ -175,36 +175,36 @@
           <h3>{$t('library_general')}</h3><p class="panel-description">{$t('library_general_note')}</p>
           <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" bind:value={kind}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="music">{$t('music')}</option></select></div></div>
           <label class="check"><input type="checkbox" bind:checked={enabled} /> {$t('active_library')}</label><p class="field-hint">{$t('disabled_library_hint')}</p>
-          {#if !folders.length}<p class="field-hint">Ajoutez un dossier dans <button type="button" class="inline-link" onclick={() => chooseEditorSection('sources')}>Sources et dossiers</button> pour pouvoir enregistrer.</p>{/if}
-          <div class="preset-row"><p>Réinitialiser les réglages avec les valeurs recommandées pour ce type de contenu.</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>Appliquer les réglages recommandés</button></div>
-          {#if presetApplied}<p role="status" class="field-hint">Réglages recommandés appliqués. Enregistrez la bibliothèque pour les conserver.</p>{/if}
+          {#if !folders.length}<p class="field-hint">{$t('add_a_folder_in')} <button type="button" class="inline-link" onclick={() => chooseEditorSection('sources')}>{$t('sources_folders')}</button> {$t('to_be_able_to_save')}</p>{/if}
+          <div class="preset-row"><p>{$t('reset_settings_to_the_values_recommended')}</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>{$t('apply_recommended_settings')}</button></div>
+          {#if presetApplied}<p role="status" class="field-hint">{$t('recommended_settings_applied_save_the')}</p>{/if}
           <LibraryOptionsForm bind:options bind:excludedPatterns {kind} section="scan" />
           {#if editedLibrary}
             {@const busyLibrary = !editedLibrary.enabled || pending.includes(editedLibrary.id) || ['queued', 'running'].includes(scans[editedLibrary.id]?.status)}
             <div class="library-actions">
-              <h4>Actions</h4>
+              <h4>{$t('actions')}</h4>
               <div class="action-buttons">
-                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; editor?.close(); refreshLibrary(library); }}><Icon name="refresh" size={16} /> Actualiser la bibliothèque</button>
-                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; target = library; mode = 'missing_metadata'; editor?.close(); refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
-                <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}>Modifier les images</button>
+                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; editor?.close(); refreshLibrary(library); }}><Icon name="refresh" size={16} /> {$t('refresh_the_library')}</button>
+                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; target = library; mode = 'missing_metadata'; editor?.close(); refresher?.showModal(); }}>{$t('look_for_missing_metadata')}</button>
+                <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}>{$t('edit_artwork')}</button>
                 <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(editedLibrary.id)}`)} onclick={() => editor?.close()}>{$t('schedule_refresh')}</a>
               </div>
             </div>
             <div class="danger-zone">
-              <h4>Supprimer la bibliothèque</h4>
-              <p>La bibliothèque disparaît d’Aether pour tous les comptes. Vos fichiers ne sont ni modifiés ni supprimés.</p>
+              <h4>{$t('delete_the_library')}</h4>
+              <p>{$t('the_library_disappears_from_aether_for')}</p>
               {#if confirmDelete}
-                <div class="action-buttons"><button type="button" class="danger" disabled={deleting} onclick={() => void deleteLibrary()}>{deleting ? 'Suppression…' : `Supprimer définitivement « ${editedLibrary.name} »`}</button><button type="button" disabled={deleting} onclick={() => confirmDelete = false}>Annuler</button></div>
-              {:else}<button type="button" class="danger" onclick={() => confirmDelete = true}><Icon name="trash" size={16} /> Supprimer la bibliothèque</button>{/if}
+                <div class="action-buttons"><button type="button" class="danger" disabled={deleting} onclick={() => void deleteLibrary()}>{deleting ? 'Suppression…' : $t('permanently_delete', { name: editedLibrary.name })}</button><button type="button" disabled={deleting} onclick={() => confirmDelete = false}>{$t('sched_cancel')}</button></div>
+              {:else}<button type="button" class="danger" onclick={() => confirmDelete = true}><Icon name="trash" size={16} /> {$t('delete_the_library')}</button>{/if}
               {#if deleteError}<p role="alert" class="editor-error">{deleteError}</p>{/if}
             </div>
           {/if}
         </div>
         <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
           <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / 32</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
-          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`${$t('remove')} ${folder.root}`} onclick={() => folders = folders.filter(item => item !== folder)}>{$t('remove')}</button></li>{:else}<li class="empty-folders">{$t('no_folder_added')}</li>{/each}</ul>
+          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={$t('remove_value', { value: folder.root })} onclick={() => folders = folders.filter(item => item !== folder)}>{$t('remove')}</button></li>{:else}<li class="empty-folders">{$t('no_folder_added')}</li>{/each}</ul>
           <label for="library-node">{$t('folder_server')}</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">{$t('local_node')}</option>{#each activeNodes.filter(node => node.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
-          <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
+          <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder={$t('e_g_media_films_or_c')} autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
           <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
         </div>
         {#each optionSections as section (section)}
@@ -217,24 +217,24 @@
     </div>
     <footer class="editor-actions">
       {#if formError || error}<p class="editor-error" role="alert">{formError || error}</p>{/if}
-      <p class="save-hint">{folders.length ? 'Les réglages locaux s’appliquent au prochain scan ; les réglages des fournisseurs aux prochaines collectes.' : 'Ajoutez un dossier dans Sources et dossiers.'}</p>
-      <div class="footer-buttons"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={!folders.length}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+      <p class="save-hint">{folders.length ? $t('local_settings_apply_at_the_next') : $t('add_a_folder_in_sources_and')}</p>
+      <div class="footer-buttons"><button type="button" onclick={() => editor?.close()}>{$t('sched_cancel')}</button><button class="primary" type="submit" disabled={!folders.length}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
     </footer>
   </fieldset></form>
 </dialog>
 <dialog bind:this={refresher} aria-labelledby="refresh-heading" oncancel={(event) => { if (refreshing) event.preventDefault(); }}>
   <form onsubmit={refresh}>
-    <h2 id="refresh-heading">Actualiser {target?.name ?? 'toutes les bibliothèques'}</h2>
-    <label for="refresh-mode">Mode d’actualisation</label><select id="refresh-mode" bind:value={mode} disabled={refreshing}>
-      <option value="incremental">Actualisation rapide (recommandée)</option>
-      <option value="new_only">Actualiser en gardant les descriptions existantes</option>
-      <option value="missing_metadata">Compléter les descriptions manquantes</option>
-      <option value="full">Tout réanalyser (plus lent)</option>
+    <h2 id="refresh-heading">{$t('refresh_target', { name: target?.name ?? $t('all_libraries') })}</h2>
+    <label for="refresh-mode">{$t('refresh_mode')}</label><select id="refresh-mode" bind:value={mode} disabled={refreshing}>
+      <option value="incremental">{$t('quick_refresh')}</option>
+      <option value="new_only">{$t('refresh_keep_descriptions')}</option>
+      <option value="missing_metadata">{$t('fill_missing_metadata')}</option>
+      <option value="full">{$t('full_rescan')}</option>
     </select>
-    <p>{mode === 'new_only' ? 'Les métadonnées des médias déjà connus sont conservées. Les fichiers modifiés et les pistes restent vérifiés.' : mode === 'missing_metadata' ? 'Les métadonnées locales déjà validées sont conservées. Les médias sans métadonnées ou sans affiches sont complétés depuis les fournisseurs en ligne configurés et les fichiers NFO.' : mode === 'full' ? 'Tous les fichiers sont réanalysés. Les métadonnées locales sont relues, y compris celles des médias connus.' : 'Les analyses techniques inchangées sont réutilisées. Les fichiers et leurs pistes externes sont vérifiés.'}</p>
+    <p>{mode === 'new_only' ? $t('metadata_of_already_known_media_is') : mode === 'missing_metadata' ? $t('local_metadata_already_validated_is_kept') : mode === 'full' ? $t('all_files_are_re_analysed_local') : $t('unchanged_technical_analyses_are_reused')}</p>
 
     {#if error}<p role="alert">{error}</p>{/if}
-    <div class="actions"><button type="button" disabled={refreshing} onclick={() => refresher?.close()}>Annuler</button><button class="primary" type="submit" disabled={refreshing}>{refreshing ? 'Lancement…' : 'Actualiser'}</button></div>
+    <div class="actions"><button type="button" disabled={refreshing} onclick={() => refresher?.close()}>{$t('sched_cancel')}</button><button class="primary" type="submit" disabled={refreshing}>{refreshing ? 'Lancement…' : 'Actualiser'}</button></div>
   </form>
 </dialog>
 {#if imageTarget}<LibraryImages library={imageTarget} onclose={() => imageTarget = null} {onchanged} />{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Library, LibraryOptions } from './types';
   import { adminRequest, type UserGroup } from './request';
+  import { t } from '../i18n';
   let { library, groups, options = $bindable(), onchanged }: {
     library: Library | null; groups: UserGroup[]; options: LibraryOptions; onchanged: () => Promise<void>;
   } = $props();
@@ -43,30 +44,30 @@
       return true;
     } catch (error) {
       failed = true;
-      message = error instanceof Error ? error.message : 'Enregistrement des accès impossible.';
+      message = error instanceof Error ? error.message : $t('unable_to_save_the_access_rules');
       return false;
     } finally { busy = false; }
   }
 </script>
 
-<h3>Accès à la bibliothèque</h3>
-<p class="lead">Choisissez les groupes qui voient cette bibliothèque. Les changements s’appliquent avec « Enregistrer ».</p>
+<h3>{$t('access_library')}</h3>
+<p class="lead">{$t('choose_the_groups_that_see_this')}</p>
 {#if !library}
-  <p class="notice">Enregistrez d’abord la bibliothèque, puis rouvrez-la pour attribuer les accès.</p>
+  <p class="notice">{$t('save_the_library_first_then_reopen')}</p>
 {:else}
   <fieldset disabled={busy}>
-    <legend>Groupes</legend>
+    <legend>{$t('groups')}</legend>
     {#each groups as group (group.id)}
       {#if group.systemRole === 'administrator'}
-        <label class="check"><input type="checkbox" bind:checked={() => options.adminAccess !== false, value => options.adminAccess = value} /><span>{group.name}<small>{group.userIds.length} membre(s) · {options.adminAccess === false ? 'aucun accès aux médias (sauf via un groupe coché) · la gestion reste possible' : 'accès à tous les médias de la bibliothèque'}</small></span></label>
+        <label class="check"><input type="checkbox" bind:checked={() => options.adminAccess !== false, value => options.adminAccess = value} /><span>{group.name}<small>{$t('member_count', { count: group.userIds.length })} · {options.adminAccess === false ? $t('no_access_to_media_except_through') : $t('access_to_all_media_in_the')}</small></span></label>
       {:else}
-        <label class="check"><input type="checkbox" value={group.id} bind:group={groupIds} /><span>{group.name}<small>{group.userIds.length} membre(s){group.isDefault ? ' · groupe par défaut' : ''}</small></span></label>
+        <label class="check"><input type="checkbox" value={group.id} bind:group={groupIds} /><span>{group.name}<small>{$t('member_count', { count: group.userIds.length })}{group.isDefault ? $t('admin_default_group') : ''}</small></span></label>
       {/if}
-    {:else}<p class="hint">Aucun groupe. Créez-en dans Groupes.</p>{/each}
+    {:else}<p class="hint">{$t('no_groups_create_some_under_groups')}</p>{/each}
   </fieldset>
   {#if message}<p role={failed ? 'alert' : 'status'} class:failed>{message}</p>{/if}
 {/if}
-<p class="hint">Les médias restent en lecture seule : ajouter un dossier n’accorde aucun droit supplémentaire.</p>
+<p class="hint">{$t('media_stays_read_only_adding_a')}</p>
 
 <style>
   h3 { margin: 0; font-size: 17px; font-weight: 700; }

@@ -51,11 +51,11 @@
     error = '';
     try {
       const response = await fetch('/api/v1/admin/backups', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
-      if (!response.ok) throw new Error(`Chargement impossible (HTTP ${response.status}).`);
+      if (!response.ok) throw new Error($t('loading_failed_http', { status: response.status }));
       const data: Listing = await response.json();
       if (active) listing = data;
     } catch (cause) {
-      if (active) error = cause instanceof Error ? cause.message : 'Chargement impossible.';
+      if (active) error = cause instanceof Error ? cause.message : $t('loading_impossible');
     } finally { if (active) loading = false; }
     void refreshMemory();
   }
@@ -107,7 +107,7 @@
         const detail = await response.json().catch(() => null);
         throw new Error(typeof detail?.code === 'string' && detail.code.startsWith('backup_') && typeof detail.message === 'string'
           ? detail.message
-          : response.status === 409 ? 'Une sauvegarde est déjà en cours ou le dossier serveur est refusé. Actualisez son état.' : `Sauvegarde impossible (HTTP ${response.status}).`);
+          : response.status === 409 ? $t('a_backup_is_already_running_or') : $t('backup_failed_http', { status: response.status }));
       }
       if (active) { success = $t('backup_created'); await refresh(); }
     } catch (cause) {
@@ -135,36 +135,36 @@
           <p>{$t('memory_cache_note')}</p>
         </div>
         <button onclick={trimMemory} disabled={memoryTrimming || memoryLoading}>
-          {memoryTrimming ? 'Libération en cours…' : 'Libérer la mémoire (Trim)'}
+          {memoryTrimming ? $t('freeing_memory') : $t('free_memory_trim')}
         </button>
       </div>
 
       <div class="memory-grid">
         <div class="metric">
-          <small>Core Aether (RSS)</small>
-          <strong>{mb(memoryReport.core.rssBytes)} Mo</strong>
-          <span>Pic historique : {mb(memoryReport.core.peakRssBytes)} Mo</span>
+          <small>{$t('aether_core_rss')}</small>
+          <strong>{$t('size_mb', { value: mb(memoryReport.core.rssBytes) })}</strong>
+          <span>{$t('peak_mb', { value: mb(memoryReport.core.peakRssBytes) })}</span>
         </div>
         <div class="metric">
-          <small>Tas anonyme (Heap)</small>
-          <strong>{mb(memoryReport.core.anonBytes)} Mo</strong>
-          <span>Données actives en RAM</span>
+          <small>{$t('anonymous_heap')}</small>
+          <strong>{$t('size_mb', { value: mb(memoryReport.core.anonBytes) })}</strong>
+          <span>{$t('active_data_in_ram')}</span>
         </div>
         <div class="metric">
-          <small>Fichiers & mmap</small>
-          <strong>{mb(memoryReport.core.fileBytes)} Mo</strong>
-          <span>SQLite mmap & binaires</span>
+          <small>{$t('files_mmap')}</small>
+          <strong>{$t('size_mb', { value: mb(memoryReport.core.fileBytes) })}</strong>
+          <span>{$t('sqlite_mmap_binaries')}</span>
         </div>
         <div class="metric">
-          <small>Processus enfants (Wasm)</small>
-          <strong>{mb(memoryReport.childrenTotalRssBytes)} Mo</strong>
-          <span>{memoryReport.children.length} worker(s) actif(s)</span>
+          <small>{$t('child_processes_wasm')}</small>
+          <strong>{$t('size_mb', { value: mb(memoryReport.childrenTotalRssBytes) })}</strong>
+          <span>{$t('admin_active', { count: memoryReport.children.length })}</span>
         </div>
         {#if memoryReport.host}
           <div class="metric highlight">
-            <small>Cache disque Linux (OS)</small>
-            <strong>{mb(memoryReport.host.linuxReclaimableCacheBytes)} Mo</strong>
-            <span>100% restituable par l’OS</span>
+            <small>{$t('linux_disk_cache_os')}</small>
+            <strong>{$t('size_mb', { value: mb(memoryReport.host.linuxReclaimableCacheBytes) })}</strong>
+            <span>{$t('n_100_reclaimable_by_the_os')}</span>
           </div>
         {/if}
       </div>
@@ -180,7 +180,7 @@
         <a class="link" href={resolve(`admin/libraries/#tasks-section?task=backup`)}>{$t('sched_backup_schedule_link')}</a>
       </article>
       <article><h3>{$t('archives')}</h3><p>{$t('archives_note')}</p>
-      {#if listing.archives.length === 0}<p>{$t('no_backup_available')}</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{(archive.size / 1024 / 1024).toFixed(2)} Mo · {archive.id}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
+      {#if listing.archives.length === 0}<p>{$t('no_backup_available')}</p>{:else}<ul class="archives">{#each listing.archives as archive (archive.id)}<li><div><strong>{new Date(archive.createdAt * 1000).toLocaleString()}</strong><small>{$t('mb', { value: (archive.size / 1024 / 1024).toFixed(2), id: archive.id })}</small></div><!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API archive endpoint, not a SvelteKit page -->
     <a href={`/api/v1/admin/backups/${archive.id}/download`} download>{$t('download')}</a></li>{/each}</ul>{/if}</article>
     {/if}
   {/if}

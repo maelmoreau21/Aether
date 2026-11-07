@@ -3,6 +3,7 @@
   import { session } from '../auth/session';
   import { history, loadHistory, markWatched } from './watch-state';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   let { workId, duration, compact = false }: { workId: string; duration?: number; compact?: boolean } = $props();
   let error = $state('');
@@ -19,7 +20,7 @@
     try {
       await markWatched(workId, !isWatched, duration);
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Statut non enregistré.';
+      error = e instanceof Error ? e.message : $t('status_not_saved');
     } finally {
       saving = false;
     }
@@ -33,8 +34,8 @@
     class:is-watched={isWatched}
     class:compact
     aria-pressed={isWatched}
-    aria-label={saving ? 'Enregistrement…' : isWatched ? 'Marquer non vu' : 'Marquer comme vu'}
-    title={saving ? 'Enregistrement…' : isWatched ? 'Marquer non vu' : 'Marquer comme vu'}
+    aria-label={saving ? 'Enregistrement…' : isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}
+    title={saving ? 'Enregistrement…' : isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}
     disabled={saving}
     onclick={toggle}
   >
@@ -44,11 +45,11 @@
     {#if !compact}
       <span class="watch-label">
         {#if saving}
-          Enregistrement…
+          {$t('saving')}
         {:else if isWatched}
-          Marquer non vu
+          {$t('mark_as_unwatched')}
         {:else}
-          Marquer comme vu
+          {$t('mark_as_watched')}
         {/if}
       </span>
     {/if}

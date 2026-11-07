@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import Icon from '../ui/Icon.svelte';
+  import { t } from '../i18n';
 
   export interface DirectoryEntry {
     name: string;
@@ -59,7 +60,7 @@
       const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
-        error = data?.error ?? 'Dossier introuvable ou inaccessible.';
+        error = data?.error ?? $t('folder_not_found_or_inaccessible');
         return;
       }
       const data: BrowseResult = await res.json();
@@ -68,7 +69,7 @@
       parent = data.parent;
       directories = data.directories;
     } catch {
-      if (!controller.signal.aborted) error = 'Impossible de contacter le serveur.';
+      if (!controller.signal.aborted) error = $t('unable_to_reach_the_server');
     } finally {
       if (requestController === controller) loading = false;
     }
@@ -98,15 +99,15 @@
 
 <dialog bind:this={dialog} class="path-picker-dialog" oncancel={handleCancel} aria-labelledby="picker-title">
   <div class="picker-header">
-    <button type="button" class="back-btn" onclick={onclose} aria-label="Retour">
+    <button type="button" class="back-btn" onclick={onclose} aria-label={$t('back')}>
       <Icon name="back" size={22} />
     </button>
-    <h2 id="picker-title">Sélectionner un chemin</h2>
+    <h2 id="picker-title">{$t('select_a_path')}</h2>
   </div>
 
   <div class="picker-body">
-    <p class="server-hint">Parcourez les dossiers du serveur sélectionné. Dans Docker, seuls les dossiers montés dans le conteneur peuvent être ajoutés.</p>
-    <label for="picker-path-input">Dossier</label>
+    <p class="server-hint">{$t('browse_the_selected_server_s_folders')}</p>
+    <label for="picker-path-input">{$t('folder')}</label>
     <div class="input-wrapper">
       <input
         id="picker-path-input"
@@ -121,16 +122,16 @@
         type="button"
         class="search-btn"
         onclick={() => browse(currentPath)}
-        title="Accéder au dossier"
-        aria-label="Accéder au dossier"
+        title={$t('go_to_folder')}
+        aria-label={$t('go_to_folder')}
       >
         <Icon name="search" size={18} />
       </button>
     </div>
 
     <div class="navigation-actions">
-      <button type="button" onclick={() => browse('')} disabled={loading}>Racines / lecteurs</button>
-      <button type="button" onclick={() => browse(parent ?? '')} disabled={loading || parent === null}>Dossier parent</button>
+      <button type="button" onclick={() => browse('')} disabled={loading}>{$t('roots_drives')}</button>
+      <button type="button" onclick={() => browse(parent ?? '')} disabled={loading || parent === null}>{$t('parent_folder')}</button>
     </div>
 
     {#if error}
@@ -140,7 +141,7 @@
     <div class="dirs-container" class:is-loading={loading}>
       {#if parent !== null}
         <button type="button" class="dir-item parent-item" onclick={() => browse(parent ?? '')}>
-          <span class="dir-name">.. — Dossier parent</span>
+          <span class="dir-name">{$t('admin_parent_folder')}</span>
           <span class="dir-arrow"><Icon name="arrow" size={18} /></span>
         </button>
       {/if}
@@ -153,13 +154,13 @@
       {/each}
 
       {#if directories.length === 0 && !loading && !error}
-        <div class="empty-hint">Ce dossier ne contient aucun sous-dossier. Vous pouvez le sélectionner ou revenir au dossier parent.</div>
+        <div class="empty-hint">{$t('this_folder_has_no_subfolders_you')}</div>
       {/if}
     </div>
 
     <div class="picker-footer">
       <button type="button" class="ok-btn" onclick={handleConfirm} disabled={loading || !!error || !resolvedPath || currentPath !== resolvedPath}>
-        {loading ? 'Chargement…' : 'Sélectionner ce dossier'}
+        {loading ? 'Chargement…' : $t('select_this_folder')}
       </button>
     </div>
   </div>

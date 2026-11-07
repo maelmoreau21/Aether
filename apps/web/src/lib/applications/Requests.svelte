@@ -73,7 +73,7 @@
   <header class="heading"><div><p class="muted">{$t('requests_subtitle')}</p>{#if !embedded}<h1>{$t('settings_requests')}</h1>{/if}<p class="muted">{$t('requests_hint')}</p></div>{#if isAdmin && $features.requests}<a class="button-link" href={embedded ? '#acquisition-section' : resolve('requests/admin/')}>{$t('manage_requests')}</a>{/if}</header>
   {#if error}<p role="alert" class="feedback error">{error}</p>{/if}
   {#if message}<p role="status" class="feedback success">{message}</p>{/if}
-  {#if loading}<p class="empty" role="status">Chargement…</p>
+  {#if loading}<p class="empty" role="status">{$t('loading_settings_short')}</p>
   {:else if !$features.requests}<p class="panel">{$t('reports_unavailable')}</p>
   {:else}
     <section class="panel stack" aria-labelledby="request-search-title"><h2 id="request-search-title">{$t('request_search')}</h2>

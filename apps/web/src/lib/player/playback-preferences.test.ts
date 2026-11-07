@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { playbackPreferences, trackPreferences, SKIP_SECONDS } from './playback-preferences';
+import { languageDefaults, playbackPreferences, trackPreferences, SKIP_SECONDS } from './playback-preferences';
 
 describe('playback account defaults', () => {
   it('keeps old accounts on manual episode changes and ten-second skips', () => {
@@ -36,5 +36,22 @@ describe('track selection policy', () => {
     expect(trackPreferences({ subtitles: 'always', subtitlePreference: { enabled: false } }).subtitlePreference).toEqual({ enabled: false });
     expect(trackPreferences({ audioLanguage: 'fr-CA', audioTrack: { mediaId: 'movie', trackId: 'old' } }).audioLanguage).toBe('fr');
     expect(trackPreferences({ subtitles: 'off', rememberSubtitleSelections: false, subtitlePreference }).subtitlePreference).toEqual({ enabled: false });
+  });
+});
+
+describe('audio and subtitle languages are independent of the interface language', () => {
+  it('uses the interface language only when nothing else was chosen', () => {
+    expect(languageDefaults({})).toEqual({ audio: 'fr', subtitle: 'fr' });
+    expect(languageDefaults({ locale: 'en' })).toEqual({ audio: 'en', subtitle: 'en' });
+  });
+  it('lets audio, subtitles and metadata each have their own language', () => {
+    expect(languageDefaults({ locale: 'fr', audioLanguage: 'original', metadataLocale: 'en-GB' })).toEqual({ audio: 'original', subtitle: 'en' });
+    expect(languageDefaults({ locale: 'fr', audioLanguage: 'ja', subtitleLanguage: 'de', metadataLocale: 'en' })).toEqual({ audio: 'ja', subtitle: 'de' });
+  });
+  it('builds the default subtitle choice from the subtitle language, not from French', () => {
+    const always = trackPreferences({ locale: 'en', subtitles: 'always', subtitleLanguage: 'es' });
+    expect(always.subtitlePreference).toEqual({ enabled: true, language: 'es', forced: false });
+    expect(trackPreferences({ locale: 'en' }).audioLanguage).toBe('en');
+    expect(trackPreferences({ locale: 'fr' }).audioLanguage).toBe('fr');
   });
 });

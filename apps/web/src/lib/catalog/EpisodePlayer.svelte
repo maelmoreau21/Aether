@@ -14,6 +14,7 @@
   import { session, getSessionGeneration } from '../auth/session';
   import type { Media } from '../player/types';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
+  import { t } from '../i18n';
 
   let {
     episode,
@@ -59,7 +60,7 @@
     void cacheVersion;
     const item = getCachedMedia(id) ?? media.find(m => m.id === id);
     if (item) return sourceLabel(item);
-    return versionIds.length > 1 ? `Version ${index + 1}` : 'Version locale';
+    return versionIds.length > 1 ? `Version ${index + 1}` : $t('catalog_local_version');
   }
 
   function prefetchVersions() {
@@ -103,20 +104,20 @@
       const item = await revalidateMediaDescriptor(id);
       immersive?.open(item);
     }
-    }catch(cause){launchError=cause instanceof Error?cause.message:'Lecture indisponible.';}
+    }catch(cause){launchError=cause instanceof Error?cause.message:$t('playback_unavailable');}
   }
 </script>
 <div class="episode-actions">
-  <button class="episode-play" onpointerenter={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }} onfocus={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }} disabled={!versionIds.length || isLaunching || episode.available === false} onclick={handlePlay} aria-label={`Lire ${episode.title}`}>
-    {episode.available === false ? 'Temporairement indisponible' : isLaunching ? 'Chargement…' : 'Lire l’épisode'}
+  <button class="episode-play" onpointerenter={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }} onfocus={() => { if (!episode.synthetic) preloadProgress(episode.id); prefetchVersions(); }} disabled={!versionIds.length || isLaunching || episode.available === false} onclick={handlePlay} aria-label={$t('play_title', { title: episode.title })}>
+    {episode.available === false ? $t('temporarily_unavailable') : isLaunching ? 'Chargement…' : $t('play_the_episode')}
   </button>
-  {#if episode.available === false}<span>Le serveur qui héberge cet épisode est hors ligne.</span>{:else if !versionIds.length}<span>Aucune version disponible.</span>{/if}
+  {#if episode.available === false}<span>{$t('the_server_hosting_this_episode_is')}</span>{:else if !versionIds.length}<span>{$t('no_version_available')}</span>{/if}
 </div>
 {#if launchError}<p role="alert">{launchError}</p>{/if}
 {#if versionIds.length > 1 || (!episode.synthetic && versionIds.length)}
-  <details class="episode-versions"><summary>{versionIds.length > 1 ? 'Versions et téléchargement' : 'Téléchargement'}</summary>
+  <details class="episode-versions"><summary>{versionIds.length > 1 ? $t('versions_and_download') : 'Téléchargement'}</summary>
     {#if versionIds.length > 1}
-      <label>Version<select aria-label={`Version de ${episode.title}`} bind:value={selected} onfocus={prefetchVersions} onpointerenter={prefetchVersions}><option value="auto">Meilleure version disponible</option>{#each versionIds as id, index (id)}<option value={id}>{getLabel(id, index)}</option>{/each}</select></label>
+      <label>{$t('version')}<select aria-label={$t('version_of', { title: episode.title })} bind:value={selected} onfocus={prefetchVersions} onpointerenter={prefetchVersions}><option value="auto">{$t('best_available_version')}</option>{#each versionIds as id, index (id)}<option value={id}>{getLabel(id, index)}</option>{/each}</select></label>
     {/if}
   </details>
 {/if}

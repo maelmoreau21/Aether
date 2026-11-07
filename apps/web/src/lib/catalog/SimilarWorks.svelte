@@ -4,6 +4,7 @@
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
   import DiscoverFeed from './DiscoverFeed.svelte';
+  import { t } from '../i18n';
 
   let { work, candidates = [] }: { work: Work; candidates?: Work[] } = $props();
   let fetchedItems = $state<Work[]>([]);
@@ -80,7 +81,7 @@
 {#if !work.synthetic}
   <div class="similar-works-section">
     {#if similarWorks.length > 0}
-      <MediaShelf title={work.kind === 'series' ? 'Séries similaires' : 'Films similaires'}>
+      <MediaShelf title={work.kind === 'series' ? $t('similar_series') : $t('similar_films')}>
         {#each similarWorks as item (item.id)}
           <Poster work={item} href={itemHref(item)} />
         {/each}
@@ -93,7 +94,7 @@
         series={work.kind === 'series' ? [work, ...similarWorks] : []}
         exclude={[work.id, ...similarWorks.map(item => item.id)]}
         kind={work.kind === 'series' ? 'series' : 'film'}
-        gridTitle={work.kind === 'series' ? 'Encore plus de séries' : 'Encore plus de films'}
+        gridTitle={work.kind === 'series' ? $t('even_more_series') : $t('even_more_films')}
         detailUrl={itemHref}
       />
     {/key}

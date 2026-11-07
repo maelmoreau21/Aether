@@ -1,15 +1,11 @@
 import { get, writable } from 'svelte/store';
 import { getSessionGeneration, onSessionGenerationChange, session } from '../auth/session';
 
+import { tr, currentFormat, translatedLabels } from '../i18n';
 export type RequestKind = 'film' | 'series' | 'artist' | 'album' | 'track';
-export const kindLabels: Record<RequestKind, string> = { film: 'Film', series: 'Série', artist: 'Artiste', album: 'Album', track: 'Titre musical' };
-export const statusLabels: Record<string, string> = {
-  pending: 'En attente de validation', approved: 'Approuvée', queued: 'À transmettre', submitted: 'Transmise',
-  downloading: 'En acquisition', acquiring: 'En acquisition', processing: 'En acquisition', imported: 'Importée', available: 'Disponible dans votre médiathèque',
-  partially_available: 'Partiellement disponible', partial: 'Partiellement disponible', suspended: 'Suspendue après import', rejected: 'Refusée', failed: 'Échouée', cancelled: 'Annulée',
-  open: 'Ouvert', in_progress: 'En cours', resolved: 'Résolu', closed: 'Fermé sans correction'
-};
-export const categoryLabels: Record<string, string> = { video: 'Vidéo', audio: 'Audio', subtitles: 'Sous-titres', metadata: 'Métadonnées', missing: 'Fichier manquant', other: 'Autre' };
+export const kindLabels: Readonly<Record<RequestKind, string>> = translatedLabels({ film: 'kind_movie', series: 'kind_series', artist: 'artist', album: 'album', track: 'music_track' });
+export const statusLabels: Readonly<Record<string, string>> = translatedLabels({ pending: 'awaiting_approval', approved: 'approved', queued: 'to_send', submitted: 'sent', downloading: 'being_acquired', acquiring: 'being_acquired', processing: 'being_acquired', imported: 'imported', available: 'available_in_your_library', partially_available: 'partially_available', partial: 'partially_available', suspended: 'suspended_after_import', rejected: 'rejected', failed: 'applications_failed', cancelled: 'sched_outcome_cancelled', open: 'applications_open', in_progress: 'stats_kpi_active', resolved: 'resolved', closed: 'closed_without_a_fix' });
+export const categoryLabels: Readonly<Record<string, string>> = translatedLabels({ video: 'applications_video', audio: 'audio', subtitles: 'report_category_subtitles', metadata: 'metadata', missing: 'report_category_missing', other: 'report_category_other' });
 
 export interface Features { requests: boolean; reports: boolean }
 export const features = writable<Features>({ requests: false, reports: false });
@@ -45,11 +41,11 @@ const errors: Record<string, string> = {
 };
 export function errorMessage(code: string | undefined, status?: number): string {
   if (code && errors[code]) return errors[code];
-  if (status === 401) return 'Votre session a expiré. Reconnectez-vous.';
-  if (status === 403) return 'Cette action n’est pas autorisée.';
-  if (status === 404) return 'Dossier ou extension introuvable.';
-  if (status === 409) return 'Le dossier a changé ou une demande existe déjà. Actualisez la page.';
-  return code ? `Opération impossible (${code}).` : 'Opération impossible. Vérifiez votre connexion et réessayez.';
+  if (status === 401) return tr('your_session_has_expired_sign_in');
+  if (status === 403) return tr('this_action_is_not_allowed');
+  if (status === 404) return tr('case_or_extension_not_found');
+  if (status === 409) return tr('the_case_has_changed_or_a');
+  return code ? tr('operation_not_possible', { code }) : tr('operation_not_possible_check_your_connection');
 }
 export async function applicationRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const current = get(session);
@@ -58,13 +54,13 @@ export async function applicationRequest<T>(path: string, init: RequestInit = {}
     ...init, credentials: 'same-origin', cache: 'no-store', signal: init.signal ?? AbortSignal.timeout(30000),
     headers: { 'content-type': 'application/json', 'x-csrf-token': current?.csrfToken ?? '', ...init.headers }
   });
-  if (generation !== getSessionGeneration()) throw new Error('Votre session a changé. Actualisez la page.');
+  if (generation !== getSessionGeneration()) throw new Error(tr('your_session_has_changed_refresh_the'));
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; code?: string } | null;
     throw new Error(errorMessage(detail?.error ?? detail?.code, response.status));
   }
   const result = response.status === 204 ? undefined as T : await response.json() as T;
-  if (generation !== getSessionGeneration()) throw new Error('Votre session a changé. Actualisez la page.');
+  if (generation !== getSessionGeneration()) throw new Error(tr('your_session_has_changed_refresh_the'));
   return result;
 }
 export async function loadFeatures(force = false): Promise<Features> {
@@ -95,24 +91,24 @@ export function requestPayload(result: SearchResult, selection: RequestSelection
 export function dateLabel(value: number | string | undefined): string {
   if (!value) return '—';
   const date = new Date(typeof value === 'number' ? value * 1000 : value);
-  return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString('fr-FR');
+  return Number.isNaN(date.valueOf()) ? '—' : currentFormat().dateTime(date);
 }
 export function parseSelection(seasons: string, episodes: string): { seasons: number[]; episodes: { season: number; episode: number }[] } {
-  if (seasons.trim() && seasons.split(',').some(item => !item.trim())) throw new Error('Indiquez des numéros de saisons séparés par des virgules.');
+  if (seasons.trim() && seasons.split(',').some(item => !item.trim())) throw new Error(tr('enter_season_numbers_separated_by_commas'));
   const selectedSeasons = seasons.trim() ? seasons.split(',').map(item => Number(item.trim())) : [];
-  if (selectedSeasons.some(value => !Number.isInteger(value) || value < 0 || value > 1000)) throw new Error('Indiquez des numéros de saisons séparés par des virgules.');
+  if (selectedSeasons.some(value => !Number.isInteger(value) || value < 0 || value > 1000)) throw new Error(tr('enter_season_numbers_separated_by_commas'));
   const selectedEpisodes = episodes.trim() ? episodes.split(',').map(item => {
     const match = /^\s*(\d{1,4})\s*[:x]\s*(\d{1,4})\s*$/.exec(item);
-    if (!match || Number(match[2]) < 1) throw new Error('Indiquez les épisodes sous la forme 1:3, 1:4 (saison:épisode).');
+    if (!match || Number(match[2]) < 1) throw new Error(tr('enter_episodes_in_the_form_1'));
     return { season: Number(match[1]), episode: Number(match[2]) };
   }) : [];
   return { seasons: [...new Set(selectedSeasons)], episodes: selectedEpisodes.filter((value, index, all) => all.findIndex(other => other.season === value.season && other.episode === value.episode) === index) };
 }
 export function reportPayload(input: ReportInput): ReportInput {
-  if (!input.description.trim()) throw new Error('Décrivez le problème rencontré.');
-  if (!input.workId && !input.trackId) throw new Error('Sélectionnez un média depuis sa fiche ou son lecteur.');
-  for (const value of [input.positionSeconds, input.endSeconds]) if (value !== undefined && (!Number.isFinite(value) || value < 0)) throw new Error('La position doit être un nombre positif.');
-  if (input.endSeconds !== undefined && (input.positionSeconds === undefined || input.endSeconds < input.positionSeconds)) throw new Error('La fin doit suivre le début du problème.');
+  if (!input.description.trim()) throw new Error(tr('describe_the_problem_you_ran_into'));
+  if (!input.workId && !input.trackId) throw new Error(tr('select_a_media_item_from_its'));
+  for (const value of [input.positionSeconds, input.endSeconds]) if (value !== undefined && (!Number.isFinite(value) || value < 0)) throw new Error(tr('the_position_must_be_a_positive'));
+  if (input.endSeconds !== undefined && (input.positionSeconds === undefined || input.endSeconds < input.positionSeconds)) throw new Error(tr('the_end_must_come_after_the'));
   const context = input.context ? Object.fromEntries(['engine', 'errorCode', 'audioTrackId', 'subtitleTrackId'].filter(key => typeof input.context?.[key as keyof ReportContext] === 'string').map(key => [key, input.context?.[key as keyof ReportContext]])) : undefined;
   return { category: input.category, description: input.description.trim(), workId: input.workId, trackId: input.trackId, assetId: input.assetId, positionSeconds: input.positionSeconds, endSeconds: input.endSeconds, context };
 }

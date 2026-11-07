@@ -87,12 +87,12 @@
         const probe = document.createElement('video');
         if (known.length === ids.length) {
           const candidate = bestVersion(known, mime => probe.canPlayType(mime));
-          if (!candidate) throw new Error('Aucune version disponible.');
+          if (!candidate) throw new Error($t('no_version_available'));
           return revalidateMediaDescriptor(candidate.id, controller.signal);
         }
         const fresh = await fetchMediaDescriptors(ids, controller.signal, { revalidate: true });
         const candidate = bestVersion(fresh, mime => probe.canPlayType(mime));
-        if (!candidate) throw new Error('Aucune version disponible.');
+        if (!candidate) throw new Error($t('no_version_available'));
         return candidate;
       })();
       void descriptor.catch(() => {});

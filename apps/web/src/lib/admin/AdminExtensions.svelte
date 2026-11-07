@@ -9,7 +9,7 @@
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { extensionPins, hasOwnPage, isPinnableExtension, toggleExtensionPin } from './extension-pins';
   import { loadFeatures } from '../applications/api';
-  import { t } from '../i18n';
+  import { t, fmt, translatedLabels, tr } from '../i18n';
   type ConfigOption = { label: string; value: string };
   type ConfigField = {
     key: string;
@@ -51,7 +51,7 @@
   let category = $state('all');
   let catalogueId = $state<string | null>(null);
   let addingRepository = $state(false);
-  const categoryOf = (manifest: Manifest) => manifest.category || (manifest.permissions.includes('avatars') ? 'Avatars' : manifest.permissions.includes('metadata.read') ? 'Métadonnées' : 'Général');
+  const categoryOf = (manifest: Manifest) => manifest.category || (manifest.permissions.includes('avatars') ? tr('admin_avatars_tab') : manifest.permissions.includes('metadata.read') ? tr('metadata') : tr('admin_general'));
   const hueOf = (id: string) => ([...id].reduce((sum, char) => (sum * 31 + char.charCodeAt(0)) % 360, 0) * 137.508) % 360;
   let managedId = $state<string | null>(null);
   let settingsOpen = $state(false);
@@ -91,7 +91,7 @@
   const formatDate = (value?: string | null) => {
     if (!value) return null;
     const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+    return Number.isNaN(date.getTime()) ? value : $fmt.date(date);
   };
   const changelogLines = (text?: string | null) => (text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
   let installed = $state<Installed[]>([]);
@@ -111,7 +111,7 @@
     `${extension.manifest.name} ${extension.manifest.description}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())
   ));
 
-  const permissionNames: Record<string,string> = {'metadata.read':'Consulter les métadonnées','metadata.write':'Modifier les métadonnées','images':'Importer des images','avatars':'Proposer des avatars','providers':'Fournisseur externe'};
+  const permissionNames: Readonly<Record<string, string>> = translatedLabels({ 'metadata.read': 'view_metadata', 'metadata.write': 'edit_metadata', 'images': 'import_images', 'avatars': 'offer_avatars', 'providers': 'external_provider' });
   const displayName = (name: string) => name.replace(/\s+\([^)]*\)$/, '');
   const shortDescription = (description: string) => description.split(' (')[0];
   const accessLabels = (permissions: string[]) => permissions.map(permission => permissionNames[permission] ?? permission).join(' · ');
@@ -194,7 +194,7 @@
     return () => window.removeEventListener('hashchange', openRequested);
   });
   function chooseOfficialRepository(branch: 'main' | 'develop') {
-    repositoryName = branch === 'develop' ? 'Aether Plugins (develop)' : 'Aether Plugins';
+    repositoryName = branch === 'develop' ? $t('admin_aether_plugins_develop') : $t('aether_plugins');
     repositoryUrl = `https://raw.githubusercontent.com/maelmoreau21/Aether-Plugins/${branch}/repository/manifest.json`;
   }
   function configure(extension: Installed, enabled: boolean) {
@@ -325,7 +325,7 @@
     };
 
     if (showNotice) {
-      await perform(action, `Version ${entry.manifest.version} installée avec succès.`);
+      await perform(action, $t('version_installed_successfully', { version: entry.manifest.version }));
     } else {
       await action();
     }
@@ -339,7 +339,7 @@
       });
       delete editingSettings[extension.manifest.id];
       downgradeConfirmedFor = '';
-    }, `Version ${entry.manifest.version} installée et désactivée. Vérifiez ses paramètres avant de la réactiver.`);
+    }, $t('version_installed_and_disabled_check_its', { version: entry.manifest.version }));
   }
 
   async function updateAllExtensions() {
@@ -353,7 +353,7 @@
         catch (cause) { failures.push(`${displayName(upd.manifest.name)} : ${cause instanceof Error ? cause.message : $t('operation_failed')}`); }
       }
       if (failures.length === pending.length) throw new Error(failures.join(' · '));
-    }, `${pending.length - failures.length} extension(s) mise(s) à jour avec succès.`);
+    }, $t('updated_successfully', { value: pending.length - failures.length }));
     if (failures.length && failures.length < pending.length) error = failures.join(' · ');
   }
 
@@ -397,7 +397,7 @@
     <div class="section-title"><h3>{$t('your_repositories')}</h3><button class="primary" aria-expanded={addingRepository} onclick={() => addingRepository=!addingRepository}>{addingRepository ? $t('close') : `+ ${$t('new_repository')}`}</button></div>
     {#if addingRepository}
     <form class="repository-form" onsubmit={addRepository}>
-      <div class="actions"><button type="button" disabled={busy} onclick={() => chooseOfficialRepository('main')}>Aether Plugins · main</button><button type="button" disabled={busy} onclick={() => chooseOfficialRepository('develop')}>Aether Plugins · develop</button></div>
+      <div class="actions"><button type="button" disabled={busy} onclick={() => chooseOfficialRepository('main')}>{$t('aether_plugins_main')}</button><button type="button" disabled={busy} onclick={() => chooseOfficialRepository('develop')}>{$t('aether_plugins_develop')}</button></div>
       <label>{$t('repository_name_optional')}<input maxlength="80" bind:value={repositoryName} disabled={busy} /></label>
       <label>{$t('repository_address')}<input type="url" required maxlength="2048" placeholder="https://example.com/manifest.json" bind:value={repositoryUrl} disabled={busy} /></label>
       <button disabled={busy}>{$t('add_repository')}</button>
@@ -413,7 +413,7 @@
     {#if !catalogueId && repositories.some(repository => !repository.refreshedAt)}<div class="catalogue-pending"><Icon name="info" size={20} /><div><strong>{$t('repository_first_refresh')}</strong><p>{$t('refresh_repositories_hint')}</p></div></div>{/if}
     {#if !catalogueId}<label class="catalogue-search">{$t('catalogue_search')}<input type="search" bind:value={search} placeholder={$t('name_or_description')} /></label>
     <p class="section-help">{$t('enable_after_install')}</p>
-    {#if repositories.some(repository=>repository.id==='community-default')&&!catalogue.some(entry=>/intro.?skip/i.test(entry.manifest.id+' '+entry.manifest.name))}<p class="catalogue-pending">Intro Skipper n’est pas présent dans le catalogue reçu. Sa version signée doit être publiée dans le dépôt, puis le catalogue actualisé.</p>{/if}{/if}
+    {#if repositories.some(repository=>repository.id==='community-default')&&!catalogue.some(entry=>/intro.?skip/i.test(entry.manifest.id+' '+entry.manifest.name))}<p class="catalogue-pending">{$t('intro_skipper_is_not_in_the')}</p>{/if}{/if}
     {#if catalogueId}
       {@const group = catalogueGroups.find(item => item.key === catalogueId)}
       {#if group}
@@ -443,14 +443,14 @@
                     {#if order === 0}
                       <span class="installed-tag"><Icon name="check" size={16} /> {$t('current_version_installed')}</span>
                     {:else if !existing}
-                      <button class:primary={version === group.entries[0]} aria-label={`${$t('install_this_version')} : ${label}`} disabled={busy || !version.compatible} onclick={() => installFromCatalogue(version)}><Icon name="download" size={16} /> {$t('install_this_version')}</button>
+                      <button class:primary={version === group.entries[0]} aria-label={$t('labelled_action', { action: $t('install_this_version'), label })} disabled={busy || !version.compatible} onclick={() => installFromCatalogue(version)}><Icon name="download" size={16} /> {$t('install_this_version')}</button>
                     {:else if order > 0}
-                      <button class="primary" aria-label={`${$t('update_to_version', { version: version.manifest.version })} : ${label}`} disabled={busy || !version.compatible} onclick={() => void switchVersion(version)}><Icon name="download" size={16} /> {$t('update_to_version', { version: version.manifest.version })}</button>
+                      <button class="primary" aria-label={$t('labelled_action', { action: $t('update_to_version', { version: version.manifest.version }), label })} disabled={busy || !version.compatible} onclick={() => void switchVersion(version)}><Icon name="download" size={16} /> {$t('update_to_version', { version: version.manifest.version })}</button>
                     {:else}
                       <div class="restore-action"><p>{$t('downgrade_warning')}</p>
                         <label><input type="checkbox" checked={downgradeConfirmedFor === version.manifest.version} onchange={(event) => downgradeConfirmedFor = event.currentTarget.checked ? version.manifest.version : ''} /> {$t('confirm_downgrade')}</label>
                         {#if existing.rollbackVersion}<p>{$t('existing_backup', { version: existing.rollbackVersion })}</p>{/if}
-                        <button aria-label={`${$t('install_this_version')} : ${label}`} disabled={busy || !version.compatible || downgradeConfirmedFor !== version.manifest.version} onclick={() => void downgrade(version, existing)}>{$t('install_this_version')}</button>
+                        <button aria-label={$t('labelled_action', { action: $t('install_this_version'), label })} disabled={busy || !version.compatible || downgradeConfirmedFor !== version.manifest.version} onclick={() => void downgrade(version, existing)}>{$t('install_this_version')}</button>
                       </div>
                     {/if}
                   </div>
@@ -471,7 +471,7 @@
       {@const entry=group.entries[0]}
       {@const existing=installed.find(item => item.manifest.id===entry.manifest.id)}
       <article class="card plugin-card catalogue-card">
-        <button class="artwork-button" aria-label={`Détails de ${displayName(entry.manifest.name)}`} onclick={() => catalogueId=group.key}>{@render artwork(entry.manifest)}</button>
+        <button class="artwork-button" aria-label={$t('details_of', { value: displayName(entry.manifest.name) })} onclick={() => catalogueId=group.key}>{@render artwork(entry.manifest)}</button>
         <div class="catalogue-identity"><span class="extension-icon"><Icon name={entry.manifest.permissions.includes('avatars') ? 'profile' : 'globe'} size={28} /></span>{#if existing || !entry.compatible}<span class="badge" class:success={!!existing}>{existing ? 'Installée' : 'Incompatible'}</span>{/if}</div>
         <div class="catalogue-content"><h4>{displayName(entry.manifest.name)}</h4><p class="plugin-desc">{shortDescription(entry.manifest.description)}</p>
         <button class="details-link" onclick={() => catalogueId=group.key}>{$t('extension_details')} <Icon name="chevron-right" size={14} /></button>
@@ -621,7 +621,7 @@
           {@render artwork(extension.manifest)}
           <div class="detail-action-buttons">
             <label class="toggle-control">
-              <input type="checkbox" role="switch" aria-label={`Activer ${displayName(extension.manifest.name)}`} checked={extension.enabled} disabled={busy} onchange={event=>void configure(extension,event.currentTarget.checked)} />
+              <input type="checkbox" role="switch" aria-label={$t('enable', { value: displayName(extension.manifest.name) })} checked={extension.enabled} disabled={busy} onchange={event=>void configure(extension,event.currentTarget.checked)} />
               <span>{extension.enabled ? $t('disable_plugin') : $t('enable_plugin')}</span>
             </label>
             <button class="btn-detail-settings" onclick={() => settingsOpen=true}>
@@ -632,7 +632,7 @@
               <button aria-pressed={$extensionPins.includes(extension.manifest.id)} disabled={busy} onclick={() => toggleExtensionPin(extension.manifest.id, displayName(extension.manifest.name))}><Icon name="star" size={16} />{$extensionPins.includes(extension.manifest.id) ? $t('unpin_menu') : $t('pin_menu')}</button>
               {#if extension.enabled && hasOwnPage(extension.manifest.id)}<a class="button-link" href={`#${extension.manifest.id === 'media-requests' ? 'requests' : 'reports'}-section`}>{$t('open_extension', { name: displayName(extension.manifest.name) })}</a>{/if}
             {/if}
-            <button class="btn-detail-uninstall" disabled={busy} onclick={()=>void perform(async()=>{await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`,{method:'DELETE',body:JSON.stringify({deleteData:false})});managedId=null;},'Extension désinstallée.')}>
+            <button class="btn-detail-uninstall" disabled={busy} onclick={()=>void perform(async()=>{await adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`,{method:'DELETE',body:JSON.stringify({deleteData:false})});managedId=null;},$t('extension_uninstalled'))}>
               <Icon name="trash" size={18} />
               {$t('uninstall')}
             </button>
@@ -677,9 +677,9 @@
   {/if}
   <div class="installed-filters"><label>{$t('filter_extensions')}<input type="search" bind:value={search} /></label><label>{$t('state')}<select bind:value={filter}><option value="all">{$t('all_extensions_filter')}</option><option value="enabled">{$t('enabled_extensions')}</option><option value="disabled">{$t('disabled_extensions')}</option></select></label></div>
   <div class="plugins-grid">{#each visibleExtensions as extension (extension.manifest.id)}
-    <button type="button" class="card plugin-card installed-card" aria-label={`Ouvrir ${displayName(extension.manifest.name)}`} onclick={() => { managedId = extension.manifest.id; settingsOpen = false; }}>
+    <button type="button" class="card plugin-card installed-card" aria-label={$t('open', { value: displayName(extension.manifest.name) })} onclick={() => { managedId = extension.manifest.id; settingsOpen = false; }}>
       {@render artwork(extension.manifest)}
-      <div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars') ? 'profile' : 'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled ? 'Activée' : 'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">Mise à jour</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p></div>
+      <div class="plugin-header"><div class="plugin-title-row"><div class="installed-identity"><span class="extension-icon"><Icon name={extension.manifest.permissions.includes('avatars') ? 'profile' : 'globe'} size={22} /></span><div><h3>{displayName(extension.manifest.name)}</h3><small>v{extension.manifest.version}</small></div></div><span class="badge" class:success={extension.enabled}>{extension.enabled ? 'Activée' : 'Désactivée'}</span>{#if getUpdateEntry(extension)}<span class="badge update">{$t('update')}</span>{/if}</div><p class="plugin-desc">{shortDescription(extension.manifest.description)}</p></div>
     </button>{:else}<p>{$t('no_installed_extensions')}</p>{/each}</div>
   {/if}
   {/if}

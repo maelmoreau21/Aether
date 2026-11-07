@@ -27,7 +27,7 @@
       panel.hidePopover();
       await goto(resolve('login/'), { replaceState: true });
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Déconnexion impossible. Réessayez.';
+      error = failure instanceof Error ? failure.message : $t('sign_out_failed_try_again');
     } finally {
       busy = false;
     }
@@ -56,7 +56,7 @@
   <button
     class="profile-trigger"
     popovertarget="profile-menu"
-    aria-label="Menu profil"
+    aria-label={$t('profile_menu')}
     aria-expanded={expanded}
     aria-controls="profile-menu"
   >
@@ -86,7 +86,7 @@
       </div>
     </div>
 
-    <nav aria-label="Menu profil">
+    <nav aria-label={$t('profile_menu')}>
       <a class="profile-entry" href={resolve('settings/')} onclick={(event) => navigate(event, 'settings/')}>
         <Icon name="profile" size={17} />
         <span>{$t('profile_settings')}</span>
@@ -113,7 +113,7 @@
             onclick={() => setTheme('light')}
             title={$t('theme_light')}
           >
-            {$locale === 'fr' ? 'Clair' : 'Light'}
+            {$t('theme_light_short')}
           </button>
           <button
             type="button"
@@ -123,7 +123,7 @@
             onclick={() => setTheme('dark')}
             title={$t('theme_dark')}
           >
-            {$locale === 'fr' ? 'Sombre' : 'Dark'}
+            {$t('theme_dark_short')}
           </button>
         </div>
       </div>

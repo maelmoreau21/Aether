@@ -305,7 +305,7 @@
               disabled={busy}
               onclick={() => choose(() => onSubtitle(item.id))}
             >
-              <span>{item.label}<small>WebVTT · {item.language.toUpperCase()}</small></span>
+              <span>{item.label}<small>{$t('webvtt', { value: item.language.toUpperCase() })}</small></span>
               {#if item.id === subtitle}
                 <Icon name="check" size={18} />
               {/if}
@@ -331,7 +331,7 @@
             </div>
           {/each}
           <p class="menu-note" role="note">
-            Conteneur : {containerLabel(source?.mime)} · Décodage assuré par le navigateur.
+            {$t('container_decoding_handled_by_the_browser', { value: containerLabel(source?.mime) })}
           </p>
         </div>
         {#if selectableVersions.length > 1}
@@ -471,7 +471,7 @@
     <input
       class="seek"
       aria-label={$t('position')}
-      aria-valuetext={`${clock(shownPosition)} sur ${clock(playback.duration)}${activeSegment?.title ? ' · ' + activeSegment.title : ''}`}
+      aria-valuetext={$t('clock_of_duration', { position: clock(shownPosition), duration: clock(playback.duration) }) + (activeSegment?.title ? ' · ' + activeSegment.title : '')}
       type="range"
       min="0"
       max={playback.duration || 1}
@@ -559,7 +559,7 @@
         <Icon name="jump-forward" size={22} />
       </button>
     </div>
-    <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}{endTime ? ', fin à ' + endTime : ''}">
+    <span class="time" aria-label={$t('clock_of_duration', { position: clock(playback.position), duration: clock(playback.duration) }) + (endTime ? $t('ends_at') + endTime : '')}>
       <span class="current-time">{clock(shownPosition)}</span>
       <span class="duration-time"> / {clock(playback.duration)}</span>
       {#if playback.duration > 0 && endTime}

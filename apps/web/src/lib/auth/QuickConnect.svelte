@@ -4,6 +4,7 @@
   import { resolve } from '$app/paths';
   import { deviceRequest } from './quick-connect';
   import { pollDeviceConnection } from './session';
+  import { t } from '../i18n';
   interface Challenge { secret: string; code: string; expiresIn: number; qrWidth: number; qrModules: boolean[]; }
   let challenge = $state<Challenge | null>(null);
   let error = $state('');
@@ -12,7 +13,7 @@
   let controller: AbortController | null = null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let deadline = 0;
-  const path = $derived(challenge?.qrModules.flatMap((dark, index) => dark ? [`M${index % challenge!.qrWidth + 4} ${Math.floor(index / challenge!.qrWidth) + 4}h1v1h-1z`] : []).join('') ?? '');
+  const path = $derived(challenge?.qrModules.flatMap((dark, index) => dark ? [$t('m_h1v1h_1z', { value: index % challenge!.qrWidth + 4, value2: Math.floor(index / challenge!.qrWidth) + 4 })] : []).join('') ?? '');
   async function poll(current: Challenge, signal: AbortSignal) {
     if (signal.aborted) return;
     if (Date.now() >= deadline) { expired = true; return; }
@@ -20,7 +21,7 @@
       if (await pollDeviceConnection(current.secret, signal)) { await goto(resolve('/'), { replaceState: true }); return; }
       if (!signal.aborted) timer = setTimeout(() => void poll(current, signal), 2500);
     } catch (cause) {
-      if (!signal.aborted) { error = cause instanceof Error ? cause.message : 'Connexion indisponible.'; expired = true; }
+      if (!signal.aborted) { error = cause instanceof Error ? cause.message : $t('sign_in_unavailable'); expired = true; }
     }
   }
   async function start() {
@@ -33,24 +34,24 @@
       if (signal.aborted) return;
       challenge = result; deadline = Date.now() + result.expiresIn * 1000;
       timer = setTimeout(() => void poll(result, signal), 2500);
-    } catch (cause) { if (!signal.aborted) error = cause instanceof Error ? cause.message : 'Connexion indisponible.'; }
+    } catch (cause) { if (!signal.aborted) error = cause instanceof Error ? cause.message : $t('sign_in_unavailable'); }
     finally { if (!signal.aborted) busy = false; }
   }
   onMount(() => () => { controller?.abort(); clearTimeout(timer); });
 </script>
 
 <section class="quick-connect" aria-labelledby="quick-connect-title">
-  <h2 id="quick-connect-title">Avec un appareil déjà connecté</h2>
-  <p>Scannez le QR code avec votre téléphone, puis confirmez la connexion. Fonctionne aussi avec votre compte SSO.</p>
+  <h2 id="quick-connect-title">{$t('with_an_already_signed_in_device')}</h2>
+  <p>{$t('scan_the_qr_code_with_your')}</p>
   {#if challenge && !expired}
-    <svg class="qr" viewBox={`0 0 ${challenge.qrWidth + 8} ${challenge.qrWidth + 8}`} role="img" aria-label="QR code de connexion à scanner avec un appareil déjà connecté" shape-rendering="crispEdges"><path class="qr-background" d={`M0 0h${challenge.qrWidth + 8}v${challenge.qrWidth + 8}H0z`} /><path d={path} /></svg>
-    <p class="code" aria-label={`Code ${challenge.code}`}>{challenge.code.slice(0, 4)}–{challenge.code.slice(4)}</p>
-    <p class="hint">Ou saisissez ce code dans Paramètres → Appareils et sessions sur l’appareil déjà connecté. Valable 5 minutes.</p>
-    <p role="status">En attente de votre confirmation…</p>
+    <svg class="qr" viewBox={`0 0 ${challenge.qrWidth + 8} ${challenge.qrWidth + 8}`} role="img" aria-label={$t('sign_in_qr_code_to_scan')} shape-rendering="crispEdges"><path class="qr-background" d={`M0 0h${challenge.qrWidth + 8}v${challenge.qrWidth + 8}H0z`} /><path d={path} /></svg>
+    <p class="code" aria-label={$t('code', { code: challenge.code })}>{challenge.code.slice(0, 4)}–{challenge.code.slice(4)}</p>
+    <p class="hint">{$t('or_enter_this_code_under_settings')}</p>
+    <p role="status">{$t('waiting_for_your_confirmation')}</p>
   {/if}
-  {#if expired && !error}<p role="status">Ce QR code a expiré. Générez un nouveau code pour connecter cet appareil.</p>{/if}
+  {#if expired && !error}<p role="status">{$t('this_qr_code_has_expired_generate')}</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
-  <button type="button" disabled={busy} onclick={() => void start()}>{busy ? 'Création du code…' : challenge ? 'Générer un nouveau code' : 'Afficher le QR code'}</button>
+  <button type="button" disabled={busy} onclick={() => void start()}>{busy ? $t('creating_the_code') : challenge ? $t('generate_a_new_code') : $t('show_the_qr_code')}</button>
 </section>
 
 <style>

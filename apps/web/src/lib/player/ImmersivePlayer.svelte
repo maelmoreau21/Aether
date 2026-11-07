@@ -13,7 +13,7 @@
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
-  import { playbackPreferences, trackPreferences } from './playback-preferences';
+  import { languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
   import { revalidateMediaDescriptor } from '../catalog/api';
@@ -21,6 +21,7 @@
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
   import { applyPartyPlayback } from '../syncplay/player-sync';
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
+  import { t } from '../i18n';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
     /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
@@ -80,6 +81,7 @@
   let loadStage = $state('Chargement de votre séance…');
   let audio = $state('');
   let preferredLanguage = 'fr';
+  let subtitleLanguage = 'fr';
   let preferredAudio: { mediaId: string; trackId: string } | undefined;
   let manualAudio: { mediaId: string; trackId: string; language?: string } | undefined;
   let manualSubtitle: SubtitlePreference | undefined;
@@ -184,7 +186,7 @@
         const chained = prefs.autoSkipIntro && active.intro && Math.abs(active.intro.start - active.recap.end) <= 1.0;
         if (chained) hasAutoSkippedIntro = true;
         measuredSeek(chained && active.intro ? active.intro.end : active.recap.end, 'skip_recap', 'automatic');
-        notice = chained ? 'Récapitulatif et introduction sautés automatiquement' : 'Récapitulatif sauté automatiquement';
+        notice = chained ? $t('recap_and_intro_skipped_automatically') : $t('recap_skipped_automatically');
         return;
       }
     }
@@ -192,7 +194,7 @@
       if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
         hasAutoSkippedIntro = true;
         measuredSeek(active.intro.end, 'skip_intro', 'automatic');
-        notice = "Introduction sautée automatiquement";
+        notice = $t('intro_skipped_automatically');
       }
     }
     if (prefs.autoSkipCredits && active?.credits && !hasAutoSkippedCredits) {
@@ -200,7 +202,7 @@
         hasAutoSkippedCredits = true;
         if (active.credits.end < dur - 10) {
           measuredSeek(active.credits.end, 'skip_credits', 'automatic');
-          notice = "Générique sauté automatiquement";
+          notice = $t('credits_skipped_automatically');
         }
       }
     }
@@ -235,7 +237,7 @@
         speed: playback.speed
       };
       if (observed > 0) progressTracker?.save(restoreState, true);
-      loadStage = 'Basculement automatique vers un nœud disponible…';
+      loadStage = $t('automatically_switching_to_an_available_node');
       let fallbackMedia: Media | undefined;
       try {
         fallbackMedia = await revalidateMediaDescriptor(nextId);
@@ -244,7 +246,7 @@
       }
       if (!fallbackMedia || current !== generation || !opened) return false;
       triedMediaIds.add(fallbackMedia.id);
-      await prepare(fallbackMedia, restoreState, 'Basculement automatique sur un nœud disponible.');
+      await prepare(fallbackMedia, restoreState, $t('automatically_switched_to_an_available_node'));
       return current === generation && !error;
     } finally {
       failoverInProgress = false;
@@ -266,7 +268,7 @@
     try { await operation(engine); }
     catch (e) {
       if (current === generation) {
-        if (e instanceof AudioSelectionRetainedError) { loadStage = e.message; notice = 'Cette piste est indisponible. La piste précédente a été conservée.'; }
+        if (e instanceof AudioSelectionRetainedError) { loadStage = e.message; notice = $t('this_track_is_unavailable_the_previous'); }
         else fail(e instanceof Error ? e.message : String(e));
       }
     }
@@ -296,21 +298,21 @@
       // preferences() is cleared by session generation changes.
       let preferenceNotice = '';
       try { await ensurePreferences(); }
-      catch { preferenceNotice = 'Préférences indisponibles : réglages locaux à cette séance.'; }
+      catch { preferenceNotice = $t('preferences_unavailable_settings_are_local'); }
       if (current !== generation) return;
       readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))), playDefaultAudio);
-      if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
+      if (!source) throw new Error($t('no_usable_audio_source_for_this'));
       if (syncClient) await resume; // Load the progress revision before collective playback saves it.
       if (current !== generation) return;
       await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
       if (current !== generation) return;
-      const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
+      const autoFailoverMsg = failoverNotice || (media.failoverFrom ? $t('automatically_switched_to_an_available_node') : '');
       notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
-      const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
+      const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference, subtitleLanguage);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -319,7 +321,7 @@
       void subtitleLoading.catch(error => {
         if (current === generation && subtitle === usableSubtitle) {
           subtitle = null;
-          notice = error instanceof Error ? error.message : 'Sous-titres indisponibles.';
+          notice = error instanceof Error ? error.message : $t('subtitles_unavailable');
         }
       });
       // Legacy audio windows share the Node's single FFmpeg worker with
@@ -352,7 +354,8 @@
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
   function readPlaybackPreferences() {
-    preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
+    const languages = languageDefaults(preferences());
+    preferredLanguage = languages.audio; subtitleLanguage = languages.subtitle; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
       const defaults = playbackPreferences(account);
@@ -366,7 +369,7 @@
       if (offsets && Number.isFinite(offsets.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
       if (offsets && Number.isFinite(offsets.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
       const language = audioLanguage(manualAudio?.language ?? policy.audioLanguage);
-      preferredLanguage = language && language !== 'und' ? language : 'fr';
+      preferredLanguage = language && language !== 'und' ? language : languages.audio;
       playDefaultAudio = policy.playDefaultAudioTrack && !manualAudio;
       subtitlePreference = manualSubtitle ?? policy.subtitlePreference;
       subtitleStyle = account.subtitleStyle;
@@ -393,7 +396,7 @@
         headers: { 'x-csrf-token': account.csrfToken, 'content-type': 'application/json' },
         body: remove ? undefined : JSON.stringify(markerEnabled ? { enabled: true, start: markerStart, end: markerEnd } : { enabled: false })
       });
-      if (!response.ok) throw new Error(`Correction refusée (${response.status}).`);
+      if (!response.ok) throw new Error($t('correction_refused', { status: response.status }));
       if (active?.id !== assetId) return;
       if (remove) {
         const fresh = await revalidateMediaDescriptor(assetId);
@@ -408,7 +411,7 @@
         active = { ...active, [markerKind]: markerEnabled ? { start: markerStart, end: markerEnd } : undefined };
       }
       markerEditor = false;
-    } catch (error) { markerError = error instanceof Error ? error.message : 'Correction indisponible.'; }
+    } catch (error) { markerError = error instanceof Error ? error.message : $t('correction_unavailable'); }
     finally { markerSaving = false; }
   }
   export function open(media: Media | Promise<Media>) {
@@ -419,7 +422,7 @@
     failoverInProgress = false;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
-    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
+    statistics = false; loadStage = $t('loading_your_session'); audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
     keyboardPinned = false; visible = true; document.body.classList.add('immersive-open');
     dialog.showModal();
     surface?.focus();
@@ -501,7 +504,7 @@
       void applyPartyPlayback(engine, state, position).then(() => {
         if (engine && Math.abs(engine.state().position - before) > 1) collector?.seek(engine.state().position, before, 'seek', 'sync');
       }).catch(cause => {
-        notice = cause instanceof Error ? cause.message : 'Lecture collective indisponible.';
+        notice = cause instanceof Error ? cause.message : $t('group_playback_unavailable');
       });
     };
     syncClient.onMediaChanged = (newMediaId) => {
@@ -509,7 +512,7 @@
       if (found) changeMedia(found);
       else void revalidateMediaDescriptor(newMediaId).then(media => {
         if (syncClient === client && opened) changeMedia(media);
-      }).catch(cause => { notice = cause instanceof Error ? cause.message : 'Média indisponible.'; });
+      }).catch(cause => { notice = cause instanceof Error ? cause.message : $t('media_unavailable'); });
     };
   }
   function reportBuffering(buffering: boolean) {
@@ -519,10 +522,10 @@
   }
 
   function requestFullscreen() {
-    if (!surface.requestFullscreen) { notice = 'Plein écran indisponible. Le mode immersif reste actif.'; return; }
+    if (!surface.requestFullscreen) { notice = $t('full_screen_unavailable_immersive_mode'); return; }
     void surface.requestFullscreen().then(() => {
       if (!opened && document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
-    }).catch(() => { if (opened) notice = 'Plein écran refusé. Le mode immersif reste actif.'; });
+    }).catch(() => { if (opened) notice = $t('full_screen_refused_immersive_mode_remains'); });
   }
   function toggleFullscreen() {
     if (document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
@@ -531,7 +534,7 @@
   }
   function togglePlayback() {
     if (syncClient && !syncClient.canControl) {
-      notice = 'Contrôles réservés à l’organisateur';
+      notice = $t('controls_reserved_for_the_organiser');
       wake();
       return;
     }
@@ -547,7 +550,7 @@
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
   function seek(value: number, kind: EventKind = 'seek') {
     if (syncClient && !syncClient.canControl) {
-      notice = 'Contrôles réservés à l’organisateur';
+      notice = $t('controls_reserved_for_the_organiser');
       wake();
       return;
     }
@@ -580,7 +583,7 @@
     // jamais interrompre ni basculer la lecture : on prévient et on continue.
     try { await player.selectSubtitle(id); }
     catch {
-      if (current === generation) notice = 'Sous-titres indisponibles pour le moment. La lecture continue.';
+      if (current === generation) notice = $t('subtitles_temporarily_unavailable_playback');
       return;
     }
     if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
@@ -663,7 +666,7 @@
 
 <svelte:window onkeydown={windowKeyboard} />
 
-<dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label="Lecteur immersif" oncancel={cancel} onclose={close}>
+<dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label={$t('immersive_player')} oncancel={cancel} onclose={close}>
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
@@ -689,53 +692,53 @@
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}
     ><track kind="captions" /></video>
-    <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
+    <button class="video-interaction" tabindex="-1" aria-label={$t('show_or_hide_controls')} onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
-      <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
-      <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
+      <button class="return" aria-label={$t('back_to_home')} onclick={close}><Icon name="back" size={24} /></button>
+      <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
-      {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> Enchaîner automatiquement</label></div>{/if}
-      {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>Corriger les marqueurs</button>{/if}
+      {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
+      {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>{$t('fix_markers')}</button>{/if}
     </div>
     {#if markerEditor && active?.episode}
-      <section class="marker-editor" aria-label="Correction des marqueurs">
-        <h2>Marqueur manuel</h2>
-        <label>Type<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">Introduction</option><option value="credits">Générique de fin</option><option value="recap">Résumé</option><option value="preview">Aperçu</option></select></label>
-        <label><input type="checkbox" bind:checked={markerEnabled} /> Activer ce marqueur</label>
+      <section class="marker-editor" aria-label={$t('marker_correction')}>
+        <h2>{$t('manual_marker')}</h2>
+        <label>{$t('request_type')}<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">{$t('intro')}</option><option value="credits">{$t('credits')}</option><option value="recap">{$t('recap')}</option><option value="preview">{$t('player_preview')}</option></select></label>
+        <label><input type="checkbox" bind:checked={markerEnabled} /> {$t('enable_this_marker')}</label>
         {#if markerEnabled}
-          <label>Début (secondes)<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
-          <label>Fin (secondes)<input type="number" min="0" max={playback.duration} step="0.1" bind:value={markerEnd} /></label>
+          <label>{$t('report_time_start')}<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
+          <label>{$t('end_seconds')}<input type="number" min="0" max={playback.duration} step="0.1" bind:value={markerEnd} /></label>
         {/if}
         {#if markerError}<p role="alert">{markerError}</p>{/if}
-        <button type="button" disabled={markerSaving} onclick={() => void saveMarker()}>Enregistrer</button>
-        <button type="button" disabled={markerSaving} onclick={() => void saveMarker(true)}>Revenir à la détection</button>
-        <button type="button" onclick={() => markerEditor = false}>Fermer</button>
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker()}>{$t('save')}</button>
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker(true)}>{$t('revert_to_detection')}</button>
+        <button type="button" onclick={() => markerEditor = false}>{$t('close')}</button>
       </section>
     {/if}
-    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>Chargement de la vidéo…</span><button onclick={close}>Annuler</button></div>{/if}
-    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
-    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Données de lecture">
-      <header><strong>Données de lecture</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
-      <p>Mesures vidéo du navigateur · actualisation chaque seconde</p>
+    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>{$t('loading_the_video')}</span><button onclick={close}>{$t('sched_cancel')}</button></div>{/if}
+    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>{$t('playback_interrupted')}</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>{$t('request_retry')}</button></div>{/if}
+    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label={$t('playback_data')}>
+      <header><strong>{$t('playback_data')}</strong><button onclick={() => { statistics = false; wake(); }}>{$t('close')}</button></header>
+      <p>{$t('browser_video_metrics_refreshed_every_second')}</p>
       <dl>
-        <dt>État</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? 'En pause' : 'Lecture'}</dd>
-        <dt>Vidéo décodée</dt><dd>{metrics.width} × {metrics.height}</dd>
-        <dt>Images / perdues</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
-        <dt>Vidéo en mémoire tampon</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
-        <dt>Audio séparé en mémoire tampon</dt><dd>{metrics.audioBuffered === null ? 'Non utilisé' : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
-        <dt>Position / durée</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
-        <dt>Vitesse</dt><dd>{playback.speed}×</dd>
-        <dt>readyState / networkState</dt><dd>{metrics.ready} / {metrics.network}</dd>
-        <dt>Nœud serveur</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Local'}</dd>
-        <dt>Mode de transport</dt><dd>{selectedSource?.directUrl ? 'Direct Node' : selectedSource?.relayUrl ? 'Relais Core' : 'Local'}</dd>
-        <dt>Source / piste audio</dt><dd>{selectedSource?.id ?? 'En attente'} / {audio || 'En attente'}</dd>
-        <dt>Conteneur / langue</dt><dd>{selectedSource?.mime ?? 'Non renseigné'} / {selectedSource?.language ?? 'Non renseignée'}</dd>
-        <dt>Mode audio déclaré</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
-        <dt>Sous-titres</dt><dd>{subtitle ?? 'Désactivés'}</dd>
+        <dt>{$t('state')}</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? $t('paused') : 'Lecture'}</dd>
+        <dt>{$t('decoded_video')}</dt><dd>{metrics.width} × {metrics.height}</dd>
+        <dt>{$t('frames_dropped')}</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
+        <dt>{$t('buffered_video')}</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
+        <dt>{$t('buffered_separate_audio')}</dt><dd>{metrics.audioBuffered === null ? $t('not_used') : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
+        <dt>{$t('position_duration')}</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
+        <dt>{$t('speed')}</dt><dd>{playback.speed}×</dd>
+        <dt>{$t('readystate_networkstate')}</dt><dd>{metrics.ready} / {metrics.network}</dd>
+        <dt>{$t('server_node')}</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Local'}</dd>
+        <dt>{$t('transport_mode')}</dt><dd>{selectedSource?.directUrl ? $t('direct_node') : selectedSource?.relayUrl ? $t('core_relay') : 'Local'}</dd>
+        <dt>{$t('source_audio_track')}</dt><dd>{selectedSource?.id ?? $t('waiting')} / {audio || $t('waiting')}</dd>
+        <dt>{$t('container_language')}</dt><dd>{selectedSource?.mime ?? $t('stats_not_set')} / {selectedSource?.language ?? $t('not_specified')}</dd>
+        <dt>{$t('declared_audio_mode')}</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
+        <dt>{$t('report_category_subtitles')}</dt><dd>{subtitle ?? 'Désactivés'}</dd>
       </dl>
-      {#each selectedSource?.tracks ?? [] as track, i (i)}<p>Piste {track.index ?? i} · {track.codec_type} · {track.codec_name} {track.profile ?? ''} {track.channels ? `· ${track.channels} canaux` : ''}</p>{/each}
-      <p>Diagnostic technique : {error || loadStage}</p>
-      <p>Les pistes déclarées ne prouvent pas la sortie audio physique. Débit réseau non mesuré.</p>
+      {#each selectedSource?.tracks ?? [] as track, i (i)}<p>{$t('track_diagnostic', { index: track.index ?? i, type: track.codec_type, codec: track.codec_name, profile: track.profile ?? '', channels: track.channels ? `· ${$t('channels_count', { count: track.channels })}` : '' })}</p>{/each}
+      <p>{$t('technical_diagnostic', { detail: error || loadStage })}</p>
+      <p>{$t('declared_tracks_do_not_prove_physical')}</p>
     </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if syncClient}
@@ -748,7 +751,7 @@
       onSpeed={speed => action(player => { player.setSpeed(speed); collector?.event('speed_change'); })} onFullscreen={toggleFullscreen} onWake={wake}
       buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
     {#if showNextCard}
-      <aside class="next-card" class:raised={visible} aria-label="Épisode suivant">
+      <aside class="next-card" class:raised={visible} aria-label={$t('next_episode')}>
         <div class="next-thumb">
           {#if nextImage && nextImageFailed !== nextImage}
             <img src={nextImage} alt="" width="640" height="360" decoding="async" onerror={() => nextImageFailed = nextImage} />
@@ -757,18 +760,18 @@
           {/if}
         </div>
         <div class="next-info">
-          <span class="next-kicker">À suivre{nextLabel ? ` · ${nextLabel}` : ''}</span>
+          <span class="next-kicker">{$t('up_next_label')}{nextLabel ? ` · ${nextLabel}` : ''}</span>
           <strong title={nextTitle}>{nextTitle}</strong>
-          {#if autoplayNext}<small>Lecture automatique à la fin</small>{/if}
+          {#if autoplayNext}<small>{$t('autoplay_at_the_end')}</small>{/if}
           <div class="next-actions">
-            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>Lire maintenant</span></button>
+            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>{$t('play_now')}</span></button>
             {#if postCreditsScene && active?.credits}
               {@const creditsEnd = active.credits.end}
-              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>Passer le générique</button>
+              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>{$t('skip_credits')}</button>
             {/if}
           </div>
         </div>
-        <button type="button" class="next-dismiss" aria-label="Masquer l’épisode suivant" title="Masquer" onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
+        <button type="button" class="next-dismiss" aria-label={$t('hide_the_next_episode')} title={$t('hide')} onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
       </aside>
     {/if}
   </div>

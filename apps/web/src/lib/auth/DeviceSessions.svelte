@@ -4,6 +4,7 @@
   import { session } from './session';
   import ClientIcon from '../ui/ClientIcon.svelte';
   import { clientInfo } from '../ui/client-info';
+  import { t, fmt } from '../i18n';
 
   interface Device { id: string; device: string; createdAt: number; lastSeenAt: number; expiresAt: number; current: boolean }
   let devices = $state<Device[]>([]);
@@ -18,10 +19,10 @@
 
   function deviceName(raw: string): string {
     const client = clientInfo(raw);
-    return [client.app, client.system].filter(Boolean).join(' · ') || 'Navigateur';
+    return [client.app, client.system].filter(Boolean).join(' · ') || $t('browser_generic');
   }
   function date(value: number): string {
-    return new Date(value * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return $fmt.dateTime(value);
   }
   async function load() {
     controller?.abort();
@@ -31,12 +32,12 @@
     error = '';
     try {
       const response = await fetch('/api/v1/account/sessions', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(10000)]) });
-      if (!response.ok) throw new Error('Impossible de charger vos sessions. Réessayez.');
+      if (!response.ok) throw new Error($t('unable_to_load_your_sessions_try'));
       const data = await response.json();
-      if (!Array.isArray(data.sessions)) throw new Error('Impossible de charger vos sessions. Réessayez.');
+      if (!Array.isArray(data.sessions)) throw new Error($t('unable_to_load_your_sessions_try'));
       if (!current.signal.aborted) { devices = data.sessions; loaded = true; }
     } catch (cause) {
-      if (!current.signal.aborted) error = cause instanceof Error && cause.name === 'TimeoutError' ? 'Le serveur met trop de temps à répondre. Réessayez.' : 'Impossible de charger vos sessions. Réessayez.';
+      if (!current.signal.aborted) error = cause instanceof Error && cause.name === 'TimeoutError' ? $t('the_server_is_taking_too_long') : $t('unable_to_load_your_sessions_try');
     } finally {
       if (!current.signal.aborted) loading = false;
     }
@@ -52,57 +53,57 @@
         method: 'DELETE', credentials: 'same-origin', cache: 'no-store',
         headers: { 'x-csrf-token': $session?.csrfToken ?? '' }, signal: AbortSignal.timeout(10000)
       });
-      if (!response.ok && !(device && response.status === 404)) throw new Error('Impossible de déconnecter cette session. Réessayez.');
+      if (!response.ok && !(device && response.status === 404)) throw new Error($t('unable_to_sign_out_this_session'));
       if (!device || device.current) { window.location.reload(); return; }
       devices = devices.filter(item => item.id !== device.id);
-      notice = 'La session a été déconnectée.';
+      notice = $t('the_session_has_been_signed_out');
       await load();
     } catch (cause) {
-      error = cause instanceof Error && cause.name === 'TimeoutError' ? 'Le serveur met trop de temps à répondre. Réessayez.' : 'Impossible de déconnecter cette session. Réessayez.';
+      error = cause instanceof Error && cause.name === 'TimeoutError' ? $t('the_server_is_taking_too_long') : $t('unable_to_sign_out_this_session');
     } finally { busy = null; confirmAll = false; }
   }
 </script>
 
 <section class="sessions" aria-labelledby="sessions-title" aria-busy={loading}>
   <header class="sessions-header">
-    <div><h3 id="sessions-title">Vos sessions <span class="session-count">{loaded ? devices.length : '…'}</span></h3><p>Retrouvez vos connexions et gardez le contrôle de votre compte.</p></div>
+    <div><h3 id="sessions-title">{$t('your_sessions')} <span class="session-count">{loaded ? devices.length : '…'}</span></h3><p>{$t('review_your_sign_ins_and_stay')}</p></div>
     <button class="refresh" disabled={!!busy || loading} onclick={() => void load()}><Icon name="refresh" size={17} />{loading ? 'Actualisation…' : 'Actualiser'}</button>
   </header>
 
   {#if error}<p class="message error" role="alert"><Icon name="alert" size={18} />{error}</p>{/if}
   {#if notice}<p class="message notice" role="status"><Icon name="check" size={18} />{notice}</p>{/if}
   {#if loading && !loaded}
-    <div class="empty" role="status"><Icon name="refresh" size={28} /><p>Chargement de vos sessions…</p></div>
+    <div class="empty" role="status"><Icon name="refresh" size={28} /><p>{$t('loading_your_sessions')}</p></div>
   {:else if loaded && devices.length === 0}
-    <div class="empty"><Icon name="shield" size={28} /><strong>Aucune session à afficher</strong><p>Actualisez la liste pour vérifier vos connexions.</p></div>
+    <div class="empty"><Icon name="shield" size={28} /><strong>{$t('no_sessions_to_show')}</strong><p>{$t('refresh_the_list_to_check_your')}</p></div>
   {/if}
 
   <div class="session-list">
     {#each ordered as device (device.id)}
       {@const client = clientInfo(device.device)}
-      <article class:current={device.current} aria-label={deviceName(device.device)} title={device.device || 'Navigateur non renseigné'}>
+      <article class:current={device.current} aria-label={deviceName(device.device)} title={device.device || $t('browser_not_reported')}>
         <div class="session-top">
           <div class="device-icon"><ClientIcon kind={client.kind} size={24} /></div>
           <div class="device-heading"><strong>{client.system || 'Appareil'}</strong><span class="client-app">{client.app}</span></div>
-          {#if device.current}<span class="current-badge"><span></span>Cet appareil</span>{/if}
+          {#if device.current}<span class="current-badge"><span></span>{$t('this_device')}</span>{/if}
         </div>
         <dl>
-          <div><dt>Dernière activité</dt><dd>{date(device.lastSeenAt)}</dd></div>
-          <div><dt>Connecté depuis</dt><dd>{date(device.createdAt)}</dd></div>
+          <div><dt>{$t('auth_last_activity')}</dt><dd>{date(device.lastSeenAt)}</dd></div>
+          <div><dt>{$t('signed_in_since')}</dt><dd>{date(device.createdAt)}</dd></div>
         </dl>
         <button class="disconnect" disabled={!!busy || loading} aria-label={'Déconnecter ' + (device.current ? 'cette session' : deviceName(device.device))} onclick={() => void revoke(device)}>{busy === device.id ? 'Déconnexion…' : 'Déconnecter'}</button>
       </article>
     {/each}
   </div>
 
-  <div class="session-info"><Icon name="shield" size={19} /><p>Une session expire après 7 jours sans activité, et au plus tard 30 jours après la connexion. Plusieurs sessions peuvent appartenir au même appareil.</p></div>
+  <div class="session-info"><Icon name="shield" size={19} /><p>{$t('a_session_expires_after_7_days')}</p></div>
   {#if devices.length > 0}
     <footer>
-      <div><strong>Déconnexion générale</strong><p>Fermez toutes les sessions de votre compte, y compris celle-ci.</p></div>
-      {#if !confirmAll}<button class="danger" disabled={!!busy || loading} onclick={() => confirmAll = true}>Déconnecter tous les appareils</button>{/if}
+      <div><strong>{$t('sign_out_everywhere')}</strong><p>{$t('close_all_sessions_of_your_account')}</p></div>
+      {#if !confirmAll}<button class="danger" disabled={!!busy || loading} onclick={() => confirmAll = true}>{$t('sign_out_all_devices')}</button>{/if}
     </footer>
     {#if confirmAll}
-      <div class="confirmation" role="group" aria-label="Confirmer la déconnexion générale"><p>Vous devrez vous reconnecter sur chaque appareil pour continuer.</p><div><button disabled={!!busy} onclick={() => confirmAll = false}>Annuler</button><button class="danger" disabled={!!busy || loading} onclick={() => void revoke()}>{busy === 'all' ? 'Déconnexion…' : 'Confirmer la déconnexion'}</button></div></div>
+      <div class="confirmation" role="group" aria-label={$t('confirm_sign_out_everywhere')}><p>{$t('you_will_need_to_sign_in')}</p><div><button disabled={!!busy} onclick={() => confirmAll = false}>{$t('sched_cancel')}</button><button class="danger" disabled={!!busy || loading} onclick={() => void revoke()}>{busy === 'all' ? 'Déconnexion…' : $t('confirm_sign_out')}</button></div></div>
     {/if}
   {/if}
 </section>

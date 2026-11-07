@@ -272,6 +272,8 @@ pub struct CachedFileMeta {
     pub relative_path: String,
     pub size: u64,
     pub modified_ns: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_fingerprint: Option<String>,
 }
 
 /// Core -> Node scan initiation command (`POST /internal/v1/node/scans`).

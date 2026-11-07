@@ -5,8 +5,10 @@
 //! This crate has zero dependency on `media-poc` (Core), `sqlx`, or Core users/sessions/permissions.
 
 mod cache_dirs;
+mod disk_cache;
 pub mod external_audio;
 pub mod files;
+pub mod fingerprint;
 mod image_preview;
 pub mod images;
 pub use image_preview::width as image_preview_width;

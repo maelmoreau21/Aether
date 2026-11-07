@@ -81,6 +81,16 @@ pub async fn refresh_editorial_for_works(
                     candidates.push(parse(&text));
                 }
                 for candidate in candidates {
+                    // An NFO that contradicts itself already dropped the provider; it must not be
+                    // revived by the other source and is reported like any other conflict.
+                    for provider in candidate["external_id_conflicts"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                    {
+                        conflicts.insert(provider.to_owned());
+                    }
                     if let Some(values) = candidate["external_ids"].as_object() {
                         for (provider, value) in values {
                             if let Some(value) = value.as_str() {

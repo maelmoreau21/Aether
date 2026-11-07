@@ -1,7 +1,7 @@
 //! Core-side adapter to the Media Node (`media-node`) crate.
 pub use media_node::{
     DEMO_FIXTURES, Descriptor, FIXTURES, Inventory, LanguageRemux, LocalNode, OpenedFile,
-    REMUX_FIXTURES, REPRESENTATIVE_FIXTURES, RepresentativeCase, images, nfo, scanner,
+    REMUX_FIXTURES, REPRESENTATIVE_FIXTURES, RepresentativeCase, fingerprint, images, nfo, scanner,
     validate_library_root,
 };
 

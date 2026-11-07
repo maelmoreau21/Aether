@@ -297,6 +297,18 @@ where
             record_error(&mut report, &mut current_batch_errors, issue);
             continue;
         }
+        // Partial content fingerprint: only for new or modified files (an unchanged file reuses the
+        // value the Core recorded, so a Node restarting with empty local caches rereads nothing).
+        // It is a hint for rename detection, never an identity; a failed read yields `None`.
+        let content_fingerprint = match cache
+            .get(&relative_path)
+            .filter(|c| c.size == file_size && c.modified_ns == modified_ns)
+            .and_then(|c| c.content_fingerprint.clone())
+            .filter(|f| crate::fingerprint::is_well_formed(f))
+        {
+            Some(known) => Some(known),
+            None => crate::fingerprint::quick_fingerprint(&opened).await,
+        };
         let parent = relative.parent().unwrap_or(Path::new("")).to_path_buf();
         if !folder_cache.contains_key(&parent)
             && let Ok(videos) = FolderVideos::load(&root, &parent).await
@@ -349,6 +361,17 @@ where
                     };
                     record_warning(&mut report, &mut current_batch_warnings, issue);
                 }
+                if let crate::nfo::NfoOutcome::Valid { metadata, path, .. } = &series_nfo {
+                    let (_, conflicts) =
+                        crate::nfo::reconcile_ids(&parsed.series_external_ids, metadata);
+                    if let Some(message) = crate::nfo::conflict_message(&conflicts) {
+                        let issue = ScanIssue {
+                            relative_path: path.clone(),
+                            message,
+                        };
+                        record_warning(&mut report, &mut current_batch_warnings, issue);
+                    }
+                }
                 let (series_poster, poster_warning) =
                     crate::images::discover_series_poster(&root, &parsed.series_dir, image_cache)
                         .await;
@@ -370,11 +393,8 @@ where
                 crate::nfo::NfoOutcome::Valid { metadata, .. } => (
                     metadata.title.clone().unwrap_or(parsed.series_raw_title),
                     metadata.year.or(parsed.series_year),
-                    if !metadata.external_ids.is_empty() {
-                        metadata.external_ids.clone()
-                    } else {
-                        parsed.series_external_ids
-                    },
+                    // Name and NFO are reconciled, never one trusted over the other.
+                    crate::nfo::reconcile_ids(&parsed.series_external_ids, metadata).0,
                 ),
                 _ => (
                     parsed.series_raw_title,
@@ -391,6 +411,20 @@ where
                 };
                 record_warning(&mut report, &mut current_batch_warnings, issue);
             }
+
+            if let crate::nfo::NfoOutcome::Valid { metadata, path, .. } = &episode_editorial
+                && let Some(message) = crate::nfo::conflict_message(&metadata.external_id_conflicts)
+            {
+                let issue = ScanIssue {
+                    relative_path: path.clone(),
+                    message,
+                };
+                record_warning(&mut report, &mut current_batch_warnings, issue);
+            }
+            let episode_external_ids = match &episode_editorial {
+                crate::nfo::NfoOutcome::Valid { metadata, .. } => metadata.external_ids.clone(),
+                _ => BTreeMap::new(),
+            };
 
             let (episode_title, episode_year) = match &episode_editorial {
                 crate::nfo::NfoOutcome::Valid { metadata, .. } => (
@@ -416,8 +450,9 @@ where
                 title: episode_title,
                 year: episode_year,
                 identity_key: episode_identity_key,
-                external_ids: BTreeMap::new(),
+                external_ids: episode_external_ids,
                 probe,
+                content_fingerprint,
                 mime: match extension.as_str() {
                     "mp4" | "m4v" | "mov" => "video/mp4",
                     "webm" => "video/webm",
@@ -439,6 +474,16 @@ where
         } else {
             let (title, year, external_ids, identity_key) = identity(relative);
             let editorial = crate::nfo::discover_with_folder(&root, relative, folder_videos).await;
+            if let crate::nfo::NfoOutcome::Valid { metadata, path, .. } = &editorial {
+                let (_, conflicts) = crate::nfo::reconcile_ids(&external_ids, metadata);
+                if let Some(message) = crate::nfo::conflict_message(&conflicts) {
+                    let issue = ScanIssue {
+                        relative_path: path.clone(),
+                        message,
+                    };
+                    record_warning(&mut report, &mut current_batch_warnings, issue);
+                }
+            }
             if let crate::nfo::NfoOutcome::Invalid { path, message } = &editorial {
                 let issue = ScanIssue {
                     relative_path: path.clone(),
@@ -473,6 +518,7 @@ where
                 identity_key,
                 external_ids,
                 probe,
+                content_fingerprint,
                 mime: match extension.as_str() {
                     "mp4" | "m4v" | "mov" => "video/mp4",
                     "webm" => "video/webm",

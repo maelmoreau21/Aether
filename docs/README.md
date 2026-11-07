@@ -62,6 +62,7 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - Publication : [`CI_GHCR.md`](CI_GHCR.md), [`RELEASES_AND_VERSIONING.md`](RELEASES_AND_VERSIONING.md), [`GITHUB_GOVERNANCE_AND_MIGRATION.md`](GITHUB_GOVERNANCE_AND_MIGRATION.md).
 - Réglages : [`SETTINGS_AND_REFRESH.md`](SETTINGS_AND_REFRESH.md), [`SETTINGS_REVIEW.md`](SETTINGS_REVIEW.md), [`PREFERENCES.md`](PREFERENCES.md).
 - Métadonnées traduites par compte : [`METADATA_LOCALIZATION.md`](METADATA_LOCALIZATION.md).
+- Stockage en lecture seule, caches, NFO, identifiants et renommages : [`STORAGE_AND_CACHES.md`](STORAGE_AND_CACHES.md).
 - Interface bilingue, langues séparées, formats et caches : [`I18N.md`](I18N.md).
 
 ## Extensions (plugins)

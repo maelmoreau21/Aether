@@ -188,6 +188,20 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
     {
         let _ = tokio::fs::rename(&tmp_path, &cache_path).await;
     }
+    // Bounded size and crash leftovers; every entry can be recomputed from the media.
+    let dir = fingerprint_cache_dir();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::disk_cache::enforce_quota(
+            &dir,
+            "json",
+            crate::disk_cache::budget_from_env(
+                "MEDIA_FINGERPRINT_CACHE_MAX_BYTES",
+                64 * 1024 * 1024,
+            ),
+            std::time::Duration::from_secs(3600),
+        )
+    })
+    .await;
 
     Ok(result)
 }

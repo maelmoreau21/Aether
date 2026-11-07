@@ -1196,6 +1196,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
     // Row A: S01E01 version 1 (MKV)
     // Has valid series NFO, title "Alpha Chronicles", year 2021, external_ids {tvdb:101, tmdb:202}, poster_a (priority 1)
     let row_a = ScannedFile {
+        content_fingerprint: None,
         audios: Vec::new(),
         subtitles: Vec::new(),
         relative_path: "Show/Season 01/S01E01 - 1080p.mkv".into(),
@@ -1245,6 +1246,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
     // but contradictory series_title ("Zeta Override" > "Alpha Chronicles"), contradictory series_year (2025 > 2021),
     // invalid series NFO, contradictory external IDs, and poster_b (priority 6, larger size/mtime/mime).
     let row_b = ScannedFile {
+        content_fingerprint: None,
         audios: Vec::new(),
         subtitles: Vec::new(),
         relative_path: "Show/Season 01/S01E01 - 2160p.mp4".into(),
@@ -1279,6 +1281,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
     // Row C: S01E02
     // Missing NFO, another title/year combination, no poster.
     let row_c = ScannedFile {
+        content_fingerprint: None,
         audios: Vec::new(),
         subtitles: Vec::new(),
         relative_path: "Show/Season 01/S01E02.mkv".into(),
@@ -1777,6 +1780,7 @@ async fn a3_contradictory_series_staging_deterministic_selection_and_200_episode
             let rel =
                 format!("MegaSeries/Season {season:02}/MegaSeries - S{season:02}E{ep:02}.mkv");
             ep_200_files.push(ScannedFile {
+                content_fingerprint: None,
                 audios: Vec::new(),
                 subtitles: Vec::new(),
                 relative_path: rel,

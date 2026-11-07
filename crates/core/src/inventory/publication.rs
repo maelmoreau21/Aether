@@ -51,6 +51,14 @@ pub async fn publish_staged_scan(
             .unwrap_or_else(|| "incremental".into());
     let mut affected_work_ids = std::collections::BTreeSet::new();
 
+    // A film renamed or moved inside this library keeps its asset (and so its work, corrections and
+    // prepared caches). Needs a complete scan: an unreadable folder is not a vanished one.
+    if complete && lib_kind == "films" {
+        let (_relocated, works) =
+            super::relocation::apply(&mut tx, scan_id, library_id, &root_snapshot).await?;
+        affected_work_ids.extend(works);
+    }
+
     if complete {
         // Collect works whose available assets are about to be marked unavailable
         let removed_works: Vec<String> = query_scalar(
@@ -1176,6 +1184,11 @@ pub async fn publish_staged_scan(
     query("INSERT INTO inventory_audio(asset_id,audios_json) SELECT a.id,f.audios_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET audios_json=excluded.audios_json")
         .bind(scan_id).execute(&mut *tx).await?;
 
+    // Remember the partial fingerprints of the files now published, for the next scan's rename
+    // detection and so a restarted Node never rereads unchanged files. Hints only.
+    query("INSERT INTO inventory_asset_fingerprints(asset_id,library_id,size,modified_ns,fingerprint) SELECT a.id,a.library_id,a.size,a.modified_ns,f.fingerprint FROM scan_staging_fingerprints f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET library_id=excluded.library_id,size=excluded.size,modified_ns=excluded.modified_ns,fingerprint=excluded.fingerprint")
+        .bind(scan_id).execute(&mut *tx).await?;
+
     crate::automation::emit_snapshot(
         &mut tx,
         library_id,
@@ -1199,6 +1212,11 @@ pub async fn publish_staged_scan(
     crate::trickplay::queue_scanned_assets(&mut tx, library_id, scan_id, &options).await?;
 
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
+        .bind(scan_id)
+        .execute(&mut *tx)
+        .await?;
+
+    query("DELETE FROM scan_staging_fingerprints WHERE scan_id=?")
         .bind(scan_id)
         .execute(&mut *tx)
         .await?;

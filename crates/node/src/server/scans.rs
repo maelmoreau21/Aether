@@ -416,6 +416,7 @@ pub(super) async fn run_remote_scan_task(
                 size: f.size,
                 modified_ns: f.modified_ns,
                 probe: media_contracts::media::Probe::default(),
+                content_fingerprint: f.content_fingerprint,
             },
         );
     }

@@ -274,6 +274,10 @@ const IDEMPOTENT_STEPS_AFTER_GROUPS: &[(&str, &str)] = &[
         "library_deletions",
         include_str!("../migrations/library_deletions.sql"),
     ),
+    (
+        "content_fingerprints",
+        include_str!("../migrations/content_fingerprints.sql"),
+    ),
 ];
 /// Journal text for the Rust-coded constraint upgrades in `task_schema`.
 const COMPAT_TASK_CONSTRAINTS: &str =

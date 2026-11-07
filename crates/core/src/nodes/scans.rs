@@ -751,6 +751,7 @@ pub async fn dispatch_remote_scan(
                 relative_path: path,
                 size: cache.size,
                 modified_ns: cache.modified_ns,
+                content_fingerprint: cache.content_fingerprint,
             })
             .collect()
     };

@@ -1,4 +1,11 @@
 //! Bounded, local-only film NFO ingestion. No URL or external entity resolver exists.
+//!
+//! Reads the NFO dialects written by Radarr, Sonarr, Jellyfin and Kodi (`<movie>`, `<tvshow>`,
+//! `<episodedetails>`, legacy `<id TMDB=…>` attributes, `<uniqueid type=…>`, `<tmdbid>`-style
+//! elements, and the URL-only / URL-suffixed files older scrapers produce). External identifiers
+//! are never trusted blindly: placeholders (`0`) are dropped, values are normalised, and a provider
+//! that appears with two different values is removed and reported in
+//! `FilmMetadata::external_id_conflicts` instead of picking a winner or discarding the whole file.
 pub use media_contracts::media::{FilmMetadata, NfoOutcome};
 use quick_xml::{Reader, events::Event};
 use std::path::Path;
@@ -9,32 +16,147 @@ use crate::{files::OpenedFile, scanner::FolderVideos};
 pub const MAX_BYTES: usize = 1024 * 1024;
 const MAX_DEPTH: usize = 16;
 const MAX_FIELD: usize = 16 * 1024;
+/// Text outside the XML root (URL-only or URL-suffixed NFOs) is scanned up to this length.
+const MAX_OUTSIDE_TEXT: usize = 4096;
 
-fn insert_id(metadata: &mut FilmMetadata, provider: &str, value: &str) -> Result<(), String> {
-    let valid = match provider {
-        "tmdb" | "tvdb" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()),
-        "imdb" => value
-            .strip_prefix("tt")
-            .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())),
+/// Provider aliases seen in the wild, mapped to Aether's canonical names. `None` marks a
+/// provider name that carries no identity (Kodi writes `type="unknown"`).
+fn canonical_provider(provider: &str) -> Option<String> {
+    let lower = provider.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "" | "unknown" | "default" | "none" | "null" => None,
+        "tmdb" | "themoviedb" | "tmdbid" | "tmdb_id" => Some("tmdb".into()),
+        "imdb" | "imdbid" | "imdb_id" => Some("imdb".into()),
+        "tvdb" | "thetvdb" | "tvdbid" | "tvdb_id" => Some("tvdb".into()),
+        _ => Some(lower),
+    }
+}
+
+/// `Ok(None)` for a placeholder value (Radarr/Sonarr write `0` when the id is unknown),
+/// `Err` for a malformed value, otherwise the canonical form (no leading zeros, lowercase `tt…`).
+fn normalize_id(provider: &str, value: &str) -> Result<Option<String>, String> {
+    let value = value.trim();
+    let invalid = || Err("invalid explicit provider identifier".to_owned());
+    match provider {
+        "tmdb" | "tvdb" => {
+            if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+                return invalid();
+            }
+            let trimmed = value.trim_start_matches('0');
+            Ok((!trimmed.is_empty()).then(|| trimmed.to_owned()))
+        }
+        "imdb" => {
+            let lower = value.to_ascii_lowercase();
+            match lower.strip_prefix("tt") {
+                Some(digits)
+                    if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) =>
+                {
+                    Ok((!digits.bytes().all(|b| b == b'0')).then_some(lower))
+                }
+                _ => invalid(),
+            }
+        }
         // Unknown explicitly named providers remain opaque, never interpreted as URLs.
         _ => {
-            !provider.is_empty() && provider.len() <= 64 && value.len() <= 256 && !value.is_empty()
+            if provider.is_empty() || provider.len() > 64 || value.len() > 256 || value.is_empty() {
+                invalid()
+            } else {
+                Ok(Some(value.to_owned()))
+            }
         }
+    }
+}
+
+fn insert_id(metadata: &mut FilmMetadata, provider: &str, value: &str) -> Result<(), String> {
+    let Some(provider) = canonical_provider(provider) else {
+        return Ok(());
     };
-    if !valid {
-        return Err("invalid explicit provider identifier".into());
+    let Some(value) = normalize_id(&provider, value)? else {
+        return Ok(());
+    };
+    if metadata.external_id_conflicts.contains(&provider) {
+        return Ok(());
     }
-    if metadata
-        .external_ids
-        .get(provider)
-        .is_some_and(|previous| previous != value)
-    {
-        return Err(format!("conflicting {provider} identifiers"));
+    match metadata.external_ids.get(&provider) {
+        Some(previous) if *previous != value => {
+            // Two sources in one file disagree: trust neither.
+            metadata.external_ids.remove(&provider);
+            metadata.external_id_conflicts.push(provider);
+        }
+        Some(_) => {}
+        None => {
+            metadata.external_ids.insert(provider, value);
+        }
     }
-    metadata
-        .external_ids
-        .insert(provider.to_owned(), value.to_owned());
     Ok(())
+}
+
+/// Identifiers embedded in provider URLs (`https://www.themoviedb.org/movie/603`,
+/// `https://www.imdb.com/title/tt0133093/`, `https://thetvdb.com/?tab=series&id=81189`).
+/// Text only: nothing is ever fetched.
+fn ids_from_urls(metadata: &mut FilmMetadata, text: &str) -> Result<(), String> {
+    fn after<'a>(text: &'a str, marker: &str) -> Option<&'a str> {
+        text.find(marker).map(|i| &text[i + marker.len()..])
+    }
+    fn digits(text: &str) -> &str {
+        let end = text.bytes().take_while(u8::is_ascii_digit).count();
+        &text[..end]
+    }
+    let lower = text.to_ascii_lowercase();
+    for marker in ["themoviedb.org/movie/", "themoviedb.org/tv/"] {
+        if let Some(rest) = after(&lower, marker) {
+            let id = digits(rest);
+            if !id.is_empty() {
+                insert_id(metadata, "tmdb", id)?;
+            }
+        }
+    }
+    if let Some(rest) = after(&lower, "imdb.com/title/tt") {
+        let id = digits(rest);
+        if !id.is_empty() {
+            insert_id(metadata, "imdb", &format!("tt{id}"))?;
+        }
+    }
+    if lower.contains("thetvdb.com")
+        && let Some(rest) = after(&lower, "id=").or_else(|| after(&lower, "/series/"))
+    {
+        let id = digits(rest);
+        if !id.is_empty() {
+            insert_id(metadata, "tvdb", id)?;
+        }
+    }
+    Ok(())
+}
+
+fn valid_date(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+    {
+        return false;
+    }
+    let year = text[..4].parse::<u16>().unwrap_or(0);
+    let month = text[5..7].parse::<u8>().unwrap_or(0);
+    let day = text[8..].parse::<u8>().unwrap_or(0);
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    let max = match month {
+        2 => {
+            if leap {
+                29
+            } else {
+                28
+            }
+        }
+        4 | 6 | 9 | 11 => 30,
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        _ => 0,
+    };
+    (1888..=2100).contains(&year) && day > 0 && day <= max
 }
 
 fn apply(
@@ -94,35 +216,8 @@ fn apply(
                 .filter(|v| (1888..=2100).contains(v))
         }
         "premiered" => {
-            let bytes = text.as_bytes();
-            if bytes.len() == 10
-                && bytes[4] == b'-'
-                && bytes[7] == b'-'
-                && bytes
-                    .iter()
-                    .enumerate()
-                    .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
-            {
-                let year = text[..4].parse::<u16>().unwrap_or(0);
-                let month = text[5..7].parse::<u8>().unwrap_or(0);
-                let day = text[8..].parse::<u8>().unwrap_or(0);
-                let leap = year.is_multiple_of(4)
-                    && (!year.is_multiple_of(100) || year.is_multiple_of(400));
-                let max = match month {
-                    2 => {
-                        if leap {
-                            29
-                        } else {
-                            28
-                        }
-                    }
-                    4 | 6 | 9 | 11 => 30,
-                    1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-                    _ => 0,
-                };
-                if (1888..=2100).contains(&year) && day > 0 && day <= max {
-                    metadata.premiered = Some(text.into());
-                }
+            if valid_date(text) {
+                metadata.premiered = Some(text.into());
             }
         }
         "rating" => {
@@ -134,41 +229,15 @@ fn apply(
         "season" => metadata.season = text.parse::<u16>().ok(),
         "episode" => metadata.episode = text.parse::<u16>().ok(),
         "aired" => {
-            let bytes = text.as_bytes();
-            if bytes.len() == 10
-                && bytes[4] == b'-'
-                && bytes[7] == b'-'
-                && bytes
-                    .iter()
-                    .enumerate()
-                    .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
-            {
-                let year = text[..4].parse::<u16>().unwrap_or(0);
-                let month = text[5..7].parse::<u8>().unwrap_or(0);
-                let day = text[8..].parse::<u8>().unwrap_or(0);
-                let leap = year.is_multiple_of(4)
-                    && (!year.is_multiple_of(100) || year.is_multiple_of(400));
-                let max = match month {
-                    2 => {
-                        if leap {
-                            29
-                        } else {
-                            28
-                        }
-                    }
-                    4 | 6 | 9 | 11 => 30,
-                    1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-                    _ => 0,
-                };
-                if (1888..=2100).contains(&year) && day > 0 && day <= max {
-                    metadata.premiered = Some(text.into());
-                }
+            // `premiered` is the authoritative date when both are present, whatever their order.
+            if valid_date(text) && metadata.premiered.is_none() {
+                metadata.premiered = Some(text.into());
             }
         }
         "uniqueid" if !provider.is_empty() => insert_id(metadata, provider, text)?,
-        "tmdbid" | "tmdb" => insert_id(metadata, "tmdb", text)?,
+        "tmdbid" | "tmdb" | "tmdb_id" => insert_id(metadata, "tmdb", text)?,
         "imdbid" | "imdb" | "imdb_id" => insert_id(metadata, "imdb", text)?,
-        "tvdbid" | "tvdb" => insert_id(metadata, "tvdb", text)?,
+        "tvdbid" | "tvdb" | "tvdb_id" => insert_id(metadata, "tvdb", text)?,
         "id" if text.starts_with("tt") => insert_id(metadata, "imdb", text)?,
         _ => (),
     }
@@ -188,24 +257,77 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
     {
         return Err("invalid XML control character".into());
     }
+    // Kodi-era scrapers wrote a provider URL before or after the XML (or instead of it). The
+    // text is only searched for identifiers; anything else outside the root stays an error.
+    let (xml, outside) = split_outside_root(xml);
+    let mut url_ids = FilmMetadata::default();
+    if !outside.trim().is_empty() {
+        if outside.len() > MAX_OUTSIDE_TEXT {
+            return Err("text outside root".into());
+        }
+        ids_from_urls(&mut url_ids, &outside)?;
+        if url_ids.external_ids.is_empty() && url_ids.external_id_conflicts.is_empty() {
+            return Err("text outside root".into());
+        }
+        if xml.is_empty() {
+            return Ok(url_ids);
+        }
+    }
     let mut reader = Reader::from_str(xml);
     reader.config_mut().check_comments = true;
     let mut stack: Vec<(String, String, String)> = Vec::new();
     let mut metadata = FilmMetadata::default();
     let mut roots = 0;
+    let mut first_root = String::new();
+    let mut extra_episode_roots = 0usize;
+    // Depth inside an additional <episodedetails> of a multi-episode file (Sonarr writes one
+    // per episode); only the first one describes this file, the others are skipped.
+    let mut ignored_depth = 0usize;
     let mut actor = media_contracts::media::Credit::default();
     let mut rating_max = 10.0;
     loop {
         let event = reader.read_event().map_err(|_| "malformed NFO XML")?;
+        if ignored_depth > 0 {
+            match event {
+                Event::Start(_) => {
+                    ignored_depth += 1;
+                    if ignored_depth > MAX_DEPTH {
+                        return Err("NFO XML depth limit".into());
+                    }
+                }
+                Event::End(_) => ignored_depth -= 1,
+                Event::DocType(_) => {
+                    return Err("DTD and entity declarations forbidden".into());
+                }
+                Event::Eof => return Err("incomplete NFO XML".into()),
+                _ => (),
+            }
+            continue;
+        }
         let empty = matches!(event, Event::Empty(_));
         match event {
             Event::Start(e) | Event::Empty(e) => {
                 let name = e.name().as_ref().to_ascii_lowercase();
                 if stack.is_empty() {
-                    roots += 1;
-                    if roots != 1
-                        || (name != "movie" && name != "tvshow" && name != "episodedetails")
-                    {
+                    if roots == 0 {
+                        roots = 1;
+                        if name != "movie" && name != "tvshow" && name != "episodedetails" {
+                            return Err(
+                                "NFO requires one valid root (movie, tvshow, or episodedetails)"
+                                    .into(),
+                            );
+                        }
+                        first_root = name.clone();
+                    } else if name == "episodedetails" && first_root == "episodedetails" {
+                        extra_episode_roots += 1;
+                        if extra_episode_roots > 32 {
+                            return Err("too many episodes in one NFO".into());
+                        }
+                        if !empty {
+                            ignored_depth = 1;
+                        }
+                        continue;
+                    } else {
                         return Err(
                             "NFO requires one valid root (movie, tvshow, or episodedetails)".into(),
                         );
@@ -341,6 +463,15 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
     if roots != 1 || !stack.is_empty() {
         return Err("incomplete NFO XML".into());
     }
+    for (provider, value) in &url_ids.external_ids {
+        insert_id(&mut metadata, provider, value)?;
+    }
+    for provider in url_ids.external_id_conflicts {
+        if !metadata.external_id_conflicts.contains(&provider) {
+            metadata.external_ids.remove(&provider);
+            metadata.external_id_conflicts.push(provider);
+        }
+    }
     if metadata.year.is_none() {
         metadata.year = metadata
             .premiered
@@ -348,6 +479,18 @@ pub fn parse(bytes: &[u8]) -> Result<FilmMetadata, String> {
             .and_then(|v| v[..4].parse().ok());
     }
     Ok(metadata)
+}
+
+/// The XML between the first `<` and the last `>`, and the text around it. Without any markup the
+/// whole input is "outside" (URL-only NFO).
+fn split_outside_root(text: &str) -> (&str, String) {
+    match (text.find('<'), text.rfind('>')) {
+        (Some(first), Some(last)) if first < last => (
+            &text[first..=last],
+            format!("{} {}", &text[..first], &text[last + 1..]),
+        ),
+        _ => ("", text.to_owned()),
+    }
 }
 
 fn append(stack: &mut [(String, String, String)], text: &str) -> Result<(), String> {
@@ -367,6 +510,44 @@ fn append(stack: &mut [(String, String, String)], text: &str) -> Result<(), Stri
         field.push_str(text);
     }
     Ok(())
+}
+
+/// Identifiers carried by a path name and by an NFO. Agreement and one-sided values are kept; a
+/// provider with two different values is dropped from the result and reported, because neither
+/// side is more trustworthy than the other. A provider the NFO itself contradicts keeps the
+/// name's value (a single explicit source) but is still reported.
+pub fn reconcile_ids(
+    from_name: &std::collections::BTreeMap<String, String>,
+    nfo: &FilmMetadata,
+) -> (std::collections::BTreeMap<String, String>, Vec<String>) {
+    let mut merged = from_name.clone();
+    let mut conflicts: Vec<String> = nfo.external_id_conflicts.clone();
+    for (provider, value) in &nfo.external_ids {
+        match merged.get(provider) {
+            Some(existing) if existing != value => {
+                merged.remove(provider);
+                if !conflicts.contains(provider) {
+                    conflicts.push(provider.clone());
+                }
+            }
+            Some(_) => {}
+            None if conflicts.contains(provider) => {}
+            None => {
+                merged.insert(provider.clone(), value.clone());
+            }
+        }
+    }
+    (merged, conflicts)
+}
+
+/// Human-readable warning for an NFO whose identifiers contradict each other, if any.
+pub fn conflict_message(providers: &[String]) -> Option<String> {
+    (!providers.is_empty()).then(|| {
+        format!(
+            "contradictory {} identifiers ignored; no automatic match on them",
+            providers.join(", ")
+        )
+    })
 }
 
 /// Exact filename sidecar wins. Shared movie.nfo is used only for one unambiguous
@@ -536,7 +717,13 @@ mod tests {
             parse(br#"<movie><imdb_id>tt1375666</imdb_id><tvdbid>100</tvdbid></movie>"#).unwrap();
         assert_eq!(m.external_ids["imdb"], "tt1375666");
         assert_eq!(m.external_ids["tvdb"], "100");
-        assert!(parse(br#"<movie><id TMDB="27205"/><tmdbid>1</tmdbid></movie>"#).is_err());
+        // Contradictory ids no longer reject the whole NFO: the provider is dropped and reported.
+        let conflicted =
+            parse(br#"<movie><title>Kept</title><id TMDB="27205"/><tmdbid>1</tmdbid></movie>"#)
+                .unwrap();
+        assert_eq!(conflicted.title.as_deref(), Some("Kept"));
+        assert!(!conflicted.external_ids.contains_key("tmdb"));
+        assert_eq!(conflicted.external_id_conflicts, ["tmdb"]);
         assert!(parse(br#"<movie><id IMDB="123"/></movie>"#).is_err());
         assert!(
             parse(br#"<movie><id>27205</id></movie>"#)
@@ -603,7 +790,6 @@ mod tests {
             "<movie><title></movie>",
             "<movie/><movie/>",
             "<?xml version='1.0' encoding='ISO-8859-1'?><movie/>",
-            "<movie><uniqueid type='tmdb'>1</uniqueid><tmdbid>2</tmdbid></movie>",
         ] {
             assert!(parse(xml.as_bytes()).is_err(), "{xml}");
         }
@@ -616,6 +802,109 @@ mod tests {
         assert!(
             parse(format!("<movie>{}{}</movie>", "<x>".repeat(16), "</x>".repeat(16)).as_bytes())
                 .is_err()
+        );
+    }
+    #[test]
+    fn radarr_sonarr_jellyfin_and_kodi_dialects_yield_the_same_reliable_ids() {
+        // Radarr: uniqueid + explicit elements, placeholder imdb.
+        let radarr = parse(br#"<movie><title>Heat</title><uniqueid type="tmdb" default="true">949</uniqueid><uniqueid type="imdb">tt0113277</uniqueid><tmdbid>949</tmdbid><imdbid>tt0113277</imdbid></movie>"#).unwrap();
+        assert_eq!(radarr.external_ids["tmdb"], "949");
+        assert_eq!(radarr.external_ids["imdb"], "tt0113277");
+        assert!(radarr.external_id_conflicts.is_empty());
+        // Sonarr: tvdb + imdb on the show, tvdb on the episode; `0` is "unknown", not an id.
+        let sonarr = parse(br#"<tvshow><title>Show</title><tvdbid>81189</tvdbid><uniqueid type="tvdb" default="true">81189</uniqueid><uniqueid type="imdb">tt0903747</uniqueid><tmdbid>0</tmdbid></tvshow>"#).unwrap();
+        assert_eq!(sonarr.external_ids["tvdb"], "81189");
+        assert!(!sonarr.external_ids.contains_key("tmdb"));
+        // Jellyfin: upper-case provider attributes and bare elements.
+        let jellyfin = parse(
+            br#"<movie><uniqueid type="Tmdb">00949</uniqueid><IMDbId>TT0113277</IMDbId></movie>"#,
+        )
+        .unwrap();
+        assert_eq!(
+            jellyfin.external_ids["tmdb"], "949",
+            "leading zeros are not part of the id"
+        );
+        assert_eq!(jellyfin.external_ids["imdb"], "tt0113277");
+        // Kodi: `type="unknown"` carries no identity; themoviedb/thetvdb are aliases.
+        let kodi = parse(br#"<movie><uniqueid type="unknown">123456</uniqueid><uniqueid type="themoviedb">949</uniqueid></movie>"#).unwrap();
+        assert_eq!(kodi.external_ids.len(), 1);
+        assert_eq!(kodi.external_ids["tmdb"], "949");
+    }
+
+    #[test]
+    fn contradictory_ids_are_dropped_and_reported_not_trusted() {
+        let m = parse(br#"<movie><title>Film</title><uniqueid type="tmdb">1</uniqueid><tmdbid>2</tmdbid><uniqueid type="tvdb">9</uniqueid></movie>"#).unwrap();
+        assert!(!m.external_ids.contains_key("tmdb"));
+        assert_eq!(m.external_ids["tvdb"], "9", "unrelated providers survive");
+        assert_eq!(m.external_id_conflicts, ["tmdb"]);
+        // A third value cannot resurrect a dropped provider.
+        let m = parse(br#"<movie><tmdbid>1</tmdbid><tmdbid>2</tmdbid><tmdbid>1</tmdbid></movie>"#)
+            .unwrap();
+        assert!(m.external_ids.is_empty());
+        assert_eq!(m.external_id_conflicts, ["tmdb"]);
+        // Malformed values remain hard errors: that file is not an NFO we understand.
+        assert!(parse(br#"<movie><imdbid>12</imdbid></movie>"#).is_err());
+        assert!(parse(br#"<movie><tmdbid>abc</tmdbid></movie>"#).is_err());
+    }
+
+    #[test]
+    fn url_only_and_url_suffixed_kodi_nfos_provide_ids_without_resolving_anything() {
+        let only = parse(b"https://www.themoviedb.org/movie/949-heat\n").unwrap();
+        assert_eq!(only.external_ids["tmdb"], "949");
+        assert!(only.title.is_none());
+        let imdb = parse(b"https://www.imdb.com/title/tt0113277/").unwrap();
+        assert_eq!(imdb.external_ids["imdb"], "tt0113277");
+        let tvdb = parse(b"https://thetvdb.com/?tab=series&id=81189").unwrap();
+        assert_eq!(tvdb.external_ids["tvdb"], "81189");
+        let suffixed =
+            parse(b"<movie><title>Heat</title></movie>\nhttps://www.themoviedb.org/movie/949\n")
+                .unwrap();
+        assert_eq!(suffixed.title.as_deref(), Some("Heat"));
+        assert_eq!(suffixed.external_ids["tmdb"], "949");
+        // The URL disagrees with the XML: neither is trusted.
+        let disagree =
+            parse(b"<movie><tmdbid>1</tmdbid></movie>\nhttps://www.themoviedb.org/movie/949\n")
+                .unwrap();
+        assert!(disagree.external_ids.is_empty());
+        assert_eq!(disagree.external_id_conflicts, ["tmdb"]);
+        // Arbitrary text outside the root is still rejected.
+        assert!(parse(b"<movie/> trailing garbage").is_err());
+        assert!(parse(b"just some words").is_err());
+        assert!(parse(b"").is_err());
+    }
+
+    #[test]
+    fn multi_episode_nfo_uses_the_first_episode_and_stays_bounded() {
+        let m = parse(br#"<episodedetails><title>Part 1</title><season>1</season><episode>1</episode><uniqueid type="tvdb">11</uniqueid></episodedetails>
+<episodedetails><title>Part 2</title><season>1</season><episode>2</episode><uniqueid type="tvdb">22</uniqueid></episodedetails>"#).unwrap();
+        assert_eq!(m.title.as_deref(), Some("Part 1"));
+        assert_eq!(m.episode, Some(1));
+        assert_eq!(m.external_ids["tvdb"], "11");
+        assert!(m.external_id_conflicts.is_empty());
+        // A different second root, an unbalanced extra episode and a flood are all rejected.
+        assert!(parse(b"<episodedetails/><movie/>").is_err());
+        assert!(parse(b"<episodedetails/><episodedetails><x>").is_err());
+        let flood = "<episodedetails/>".repeat(40);
+        assert!(parse(flood.as_bytes()).is_err());
+        assert!(parse(b"<movie/><episodedetails/>").is_err());
+    }
+
+    #[test]
+    fn premiered_wins_over_aired_in_any_order() {
+        for xml in [
+            "<episodedetails><aired>2020-01-01</aired><premiered>2019-05-05</premiered></episodedetails>",
+            "<episodedetails><premiered>2019-05-05</premiered><aired>2020-01-01</aired></episodedetails>",
+        ] {
+            assert_eq!(
+                parse(xml.as_bytes()).unwrap().premiered.as_deref(),
+                Some("2019-05-05")
+            );
+        }
+        assert_eq!(
+            parse(b"<episodedetails><aired>2021-02-29</aired></episodedetails>")
+                .unwrap()
+                .premiered,
+            None
         );
     }
     #[tokio::test]

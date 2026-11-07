@@ -8,6 +8,7 @@ mod details;
 mod editorial;
 mod playback;
 mod publication;
+mod relocation;
 mod resources;
 mod scan;
 

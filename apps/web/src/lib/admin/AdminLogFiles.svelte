@@ -98,6 +98,7 @@
       </div>
       <div class="actions">
         <button class="icon" aria-label={$t('refresh')} title={$t('refresh')} disabled={reading} onclick={() => opened && void open(opened)}><Icon name="refresh" size={18} /></button>
+        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API log download endpoint, not a SvelteKit page -->
         <a class="button" href={downloadHref(opened)} download={opened}><Icon name="download" size={18} /><span>{$t('download')}</span></a>
       </div>
     </header>
@@ -175,6 +176,7 @@
                   <span class="file-meta">{file.name} · {fileSizeLabel(file.size, $fmt.tag)}</span>
                 </span>
               </button>
+              <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- Core API log download endpoint, not a SvelteKit page -->
               <a class="icon-link" href={downloadHref(file.name)} download={file.name} aria-label={$t('logs_download_file', { name: file.name })} title={$t('download')}><Icon name="download" size={18} /></a>
             </li>
           {/each}

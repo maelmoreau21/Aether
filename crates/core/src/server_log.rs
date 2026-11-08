@@ -293,8 +293,9 @@ fn prune(directory: &DiskPath) {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
     // Today counts as one day: a retention of 1 keeps only today's file.
-    let (cutoff, _) =
-        timestamp(now_ms.saturating_sub(u64::from(retention_days()).saturating_sub(1) * 86_400_000));
+    let (cutoff, _) = timestamp(
+        now_ms.saturating_sub(u64::from(retention_days()).saturating_sub(1) * 86_400_000),
+    );
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };

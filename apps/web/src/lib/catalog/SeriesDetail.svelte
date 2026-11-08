@@ -281,7 +281,7 @@
   .season-card:hover { background: var(--pn-2); }
   .season-card[aria-selected='true'] { border-color: var(--ac); background: var(--ac-soft); }
   .season-art { grid-row: 1 / 3; position: relative; display: grid; place-items: center; width: 44px; aspect-ratio: 2 / 3; overflow: hidden; border-radius: var(--r-xs); background: var(--pn-2); }
-  .season-art img { width: 100%; height: 100%; object-fit: cover; }
+  .season-art img { width: 100%; height: 100%; object-fit: contain; }
   .season-fallback { font-size: 16px; font-weight: 800; color: var(--mu); }
   .season-name { font-size: 14px; font-weight: 800; white-space: nowrap; }
   .season-sub { font-size: 12px; color: var(--mu); white-space: nowrap; }

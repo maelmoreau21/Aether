@@ -53,8 +53,19 @@
        boutons et fiche rapide restent lisibles sur le voile. -->
   <div class="masthead" class:has-backdrop={hasBackdrop} class:halo={hasBackdrop} class:dark={hasBackdrop}>
     {#if hasBackdrop}
-      <img class="backdrop" class:ambient src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
-      <div class="shade" aria-hidden="true"></div>
+      <!-- Calque image à part : lui seul est rogné aux coins arrondis, pour que les menus et
+           fenêtres des actions (⋯, listes) passent au-dessus du reste de la page. -->
+      <div class="media" aria-hidden="true">
+        <!-- Fond : la même image floutée comble l'espace autour de l'image nette. -->
+        <img class="fill" class:ambient src={backdrop} alt="" width="1280" height="720" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+        {#if !ambient}
+          <!-- Image nette affichée entière (jamais rognée), calée en haut à droite ; son cadre suit son ratio réel. -->
+          <div class="backdrop-frame">
+            <img class="backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ adapt: false }} />
+          </div>
+        {/if}
+        <div class="shade"></div>
+      </div>
     {/if}
 
     <div class="layout" class:has-aside={hasAside}>
@@ -133,10 +144,10 @@
     margin-top: 12px;
   }
 
+  /* Ni overflow ni contexte d'empilement ici : les menus déroulants et fenêtres des
+     actions doivent pouvoir sortir de l'en-tête et passer au-dessus de la page. */
   .masthead {
     position: relative;
-    isolation: isolate;
-    overflow: hidden;
     border-radius: var(--r-xl);
     background: var(--bg-2);
     color: var(--tx);
@@ -147,31 +158,54 @@
     color: var(--on-media);
   }
 
-  /* Image de fond : décor sous un voile, donc un recadrage « cover » reste acceptable
-     quel que soit son format ; une affiche seule passe en ambiance floutée. */
-  .backdrop {
+  .media {
     position: absolute;
     inset: 0;
-    z-index: -2;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .fill {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
-    object-position: 70% 25%;
+    filter: blur(36px) saturate(1.2) brightness(0.55);
+    transform: scale(1.2);
   }
 
-  .backdrop.ambient { object-position: center; filter: blur(36px) saturate(1.2) brightness(0.6); transform: scale(1.2); }
+  /* Cadre de l'image nette : hauteur de l'en-tête, largeur selon le ratio réel (--artwork-ratio
+     publié par fitArtwork), plafonné à la largeur disponible ; l'image y est « contenue ». */
+  .backdrop-frame {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    max-width: 100%;
+    aspect-ratio: var(--artwork-ratio, 16 / 9);
+  }
+
+  .backdrop {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    object-position: right top;
+  }
 
   /* Voile de lisibilité : seul dégradé autorisé sur une image */
   .shade {
     position: absolute;
     inset: 0;
-    z-index: -1;
     background:
       linear-gradient(0deg, var(--media-shade) 0%, rgb(6 8 14 / 0.55) 55%, rgb(6 8 14 / 0.35) 100%),
       linear-gradient(90deg, rgb(6 8 14 / 0.55) 0%, rgb(6 8 14 / 0) 60%);
   }
 
   .layout {
+    position: relative;
     display: grid;
     grid-template-columns: clamp(140px, 14vw, 230px) minmax(0, 1fr);
     grid-template-rows: 1fr auto;

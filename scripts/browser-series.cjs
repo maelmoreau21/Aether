@@ -378,7 +378,10 @@ fs.mkdirSync(out, {recursive: true});
     await filmCard.waitFor();
     await filmCard.click({position:{x:12,y:12}});
     // Audio languages are in the masthead's quick facts; the cast is behind its tab.
+    // The quick facts show up with the ratings first; quality and languages join them once
+    // the file's descriptor has loaded, so wait for them before reading the text.
     const filmFacts = page.getByRole('complementary',{name:'En bref',exact:true});
+    await filmFacts.filter({hasText:/français/}).filter({hasText:/anglais/}).waitFor();
     assert.match(await filmFacts.innerText(),/français/);
     assert.match(await filmFacts.innerText(),/anglais/);
     await page.getByRole('tablist',{name:'Sections de la fiche',exact:true}).getByRole('tab',{name:'Distribution',exact:true}).click();

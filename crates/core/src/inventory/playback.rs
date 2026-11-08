@@ -45,7 +45,74 @@ pub async fn descriptor(
     descriptor_for_user(store, asset_id, session_hash, None, None).await
 }
 
+/// Descriptor of a file, or of the first playable file of a work: a "watch together"
+/// session points at a film, an episode or a series, never at one of its files.
 pub async fn descriptor_for_user(
+    store: &IdentityStore,
+    id: &str,
+    session_hash: &str,
+    user_id: Option<&str>,
+    visible_libraries: Option<&[String]>,
+) -> Result<Option<Value>, sqlx::Error> {
+    if let Some(desc) =
+        descriptor_for_asset(store, id, session_hash, user_id, visible_libraries).await?
+    {
+        return Ok(Some(desc));
+    }
+    let Some(asset_id) = playable_asset_for_work(store, id).await? else {
+        return Ok(None);
+    };
+    let mut desc =
+        descriptor_for_asset(store, &asset_id, session_hash, user_id, visible_libraries).await?;
+    if let Some(desc) = desc.as_mut()
+        && desc.get("requestedId").is_none()
+    {
+        desc["requestedId"] = json!(id);
+    }
+    Ok(desc)
+}
+
+/// First playable file of a film or an episode (by work id or episode id), or of a
+/// series: its first episode with a file, specials last.
+pub(crate) async fn playable_asset_for_work(
+    store: &IdentityStore,
+    id: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let own: Option<String> = query_scalar(
+        "SELECT a.id FROM inventory_assets a \
+         JOIN inventory_sources s ON s.id=a.source_id \
+         JOIN inventory_versions v ON v.id=s.version_id \
+         JOIN inventory_editions e ON e.id=v.edition_id \
+         JOIN libraries l ON l.id=s.library_id \
+         WHERE a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 \
+           AND e.work_id=COALESCE((SELECT work_id FROM inventory_episodes WHERE id=?), ?) \
+         ORDER BY a.id LIMIT 1",
+    )
+    .bind(id)
+    .bind(id)
+    .fetch_optional(&store.pool)
+    .await?;
+    if own.is_some() {
+        return Ok(own);
+    }
+    query_scalar(
+        "SELECT a.id FROM inventory_seasons se \
+         JOIN inventory_episodes ep ON ep.season_id=se.id \
+         JOIN inventory_editions e ON e.work_id=ep.work_id \
+         JOIN inventory_versions v ON v.edition_id=e.id \
+         JOIN inventory_sources s ON s.version_id=v.id \
+         JOIN inventory_assets a ON a.source_id=s.id \
+         JOIN libraries l ON l.id=s.library_id \
+         WHERE se.series_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 \
+         ORDER BY CASE WHEN se.season_number=0 THEN 1 ELSE 0 END, se.season_number, ep.episode_number, a.id \
+         LIMIT 1",
+    )
+    .bind(id)
+    .fetch_optional(&store.pool)
+    .await
+}
+
+async fn descriptor_for_asset(
     store: &IdentityStore,
     asset_id: &str,
     session_hash: &str,

@@ -38,8 +38,9 @@
   let mode = $state<'create' | 'list'>('create');
   let customPartyName = $state<string | null>(null);
   let partyName = $derived(
-    customPartyName ?? (selectedMediaTitle ? `Séance : ${selectedMediaTitle}` : 'Ma séance privée')
+    customPartyName ?? (selectedMediaTitle ? `Séance : ${selectedMediaTitle}` : 'Ma séance')
   );
+  let isPublic = $state(true);
   let controlMode = $state<ControlMode>('host_only');
   let waitForBuffering = $state(true);
 
@@ -144,6 +145,10 @@
       error = $t('please_select_a_work_or_an');
       return;
     }
+    if (!isPublic && invitees.length === 0) {
+      error = $t('party_private_needs_invitees');
+      return;
+    }
     loading = true;
     error = null;
 
@@ -157,6 +162,7 @@
           mediaId: selectedMediaId,
           controlMode,
           waitForBuffering,
+          isPublic,
           inviteUserIds: userIds.length > 0 ? userIds : undefined,
           inviteUsernames: usernames.length > 0 ? usernames : undefined
         },
@@ -189,7 +195,10 @@
     loading = true;
     error = null;
     try {
-      await joinParty(pId, $session?.csrfToken ?? '');
+      // A private session is entered through its invitation.
+      const invite = userInvites.find((i) => i.partyId === pId);
+      if (invite) await acceptPartyInvite(invite.token, $session?.csrfToken ?? '');
+      else await joinParty(pId, $session?.csrfToken ?? '');
       onJoinParty(pId, mId);
       onClose();
     } catch (e) {
@@ -255,17 +264,6 @@
 
     <div class="modal-body">
       {#if mode === 'create'}
-        <!-- Security & Privacy Guarantee Banner -->
-        <div class="privacy-banner">
-          <div class="privacy-icon"><Icon name="shield" size={20} /></div>
-          <div class="privacy-text">
-            <strong>{$t('private_session_by_invitation_only')}</strong>
-            <p>
-              {$t('each_invited_user_watches_with_their')}
-            </p>
-          </div>
-        </div>
-
         <form
           class="create-form"
           onsubmit={(e) => {
@@ -349,6 +347,29 @@
               placeholder={$t('e_g_movie_night_with_friends')}
             />
           </div>
+
+          <!-- Visibility: public (listed, open) or private (invited users only) -->
+          <fieldset class="field-group visibility">
+            <legend>{$t('party_visibility')}</legend>
+            <div class="visibility-options">
+              <label class="visibility-option" class:active={isPublic}>
+                <input type="radio" name="party-visibility" value="public" onchange={() => (isPublic = true)} checked={isPublic} />
+                <span class="visibility-icon"><Icon name="users" size={18} /></span>
+                <span class="visibility-text">
+                  <strong>{$t('party_public')}</strong>
+                  <small>{$t('party_public_hint')}</small>
+                </span>
+              </label>
+              <label class="visibility-option" class:active={!isPublic}>
+                <input type="radio" name="party-visibility" value="private" onchange={() => (isPublic = false)} checked={!isPublic} />
+                <span class="visibility-icon"><Icon name="shield" size={18} /></span>
+                <span class="visibility-text">
+                  <strong>{$t('party_private')}</strong>
+                  <small>{$t('party_private_hint')}</small>
+                </span>
+              </label>
+            </div>
+          </fieldset>
 
           <!-- Invite users by username (@pseudo) -->
           <div class="field-group">
@@ -448,7 +469,7 @@
               class="btn-primary"
               disabled={loading || !selectedMediaId || !partyName.trim()}
             >
-              {loading ? $t('creating') : $t('create_the_private_session')}
+              {loading ? $t('creating') : $t('create_the_session')}
             </button>
           </div>
         </form>
@@ -492,6 +513,9 @@
                   <div class="party-card-info">
                     <div class="party-card-header">
                       <strong>{p.name}</strong>
+                      <span class="badge-visibility" class:private={p.isLocked}>
+                        {p.isLocked ? $t('private_badge') : $t('public_badge')}
+                      </span>
                       <span class="badge-status" class:playing={p.state === 'playing'}>
                         {p.state === 'playing'
                           ? $t('playing')
@@ -521,7 +545,7 @@
                     class="btn-secondary-small"
                     onclick={() => (mode = 'create')}
                   >
-                    {$t('create_a_private_session')}
+                    {$t('create_a_session')}
                   </button>
                 </div>
               {/each}
@@ -688,37 +712,96 @@
     min-height: 0;
   }
 
-  .privacy-banner {
-    display: flex;
-    gap: 14px;
-    padding: 14px 16px;
-    background: var(--pn);
+  /* Visibilité : publique ou privée */
+  fieldset.visibility {
     border: 0;
-    border-radius: var(--r-md);
-    margin-bottom: 20px;
+    margin: 0;
+    padding: 0;
+    min-width: 0;
   }
-  .privacy-icon {
+  .visibility legend {
+    padding: 0;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--tx);
+  }
+  .visibility-options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .visibility-option {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-height: 44px;
+    padding: 12px 14px;
+    background: var(--pn);
+    border: 2px solid transparent;
+    border-radius: var(--r-md);
+    cursor: pointer;
+    transition:
+      background-color var(--t-fast) var(--ease),
+      border-color var(--t-fast) var(--ease);
+  }
+  .visibility-option:hover {
+    background: var(--pn-2);
+  }
+  .visibility-option.active {
+    border-color: var(--ac);
+  }
+  .visibility-option input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .visibility-option:has(input:focus-visible) {
+    outline: 2px solid var(--ac);
+    outline-offset: 3px;
+  }
+  .visibility-icon {
     flex: none;
     display: grid;
     place-items: center;
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     border-radius: var(--r-sm);
     background: var(--pn-2);
     color: var(--tx);
   }
-  .privacy-text strong {
+  .visibility-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .visibility-text strong {
     font-size: 15px;
     font-weight: 700;
     color: var(--tx);
-    display: block;
-    margin-bottom: 4px;
   }
-  .privacy-text p {
+  .visibility-text small {
     font-size: 13px;
+    line-height: 1.45;
     color: var(--mu);
-    margin: 0;
-    line-height: 1.5;
+  }
+  .badge-visibility {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: var(--r-pill);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
+  .badge-visibility.private {
+    background: var(--info-soft);
+    color: var(--info);
   }
 
   .media-preview-bar {
@@ -1246,6 +1329,9 @@
     }
     .modal-actions {
       flex-direction: column-reverse;
+    }
+    .visibility-options {
+      grid-template-columns: 1fr;
     }
     .modal-actions > button {
       width: 100%;

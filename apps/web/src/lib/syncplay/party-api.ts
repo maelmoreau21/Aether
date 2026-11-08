@@ -15,6 +15,8 @@ export interface CreatePartyRequest {
   mediaId: string;
   controlMode: ControlMode;
   waitForBuffering: boolean;
+  /** Public (default): listed and open to anyone who may see the title. Private: invited users only. */
+  isPublic?: boolean;
   inviteUserIds?: string[];
   inviteUsernames?: string[];
 }

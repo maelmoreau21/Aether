@@ -64,6 +64,9 @@ pub(super) struct CreatePartyInput {
     pub media_id: String,
     pub control_mode: Option<String>,
     pub wait_for_buffering: Option<bool>,
+    /// Public (the default): anyone who may see the title finds and joins it.
+    /// Private: invited users only.
+    pub is_public: Option<bool>,
     pub invite_user_ids: Option<Vec<String>>,
     pub invite_usernames: Option<Vec<String>>,
 }
@@ -119,6 +122,7 @@ pub(super) async fn create_party(
         .map(ControlMode::from_str)
         .unwrap_or(ControlMode::HostOnly);
     let wait_buffering = input.wait_for_buffering.unwrap_or(true);
+    let is_locked = !input.is_public.unwrap_or(true);
 
     let party_id = Uuid::new_v4().to_string();
     let now = current_epoch_s();
@@ -136,7 +140,7 @@ pub(super) async fn create_party(
 
     query(
         "INSERT INTO watch_parties (id, name, host_user_id, media_id, control_mode, state, current_position_ms, position_updated_at_ms, is_locked, wait_for_buffering, created_at) \
-         VALUES (?, ?, ?, ?, ?, 'waiting', 0, ?, 0, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, 'waiting', 0, ?, ?, ?, ?)",
     )
     .bind(&party_id)
     .bind(&party_name)
@@ -144,6 +148,7 @@ pub(super) async fn create_party(
     .bind(media_id)
     .bind(control_mode.as_str())
     .bind(now_ms)
+    .bind(i64::from(is_locked))
     .bind(i64::from(wait_buffering))
     .bind(now)
     .execute(&mut *tx)
@@ -250,6 +255,7 @@ pub(super) async fn create_party(
         "mediaId": media_id,
         "mediaTitle": media_title,
         "controlMode": control_mode.as_str(),
+        "isLocked": is_locked,
         "state": "waiting",
         "createdAt": now
     })))
@@ -451,8 +457,20 @@ pub(super) async fn join_party(
         ));
     }
 
-    // If locked and not already a member, reject
-    if room.is_locked && !room.participants.contains_key(&actor.user.id) {
+    // A private (locked) session admits its members and the users it invited.
+    let invited = || async {
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*) FROM watch_party_invites WHERE party_id = ? AND target_user_id = ? AND expires_at > ? AND revoked_at IS NULL",
+        )
+        .bind(&id)
+        .bind(&actor.user.id)
+        .bind(current_epoch_s())
+        .fetch_one(&auth.store.pool)
+        .await
+        .unwrap_or(0);
+        count > 0
+    };
+    if room.is_locked && !room.participants.contains_key(&actor.user.id) && !invited().await {
         return Err(PartyApiError(
             StatusCode::FORBIDDEN,
             "La séance est verrouillée : demandez une invitation à l'hôte.".to_string(),

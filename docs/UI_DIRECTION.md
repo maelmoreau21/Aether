@@ -183,6 +183,8 @@ Ce jalon ne constitue pas la refonte complète des fiches ou de l’administrati
 
 Les fiches film/série utilisent `DetailHero.svelte` : logo ou titre unique,
 backdrop réel seulement, poster 2:3 desktop et composition adaptée au téléphone.
+Le backdrop couvre tout le bandeau, qui occupe le premier écran : identité, synopsis
+et actions calés en bas à gauche, fiche rapide (notes, qualité, langues) en bas à droite.
 La lecture précède les commandes secondaires ; les versions et l’inventaire
 technique sont repliables. Les résumés longs sont extensibles, les images cassées
 reviennent au texte ou à une surface neutre.

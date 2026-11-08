@@ -263,7 +263,10 @@
 
   async function launchWatchParty(partyId: string, targetMediaId?: string) {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
-    const targetId = targetMediaId || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
+    // A session points at the work; the open page plays the version chosen on it, other
+    // pages let the server pick the work's first playable file.
+    const chosen = targetMediaId && targetMediaId === detail?.id && current ? current.id : targetMediaId;
+    const targetId = chosen || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
     if (!targetId) return;
     const controller = new AbortController();
     episodeLaunchController = controller;

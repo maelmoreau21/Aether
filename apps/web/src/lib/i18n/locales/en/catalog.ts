@@ -960,6 +960,8 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   segment_copy_kept: '{count} kept their manual correction.',
   segment_copy_failed: '{count} failed.',
   segment_season: 'Season',
+  segment_season_number: 'Season {number}',
+  segment_specials: 'Specials',
   segment_analysis_no_provider: 'Request recorded, but no detection extension is active: install and enable “Intro Skipper” in Administration › Extensions.',
   segment_duration_unknown: 'The length of this file is unknown: rescan the library before placing a segment.',
   segment_beyond_duration_film: 'The end is past the film length ({duration}).',

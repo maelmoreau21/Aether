@@ -5,6 +5,7 @@
   import MetadataEditorModal from './MetadataEditorModal.svelte';
   import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
+  import SegmentsDialog from './SegmentsDialog.svelte';
   import { session } from '../auth/session';
   import { playbackIds, type Work } from './api';
   import type { Media } from '../player/types';
@@ -47,6 +48,7 @@
   let listOpen = $state(false);
   let menuOpen = $state(false);
   let watchPartyOpen = $state(false);
+  let segmentsOpen = $state(false);
 
   let lists = $state<{ id: string; name: string; owned?: boolean }[]>([]);
   let listName = $state('');
@@ -196,6 +198,10 @@
   />
 {/if}
 
+{#if segmentsOpen && isAdmin}
+  <SegmentsDialog {work} assetId={selectedMedia?.id ?? null} onclose={() => (segmentsOpen = false)} />
+{/if}
+
 {#if subtitlesOpen && isAdmin}
   <SubtitleDownloads {work} {selectedMedia} onclose={() => (subtitlesOpen = false)} />
 {/if}
@@ -312,7 +318,7 @@
           }}
         >
           <Icon name="users" size={16} />
-          <span>{$t('watch_party')}</span>
+          <span>{$t('watch_together')}</span>
         </button>
 
         <button
@@ -358,6 +364,21 @@
             >
               <Icon name="search" size={16} />
               <span>{$t('search_subtitles')}</span>
+            </button>
+          {/if}
+
+          {#if !work.synthetic && (work.kind === 'series' ? (work.seasons?.length ?? 0) > 0 : assetIds.length > 0)}
+            <button
+              type="button"
+              class="menu-item"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                segmentsOpen = true;
+              }}
+            >
+              <Icon name="film" size={16} />
+              <span>{$t('segments_tab')}</span>
             </button>
           {/if}
 

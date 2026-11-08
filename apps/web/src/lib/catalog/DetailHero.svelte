@@ -59,8 +59,8 @@
           <!-- Affiche seule : floutée en fond d'ambiance, jamais recadrée en net. -->
           <img class="fill" src={backdrop} alt="" width="1280" height="720" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
         {:else}
-          <!-- Image large affichée entière sur toute la largeur : c'est elle qui donne la hauteur
-               du bandeau (son ratio réel), sans recadrage ni remplissage. -->
+          <!-- Image large en fond de tout le bandeau (recadrée comme au cinéma, cadrée vers le haut
+               où se trouvent en général les visages). -->
           <img class="backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
         {/if}
         <div class="shade"></div>
@@ -152,34 +152,33 @@
     color: var(--tx);
   }
 
-  /* Avec une image large : l'image et le contenu partagent la même cellule de grille.
-     Le bandeau prend la plus grande des deux hauteurs : celle de l'image à son ratio
-     réel (le cas courant) ou celle du contenu s'il est plus haut (téléphone, image très
-     large) ; dans ce cas le bas de l'image se fond dans le fond du bandeau. */
+  /* Avec une image large : elle couvre tout le bandeau, qui occupe le premier écran.
+     Le contenu se cale en bas : identité, synopsis et actions à gauche, fiche rapide
+     (notes, qualité, langues) à droite. Si le contenu est plus haut que l'écran
+     (téléphone, synopsis déplié), le bandeau grandit avec lui. */
   .masthead.has-backdrop {
     display: grid;
+    min-height: clamp(460px, calc(100dvh - 116px), 1080px);
     background: #06080e;
     color: var(--on-media);
   }
 
   .media {
-    position: relative;
-    grid-area: 1 / 1;
-    align-self: start;
+    position: absolute;
+    inset: 0;
     overflow: hidden;
     border-radius: inherit;
     pointer-events: none;
   }
 
-  .media.ambient {
+  .backdrop {
     position: absolute;
     inset: 0;
-  }
-
-  .backdrop {
     display: block;
     width: 100%;
-    height: auto;
+    height: 100%;
+    object-fit: cover;
+    object-position: center 22%;
   }
 
   .fill {
@@ -198,13 +197,21 @@
     position: absolute;
     inset: 0;
     background:
-      linear-gradient(0deg, #06080e 0%, rgb(6 8 14 / 0.6) 22%, rgb(6 8 14 / 0.15) 60%, rgb(6 8 14 / 0.25) 100%),
-      linear-gradient(90deg, rgb(6 8 14 / 0.85) 0%, rgb(6 8 14 / 0.55) 35%, rgb(6 8 14 / 0) 65%);
+      linear-gradient(0deg, rgb(6 8 14 / 0.92) 0%, rgb(6 8 14 / 0.55) 26%, rgb(6 8 14 / 0.08) 58%, rgb(6 8 14 / 0.3) 100%),
+      linear-gradient(90deg, rgb(6 8 14 / 0.8) 0%, rgb(6 8 14 / 0.45) 38%, rgb(6 8 14 / 0) 62%),
+      linear-gradient(270deg, rgb(6 8 14 / 0.55) 0%, rgb(6 8 14 / 0) 28%);
   }
 
   .masthead.has-backdrop .layout {
     grid-area: 1 / 1;
-    align-self: center;
+    align-self: end;
+  }
+
+  @media (min-width: 1101px) {
+    .masthead.has-backdrop .layout.has-aside {
+      grid-template-columns: clamp(140px, 14vw, 230px) minmax(0, 1fr) minmax(260px, 340px);
+      column-gap: clamp(20px, 3vw, 48px);
+    }
   }
 
   .layout {
@@ -223,7 +230,7 @@
   .layout.has-aside {
     grid-template-columns: clamp(140px, 14vw, 230px) minmax(0, 1fr) minmax(240px, 320px);
     grid-template-areas:
-      'poster identity aside'
+      'poster identity .'
       'poster main aside';
   }
 
@@ -434,6 +441,7 @@
   /* Téléphone : affiche réduite à côté du titre, puis actions et fiche en pleine largeur. */
   @media (max-width: 760px) {
     .masthead { border-radius: var(--r-lg); }
+    .masthead.has-backdrop { min-height: min(78dvh, 640px); }
     .layout,
     .layout.has-aside {
       grid-template-columns: 104px minmax(0, 1fr);

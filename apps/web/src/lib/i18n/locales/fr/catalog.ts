@@ -958,6 +958,8 @@ export const catalog = {
   segment_copy_kept: '{count} conservé(s) avec leur correction manuelle.',
   segment_copy_failed: '{count} en échec.',
   segment_season: 'Saison',
+  segment_season_number: 'Saison {number}',
+  segment_specials: 'Hors-série',
   segment_analysis_no_provider: 'Demande enregistrée, mais aucune extension de détection n’est active : installez et activez « Intro Skipper » dans Administration › Extensions.',
   segment_duration_unknown: 'La durée de ce fichier est inconnue : relancez un scan de la bibliothèque avant de placer un segment.',
   segment_beyond_duration_film: 'La fin dépasse la durée du film ({duration}).',

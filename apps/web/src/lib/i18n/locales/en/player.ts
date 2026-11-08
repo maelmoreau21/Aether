@@ -45,7 +45,6 @@ export const player: Readonly<Record<keyof typeof source, string>> = {
   text_outline_shadow: 'Text outline and shadow',
   drop_shadow_default: 'Sharp drop shadow (default)',
   strong_black_outline: 'Enhanced black outline',
-  watch_party: 'Watch together session',
   watch_together: 'Watch together',
   watch_together_from_player: 'Start a “Watch together” session from this item',
   party_expiry_note: 'A session ends when the host closes it, when everyone has left, or after 5 minutes with nobody connected. Invitations expire after 24 hours.',

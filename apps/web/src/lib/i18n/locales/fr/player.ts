@@ -43,7 +43,6 @@ export const player = {
   text_outline_shadow: 'Contour et ombre du texte',
   drop_shadow_default: 'Ombre portée nette (par défaut)',
   strong_black_outline: 'Contour noir renforcé',
-  watch_party: 'Séance « Regarder ensemble »',
   watch_together: 'Regarder ensemble',
   watch_together_from_player: 'Lancer une séance « Regarder ensemble » à partir de ce média',
   party_expiry_note: 'Une séance se termine quand l’hôte la ferme, quand tout le monde l’a quittée, ou après 5 minutes sans personne de connecté. Les invitations expirent après 24 heures.',

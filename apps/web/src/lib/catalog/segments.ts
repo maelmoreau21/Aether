@@ -230,7 +230,8 @@ export function copySegment(kind: SegmentKind, start: number, end: number, from:
     next = { start: to - (from - start), end: to - (from - end) };
   }
   // Rounding must not push credits that end with the file past its end.
-  next = { start: Math.max(0, round(next.start)), end: to === null ? round(next.end) : Math.min(round(next.end), to) };
+  const roundedEnd = round(next.end);
+  next = { start: round(next.start), end: fitEnd(roundedEnd, to) ?? roundedEnd };
   return segmentProblem(next.start, next.end, to, kind) ? null : next;
 }
 

@@ -455,7 +455,7 @@
       {#each categories as item (item)}<button class:chosen={category === item} aria-pressed={category === item} onclick={() => category=item}>{item}</button>{/each}
     </div>
     <div class="list-filters">
-      <label>{$t('filter_extensions')}<input type="search" bind:value={search} placeholder={$t('name_or_description')} /></label>
+      <label>{tab === 'catalogue' ? $t('catalogue_search') : $t('filter_extensions')}<input type="search" bind:value={search} placeholder={$t('name_or_description')} /></label>
       {#if tab === 'installed'}
         <label>{$t('state')}<select bind:value={filter}><option value="all">{$t('all_extensions_filter')}</option><option value="enabled">{$t('enabled_extensions')}</option><option value="disabled">{$t('disabled_extensions')}</option></select></label>
       {:else}

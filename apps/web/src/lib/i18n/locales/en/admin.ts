@@ -51,6 +51,7 @@ export const admin: Readonly<Record<keyof typeof source, string>> = {
   preconfigured: 'Preconfigured',
   installed_extensions_kept: 'Installed extensions are kept.',
   repository_first_refresh: 'A repository is waiting for its first refresh',
+  catalogue_search: 'Search the catalogue',
   install: 'Install',
   installed: 'Installed',
   incompatible: 'Incompatible',

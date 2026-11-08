@@ -49,6 +49,7 @@ export const admin = {
   preconfigured: 'Préconfiguré',
   installed_extensions_kept: 'Les extensions installées sont conservées.',
   repository_first_refresh: 'Un dépôt attend sa première actualisation',
+  catalogue_search: 'Rechercher dans le catalogue',
   install: 'Installer',
   installed: 'Installée',
   incompatible: 'Incompatible',

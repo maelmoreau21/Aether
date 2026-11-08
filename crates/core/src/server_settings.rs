@@ -318,7 +318,9 @@ async fn write(
             let id: String = row.get("id");
             let opts_raw: Option<String> = row.get("options_json");
             let mut opts = opts_raw
-                .and_then(|s| serde_json::from_str::<crate::library_options::LibraryOptions>(&s).ok())
+                .and_then(|s| {
+                    serde_json::from_str::<crate::library_options::LibraryOptions>(&s).ok()
+                })
                 .unwrap_or_default();
             opts.trickplay_enabled = input.trickplay_enabled;
             opts.trickplay_during_scan = input.trickplay_auto_generate;

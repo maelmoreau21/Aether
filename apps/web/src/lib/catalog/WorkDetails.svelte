@@ -66,19 +66,19 @@
       {/if}
       {#if work.studios?.length}
         <div class="meta-row">
-          <dt>Studios</dt>
+          <dt>{$t('detail_studios')}</dt>
           <dd>{work.studios.join(', ')}</dd>
         </div>
       {/if}
       {#if work.countries?.length}
         <div class="meta-row">
-          <dt>{($locale ?? 'fr').startsWith('fr') ? 'Pays' : 'Countries'}</dt>
+          <dt>{$t('detail_countries')}</dt>
           <dd>{work.countries.join(', ')}</dd>
         </div>
       {/if}
       {#if work.collection?.name}
         <div class="meta-row">
-          <dt>{($locale ?? 'fr').startsWith('fr') ? 'Coffret' : 'Collection'}</dt>
+          <dt>{$t('detail_collection')}</dt>
           <dd>{work.collection.name}</dd>
         </div>
       {/if}

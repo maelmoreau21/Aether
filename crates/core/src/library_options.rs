@@ -151,6 +151,11 @@ pub const KNOWN_CATALOG_METADATA_PROVIDERS: &[&str] = &[
 ];
 
 impl LibraryOptions {
+    /// Parse JSON-encoded library options or return the default settings when parsing fails.
+    pub fn from_json(raw: &str) -> Self {
+        serde_json::from_str(raw).unwrap_or_default()
+    }
+
     /// Default primary metadata provider for a library or work kind:
     /// - `"films"` / `"film"` -> `"tmdb"` (TheMovieDB)
     /// - `"series"` / `"episode"` / `"anime"` -> `"tvdb"` (TheTVDB)
@@ -547,6 +552,15 @@ mod tests {
         );
         // These booleans are configuration only; filter_file does not execute writers.
         assert!(options.save_nfo_to_media);
+        assert_eq!(
+            LibraryOptions::from_json("invalid json").preferred_metadata_language,
+            "fr"
+        );
+        assert_eq!(
+            LibraryOptions::from_json(r#"{"preferredMetadataLanguage":"ja"}"#)
+                .preferred_metadata_language,
+            "ja"
+        );
     }
 
     #[test]

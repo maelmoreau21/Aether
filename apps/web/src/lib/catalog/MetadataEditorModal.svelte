@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { session } from '../auth/session';
-  import { locale, t } from '../i18n';
+  import { locale, t, fmt } from '../i18n';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
   import {
@@ -74,43 +74,31 @@
   }[]>([]);
   let merges = $state<{ id: string; groupId: string; origin: string }[]>([]);
 
-  const isFrench = $derived(($locale ?? 'fr').toLowerCase().startsWith('fr'));
-
   const lockableFieldLabels = $derived<Record<LockableMetadataField, string>>({
-    title: isFrench ? 'Nom' : 'Name',
-    plot: isFrench ? 'Synopsis' : 'Overview',
-    genres: isFrench ? 'Genres' : 'Genres',
-    mpaa: isFrench ? 'Classification parentale' : 'Parental rating',
-    people: isFrench ? 'Personnes' : 'People',
-    countries: isFrench ? 'Pays de production' : 'Production countries',
-    studios: isFrench ? 'Studios' : 'Studios',
-    tags: isFrench ? 'Étiquettes' : 'Tags'
+    title: $t('title'),
+    plot: $t('description_synopsis'),
+    genres: $t('meta_genres_title'),
+    mpaa: $t('meta_parental_rating'),
+    people: $t('meta_people_title'),
+    countries: $t('meta_countries_title'),
+    studios: $t('meta_studios_title'),
+    tags: $t('meta_tags_title')
   });
 
   const tmdbLabel = $derived(
     work.kind === 'film'
-      ? isFrench
-        ? 'ID TheMovieDb Film'
-        : 'TheMovieDb Movie ID'
+      ? $t('meta_tmdb_movie_id')
       : work.kind === 'series'
-        ? isFrench
-          ? 'ID TheMovieDb Série'
-          : 'TheMovieDb Series ID'
-        : isFrench
-          ? 'ID TheMovieDb Épisode'
-          : 'TheMovieDb Episode ID'
+        ? $t('meta_tmdb_series_id')
+        : $t('meta_tmdb_episode_id')
   );
 
   const tvdbLabel = $derived(
     work.kind === 'series'
-      ? isFrench
-        ? 'ID TheTVDB Série'
-        : 'TheTVDB Series ID'
+      ? $t('meta_tvdb_series_id')
       : work.kind === 'episode'
-        ? isFrench
-          ? 'ID TheTVDB Épisode'
-          : 'TheTVDB Episode ID'
-        : 'ID TheTVDB'
+        ? $t('meta_tvdb_episode_id')
+        : $t('meta_tvdb_id')
   );
 
   onMount(() => {
@@ -225,13 +213,9 @@
         role:
           newPersonRole.trim() ||
           (newPersonType === 'director'
-            ? isFrench
-              ? 'Réalisateur'
-              : 'Director'
+            ? $t('meta_director')
             : newPersonType === 'writer'
-              ? isFrench
-                ? 'Scénariste'
-                : 'Writer'
+              ? $t('meta_writer')
               : ''),
         type: newPersonType
       }
@@ -306,16 +290,16 @@
   }
 
   function personTypeLabel(type: MetadataPersonType): string {
-    if (type === 'director') return isFrench ? 'Réalisateur' : 'Director';
-    if (type === 'writer') return isFrench ? 'Scénariste' : 'Writer';
-    return isFrench ? 'Acteur' : 'Actor';
+    if (type === 'director') return $t('meta_director');
+    if (type === 'writer') return $t('meta_writer');
+    return $t('meta_actor');
   }
 
   async function handleSave(event: SubmitEvent) {
     event.preventDefault();
     syncActiveLocaleTranslation(draft);
     if (!draft.title.trim()) {
-      error = isFrench ? 'Le titre est obligatoire.' : 'Title is required.';
+      error = $t('meta_title_required');
       return;
     }
     const payload = buildMetadataPutPayload(draft);
@@ -380,19 +364,17 @@
         {/if}
 
         <!-- Multi-language switcher bar (Aether multi-language adaptation) -->
-        <section class="lang-switcher-box" aria-label={isFrench ? 'Langue des métadonnées' : 'Metadata language'}>
+        <section class="lang-switcher-box" aria-label={$t('meta_lang_aria')}>
           <div class="lang-switcher-head">
             <div class="lang-switcher-title">
               <Icon name="globe" size={16} />
-              <strong>{isFrench ? 'Langue d’édition des textes' : 'Text editing language'}</strong>
+              <strong>{$t('meta_lang_editing')}</strong>
               {#if loadingRemote}
-                <span class="loading-pill">{isFrench ? 'Synchronisation…' : 'Syncing…'}</span>
+                <span class="loading-pill">{$t('meta_syncing')}</span>
               {/if}
             </div>
             <span class="lang-switcher-hint">
-              {isFrench
-                ? 'Le titre, le titre de tri, le slogan et le synopsis sont enregistrés par langue.'
-                : 'Title, sort title, tagline and synopsis are saved per language.'}
+              {$t('meta_lang_hint')}
             </span>
           </div>
 
@@ -412,7 +394,7 @@
               >
                 <span class="lang-code">{opt.code.toUpperCase()}</span>
                 {#if isDefault}
-                  <span class="lang-badge default">{isFrench ? 'Défaut' : 'Default'}</span>
+                  <span class="lang-badge default">{$t('meta_default_badge')}</span>
                 {:else if filled}
                   <span class="lang-dot" aria-hidden="true"></span>
                 {/if}
@@ -446,10 +428,12 @@
               </label>
 
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Langue d’origine' : 'Original language'}</span>
+                <span class="field-label">{$t('meta_original_language')}</span>
                 <select bind:value={draft.originalLanguage}>
                   {#each ORIGINAL_LANGUAGE_OPTIONS as lang (lang.code)}
-                    <option value={lang.code}>{isFrench ? lang.labelFr : lang.labelEn}</option>
+                    <option value={lang.code}>
+                      {lang.code === '' ? $t('meta_lang_not_set') : `${$fmt.language(lang.code)} (${lang.code})`}
+                    </option>
                   {/each}
                   {#if draft.originalLanguage && !ORIGINAL_LANGUAGE_OPTIONS.some(l => l.code === draft.originalLanguage)}
                     <option value={draft.originalLanguage}>{draft.originalLanguage}</option>
@@ -461,7 +445,7 @@
             <div class="field-block">
               <div class="field-label-row">
                 <span class="field-label">
-                  {isFrench ? 'Titre de tri' : 'Sort title'}
+                  {$t('meta_sort_title')}
                   <span class="locale-tag">{draft.activeLocale.toUpperCase()}</span>
                 </span>
                 <button
@@ -472,7 +456,7 @@
                     syncActiveLocaleTranslation(draft);
                   }}
                 >
-                  {isFrench ? 'Générer depuis le titre' : 'Generate from title'}
+                  {$t('meta_generate_from_title')}
                 </button>
               </div>
               <input
@@ -484,12 +468,12 @@
 
             <div class="fields-row three-cols">
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Date d’ajout' : 'Date added'}</span>
+                <span class="field-label">{$t('meta_date_added')}</span>
                 <input type="date" bind:value={draft.addedAtDate} />
               </label>
 
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Date de sortie' : 'Release date'}</span>
+                <span class="field-label">{$t('meta_date_released')}</span>
                 <input type="date" bind:value={draft.premieredDate} />
               </label>
 
@@ -501,7 +485,7 @@
 
             <div class="fields-row two-cols">
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Note de la communauté' : 'Community rating'}</span>
+                <span class="field-label">{$t('meta_community_rating')}</span>
                 <input
                   type="number"
                   step="0.001"
@@ -513,7 +497,7 @@
               </label>
 
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Note des critiques' : 'Critic rating'}</span>
+                <span class="field-label">{$t('meta_critic_rating')}</span>
                 <input
                   type="number"
                   step="0.1"
@@ -527,10 +511,10 @@
 
             <div class="fields-row two-cols">
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Classification parentale' : 'Parental rating'}</span>
+                <span class="field-label">{$t('meta_parental_rating')}</span>
                 <select bind:value={draft.mpaa}>
                   {#each PARENTAL_RATING_OPTIONS as opt (opt)}
-                    <option value={opt}>{opt || (isFrench ? 'Non classé' : 'Unrated')}</option>
+                    <option value={opt}>{opt || $t('meta_unrated')}</option>
                   {/each}
                   {#if draft.mpaa && !PARENTAL_RATING_OPTIONS.includes(draft.mpaa)}
                     <option value={draft.mpaa}>{draft.mpaa}</option>
@@ -539,10 +523,16 @@
               </label>
 
               <label class="field-block">
-                <span class="field-label">{isFrench ? 'Note personnalisée (âge minimum)' : 'Custom rating (minimum age)'}</span>
+                <span class="field-label">{$t('meta_custom_rating')}</span>
                 <select bind:value={draft.minimumAge}>
                   {#each CUSTOM_AGE_OPTIONS as opt (opt.value)}
-                    <option value={opt.value}>{isFrench ? opt.labelFr : opt.labelEn}</option>
+                    <option value={opt.value}>
+                      {opt.value === ''
+                        ? $t('meta_age_inherit')
+                        : opt.value === '0'
+                          ? $t('meta_age_all')
+                          : $t('meta_age_plus', { age: opt.value })}
+                    </option>
                   {/each}
                 </select>
               </label>
@@ -550,7 +540,7 @@
 
             <label class="field-block">
               <span class="field-label">
-                {isFrench ? 'Slogan' : 'Tagline'}
+                {$t('meta_tagline')}
                 <span class="locale-tag">{draft.activeLocale.toUpperCase()}</span>
               </span>
               <input
@@ -562,7 +552,7 @@
 
             <label class="field-block">
               <span class="field-label">
-                {isFrench ? 'Synopsis' : 'Overview'}
+                {$t('description_synopsis')}
                 <span class="locale-tag">{draft.activeLocale.toUpperCase()}</span>
               </span>
               <textarea
@@ -579,12 +569,12 @@
           <!-- Screenshot 2 & 3: External Identifiers -->
           <section class="editor-section">
             <div class="section-head">
-              <h4>{isFrench ? 'Identifiants externes' : 'External IDs'}</h4>
+              <h4>{$t('meta_external_ids')}</h4>
               <button
                 type="button"
                 class="add-circle-btn"
-                title={isFrench ? 'Ajouter un identifiant externe' : 'Add external ID'}
-                aria-label={isFrench ? 'Ajouter un identifiant externe' : 'Add external ID'}
+                title={$t('meta_add_external_id')}
+                aria-label={$t('meta_add_external_id')}
                 onclick={() => (showAddExtraId = !showAddExtraId)}
               >
                 +
@@ -593,7 +583,7 @@
 
             <div class="fields-row two-cols">
               <label class="field-block">
-                <span class="field-label">ID IMDb</span>
+                <span class="field-label">{$t('meta_imdb_id')}</span>
                 <input maxlength="64" placeholder="tt35856133" bind:value={draft.imdbId} />
               </label>
 
@@ -609,7 +599,7 @@
 
               {#if work.kind === 'film'}
                 <label class="field-block">
-                  <span class="field-label">{isFrench ? 'ID TheMovieDb Coffret' : 'TheMovieDb Collection ID'}</span>
+                  <span class="field-label">{$t('meta_tmdb_collection_id')}</span>
                   <input maxlength="64" placeholder="1165374" bind:value={draft.collectionId} />
                 </label>
               {/if}
@@ -617,7 +607,7 @@
 
             {#if work.kind === 'film' && draft.collectionId.trim()}
               <label class="field-block top-gap">
-                <span class="field-label">{isFrench ? 'Nom du coffret / saga' : 'Collection name'}</span>
+                <span class="field-label">{$t('meta_collection_name')}</span>
                 <input maxlength="256" bind:value={draft.collectionName} />
               </label>
             {/if}
@@ -636,7 +626,7 @@
                     <button
                       type="button"
                       class="trash-btn"
-                      aria-label={isFrench ? `Supprimer ${item.key}` : `Remove ${item.key}`}
+                      aria-label={$t('meta_remove_item', { name: item.key })}
                       onclick={() => removeExtraExternalId(idx)}
                     >
                       <Icon name="trash" size={16} />
@@ -649,15 +639,15 @@
             {#if showAddExtraId}
               <div class="inline-add-box top-gap">
                 <input
-                  placeholder={isFrench ? 'Clé (ex. anilist, trakt)' : 'Key (e.g. anilist, trakt)'}
+                  placeholder={$t('meta_key_placeholder')}
                   bind:value={newExtraIdKey}
                 />
                 <input
-                  placeholder={isFrench ? 'Valeur / ID' : 'Value / ID'}
+                  placeholder={$t('meta_value_placeholder')}
                   bind:value={newExtraIdValue}
                 />
                 <button type="button" class="btn small primary-btn" onclick={addExtraExternalId}>
-                  {isFrench ? 'Ajouter' : 'Add'}
+                  {$t('meta_add_button')}
                 </button>
               </div>
             {/if}
@@ -668,12 +658,12 @@
           <!-- Screenshot 3: Genres -->
           <section class="editor-section">
             <div class="section-head">
-              <h4>{isFrench ? 'Genres' : 'Genres'}</h4>
+              <h4>{$t('meta_genres_title')}</h4>
               <button
                 type="button"
                 class="add-circle-btn"
-                title={isFrench ? 'Ajouter un genre' : 'Add genre'}
-                aria-label={isFrench ? 'Ajouter un genre' : 'Add genre'}
+                title={$t('meta_add_genre')}
+                aria-label={$t('meta_add_genre')}
                 onclick={() => (showAddGenre = !showAddGenre)}
               >
                 +
@@ -683,7 +673,7 @@
             {#if showAddGenre}
               <div class="inline-add-box">
                 <input
-                  placeholder={isFrench ? 'Nouveau genre (ex. Drama, History, War)' : 'New genre (e.g. Drama, Sci-Fi)'}
+                  placeholder={$t('action_adventure_drama')}
                   bind:value={newGenre}
                   onkeydown={e => {
                     if (e.key === 'Enter') {
@@ -693,7 +683,7 @@
                   }}
                 />
                 <button type="button" class="btn small primary-btn" onclick={addGenre}>
-                  {isFrench ? 'Ajouter' : 'Add'}
+                  {$t('meta_add_button')}
                 </button>
               </div>
             {/if}
@@ -708,14 +698,14 @@
                   <button
                     type="button"
                     class="trash-btn"
-                    aria-label={isFrench ? `Supprimer ${genre}` : `Remove ${genre}`}
+                    aria-label={$t('meta_remove_item', { name: genre })}
                     onclick={() => removeGenre(idx)}
                   >
                     <Icon name="trash" size={16} />
                   </button>
                 </div>
               {:else}
-                <p class="empty-list-hint">{isFrench ? 'Aucun genre défini.' : 'No genres set.'}</p>
+                <p class="empty-list-hint">{$t('meta_no_genres')}</p>
               {/each}
             </div>
           </section>
@@ -725,12 +715,12 @@
           <!-- Screenshot 3: Personnes -->
           <section class="editor-section">
             <div class="section-head">
-              <h4>{isFrench ? 'Personnes' : 'People'}</h4>
+              <h4>{$t('meta_people_title')}</h4>
               <button
                 type="button"
                 class="add-circle-btn"
-                title={isFrench ? 'Ajouter une personne' : 'Add person'}
-                aria-label={isFrench ? 'Ajouter une personne' : 'Add person'}
+                title={$t('meta_add_person')}
+                aria-label={$t('meta_add_person')}
                 onclick={() => (showAddPerson = !showAddPerson)}
               >
                 +
@@ -740,20 +730,20 @@
             {#if showAddPerson}
               <div class="inline-add-box person-add-box">
                 <input
-                  placeholder={isFrench ? 'Nom (ex. Simon Abkarian)' : 'Name'}
+                  placeholder={$t('meta_person_name_placeholder')}
                   bind:value={newPersonName}
                 />
                 <input
-                  placeholder={isFrench ? 'Rôle / Personnage (ex. Charles de Gaulle)' : 'Role / Character'}
+                  placeholder={$t('meta_person_role_placeholder')}
                   bind:value={newPersonRole}
                 />
                 <select bind:value={newPersonType}>
-                  <option value="actor">{isFrench ? 'Acteur' : 'Actor'}</option>
-                  <option value="director">{isFrench ? 'Réalisateur' : 'Director'}</option>
-                  <option value="writer">{isFrench ? 'Scénariste' : 'Writer'}</option>
+                  <option value="actor">{$t('meta_actor')}</option>
+                  <option value="director">{$t('meta_director')}</option>
+                  <option value="writer">{$t('meta_writer')}</option>
                 </select>
                 <button type="button" class="btn small primary-btn" onclick={addPerson}>
-                  {isFrench ? 'Ajouter' : 'Add'}
+                  {$t('meta_add_button')}
                 </button>
               </div>
             {/if}
@@ -782,14 +772,14 @@
                   <button
                     type="button"
                     class="trash-btn"
-                    aria-label={isFrench ? `Supprimer ${person.name}` : `Remove ${person.name}`}
+                    aria-label={$t('meta_remove_item', { name: person.name })}
                     onclick={() => removePerson(idx)}
                   >
                     <Icon name="trash" size={16} />
                   </button>
                 </div>
               {:else}
-                <p class="empty-list-hint">{isFrench ? 'Aucune personne enregistrée.' : 'No people listed.'}</p>
+                <p class="empty-list-hint">{$t('meta_no_people')}</p>
               {/each}
             </div>
           </section>
@@ -801,11 +791,11 @@
             <!-- Pays de production -->
             <section class="editor-section">
               <div class="section-head">
-                <h4>{isFrench ? 'Pays de production' : 'Countries'}</h4>
+                <h4>{$t('meta_countries_title')}</h4>
                 <button
                   type="button"
                   class="add-circle-btn"
-                  aria-label={isFrench ? 'Ajouter un pays' : 'Add country'}
+                  aria-label={$t('meta_add_country')} title={$t('meta_add_country')}
                   onclick={() => (showAddCountry = !showAddCountry)}
                 >
                   +
@@ -815,7 +805,7 @@
               {#if showAddCountry}
                 <div class="inline-add-box compact">
                   <input
-                    placeholder="France, US…"
+                    placeholder={$t('meta_country_placeholder')}
                     bind:value={newCountry}
                     onkeydown={e => {
                       if (e.key === 'Enter') {
@@ -835,14 +825,14 @@
                     <button
                       type="button"
                       class="trash-btn"
-                      aria-label={isFrench ? `Supprimer ${country}` : `Remove ${country}`}
+                      aria-label={$t('meta_remove_item', { name: country })}
                       onclick={() => removeCountry(idx)}
                     >
                       <Icon name="trash" size={15} />
                     </button>
                   </div>
                 {:else}
-                  <p class="empty-list-hint">{isFrench ? 'Aucun pays' : 'No countries'}</p>
+                  <p class="empty-list-hint">{$t('meta_no_countries')}</p>
                 {/each}
               </div>
             </section>
@@ -850,11 +840,11 @@
             <!-- Studios -->
             <section class="editor-section">
               <div class="section-head">
-                <h4>{isFrench ? 'Studios' : 'Studios'}</h4>
+                <h4>{$t('meta_studios_title')}</h4>
                 <button
                   type="button"
                   class="add-circle-btn"
-                  aria-label={isFrench ? 'Ajouter un studio' : 'Add studio'}
+                  aria-label={$t('meta_add_studio')} title={$t('meta_add_studio')}
                   onclick={() => (showAddStudio = !showAddStudio)}
                 >
                   +
@@ -864,7 +854,7 @@
               {#if showAddStudio}
                 <div class="inline-add-box compact">
                   <input
-                    placeholder="Pathé…"
+                    placeholder={$t('meta_studio_placeholder')}
                     bind:value={newStudio}
                     onkeydown={e => {
                       if (e.key === 'Enter') {
@@ -884,14 +874,14 @@
                     <button
                       type="button"
                       class="trash-btn"
-                      aria-label={isFrench ? `Supprimer ${studio}` : `Remove ${studio}`}
+                      aria-label={$t('meta_remove_item', { name: studio })}
                       onclick={() => removeStudio(idx)}
                     >
                       <Icon name="trash" size={15} />
                     </button>
                   </div>
                 {:else}
-                  <p class="empty-list-hint">{isFrench ? 'Aucun studio' : 'No studios'}</p>
+                  <p class="empty-list-hint">{$t('meta_no_studios')}</p>
                 {/each}
               </div>
             </section>
@@ -899,11 +889,11 @@
             <!-- Étiquettes -->
             <section class="editor-section">
               <div class="section-head">
-                <h4>{isFrench ? 'Étiquettes' : 'Tags'}</h4>
+                <h4>{$t('meta_tags_title')}</h4>
                 <button
                   type="button"
                   class="add-circle-btn"
-                  aria-label={isFrench ? 'Ajouter une étiquette' : 'Add tag'}
+                  aria-label={$t('meta_add_tag')} title={$t('meta_add_tag')}
                   onclick={() => (showAddTag = !showAddTag)}
                 >
                   +
@@ -913,7 +903,7 @@
               {#if showAddTag}
                 <div class="inline-add-box compact">
                   <input
-                    placeholder="4k, vf…"
+                    placeholder={$t('meta_tag_placeholder')}
                     bind:value={newTag}
                     onkeydown={e => {
                       if (e.key === 'Enter') {
@@ -933,14 +923,14 @@
                     <button
                       type="button"
                       class="trash-btn"
-                      aria-label={isFrench ? `Supprimer ${tag}` : `Remove ${tag}`}
+                      aria-label={$t('meta_remove_item', { name: tag })}
                       onclick={() => removeTag(idx)}
                     >
                       <Icon name="trash" size={15} />
                     </button>
                   </div>
                 {:else}
-                  <p class="empty-list-hint">{isFrench ? 'Aucune étiquette' : 'No tags'}</p>
+                  <p class="empty-list-hint">{$t('meta_no_tags')}</p>
                 {/each}
               </div>
             </section>
@@ -953,18 +943,14 @@
             <label class="checkbox-row master-lock">
               <input type="checkbox" bind:checked={draft.locked} />
               <span>
-                {isFrench
-                  ? 'Verrouiller cet élément pour éviter de futures modifications automatiques'
-                  : 'Lock this item to prevent future automatic changes'}
+                {$t('meta_lock_item')}
               </span>
             </label>
 
             <div class="lock-fields-block">
-              <h4>{isFrench ? 'Activer les champs' : 'Enabled fields'}</h4>
+              <h4>{$t('meta_enabled_fields')}</h4>
               <p class="lock-hint">
-                {isFrench
-                  ? 'Décocher un champ pour le verrouiller et empêcher ses données d’être modifiées.'
-                  : 'Uncheck a field to lock it and prevent its data from being overwritten.'}
+                {$t('meta_enabled_fields_hint')}
               </p>
 
               <div class="lock-checkboxes-grid">
@@ -1112,16 +1098,10 @@
           disabled={busy}
           onclick={handleReset}
         >
-          {isFrench ? 'Réinitialiser' : 'Reset'}
+          {$t('revert_to_scan_metadata')}
         </button>
         <button type="submit" class="btn primary-btn" disabled={busy}>
-          {busy
-            ? isFrench
-              ? 'Sauvegarde…'
-              : 'Saving…'
-            : isFrench
-              ? 'Sauvegarder'
-              : 'Save'}
+          {busy ? $t('meta_save_saving') : $t('meta_save_button')}
         </button>
       </div>
     </form>

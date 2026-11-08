@@ -128,10 +128,9 @@ pub(super) async fn search(
     } else if !explicit_provider.is_empty() {
         Some(explicit_provider.to_owned())
     } else {
-        let preferred =
-            crate::library_options::LibraryOptions::default_metadata_provider_for_kind(
-                &context.kind,
-            );
+        let preferred = crate::library_options::LibraryOptions::default_metadata_provider_for_kind(
+            &context.kind,
+        );
         preferred
             .filter(|pref| permitted_rows.iter().any(|(id, _)| id == pref))
             .map(str::to_owned)

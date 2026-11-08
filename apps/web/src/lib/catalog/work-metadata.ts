@@ -170,40 +170,40 @@ export const LOCKABLE_METADATA_FIELDS = [
 
 export type LockableMetadataField = (typeof LOCKABLE_METADATA_FIELDS)[number];
 
-export const METADATA_LANGUAGE_OPTIONS: { code: string; label: string }[] = [
-  { code: 'fr', label: 'Français (fr)' },
-  { code: 'fr-ca', label: 'Français — Canada (fr-CA)' },
-  { code: 'en', label: 'English (en)' },
-  { code: 'de', label: 'Deutsch (de)' },
-  { code: 'es', label: 'Español (es)' },
-  { code: 'it', label: 'Italiano (it)' },
-  { code: 'pt', label: 'Português (pt)' },
-  { code: 'ja', label: '日本語 (ja)' },
-  { code: 'ko', label: '한국어 (ko)' },
-  { code: 'zh', label: '中文 (zh)' }
+export const METADATA_LANGUAGE_OPTIONS: { code: string }[] = [
+  { code: 'fr' },
+  { code: 'fr-ca' },
+  { code: 'en' },
+  { code: 'de' },
+  { code: 'es' },
+  { code: 'it' },
+  { code: 'pt' },
+  { code: 'ja' },
+  { code: 'ko' },
+  { code: 'zh' }
 ];
 
-export const ORIGINAL_LANGUAGE_OPTIONS: { code: string; labelFr: string; labelEn: string }[] = [
-  { code: '', labelFr: 'Non définie', labelEn: 'Not set' },
-  { code: 'fr', labelFr: 'Français (fr)', labelEn: 'French (fr)' },
-  { code: 'en', labelFr: 'Anglais (en)', labelEn: 'English (en)' },
-  { code: 'ja', labelFr: 'Japonais (ja)', labelEn: 'Japanese (ja)' },
-  { code: 'ko', labelFr: 'Coréen (ko)', labelEn: 'Korean (ko)' },
-  { code: 'es', labelFr: 'Espagnol (es)', labelEn: 'Spanish (es)' },
-  { code: 'de', labelFr: 'Allemand (de)', labelEn: 'German (de)' },
-  { code: 'it', labelFr: 'Italien (it)', labelEn: 'Italian (it)' },
-  { code: 'pt', labelFr: 'Portugais (pt)', labelEn: 'Portuguese (pt)' },
-  { code: 'zh', labelFr: 'Chinois (zh)', labelEn: 'Chinese (zh)' },
-  { code: 'ru', labelFr: 'Russe (ru)', labelEn: 'Russian (ru)' },
-  { code: 'ar', labelFr: 'Arabe (ar)', labelEn: 'Arabic (ar)' },
-  { code: 'hi', labelFr: 'Hindi (hi)', labelEn: 'Hindi (hi)' },
-  { code: 'nl', labelFr: 'Néerlandais (nl)', labelEn: 'Dutch (nl)' },
-  { code: 'pl', labelFr: 'Polonais (pl)', labelEn: 'Polish (pl)' },
-  { code: 'sv', labelFr: 'Suédois (sv)', labelEn: 'Swedish (sv)' },
-  { code: 'da', labelFr: 'Danois (da)', labelEn: 'Danish (da)' },
-  { code: 'no', labelFr: 'Norvégien (no)', labelEn: 'Norwegian (no)' },
-  { code: 'fi', labelFr: 'Finnois (fi)', labelEn: 'Finnish (fi)' },
-  { code: 'tr', labelFr: 'Turc (tr)', labelEn: 'Turkish (tr)' }
+export const ORIGINAL_LANGUAGE_OPTIONS: { code: string }[] = [
+  { code: '' },
+  { code: 'fr' },
+  { code: 'en' },
+  { code: 'ja' },
+  { code: 'ko' },
+  { code: 'es' },
+  { code: 'de' },
+  { code: 'it' },
+  { code: 'pt' },
+  { code: 'zh' },
+  { code: 'ru' },
+  { code: 'ar' },
+  { code: 'hi' },
+  { code: 'nl' },
+  { code: 'pl' },
+  { code: 'sv' },
+  { code: 'da' },
+  { code: 'no' },
+  { code: 'fi' },
+  { code: 'tr' }
 ];
 
 export const PARENTAL_RATING_OPTIONS: string[] = [
@@ -224,27 +224,23 @@ export const PARENTAL_RATING_OPTIONS: string[] = [
   'TV-PG',
   'TV-14',
   'TV-MA',
-  'FSK 0',
-  'FSK 6',
-  'FSK 12',
-  'FSK 16',
-  'FSK 18'
+  ...['0', '6', '12', '16', '18'].map(n => 'FSK ' + n)
 ];
 
-export const CUSTOM_AGE_OPTIONS: { value: string; labelFr: string; labelEn: string }[] = [
-  { value: '', labelFr: 'Hériter / Non défini', labelEn: 'Inherit / Unset' },
-  { value: '0', labelFr: 'Tous publics (0+)', labelEn: 'All ages (0+)' },
-  { value: '6', labelFr: '6 ans et +', labelEn: '6+' },
-  { value: '7', labelFr: '7 ans et +', labelEn: '7+' },
-  { value: '10', labelFr: '10 ans et +', labelEn: '10+' },
-  { value: '12', labelFr: '12 ans et +', labelEn: '12+' },
-  { value: '13', labelFr: '13 ans et +', labelEn: '13+' },
-  { value: '14', labelFr: '14 ans et +', labelEn: '14+' },
-  { value: '15', labelFr: '15 ans et +', labelEn: '15+' },
-  { value: '16', labelFr: '16 ans et +', labelEn: '16+' },
-  { value: '17', labelFr: '17 ans et +', labelEn: '17+' },
-  { value: '18', labelFr: '18 ans et +', labelEn: '18+' },
-  { value: '21', labelFr: '21 ans et +', labelEn: '21+' }
+export const CUSTOM_AGE_OPTIONS: { value: string }[] = [
+  { value: '' },
+  { value: '0' },
+  { value: '6' },
+  { value: '7' },
+  { value: '10' },
+  { value: '12' },
+  { value: '13' },
+  { value: '14' },
+  { value: '15' },
+  { value: '16' },
+  { value: '17' },
+  { value: '18' },
+  { value: '21' }
 ];
 
 export function cleanPlaceholderPlot(raw?: string | null): string {

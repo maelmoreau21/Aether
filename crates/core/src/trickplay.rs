@@ -71,10 +71,7 @@ pub(crate) async fn queue_scanned_assets(
                 {
                     String::new()
                 } else {
-                    format!(
-                        ":{}x{}",
-                        options.trickplay_columns, options.trickplay_rows
-                    )
+                    format!(":{}x{}", options.trickplay_columns, options.trickplay_rows)
                 };
                 let key = format!(
                     "trickplay:{:x}",

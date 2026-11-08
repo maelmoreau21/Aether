@@ -17,6 +17,15 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 8 novembre 2026 — Correction des échecs CI (compilation Rust, rustfmt, et Vitest i18n)
+
+- Rust compilation (`crates/core/src/library_options.rs`) : ajout de la méthode associée `LibraryOptions::from_json(&str) -> Self` avec test unitaire, résolvant l'erreur `E0599` dans `crates/core/src/product.rs:486`.
+- Rustfmt (`crates/core/src/extensions/identify.rs`, `server_settings.rs`, `trickplay.rs`) : réalignement des retours à la ligne et fermetures de blocs pour satisfaire `cargo fmt --check`.
+- Vitest i18n (`MetadataEditorModal.svelte`, `work-metadata.ts`, `WorkDetails.svelte`, `locales/{fr,en}/catalog.ts`) :
+  - Élimination des 96 littéraux en dur dans `MetadataEditorModal.svelte`, 56 dans `work-metadata.ts` et 1 dans `WorkDetails.svelte` en déplaçant toutes les chaînes d'interface dans les catalogues bilingues (`$t('meta_*')`, `detail_*`) et en utilisant `$fmt.language(...)` pour les sélecteurs de langue.
+  - Nettoyage des clés orphelines de l'ancien formulaire textarea et synchronisation stricte des clés et paramètres d'interpolation entre `fr/catalog.ts` et `en/catalog.ts`.
+- Vérifié : `git diff --check` (0 erreur), script de vérification miroir de `completeness.test.ts` (0 clé orpheline, 0 clé manquante, 0 caractère accentué en anglais, 0 incohérence de placeholders) et vérification d'absence de phrases en dur sur tous les composants modifiés.
+
 ## 8 novembre 2026 — Fournisseurs par défaut (TVDB séries/animés, TMDB films) et éditeur de métadonnées multi-langue
 
 - Fournisseurs par défaut selon le type de média (`library_options.rs`, `automation.rs`,

@@ -234,11 +234,11 @@ fn write_file(at: u64, level: Level, message: &str) {
             prune(&sink.directory);
         }
     }
-    if let Some(file) = sink.file.as_mut() {
-        if writeln!(file, "{stamp} {:<5} {message}", level.tag()).is_err() {
-            // Reopen on the next line (rotated, deleted or full disk).
-            sink.file = None;
-        }
+    if let Some(file) = sink.file.as_mut()
+        && writeln!(file, "{stamp} {:<5} {message}", level.tag()).is_err()
+    {
+        // Reopen on the next line (rotated, deleted or full disk).
+        sink.file = None;
     }
 }
 
@@ -289,12 +289,12 @@ fn day_of(name: &str) -> &str {
 }
 
 fn prune(directory: &DiskPath) {
-    let keep_days = i64::from(retention_days());
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as u64);
     // Today counts as one day: a retention of 1 keeps only today's file.
-    let (cutoff, _) = timestamp(now_ms.saturating_sub((keep_days as u64 - 1) * 86_400_000));
+    let (cutoff, _) =
+        timestamp(now_ms.saturating_sub(u64::from(retention_days()).saturating_sub(1) * 86_400_000));
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };
@@ -402,14 +402,12 @@ fn redact(line: &str) -> String {
     }
     out.push_str(rest);
     // `scheme://user:password@host` credentials.
-    if let Some(scheme) = out.find("://") {
-        if let Some(at) = out[scheme + 3..].find('@').map(|i| i + scheme + 3) {
-            if let Some(colon) = out[scheme + 3..at].find(':').map(|i| i + scheme + 3) {
-                if !out[scheme + 3..at].contains(char::is_whitespace) {
-                    out.replace_range(colon + 1..at, "***");
-                }
-            }
-        }
+    if let Some(scheme) = out.find("://")
+        && let Some(at) = out[scheme + 3..].find('@').map(|i| i + scheme + 3)
+        && let Some(colon) = out[scheme + 3..at].find(':').map(|i| i + scheme + 3)
+        && !out[scheme + 3..at].contains(char::is_whitespace)
+    {
+        out.replace_range(colon + 1..at, "***");
     }
     out
 }

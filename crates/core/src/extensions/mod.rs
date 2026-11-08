@@ -74,7 +74,7 @@ use package::*;
 use run::*;
 use settings::*;
 
-pub(crate) use automated::{UNIDENTIFIED_ERROR, run_automated};
+pub(crate) use automated::{MARKER_CHAPTERS_MAX, UNIDENTIFIED_ERROR, run_automated};
 pub use install::install_internal_with_key;
 pub use matching::trusted_music_candidate;
 pub use package::validate_package;

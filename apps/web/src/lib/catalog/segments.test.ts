@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { copySegment, effectiveSegment, formatClock, parseClock, seasonSummary, segmentProblem, type SegmentEpisode } from './segments';
+import {
+  analysisState, analysisSteps, copySegment, effectiveSegment, formatClock,
+  nearestChapter, parseClock, seasonSummary, segmentProblem, snapBound,
+  suggestedSegment, type SegmentEpisode
+} from './segments';
 
 const episode = (patch: Partial<SegmentEpisode> = {}): SegmentEpisode => ({
   assetId: 'a', workId: 'w', episodeNumber: 1, title: 'Pilot', duration: 1400, minConfidence: 0.8, detectionEnabled: true,
@@ -46,8 +50,24 @@ describe('segment validation and copies', () => {
     expect(segmentProblem(10, 5, 100)).toBe('segment_end_before_start');
     expect(segmentProblem(10, 120, 100)).toBe('segment_beyond_duration');
     expect(segmentProblem(0, 700, 1000)).toBe('segment_too_long');
+    expect(segmentProblem(0, 700, 2000, 'credits')).toBeNull();
+    expect(segmentProblem(0, 1300, 2000, 'credits')).toBe('segment_too_long_credits');
     expect(segmentProblem(null, 10, 100)).toBe('segment_invalid_time');
     expect(segmentProblem(30, 120, 1400)).toBeNull();
+  });
+  it('snaps bounds to nearby chapters and surfaces weak suggestions', () => {
+    const chapters = [{ start: 30, title: 'Opening' }, { start: 120, title: 'Part A' }];
+    expect(nearestChapter(chapters, 31.2, 3)?.title).toBe('Opening');
+    expect(snapBound(chapters, 118.4, 3)).toBe(120);
+    expect(snapBound(chapters, 110, 3)).toBe(110);
+    const weak = { type: 'intro' as const, start: 30, end: 120, confidence: 0.72, extensionId: 'intro-skipper', updatedAt: 1, usable: false };
+    expect(suggestedSegment(episode({ automatic: [weak] }), 'intro')).toEqual({ start: 30, end: 120 });
+  });
+  it('distinguishes film and episode analysis steps', () => {
+    const film = episode({ chapterReading: { status: 'completed', error: null, updatedAt: 1 }, fingerprint: { status: 'missing', error: null, updatedAt: null }, detection: { status: 'missing', error: null, updatedAt: null } });
+    expect(analysisState(film, 'film').label).toBe('segment_status_analysed');
+    expect(analysisSteps(film, 'film')).toHaveLength(1);
+    expect(analysisSteps(episode(), 'episode')).toHaveLength(3);
   });
   it('keeps credits anchored to the end of each file', () => {
     expect(copySegment('credits', 1300, 1390, 1400, 1450)).toEqual({ start: 1350, end: 1440 });

@@ -17,6 +17,19 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 8 novembre 2026 — Fusion chapitres/audio Intro Skipper, ré-extraction des empreintes tronquées et éditeur de segments films/épisodes
+
+- Plugin `intro-skipper` (`Aether-Plugins-IntroSkipper/src/chapters.rs`, `src/lib.rs`, `tests/chapter_fusion_tests.rs`, `tests/intro_skipper_tests.rs`) :
+  - Détection par structure sur les chapitres génériques d’animé (`Chapter 1..N`) sans titres nommés (`detect_unnamed_structure`, confiance `0.72`) et reconnaissance élargie des mots-clés multilingues (`opening`, `ending`, `crédits`, `générique`, `récap`, `aperçu`, `scène post-générique`).
+  - Fusion intelligente chapitres + empreintes audio (`fuse_detections`) : recalage sur les frontières de chapitre proches (`CHAPTER_SNAP_SECONDS = 8.0`), arbitrage des chevauchements et conservation de la source combinée (`chapter+audio`).
+- Core & Node (`crates/core/src/automation.rs`, `timeline_markers.rs`, `extensions/automated.rs`, `crates/node/src/tasks.rs`, `crates/core/tests/automation_flow.rs`, `docs/INTRO_SKIPPER.md`) :
+  - Clé de déduplication canonique `fingerprint_key(asset, source)` basée sur `asset_id + container + size_bytes + mtime_secs + duration_ms` et ré-extraction automatique des anciennes empreintes ne couvrant pas la fin de l’épisode (`tailless`, lorsque `duration > 360 s` et qu’aucune fenêtre ne dépasse `300 s`).
+  - Planification et relance bornées (`usable_fingerprint_peers`, `season_fingerprint_candidates`, `queue_fingerprint`, `redetect`) sans doublons ni avertissements `clippy`/`dead_code`.
+- Interface Web (`MediaSegments.svelte`, `SegmentEditor.svelte`, `SegmentEditPanel.svelte`, `SegmentSteps.svelte`, `SeriesDetail.svelte`, `segments.ts`, `segments.test.ts`, `locales/{fr,en}/catalog.ts`) :
+  - Prise en charge de la détection et de l’édition de segments sur les films (`scope="film"`) comme sur les séries (`scope="episode"`), suivi détaillé des étapes d’analyse (`SegmentSteps.svelte`), aimantation aux chapitres proches et copie/propagation inter-épisodes avec filtrage des durées incompatibles.
+  - Synchronisation complète des clés i18n `segment_*` (`fr` et `en`) et enrichissement des tests unitaires `segments.test.ts`.
+- Vérifié : `git diff --check` (0 erreur sur `Aether` et `Aether-Plugins`), vérification miroir de `completeness.test.ts` (0 clé inutilisée, 0 clé manquante, 0 incohérence de placeholders). Exécution complète de la CI GitHub Actions après push.
+
 ## 8 novembre 2026 — Correction des échecs CI (compilation Rust, rustfmt, et Vitest i18n)
 
 - Rust compilation (`crates/core/src/library_options.rs`) : ajout de la méthode associée `LibraryOptions::from_json(&str) -> Self` avec test unitaire, résolvant l'erreur `E0599` dans `crates/core/src/product.rs:486`.

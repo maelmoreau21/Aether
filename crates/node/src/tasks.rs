@@ -14,7 +14,7 @@ use tokio::io::AsyncReadExt;
 /// time by about 6 %: measured on `ffmpeg -f chromaprint` output of a repeated 60 s theme.
 pub const FINGERPRINT_RATE: f64 = 11025.0 / 1365.0;
 /// Audio decoded from the start of the file.
-const HEAD_SECONDS: f64 = 300.0;
+pub const HEAD_SECONDS: f64 = 300.0;
 /// The head and the tail each keep at most this many items.
 const HEAD_ITEMS: usize = 2500;
 const TAIL_ITEMS: usize = 1500;

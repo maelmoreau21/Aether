@@ -285,7 +285,15 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
         .execute(store.pool())
         .await
         .unwrap();
-    query("UPDATE inventory_works SET kind='episode'")
+    query("UPDATE inventory_works SET kind='episode',library_id='library-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE inventory_sources SET library_id='library-1'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE inventory_assets SET library_id='library-1'")
         .execute(store.pool())
         .await
         .unwrap();
@@ -299,13 +307,18 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
         let fingerprint = format!("source-{index}");
         query("INSERT INTO inventory_episodes(id,season_id,episode_number,work_id) VALUES(?,'season',?,?)")
             .bind(format!("episode-{index}")).bind(i64::from(index)).bind(format!("work-{index}")).execute(store.pool()).await.unwrap();
-        query("INSERT INTO automation_observations(asset_id,library_id,fingerprint,revision) VALUES(?,?,?,1)")
-            .bind(&asset).bind(format!("library-{index}")).bind(&fingerprint).execute(store.pool()).await.unwrap();
+        query("INSERT INTO automation_observations(asset_id,library_id,fingerprint,revision) VALUES(?,'library-1',?,1)")
+            .bind(&asset).bind(&fingerprint).execute(store.pool()).await.unwrap();
         let digest =
             Sha256::digest(serde_json::to_vec(&(&asset, &fingerprint, "chromaprint-v1")).unwrap());
         let key = format!("fp:{digest:x}");
-        query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,status,created_at,updated_at,available_at,finished_at) VALUES(?,?,'system',?,?,'analyze',?,'fingerprint','completed',1,1,1,1)")
-            .bind(format!("fingerprint-{index}")).bind(format!("library-{index}")).bind(key).bind(format!("node-{index}")).bind(&asset).execute(store.pool()).await.unwrap();
+        query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,status,created_at,updated_at,available_at,finished_at) VALUES(?,'library-1','system',?,'node-1','analyze',?,'fingerprint','completed',1,1,1,1)")
+            .bind(format!("fingerprint-{index}"))
+            .bind(key)
+            .bind(&asset)
+            .execute(store.pool())
+            .await
+            .unwrap();
     }
     let package = media_extension_sdk::Package {
         manifest: media_extension_sdk::Manifest {
@@ -324,9 +337,11 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
         .bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
     query("INSERT INTO extension_grants(extension_id,library_id) VALUES('fixture.markers','library-1')").execute(store.pool()).await.unwrap();
     automation::drain(&store, 100, 100).await.unwrap();
-    let detection: String = query_scalar("SELECT task_id FROM automation_task_links WHERE extension_id='fixture.markers' AND operation='intro.detect'").fetch_one(store.pool()).await.unwrap();
-    query("UPDATE durable_tasks SET status='completed',finished_at=100 WHERE id=?")
-        .bind(&detection)
+    let detection: String = query_scalar("SELECT l.task_id FROM automation_task_links l JOIN durable_tasks t ON t.id=l.task_id WHERE l.extension_id='fixture.markers' AND l.operation='intro.detect' AND t.target_id='asset-1'")
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE durable_tasks SET status='completed',finished_at=100 WHERE id IN (SELECT task_id FROM automation_task_links WHERE extension_id='fixture.markers' AND operation='intro.detect')")
         .execute(store.pool())
         .await
         .unwrap();
@@ -405,7 +420,7 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_eq!(detections, 1, "no duplicate or chapter-only task");
+    assert_eq!(detections, 2, "no duplicate or chapter-only task");
     let extractions: i64 =
         query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE component='fingerprint'")
             .fetch_one(store.pool())

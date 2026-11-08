@@ -1,23 +1,38 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { adminRequest } from '../admin/request';
   import { t } from '../i18n';
   import Icon from '../ui/Icon.svelte';
+  import MediaSegments from './MediaSegments.svelte';
   import SegmentEditPanel from './SegmentEditPanel.svelte';
+  import SegmentSteps from './SegmentSteps.svelte';
   import {
-    analysisState, effectiveSegment, formatClock, seasonSummary, segmentKinds,
+    SEASON_MARKERS_LIMIT, analysisActive, analysisState, effectiveSegment, formatClock, pollWhile, seasonSummary, segmentKinds,
     type SeasonSegments, type SegmentEpisode, type SegmentKind
   } from './segments';
 
-  let { seasonId, seasonTitle, focusWork = null }: { seasonId: string; seasonTitle: string; focusWork?: string | null } = $props();
+  let { seasonId, seasonTitle, focusWork = null, focusAsset = null, focusTitle = '' }: {
+    seasonId: string; seasonTitle: string;
+    /** Opened from an episode's shortcut: that episode (its work, and the file played). */
+    focusWork?: string | null; focusAsset?: string | null; focusTitle?: string;
+  } = $props();
 
   let data = $state<SeasonSegments | null>(null);
   let loading = $state(false), loadError = $state('');
   let notice = $state(''), actionError = $state('');
   let analysing = $state(false);
   let openAsset = $state<string | null>(null);
+  // Analysis of the open episode alone.
+  let rowAnalysing = $state(false), rowNotice = $state(''), rowError = $state('');
+  // The focused episode is unfolded once; when the season list does not include it (unavailable
+  // file, or past the list's limit), its own editor is shown instead.
+  let focusDone = false;
+  let focusMissing = $state(false);
+  let stopPolling: (() => void) | null = null;
 
   const kindLabel = (value: SegmentKind) => $t(`segment_kind_${value}`);
   const summary = $derived(data ? seasonSummary(data.episodes) : null);
+  const providerOn = $derived(data?.providers.some(provider => provider.enabled) ?? false);
 
   async function load() {
     const id = seasonId;
@@ -26,20 +41,37 @@
       const result = await adminRequest<SeasonSegments>(`/api/v1/admin/seasons/${encodeURIComponent(id)}/markers`);
       if (id === seasonId) {
         data = result;
-        // Opened from an episode: unfold that episode once.
-        const focused = focusWork ? result.episodes.find(item => item.workId === focusWork) : undefined;
-        if (focused && !openAsset) {
-          openAsset = focused.assetId;
-          requestAnimationFrame(() => document.getElementById(`segment-row-${focused.assetId}`)?.scrollIntoView({ block: 'center' }));
+        if (focusWork && !focusDone) {
+          focusDone = true;
+          const focused = result.episodes.find(item => item.workId === focusWork || item.assetId === focusAsset);
+          if (focused) {
+            openAsset = focused.assetId;
+            requestAnimationFrame(() => document.getElementById(`segment-row-${focused.assetId}`)?.scrollIntoView({ block: 'center' }));
+          } else focusMissing = true;
         }
       }
     } catch (cause) { loadError = cause instanceof Error ? cause.message : $t('segment_load_failed'); }
     finally { loading = false; }
   }
-  $effect(() => { void seasonId; data = null; openAsset = null; notice = ''; actionError = ''; void load(); });
+  function stopWatching() { stopPolling?.(); stopPolling = null; }
+  $effect(() => {
+    void seasonId;
+    untrack(() => { stopWatching(); data = null; openAsset = null; focusMissing = false; notice = ''; actionError = ''; rowNotice = ''; rowError = ''; void load(); });
+    return stopWatching;
+  });
+
+  // After an analysis request, refresh every few seconds while an episode's analysis waits or runs.
+  function watch() {
+    stopWatching();
+    stopPolling = pollWhile(async () => {
+      await load();
+      return data ? data.episodes.some(episode => analysisActive(episode)) : false;
+    });
+  }
 
   function open(episode: SegmentEpisode) {
     openAsset = openAsset === episode.assetId ? null : episode.assetId;
+    rowNotice = ''; rowError = '';
   }
   async function analyse() {
     if (analysing) return;
@@ -48,8 +80,21 @@
       const result = await adminRequest<{ episodesCount: number; tasksQueued: number }>(`/api/v1/admin/seasons/${encodeURIComponent(seasonId)}/analyze-markers`, { method: 'POST' });
       notice = $t('intro_analysis_queued', { episodes: result.episodesCount, queued: result.tasksQueued });
       await load();
+      watch();
     } catch (cause) { actionError = cause instanceof Error ? cause.message : $t('analysis_unavailable'); }
     finally { analysing = false; }
+  }
+  // Reads the episode's chapters again and fingerprints it (and peers still missing one).
+  async function analyseEpisode(episode: SegmentEpisode) {
+    if (rowAnalysing) return;
+    rowAnalysing = true; rowNotice = ''; rowError = '';
+    try {
+      await adminRequest(`/api/v1/admin/assets/${encodeURIComponent(episode.assetId)}/analyze-markers`, { method: 'POST' });
+      rowNotice = providerOn ? $t('segment_analysis_queued_episode') : $t('segment_analysis_no_provider');
+      await load();
+      watch();
+    } catch (cause) { rowError = cause instanceof Error ? cause.message : $t('analysis_unavailable'); }
+    finally { rowAnalysing = false; }
   }
   const pct = (value: number, duration: number | null) => duration ? `${Math.min(100, Math.max(0, value / duration * 100))}%` : '0%';
 </script>
@@ -83,6 +128,13 @@
   {#if actionError}<p class="banner err" role="alert">{actionError}</p>{/if}
   {#if loadError}<p class="banner err" role="alert">{loadError}</p>{/if}
   {#if loading && !data}<p role="status">{$t('segment_loading')}</p>{/if}
+  {#if data && data.episodes.length >= SEASON_MARKERS_LIMIT}
+    <p class="banner warn" role="status">{$t('segment_list_truncated', { count: SEASON_MARKERS_LIMIT })}</p>
+  {/if}
+  {#if focusMissing}
+    <p class="banner warn" role="status">{$t('segment_focus_not_listed')}</p>
+    {#if focusAsset}<div class="focus-media"><MediaSegments assetId={focusAsset} title={focusTitle} /></div>{/if}
+  {/if}
 
   {#if data}
     <ol class="seg-list">
@@ -119,7 +171,12 @@
 
           {#if expanded}
             <div class="editor-wrap">
-              {#if status.detail}<p class="banner err">{status.detail}</p>{/if}
+              <div class="row-status">
+                <SegmentSteps {episode} />
+                <button type="button" class="btn" disabled={rowAnalysing} onclick={() => analyseEpisode(episode)}><Icon name="search" size={15} />{rowAnalysing ? $t('analysing') : $t('segment_analyse_media')}</button>
+              </div>
+              {#if rowNotice}<p class="banner ok" role="status">{rowNotice}</p>{/if}
+              {#if rowError}<p class="banner err" role="alert">{rowError}</p>{/if}
               <SegmentEditPanel {episode} siblings={data.episodes} onChanged={load} />
             </div>
           {/if}
@@ -164,6 +221,8 @@
   .state { font-size: 12px; font-weight: 700; white-space: nowrap; }
   .state.ok { color: var(--ac); } .state.err { color: var(--err); } .state.wait { color: var(--tx); } .state.mute { color: var(--mu); }
   .editor-wrap { display: flex; flex-direction: column; gap: 12px; padding: 4px 16px 16px; }
+  .row-status { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 10px 16px; padding-bottom: 12px; border-bottom: 1px solid var(--line-2); }
+  .focus-media { padding: 14px 16px; border-radius: var(--r-md); background: var(--pn-2); }
   .caret { display: inline-flex; transition: transform var(--t-fast) ease; } .caret.up { transform: rotate(180deg); }
   .empty { padding: 24px; color: var(--mu); text-align: center; }
   @media (max-width: 760px) {

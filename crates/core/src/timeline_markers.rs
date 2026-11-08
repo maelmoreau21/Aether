@@ -453,9 +453,9 @@ async fn analyze_asset_markers(
     if asset.len() > 128 {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    type TargetRow = (String, String, String, String, Option<String>);
+    type TargetRow = (String, String, String, String);
     let row: Option<TargetRow> = query_as(
-        "SELECT a.library_id, l.node_id, obs.fingerprint, w.kind, ep.season_id \
+        "SELECT a.library_id, l.node_id, obs.fingerprint, w.kind \
          FROM inventory_assets a \
          JOIN inventory_sources s ON s.id=a.source_id \
          JOIN inventory_versions v ON v.id=s.version_id \
@@ -464,7 +464,6 @@ async fn analyze_asset_markers(
          JOIN libraries l ON l.id=a.library_id \
          JOIN media_nodes n ON n.id=l.node_id \
          JOIN automation_observations obs ON obs.asset_id=a.id \
-         LEFT JOIN inventory_episodes ep ON ep.work_id=w.id \
          WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
          AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))",
     )
@@ -472,7 +471,7 @@ async fn analyze_asset_markers(
     .fetch_optional(auth.store.pool())
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let Some((library, node, source, kind, season)) = row else {
+    let Some((library, node, source, kind)) = row else {
         return Err(StatusCode::NOT_FOUND);
     };
     if kind != "episode" && kind != "film" {
@@ -480,29 +479,23 @@ async fn analyze_asset_markers(
     }
     let mut queued = 0;
     if kind == "episode" {
-        let mut fingerprints = vec![(asset.clone(), library.clone(), node.clone(), source.clone())];
-        if let Some(season) = &season {
-            let peers: Vec<(String, String, String, String)> = query_as(
-                "SELECT a.id, a.library_id, l.node_id, obs.fingerprint \
-                 FROM inventory_episodes ep \
-                 JOIN inventory_editions ed ON ed.work_id=ep.work_id \
-                 JOIN inventory_versions v ON v.edition_id=ed.id \
-                 JOIN inventory_sources s ON s.version_id=v.id \
-                 JOIN inventory_assets a ON a.source_id=s.id \
-                 JOIN libraries l ON l.id=a.library_id \
-                 JOIN media_nodes n ON n.id=l.node_id \
-                 JOIN automation_observations obs ON obs.asset_id=a.id \
-                 WHERE ep.season_id=? AND a.id!=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
-                 AND NOT EXISTS(SELECT 1 FROM durable_tasks t WHERE t.target_id=a.id AND t.component='fingerprint' AND t.status IN ('completed','queued','running','paused')) LIMIT 64",
-            )
-            .bind(season)
-            .bind(&asset)
-            .bind(&library)
-            .fetch_all(auth.store.pool())
+        let mut conn = auth
+            .store
+            .pool()
+            .acquire()
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            fingerprints.extend(peers);
-        }
+        let mut tx = begin_write(&mut conn)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let peers = crate::automation::season_fingerprint_candidates(&mut tx, &asset, &library, 64)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        tx.commit()
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut fingerprints = vec![(asset.clone(), library.clone(), node.clone(), source.clone())];
+        fingerprints.extend(peers);
         queued = queue_episodes_fingerprints_with(&auth, &fingerprints, false).await?;
     }
     emit_chapter_reanalysis(&auth, &[(library.clone(), asset.clone(), source.clone())]).await?;
@@ -627,62 +620,51 @@ async fn queue_episodes_fingerprints_with(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let mut queued = 0;
-    for (asset_id, library_id, node_id, source_fp) in episodes {
-        let key = format!(
-            "fp:{}",
-            crate::automation::hash(&(&asset_id, &source_fp, "chromaprint-v1"))
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        );
-        let task_id = uuid::Uuid::new_v4().to_string();
-        let inserted = query(
-            "INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) \
-             VALUES(?,?,?,?,?,'analyze',?,'fingerprint',20,?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',failure_count=0,finished_at=NULL,updated_at=excluded.updated_at WHERE status IN ('error','cancelled')",
+    for (index, (asset_id, library_id, node_id, source_fp)) in episodes.iter().enumerate() {
+        let state = crate::automation::queue_fingerprint(
+            &mut tx,
+            &crate::automation::FingerprintRequest {
+                library: library_id,
+                node: node_id,
+                asset: asset_id,
+                source: source_fp,
+                reextract_tailless: reanalyze || index == 0,
+            },
+            now,
         )
-        .bind(&task_id)
-        .bind(library_id)
-        .bind("system")
-        .bind(&key)
-        .bind(node_id)
-        .bind(asset_id)
-        .bind(now)
-        .bind(now)
-        .bind(now)
-        .execute(&mut *tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-        if inserted.rows_affected() > 0 {
-            queued += 1;
-        }
-
-        // Emit an event to trigger immediate marker detection if fingerprint is ready
-        let completed: Option<String> = query_scalar(
-            "SELECT id FROM durable_tasks WHERE owner='system' AND idempotency_key=? AND target_id=? AND component='fingerprint' AND status='completed'",
-        )
-        .bind(&key)
-        .bind(asset_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-        if let Some(completed) = completed.filter(|_| reanalyze) {
-            // An explicit reanalysis must bypass the ordinary once-per-source
-            // event deduplication, while reusing the Node's completed extraction.
-            let event_key = format!("marker-reanalysis:{}", uuid::Uuid::new_v4());
-            crate::automation::emit(
-                &mut tx,
-                &crate::automation::EventInput {
-                    key: &event_key,
-                    kind: "manual",
-                    library_id,
-                    asset_id,
-                    fingerprint: source_fp,
-                    payload: &json!({"fingerprintTaskId": completed, "reanalyzeMarkers": true, "stale": false}),
-                },
-                now,
-            )
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        match state {
+            crate::automation::FingerprintState::Queued => {
+                queued += 1;
+            }
+            crate::automation::FingerprintState::Pending => {}
+            crate::automation::FingerprintState::Completed(completed) if reanalyze => {
+                // An explicit reanalysis must bypass the ordinary once-per-source
+                // event deduplication, while reusing the Node's completed extraction.
+                let event_key = format!("marker-reanalysis:{}", uuid::Uuid::new_v4());
+                let payload = json!({
+                    "fingerprintTaskId": completed,
+                    "reanalyzeMarkers": true,
+                    "stale": false,
+                });
+                crate::automation::emit(
+                    &mut tx,
+                    &crate::automation::EventInput {
+                        key: &event_key,
+                        kind: "manual",
+                        library_id,
+                        asset_id,
+                        fingerprint: source_fp,
+                        payload: &payload,
+                    },
+                    now,
+                )
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            }
+            crate::automation::FingerprintState::Completed(_) => {}
         }
     }
 

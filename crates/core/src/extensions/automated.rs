@@ -30,7 +30,7 @@ const MARKER_EPISODE_OVERHEAD: usize = 320;
 const MARKER_REQUEST_MARGIN: usize = 1024;
 
 /// Chapters sent with each episode of an acoustic detection (a typical file has 4 to 12).
-const MARKER_CHAPTERS_MAX: usize = 40;
+pub(crate) const MARKER_CHAPTERS_MAX: usize = 40;
 
 /// The chapters of an ffprobe result as the plugin reads them: start, end and title, sorted,
 /// at most `limit`. A chapter without a title is kept with an empty one: its boundaries still
@@ -278,10 +278,7 @@ pub(crate) async fn run_automated(
             if seen.contains(&episode_work) {
                 continue;
             }
-            let expected = format!(
-                "fp:{}",
-                crate::automation::hash(&(&asset, &source, "chromaprint-v1")).map_err(db)?
-            );
+            let expected = crate::automation::fingerprint_key(&asset, &source).map_err(db)?;
             if key != expected {
                 continue;
             }

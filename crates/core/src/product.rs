@@ -506,7 +506,8 @@ async fn get_metadata(
         }
     }
 
-    let tr_rows: Vec<(
+    /// locale, language, source, title, sort title, overview, tagline.
+    type TranslationRow = (
         String,
         String,
         String,
@@ -514,7 +515,8 @@ async fn get_metadata(
         Option<String>,
         Option<String>,
         Option<String>,
-    )> = query_as(
+    );
+    let tr_rows: Vec<TranslationRow> = query_as(
         "SELECT locale, language, source, title, sort_title, overview, tagline \
          FROM work_translations WHERE work_id = ? \
          ORDER BY priority DESC, CASE WHEN locale = language THEN 0 ELSE 1 END, locale ASC",

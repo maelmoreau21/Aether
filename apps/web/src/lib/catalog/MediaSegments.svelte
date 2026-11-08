@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { adminRequest } from '../admin/request';
   import { t } from '../i18n';
   import Icon from '../ui/Icon.svelte';
   import SegmentEditPanel from './SegmentEditPanel.svelte';
-  import { analysisState, formatClock, taskLabel, type AssetSegments, type TaskState } from './segments';
+  import SegmentSteps from './SegmentSteps.svelte';
+  import { analysisActive, analysisState, formatClock, pollWhile, type AssetSegments } from './segments';
 
   // Segments of one file (a film, or one episode): where its analysis stands, step by step,
   // and the editor to correct what was detected.
@@ -12,6 +14,7 @@
   let data = $state<AssetSegments | null>(null);
   let loading = $state(false), loadError = $state('');
   let analysing = $state(false), notice = $state(''), actionError = $state('');
+  let stopPolling: (() => void) | null = null;
 
   const film = $derived(data?.kind === 'film');
   const overall = $derived(data ? analysisState(data.asset, film) : null);
@@ -25,29 +28,35 @@
     } catch (cause) { loadError = cause instanceof Error ? cause.message : $t('segment_load_failed_media'); }
     finally { loading = false; }
   }
-  $effect(() => { void assetId; data = null; notice = ''; actionError = ''; void load(); });
+  function stopWatching() { stopPolling?.(); stopPolling = null; }
+  $effect(() => {
+    void assetId;
+    untrack(() => { stopWatching(); data = null; notice = ''; actionError = ''; void load(); });
+    return stopWatching;
+  });
+
+  // After an analysis request, refresh every few seconds while a step waits or runs.
+  function watch() {
+    stopWatching();
+    stopPolling = pollWhile(async () => {
+      await load();
+      return data ? analysisActive(data.asset, data.kind === 'film') : false;
+    });
+  }
 
   async function analyse() {
     if (analysing) return;
     analysing = true; notice = ''; actionError = '';
     try {
       await adminRequest(`/api/v1/admin/assets/${encodeURIComponent(assetId)}/analyze-markers`, { method: 'POST' });
-      notice = film ? $t('segment_analysis_queued_film') : $t('segment_analysis_queued_episode');
+      // Without an enabled detection extension, the chapters are not read again.
+      const providerOn = data?.providers.some(provider => provider.enabled) ?? false;
+      notice = !providerOn ? $t('segment_analysis_no_provider') : film ? $t('segment_analysis_queued_film') : $t('segment_analysis_queued_episode');
       await load();
+      watch();
     } catch (cause) { actionError = cause instanceof Error ? cause.message : $t('analysis_unavailable'); }
     finally { analysing = false; }
   }
-
-  type Step = { label: string; task: TaskState };
-  const steps = $derived<Step[]>(data ? [
-    { label: $t('segment_step_chapters', { count: data.asset.chapters.length }), task: data.asset.chapterReading ?? { status: 'missing', error: null, updatedAt: null } },
-    ...(film ? [] : [
-      { label: $t('segment_step_fingerprint'), task: data.asset.fingerprint },
-      { label: $t('segment_step_detection'), task: data.asset.detection }
-    ])
-  ] : []);
-  const tone = (status: string) => status === 'completed' ? 'ok' : status === 'error' ? 'err' : ['queued', 'running', 'paused'].includes(status) ? 'wait' : 'mute';
-  const when = (updatedAt: number | null) => updatedAt ? new Date(updatedAt * 1000).toLocaleString() : '';
 </script>
 
 <section class="media-segments" aria-labelledby="media-segments-title">
@@ -75,15 +84,7 @@
   {#if data && overall}
     <div class="status">
       <p class="overall {overall.tone}">{$t(overall.key)}{#if data.asset.duration} · {$t('segment_media_duration', { duration: formatClock(data.asset.duration) })}{/if}</p>
-      <ol class="steps">
-        {#each steps as step (step.label)}
-          <li class={tone(step.task.status)}>
-            <span class="step-label">{step.label}</span>
-            <span class="step-state">{$t(taskLabel(step.task.status))}{#if step.task.updatedAt} · {when(step.task.updatedAt)}{/if}</span>
-            {#if step.task.error}<span class="step-error">{step.task.error}</span>{/if}
-          </li>
-        {/each}
-      </ol>
+      <SegmentSteps episode={data.asset} {film} />
       {#if film}<p class="hint">{$t('segment_film_hint')}</p>{/if}
     </div>
     <div class="panel"><SegmentEditPanel episode={data.asset} {film} onChanged={load} /></div>
@@ -105,14 +106,7 @@
   .status, .panel { padding: 14px 16px; border-radius: var(--r-md); background: var(--pn); }
   .status { display: flex; flex-direction: column; gap: 10px; }
   .overall { margin: 0; font-weight: 800; }
-  .steps { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
-  .steps li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; padding-left: 12px; border-left: 3px solid var(--line-2); }
-  .steps li.ok { border-color: var(--ac); } .steps li.err { border-color: var(--err); } .steps li.wait { border-color: var(--tx); }
-  .step-label { font-weight: 700; color: var(--tx); }
-  .step-state { color: var(--mu); }
-  .step-error { flex-basis: 100%; color: var(--err); overflow-wrap: anywhere; }
   .ok { color: var(--ac); } .err { color: var(--err); } .mute { color: var(--mu); }
-  .steps li.ok, .steps li.err, .steps li.mute, .steps li.wait { color: inherit; }
   .hint { margin: 0; font-size: 13px; color: var(--mu); }
   @media (max-width: 760px) { .status, .panel { padding: 12px 10px; } }
 </style>

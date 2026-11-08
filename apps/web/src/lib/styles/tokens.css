@@ -3,9 +3,11 @@
    ci-dessous n'en sont que des alias, pour que tous les composants existants
    suivent le thème clair/sombre et l'accent sans valeurs en dur.
    Nouveau code : utiliser directement les jetons Halo (--bg, --tx, --ac, --r-md…).
-   Redéclarés sur le lecteur pour qu'il suive ses jetons sombres forcés. */
+   Redéclarés sur le lecteur et les zones `.halo.dark` (en-tête de fiche sur image)
+   pour qu'ils suivent leurs jetons sombres forcés. */
 
 :root,
+.halo.dark,
 .immersive-dialog {
   --color-on-accent: var(--on-ac);
   --color-play: var(--btn);

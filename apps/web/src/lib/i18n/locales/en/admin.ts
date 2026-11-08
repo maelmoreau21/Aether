@@ -886,7 +886,6 @@ export const admin: Readonly<Record<keyof typeof source, string>> = {
   external_provider: 'External provider',
   anime: 'Anime',
   library_action_artwork_hint: 'Choose the library posters and backdrops.',
-  library_refresh_started: 'Started: {mode}. Progress shows in the library list.',
   extension_settings_button: 'Settings',
   catalogue_installed_filter: 'Installed',
   catalogue_available_filter: 'Not installed',

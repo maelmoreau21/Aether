@@ -884,7 +884,6 @@ export const admin = {
   external_provider: 'Fournisseur externe',
   anime: 'Animés',
   library_action_artwork_hint: 'Choisir les affiches et les fonds de la bibliothèque.',
-  library_refresh_started: 'Lancé : {mode}. La progression s’affiche dans la liste des bibliothèques.',
   extension_settings_button: 'Paramètres',
   catalogue_installed_filter: 'Installées',
   catalogue_available_filter: 'Non installées',

@@ -38,8 +38,8 @@ fs.mkdirSync(out, {recursive:true});
       const runScan = async () => {
         const posted=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/scan'));
         await page.getByLabel('Paramètres de Films scanner navigateur',{exact:true}).click();
-        await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-        await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+        await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+        await page.getByRole('dialog').waitFor({state:'hidden'});
         assert.equal((await posted).status(),202);
         await page.waitForFunction(async()=>{
           const data=await (await fetch('/api/v1/admin/libraries')).json();

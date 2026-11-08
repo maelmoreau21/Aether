@@ -80,11 +80,10 @@
     { mode: 'missing_metadata' as RefreshMode, label: $t('fill_missing_metadata'), hint: $t('local_metadata_already_validated_is_kept') },
     { mode: 'full' as RefreshMode, label: $t('full_rescan'), hint: $t('all_files_are_re_analysed_local') }
   ]);
-  let refreshNotice = $state('');
+  // Once started, the editor closes: progress shows at once in the library list.
   async function startRefresh(library: Library, chosen: RefreshMode) {
-    refreshNotice = '';
     await onscan(library, chosen);
-    if (!error) refreshNotice = $t('library_refresh_started', { mode: refreshModes.find(item => item.mode === chosen)?.label ?? '' });
+    if (!error) editor?.close();
   }
   // "Animés" is a series library shown under another name: same scan, same player.
   const contentKind = $derived(kind === 'series' && options.anime ? 'anime' : kind);
@@ -243,7 +242,6 @@
                   </li>
                 {/if}
               </ul>
-              {#if refreshNotice}<p role="status" class="field-hint">{refreshNotice}</p>{/if}
               {#if markersNotice}<p role="status" class="field-hint">{markersNotice}</p>{/if}
               {#if markersError}<p role="alert" class="editor-error">{markersError}</p>{/if}
             </div>

@@ -403,6 +403,7 @@ const SEEDED_BY_UPGRADE: &[&str] = &[
     "task_trigger_migrations",
     "user_groups",
     "avatar_gallery_initialization",
+    "avatar_builtin_seeds",
     "avatar_requirements",
     "avatar_policy",
     "avatar_packs",

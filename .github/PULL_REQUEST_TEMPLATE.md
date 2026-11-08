@@ -1,38 +1,65 @@
-## Description des modifications
+# Pull request Aether
 
-<!-- Décrivez clairement les modifications apportées et leur motivation technique. -->
+## Objectif et périmètre
 
-## Jalon concerné
+<!-- Quel problème concret est résolu ? Quel comportement doit rester inchangé ? -->
+**But :**
 
-- [ ] P0 — Codecs & Conteneurs (AV1 + Opus, MKV/MP4, streaming navigateur)
-- [ ] P1 — Mode autonome (Core + Media Node local + SQLite)
-- [ ] P2 — Multi-Node & Authentik SSO
-- [ ] P3 — Pistes externes / formats élémentaires
-- [ ] P4 — Films & Séries
-- [ ] P5 — Robustesse & Observabilité
-- [ ] CI / Outillage / Documentation
+**Fichiers ou domaines concernés :**
 
-Issue liée : <!-- ex: Closes #123 -->
+**Issue liée (facultatif) :**
+
+## Type de modification
+
+- [ ] Correction de bug (reproduction et non-régression)
+- [ ] Fonctionnalité (parcours fonctionnel complet)
+- [ ] Refactorisation (contrats et comportement préservés)
+- [ ] Documentation / instructions IA
+- [ ] CI / outillage / packaging
+
+## Changements apportés
+
+<!-- Résumer les modifications réalisées, sans présenter un plan ou un test non exécuté comme livré. -->
+
+## Contrats et sécurité (si concernés)
+
+- [ ] Autorisations et rôles préservés côté Core ; aucune élévation implicite de privilèges.
+- [ ] Médias personnels conservés en lecture seule ; aucune migration ou suppression de données.
+- [ ] API, schémas SQL, identifiants et protocole Core/Node compatibles, ou changements explicitement décrits.
+- [ ] Aucun secret, jeton ni donnée personnelle ajouté au dépôt ou aux logs.
+- [ ] Comportement AV1/Opus, langues, sous-titres et HTTP Range non régressé lorsqu'il est concerné.
+- [ ] Non applicable : cette PR ne touche pas ces contrats.
+
+## Validations réellement exécutées
+
+Indiquer les commandes **effectivement lancées**, leur environnement et leur résultat ; écrire « non exécuté » plutôt que de cocher fictivement un contrôle.
+
+| Contrôle | Exécuté ? | Résultat / raison si non exécuté |
+| --- | --- | --- |
+| Rust : formatage / Clippy / tests ciblés | | |
+| Web : Svelte check / lint / tests / build | | |
+| Navigateur / API / Core / Media Node | | |
+| Docker / plateformes / migrations | | |
+| Documentation / liens / diff | | |
+
+<!-- Pour des changements documentaires uniquement, ne pas lancer toute la suite Rust/Docker sans nécessité.
+Pour les chemins critiques, inclure les tests de non-régression pertinents. -->
+
+## Risques, limites et déploiement
+
+**Risques et cas non validés :**
+
+**Migrations, configuration ou intervention de production nécessaires :**
+
+**Retour arrière :**
+
+## Coordination avec d'autres agents
+
+<!-- Si Claude Code/Codex travaillent en parallèle, indiquer les fichiers partagés ou conflits potentiels. -->
+**Branche ou worktree de travail :**
+
+**Changements concurrents connus :**
 
 ---
 
-## Garde-fous d'architecture et de sécurité (AGENTS.md)
-
-Veuillez cocher pour attester de la conformité aux règles non négociables :
-- [ ] **Accès lecture seule** : Les bibliothèques et médias restent strictement montés en `:ro` (aucune écriture, aucun tag altéré).
-- [ ] **Rôles stricts** : Seuls les rôles `administrator` et `user` sont utilisés (aucun rôle `guest` ou invité implicite).
-- [ ] **Pas de transcodage vidéo forcé** : Le streaming direct ou le remux léger est privilégié sans exiger d'iGPU.
-- [ ] **Neutralité de marque** : Aucune référence de marque en dur dans les chemins API, DB, types ou variables (`MEDIA_*` utilisé).
-- [ ] **Sécurité & Secrets** : Aucun jeton, clé secrète, mot de passe ou chemin NAS absolu n'est introduit dans le code ou les commits.
-- [ ] **Fixtures légales** : Aucun média sous droits d'auteur n'est introduit (uniquement des flux synthétiques générés).
-
----
-
-## Vérifications locales obligatoires
-
-- [ ] `cargo fmt --check` : exécuté avec succès.
-- [ ] `cargo clippy --locked --all-targets -- -D warnings` : 0 warning.
-- [ ] `cargo test --locked` : tous les tests passent.
-- [ ] `cargo audit` : validé sans faille sur les dépendances.
-- [ ] Si applicable, tests de lecture navigateur documentés.
-- [ ] Documentation associée et `.ai/MEMORY.md` mis à jour si un jalon réel est franchi.
+Consignes communes : [AGENTS.md](../AGENTS.md) et [docs/AI_WORKFLOW.md](../docs/AI_WORKFLOW.md). Les anciens jalons P0–P5 sont historiques, pas des cases obligatoires pour toute PR. Ne pas fusionner avant revue des changements et des contrôles adaptés.

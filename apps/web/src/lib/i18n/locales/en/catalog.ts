@@ -203,7 +203,6 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   loading_settings_short: 'Loading…',
   retry_action: 'Retry',
   errors: 'Errors',
-  run_now: 'Run now',
   actions: 'Actions',
   manage_nodes: 'Media Node management',
   add_node: 'Add Node',

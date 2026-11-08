@@ -7,11 +7,15 @@ export interface AdminDestination { hash: string; label: string; labelKey: Label
 /** A sidebar entry. Entries with tabs group related sections behind one destination. */
 export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[]; extensionId?: 'media-requests' | 'media-reports' }
 
-/** Scheduled tasks first; automation and the server log stay one click away. */
+/** Scheduled tasks first; metadata automation stays one click away. */
 const taskTabs: AdminDestination[] = [
   { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock' },
-  { hash: '#automation-section', label: 'Automatisations', labelKey: 'admin_automation_tab', icon: 'sparkles' },
-  { hash: '#logs-section', label: 'Journaux du serveur', labelKey: 'admin_logs_tab', icon: 'server' }
+  { hash: '#automation-section', label: 'Automatisations', labelKey: 'admin_automation_tab', icon: 'sparkles' }
+];
+/** Log files and their level first; the live stream is the second tab. */
+const logTabs: AdminDestination[] = [
+  { hash: '#logs-section', label: 'Fichiers journaux', labelKey: 'admin_logs_files_tab', icon: 'file' },
+  { hash: '#logs-live-section', label: 'Temps réel', labelKey: 'admin_logs_live_tab', icon: 'clock' }
 ];
 const serverTabs: AdminDestination[] = [
   { hash: '#general-section', label: 'Général', labelKey: 'admin_general', icon: 'settings' },
@@ -43,6 +47,7 @@ export const adminNavigation: { label: string; labelKey: LabelKey; links: AdminE
   { label: 'Système', labelKey: 'admin_group_system', links: [
     { hash: '#api-keys-section', label: 'Clés API', labelKey: 'admin_api_keys', icon: 'shield' },
     { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock', tabs: taskTabs },
+    { hash: '#logs-section', label: 'Journaux', labelKey: 'admin_nav_logs', icon: 'file', tabs: logTabs },
     { hash: '#backups-section', label: 'Sauvegardes', labelKey: 'admin_backups', icon: 'server' },
     { hash: '#general-section', label: 'Paramètres du serveur', labelKey: 'admin_server_settings', icon: 'settings', tabs: serverTabs }
   ] }
@@ -80,8 +85,9 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#groups-section': ['Groupes d’utilisateurs', 'Groupe par défaut', 'Membres du groupe', 'Permissions sur les bibliothèques', 'Type d’affectation', 'Propriétés du groupe'],
   '#api-keys-section': ['Créer une clé', 'Expiration en jours', 'Révoquer une clé', 'Propriétaire de la clé', 'Jetons d’accès'],
   '#tasks-section': ['Planification', 'Tâches planifiées', 'Ajouter un déclencheur', 'Tous les jours', 'Hebdomadaire', 'Intervalle', 'Au démarrage du serveur', 'Limite de temps', 'Nettoyer le cache', 'Nettoyer le journal des extensions', 'Sauvegarde planifiée'],
-  '#logs-section': ['Journaux du serveur', 'Logs', 'Erreurs du serveur', 'Avertissements', 'Télécharger les journaux', 'Diagnostic'],
-  '#automation-section': ['Automatisations', 'Politiques d’automatisation', 'Historique des automatisations', 'Quotas des fournisseurs', 'Sources des métadonnées'],
+  '#logs-section': ['Journaux', 'Journaux du serveur', 'Fichiers journaux', 'Logs', 'Niveau de journalisation', 'Débogage', 'Conservation des journaux', 'Télécharger les journaux', 'Diagnostic'],
+  '#logs-live-section': ['Journaux en temps réel', 'Erreurs du serveur', 'Avertissements', 'Copier les lignes'],
+  '#automation-section': ['Automatisations', 'Règles d’automatisation', 'Historique des automatisations', 'Limites des fournisseurs', 'Sources des métadonnées', 'Relancer les éléments manquants'],
   '#backups-section': ['Sauvegarde automatique', 'Activer les sauvegardes automatiques', 'Planification automatique', 'Archives', 'Télécharger une sauvegarde', 'Base de données', 'Consommation mémoire', 'Cache disque Linux'],
   '#extensions-section': ['Extensions installées', 'Catalogue', 'Dépôts', 'Adresse du dépôt', 'Mettre à jour une extension', 'Versions des extensions', 'Accès demandés', 'Paramètres des extensions', 'Plugins'],
   '#requests-section': ['Demandes', 'Valider une demande', 'Acquisition', 'Épingler les demandes'],
@@ -106,8 +112,9 @@ export const adminSearchKeywordsEn: Record<string, readonly string[]> = {
   '#groups-section': ['User groups', 'Default group', 'Group members', 'Library permissions', 'Assignment type', 'Group properties'],
   '#api-keys-section': ['Create a key', 'Expiry in days', 'Revoke a key', 'Key owner', 'Access tokens'],
   '#tasks-section': ['Scheduling', 'Scheduled tasks', 'Add a trigger', 'Every day', 'Weekly', 'Interval', 'At server startup', 'Time limit', 'Clear the cache', 'Clear the extension log', 'Scheduled backup'],
-  '#logs-section': ['Server logs', 'Logs', 'Server errors', 'Warnings', 'Download the logs', 'Diagnostics'],
-  '#automation-section': ['Automations', 'Automation policies', 'Automation history', 'Provider quotas', 'Metadata sources'],
+  '#logs-section': ['Logs', 'Server logs', 'Log files', 'Journal', 'Log level', 'Debug', 'Log retention', 'Download the logs', 'Diagnostics'],
+  '#logs-live-section': ['Live logs', 'Server errors', 'Warnings', 'Copy the lines'],
+  '#automation-section': ['Automations', 'Automation rules', 'Automation history', 'Provider limits', 'Metadata sources', 'Re-run missing items'],
   '#backups-section': ['Automatic backup', 'Enable automatic backups', 'Automatic scheduling', 'Archives', 'Download a backup', 'Database', 'Memory usage', 'Linux disk cache'],
   '#extensions-section': ['Installed extensions', 'Catalogue', 'Repositories', 'Repository address', 'Update an extension', 'Extension versions', 'Requested access', 'Extension settings', 'Plugins'],
   '#requests-section': ['Requests', 'Approve a request', 'Acquisition', 'Pin requests'],

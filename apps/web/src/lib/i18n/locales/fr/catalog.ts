@@ -201,7 +201,6 @@ export const catalog = {
   loading_settings_short: 'Chargement…',
   retry_action: 'Réessayer',
   errors: 'Erreurs',
-  run_now: 'Exécuter maintenant',
   actions: 'Actions',
   manage_nodes: 'Gestion des Media Nodes',
   add_node: 'Ajouter un Node',

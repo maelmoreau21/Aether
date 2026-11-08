@@ -1172,7 +1172,9 @@ async fn automation_http_requires_admin_csrf_and_validated_idempotent_requests()
     );
     let history = call(&app, "GET", history_path, &cookie, "", Value::Null).await;
     assert_eq!(history.status(), StatusCode::OK);
-    assert!(body(history).await["tasks"].is_array());
+    let history = body(history).await;
+    assert!(history["tasks"].is_array());
+    assert!(history["now"].is_i64());
     let policy = json!({"extensionId":"fixture.metadata","libraryId":"library-1","mode":"automatic","priority":100,"operation":"metadata.propose","configRevision":"cfg","algorithmVersion":"1","intervalSeconds":3600,"nextRunAt":0,"maxConcurrent":1});
     assert_eq!(
         call(&app, "GET", path, "", "", Value::Null).await.status(),

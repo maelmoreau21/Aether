@@ -47,6 +47,13 @@ pub struct Settings {
     pub activity_log_retention_days: u32,
     #[serde(default)]
     pub cors_hosts: Vec<String>,
+    #[serde(default)]
+    pub log_level: crate::server_log::Level,
+    #[serde(default = "default_log_retention")]
+    pub log_retention_days: u32,
+}
+fn default_log_retention() -> u32 {
+    crate::server_log::DEFAULT_RETENTION_DAYS
 }
 fn default_activity_retention() -> u32 {
     30
@@ -111,6 +118,8 @@ struct SettingsInput {
     metadata_country_code: Option<String>,
     activity_log_retention_days: Option<u32>,
     cors_hosts: Option<Vec<String>>,
+    log_level: Option<crate::server_log::Level>,
+    log_retention_days: Option<u32>,
 }
 
 impl Default for Settings {
@@ -133,6 +142,8 @@ impl Default for Settings {
             metadata_country_code: default_metadata_country(),
             activity_log_retention_days: default_activity_retention(),
             cors_hosts: Vec::new(),
+            log_level: crate::server_log::Level::Info,
+            log_retention_days: default_log_retention(),
         }
     }
 }
@@ -244,6 +255,11 @@ async fn write(
                     .collect()
             })
             .unwrap_or(previous.cors_hosts),
+        log_level: input.log_level.unwrap_or(previous.log_level),
+        log_retention_days: input
+            .log_retention_days
+            .filter(|days| (1..=crate::server_log::MAX_RETENTION_DAYS).contains(days))
+            .unwrap_or(previous.log_retention_days),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)
@@ -273,6 +289,23 @@ async fn write(
         *guard = input.cors_hosts.clone();
     }
     Ok(StatusCode::NO_CONTENT)
+}
+/// Persists the log level and file retention without touching the other settings.
+pub async fn save_logging(
+    store: &IdentityStore,
+    level: crate::server_log::Level,
+    retention_days: u32,
+) -> Result<(), StatusCode> {
+    let mut settings = load(store).await?;
+    settings.log_level = level;
+    settings.log_retention_days = retention_days;
+    let json = serde_json::to_string(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json")
+        .bind(json)
+        .execute(&store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
 }
 pub async fn ensure_cors_origins_warm(store: &IdentityStore) {
     let empty = store

@@ -87,6 +87,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
         default_hook(info);
     }));
+    let log_directory = media_poc::server_log::default_directory();
+    if let Err(error) = media_poc::server_log::init_files(log_directory.clone()) {
+        eprintln!(
+            "Warning: log files disabled, cannot write to '{}': {error}",
+            log_directory.display()
+        );
+    }
 
     let source = library_source().await?;
     let root = match &source {
@@ -132,6 +139,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let public_origin =
         std::env::var("MEDIA_PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
     let auth = AuthState::new(database.clone(), public_origin.clone()).await?;
+    if let Ok(settings) = media_poc::server_settings::load(&database).await {
+        media_poc::server_log::configure(settings.log_level, settings.log_retention_days);
+    }
     println!("aether-core listening on {public_origin}/app/");
     media_poc::server_log::remember(
         media_poc::server_log::Level::Info,

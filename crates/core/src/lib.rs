@@ -307,7 +307,9 @@ async fn secure_app_with_jobs_and_web_dist(
         Some(store_for_csp),
         allowed_origins,
     );
-    Ok(health_routes(mode).merge(protected))
+    Ok(health_routes(mode)
+        .merge(protected)
+        .layer(middleware::from_fn(server_log::trace_requests)))
 }
 
 async fn local_stream_priority(

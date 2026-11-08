@@ -6,7 +6,7 @@
 
   let { active = false }: { active?: boolean } = $props();
 
-  type Level = 'info' | 'warning' | 'error';
+  type Level = 'debug' | 'info' | 'warning' | 'error';
   type Entry = { seq: number; at: number; level: Level; message: string };
   const MAX_KEPT = 2000;
 
@@ -22,7 +22,7 @@
   let following = true;
   let inflight = false;
 
-  const rank: Record<Level, number> = { info: 0, warning: 1, error: 2 };
+  const rank: Record<Level, number> = { debug: 0, info: 1, warning: 2, error: 3 };
   const needle = $derived(search.trim().toLowerCase());
   const shown = $derived(entries.filter(entry =>
     (level === 'all' || rank[entry.level] >= rank[level]) && (!needle || entry.message.toLowerCase().includes(needle))));
@@ -30,7 +30,7 @@
   const levels = [
     { id: 'all', key: 'logs_level_all' }, { id: 'warning', key: 'logs_level_warning' }, { id: 'error', key: 'logs_level_error' }
   ] as const;
-  const badges = { info: 'logs_badge_info', warning: 'logs_badge_warning', error: 'logs_badge_error' } as const;
+  const badges = { debug: 'logs_badge_debug', info: 'logs_badge_info', warning: 'logs_badge_warning', error: 'logs_badge_error' } as const;
 
   function time(at: number) { return $fmt.dateTime(Math.floor(at / 1000)); }
   function clock(at: number) {
@@ -179,6 +179,7 @@
   .badge { min-width: 52px; font-family: var(--font-sans); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-muted); }
   .line[data-level='warning'] .badge { color: var(--color-warning); }
   .line[data-level='error'] .badge { color: var(--color-danger); }
+  .line[data-level='debug'] .message { color: var(--color-muted); }
   .message { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-text); }
   .empty { margin: 0; padding: 24px 16px; font-family: var(--font-sans); font-size: 14px; color: var(--color-muted); }
 

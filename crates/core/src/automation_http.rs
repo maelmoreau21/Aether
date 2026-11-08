@@ -129,33 +129,70 @@ async fn results(
     ))
 }
 
-type TaskHistoryRow = (
-    String,
-    String,
-    String,
-    String,
-    String,
-    i64,
-    i64,
-    Option<i64>,
-    Option<i64>,
-    String,
-);
+#[derive(sqlx::FromRow)]
+struct TaskHistoryRow {
+    id: String,
+    extension_id: String,
+    library_id: String,
+    root_library_id: String,
+    library_name: String,
+    status: String,
+    operation: String,
+    provider: String,
+    priority: i64,
+    attempt: i64,
+    max_attempts: i64,
+    created_at: i64,
+    started_at: Option<i64>,
+    finished_at: Option<i64>,
+    error: String,
+    asset_path: String,
+    track_title: String,
+}
+
+/// File name of an inventory path, whichever separator the node used.
+fn file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
 
 async fn history(
     State(auth): State<AuthState>,
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     admin(&auth, &headers, false).await?;
-    let tasks: Vec<TaskHistoryRow> = query_as("SELECT t.id,l.extension_id,t.library_id,t.status,l.operation,t.priority,t.attempt,t.started_at,t.finished_at,t.error FROM durable_tasks t JOIN automation_task_links l ON l.task_id=t.id ORDER BY t.created_at DESC,t.id LIMIT 100")
+    // Folder libraries (extra roots of a library) have their own id: report the
+    // library the administrator knows, and the file or track that was processed.
+    let tasks: Vec<TaskHistoryRow> = query_as("SELECT t.id AS id,l.extension_id AS extension_id,t.library_id AS library_id,COALESCE(parent.id,lib.id,t.library_id) AS root_library_id,COALESCE(parent.name,lib.name,'') AS library_name,t.status AS status,l.operation AS operation,l.provider AS provider,t.priority AS priority,t.attempt AS attempt,t.max_attempts AS max_attempts,t.created_at AS created_at,t.started_at AS started_at,t.finished_at AS finished_at,t.error AS error,COALESCE(a.relative_path,'') AS asset_path,COALESCE(m.title,'') AS track_title FROM durable_tasks t JOIN automation_task_links l ON l.task_id=t.id LEFT JOIN libraries lib ON lib.id=t.library_id LEFT JOIN library_folders f ON f.library_id=t.library_id LEFT JOIN libraries parent ON parent.id=f.parent_id LEFT JOIN inventory_assets a ON a.id=t.target_id LEFT JOIN music_tracks m ON m.id=t.target_id ORDER BY t.created_at DESC,t.id LIMIT 200")
         .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     let quotas:Vec<(String,i64,i64,i64)>=query_as("SELECT provider,next_allowed_at,min_interval_seconds,max_concurrent FROM automation_provider_limits ORDER BY provider LIMIT 100")
         .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
-    let sources:Vec<(String,String,String,String,i64,i64)>=query_as("SELECT work_id,field_name,extension_id,provider_id,priority,updated_at FROM automatic_metadata_provenance ORDER BY updated_at DESC,work_id,field_name LIMIT 100")
+    let sources:Vec<(String,String,String,String,String,i64,i64)>=query_as("SELECT p.work_id,COALESCE(w.title,''),p.field_name,p.extension_id,p.provider_id,p.priority,p.updated_at FROM automatic_metadata_provenance p LEFT JOIN inventory_works w ON w.id=p.work_id ORDER BY p.updated_at DESC,p.work_id,p.field_name LIMIT 100")
         .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(json!({
-        "tasks":tasks.into_iter().map(|(id,extension,library,status,operation,priority,attempt,started,finished,error)|json!({"id":id,"extensionId":extension,"libraryId":library,"status":status,"operation":operation,"priority":priority,"attempt":attempt,"durationSeconds":started.zip(finished).map(|(start,end)|end.saturating_sub(start)),"error":error})).collect::<Vec<_>>(),
+        "now": media_contracts::protocol::unix_now(),
+        "tasks":tasks.into_iter().map(|task| {
+            let target = if task.track_title.is_empty() { file_name(&task.asset_path).to_owned() } else { task.track_title.clone() };
+            json!({
+                "id":task.id,"extensionId":task.extension_id,"libraryId":task.library_id,"rootLibraryId":task.root_library_id,
+                "libraryName":task.library_name,"status":task.status,"operation":task.operation,"provider":task.provider,
+                "priority":task.priority,"attempt":task.attempt,"maxAttempts":task.max_attempts,"target":target,
+                "createdAt":task.created_at,"startedAt":task.started_at,"finishedAt":task.finished_at,
+                "durationSeconds":task.started_at.zip(task.finished_at).map(|(start,end)|end.saturating_sub(start)),
+                "error":task.error
+            })
+        }).collect::<Vec<_>>(),
         "quotas":quotas.into_iter().map(|(provider,next,min_interval,max_concurrent)|json!({"provider":provider,"nextAllowedAt":next,"minIntervalSeconds":min_interval,"maxConcurrent":max_concurrent})).collect::<Vec<_>>(),
-        "sources":sources.into_iter().map(|(work,field,extension,provider,priority,updated)|json!({"workId":work,"field":field,"extensionId":extension,"providerId":provider,"priority":priority,"updatedAt":updated})).collect::<Vec<_>>()
+        "sources":sources.into_iter().map(|(work,title,field,extension,provider,priority,updated)|json!({"workId":work,"workTitle":title,"field":field,"extensionId":extension,"providerId":provider,"priority":priority,"updatedAt":updated})).collect::<Vec<_>>()
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn file_names_ignore_the_node_separator() {
+        assert_eq!(super::file_name("Films/Dune (2021)/Dune.mkv"), "Dune.mkv");
+        assert_eq!(super::file_name(r"Films\Dune.mkv"), "Dune.mkv");
+        assert_eq!(super::file_name("Dune.mkv"), "Dune.mkv");
+        assert_eq!(super::file_name(""), "");
+    }
 }

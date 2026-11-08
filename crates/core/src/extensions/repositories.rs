@@ -326,20 +326,37 @@ async fn fetch_asset(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
     let _permit = DOWNLOADS
         .try_acquire()
         .map_err(|_| err(StatusCode::TOO_MANY_REQUESTS, "repository_busy"))?;
-    let direct = download(raw, maximum, "*/*", Duration::from_secs(60)).await;
-    let Err(failure) = direct else {
-        return direct;
-    };
-    // github.com can time out (504) on some networks while the API and the asset
-    // content host stay reachable. The checksum and signature still decide trust.
     let Some((owner, repository, tag, name)) = github_release_asset(raw) else {
-        return Err(failure);
+        return download(raw, maximum, "*/*", Duration::from_secs(60)).await;
     };
-    eprintln!("Release download failed ({raw}); retrying through the GitHub API");
-    match github_api_asset(&owner, &repository, &tag, &name, maximum).await {
-        Ok(bytes) => Ok(bytes),
-        Err(_) => Err(failure),
+    // github.com (web pages and releases/download) can hang or answer 504 on some
+    // networks while api.github.com and the asset CDN stay reachable. Both routes end
+    // on the same CDN object and the checksum and signature still decide trust, so the
+    // API goes first (one retry), then the direct link, all inside the 70 s the admin
+    // page waits for an answer.
+    let deadline = Instant::now() + Duration::from_secs(58);
+    let left = || deadline.saturating_duration_since(Instant::now());
+    for attempt in 1..=2 {
+        if left() < Duration::from_secs(8) {
+            break;
+        }
+        match github_api_asset(&owner, &repository, &tag, &name, maximum, left()).await {
+            Ok(bytes) => return Ok(bytes),
+            Err(failure) => eprintln!(
+                "GitHub API release download failed ({owner}/{repository} {tag}/{name}, attempt {attempt}): {}",
+                error_code(&failure)
+            ),
+        }
     }
+    let timeout = left().max(Duration::from_secs(5));
+    download(raw, maximum, "*/*", timeout)
+        .await
+        .inspect_err(|failure| {
+            eprintln!("Release download failed ({raw}): {}", error_code(failure));
+        })
+}
+fn error_code(failure: &Error) -> &str {
+    failure.1.0["error"].as_str().unwrap_or("unknown")
 }
 /// `https://github.com/{owner}/{repo}/releases/download/{tag}/{asset}`.
 fn github_release_asset(raw: &str) -> Option<(String, String, String, String)> {
@@ -375,12 +392,14 @@ async fn github_api_asset(
     tag: &str,
     name: &str,
     maximum: usize,
+    budget: Duration,
 ) -> Result<Vec<u8>, Error> {
+    let started = Instant::now();
     let release = download(
         &format!("https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}"),
         MAX_MANIFEST,
         "application/vnd.github+json",
-        Duration::from_secs(10),
+        budget.min(Duration::from_secs(10)),
     )
     .await?;
     let release: Value = serde_json::from_slice(&release)
@@ -396,13 +415,10 @@ async fn github_api_asset(
         })
         .ok_or_else(|| err(StatusCode::BAD_GATEWAY, "repository_http_error"))?
         .to_owned();
-    download(
-        &asset,
-        maximum,
-        "application/octet-stream",
-        Duration::from_secs(60),
-    )
-    .await
+    let left = budget
+        .saturating_sub(started.elapsed())
+        .max(Duration::from_secs(5));
+    download(&asset, maximum, "application/octet-stream", left).await
 }
 async fn download(
     raw: &str,

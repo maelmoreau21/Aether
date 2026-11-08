@@ -21,7 +21,7 @@ describe('administration task navigation', () => {
 describe('administration grouping', () => {
   it('keeps every historical section and native statistics reachable', async () => {
     const { adminEntries, adminEntryFor } = await import('./navigation');
-    expect(adminEntries).toHaveLength(14);
+    expect(adminEntries).toHaveLength(15);
     for (const hash of ['#overview', '#statistics-section', '#general-section', '#network-section', '#libraries-section', '#nodes-section', '#avatars-section', '#users-section', '#groups-section', '#api-keys-section', '#tasks-section', '#backups-section', '#extensions-section']) {
       expect(parseAdminHash(hash).section).toBe(hash);
       expect(adminEntryFor(hash)).toBeDefined();
@@ -32,12 +32,16 @@ describe('administration grouping', () => {
     expect(adminSectionHashes.has('#artwork-section')).toBe(false);
     expect(adminEntryFor('#network-section')?.label).toBe('Paramètres du serveur');
   });
-  it('keeps automation and the server log reachable beside scheduled tasks', async () => {
-    const { adminEntryFor } = await import('./navigation');
-    for (const hash of ['#automation-section', '#logs-section']) {
+  it('keeps automation beside scheduled tasks and gives the logs their own System entry', async () => {
+    const { adminEntryFor, adminNavigation } = await import('./navigation');
+    expect(parseAdminHash('#automation-section').section).toBe('#automation-section');
+    expect(adminEntryFor('#tasks-section')?.tabs?.map(tab => tab.hash)).toEqual(['#tasks-section', '#automation-section']);
+    for (const hash of ['#logs-section', '#logs-live-section']) {
       expect(parseAdminHash(hash).section).toBe(hash);
-      expect(adminEntryFor(hash)?.hash).toBe('#tasks-section');
+      expect(adminEntryFor(hash)?.label).toBe('Journaux');
     }
+    expect(adminNavigation.find(group => group.label === 'Système')?.links.map(link => link.hash))
+      .toEqual(['#api-keys-section', '#tasks-section', '#logs-section', '#backups-section', '#general-section']);
     expect(parseAdminHash('#logs-section?task=backup').task).toBeNull();
     // The former operations tab was removed; old links open the scheduled tasks.
     expect(parseAdminHash('#operations-section').section).toBe('#tasks-section');

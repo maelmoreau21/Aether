@@ -26,6 +26,7 @@
   import AdminTasks from '../../../lib/admin/AdminTasks.svelte';
   import AdminMaintenance from '../../../lib/admin/AdminMaintenance.svelte';
   import AdminServerLogs from '../../../lib/admin/AdminServerLogs.svelte';
+  import AdminLogFiles from '../../../lib/admin/AdminLogFiles.svelte';
   import AutomationTasks from '../../../lib/admin/AutomationTasks.svelte';
   import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
   import Requests from '../../../lib/applications/Requests.svelte';
@@ -487,6 +488,9 @@
             <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} selectedId={selectedTaskId} active={currentHash === '#tasks-section'} />
           </div>
           {#if currentHash === '#logs-section'}
+            <AdminLogFiles active={true} />
+          {/if}
+          {#if currentHash === '#logs-live-section'}
             <AdminServerLogs active={true} />
           {/if}
           {#if currentHash === '#automation-section'}

@@ -20,22 +20,22 @@ pub fn can_read_fixture_library(role: Role) -> bool {
     matches!(role, Role::Administrator)
 }
 
-/// The file a `/api/v1/media/{id}` request is served from: the id itself for a file, the
-/// first playable file of a film, an episode or a series otherwise (the descriptor handler
-/// resolves the same way). Unknown ids come back unchanged and fail the library check.
-async fn media_asset_id(
+/// The file a `/api/v1/media/{id}` request is served from, with its library: the id itself
+/// for a file, the first playable file of a film, an episode or a series otherwise (the
+/// descriptor handler resolves the same way). An unknown id comes back unchanged and without
+/// a library, so it fails the library check.
+async fn media_asset(
     store: &crate::identity::IdentityStore,
     id: &str,
-) -> Result<String, sqlx::Error> {
-    if crate::inventory::resource_library(store, "asset", id)
-        .await?
-        .is_some()
-    {
-        return Ok(id.to_owned());
+) -> Result<(String, Option<String>), sqlx::Error> {
+    if let Some(library) = crate::inventory::resource_library(store, "asset", id).await? {
+        return Ok((id.to_owned(), Some(library)));
     }
-    Ok(crate::inventory::playable_asset_for_work(store, id)
-        .await?
-        .unwrap_or_else(|| id.to_owned()))
+    let Some(asset) = crate::inventory::playable_asset_for_work(store, id).await? else {
+        return Ok((id.to_owned(), None));
+    };
+    let library = crate::inventory::resource_library(store, "asset", &asset).await?;
+    Ok((asset, library))
 }
 
 pub async fn require_media(
@@ -60,8 +60,8 @@ pub async fn require_media(
     // A "watch together" session points at a film, an episode or a series, and its
     // descriptor is that of the work's first playable file: the gate checks that file.
     let media_target = match path.strip_prefix("/api/v1/media/") {
-        Some(id) => match media_asset_id(&state.auth.store, id).await {
-            Ok(asset) => Some(asset),
+        Some(id) => match media_asset(&state.auth.store, id).await {
+            Ok(target) => Some(target),
             Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
         },
         None => None,
@@ -116,10 +116,13 @@ pub async fn require_media(
             && !path.starts_with("/api/v1/assets/demo-")
             && !path.starts_with("/api/v1/assets/fixture-"))
     {
-        let id = media_target
-            .as_deref()
-            .or_else(|| {
-                path.strip_prefix("/api/v1/assets/").and_then(|value| {
+        // `/api/v1/media/{id}`: the library was read with the file it resolves to.
+        let library = if let Some((_, library)) = &media_target {
+            Ok(library.clone())
+        } else {
+            let id = path
+                .strip_prefix("/api/v1/assets/")
+                .and_then(|value| {
                     value
                         .strip_suffix("/content")
                         .or_else(|| value.strip_suffix("/download"))
@@ -133,19 +136,19 @@ pub async fn require_media(
                         .or_else(|| value.split_once("/audio/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/prepared/").map(|(id, _)| id))
                 })
-            })
-            .unwrap_or("");
-        match crate::inventory::resource_library(
-            &state.auth.store,
-            if path.ends_with("/image") {
-                "image"
-            } else {
-                "asset"
-            },
-            id,
-        )
-        .await
-        {
+                .unwrap_or("");
+            crate::inventory::resource_library(
+                &state.auth.store,
+                if path.ends_with("/image") {
+                    "image"
+                } else {
+                    "asset"
+                },
+                id,
+            )
+            .await
+        };
+        match library {
             Ok(Some(library)) => visible.iter().any(|v| v == &library),
             Ok(None) => false,
             Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
@@ -163,8 +166,8 @@ pub async fn require_media(
     if path != "/api/v1/catalog" {
         let (kind, target) = if let Some(id) = path.strip_prefix("/api/v1/catalog/") {
             ("work", id)
-        } else if let Some(id) = media_target.as_deref() {
-            ("asset", id)
+        } else if let Some((asset, _)) = &media_target {
+            ("asset", asset.as_str())
         } else if let Some(id) = path.strip_prefix("/api/v1/assets/") {
             (
                 if path.ends_with("/image") {

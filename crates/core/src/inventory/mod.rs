@@ -29,7 +29,6 @@ pub(crate) use catalogue::{
 };
 pub use details::asset_details;
 pub use editorial::{editorial_warnings, refresh_editorial_for_works, refresh_work_editorial};
-#[cfg(test)]
 pub(crate) use playback::playable_asset_for_work;
 pub(crate) use playback::{
     audio_operational_id, report_track_allowed, usable_marker, valid_chapters,

@@ -84,9 +84,14 @@
         </span>
       {/each}
     </div>
+    <!-- The compact pill keeps the value's room even with no rating: rating or previewing a
+         star never changes its width, so the actions around it never reflow under the pointer
+         (in a bottom-aligned hero, a reflow would move the stars away from it). -->
     {#if shownRating}
       <span class="rating-value">{$fmt.number(shownRating)}</span>
-    {:else if !compact}
+    {:else if compact}
+      <span class="rating-value" aria-hidden="true"></span>
+    {:else}
       <span class="rating-placeholder">{$t('rate')}</span>
     {/if}
   </div>

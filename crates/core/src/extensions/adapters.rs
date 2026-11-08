@@ -325,7 +325,8 @@ fn valid_timeline_marker(marker: &Value) -> bool {
         && confidence.is_finite()
         && start >= 0.0
         && end > start
-        && end - start <= 600.0
+        && end - start
+            <= crate::automation::max_marker_length(marker["markerType"].as_str().unwrap_or(""))
         && (0.0..=1.0).contains(&confidence)
         && marker["id"]
             .as_str()

@@ -177,7 +177,7 @@ async fn missing_only_sweep_skips_complete_and_manually_corrected_works() {
 }
 
 #[tokio::test]
-async fn installed_marker_extension_queues_only_episode_chapter_work() {
+async fn installed_marker_extension_queues_chapter_work_for_episodes_and_films() {
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("markers.sqlite"))
         .await
@@ -225,6 +225,7 @@ async fn installed_marker_extension_queues_only_episode_chapter_work() {
     .await
     .unwrap();
     assert_eq!(operation, "intro.parse_chapters");
+    // A film of a library the extension may not read gets nothing.
     emit(&store, "marker-film", "media.added", 2, "source-b", 102).await;
     automation::drain(&store, 103, 100).await.unwrap();
     let count: i64 = query_scalar(
@@ -234,6 +235,27 @@ async fn installed_marker_extension_queues_only_episode_chapter_work() {
     .await
     .unwrap();
     assert_eq!(count, 1);
+    // Once granted, a film has its chapters read (its credits chapter), never an acoustic
+    // detection: it has no season to compare its audio with.
+    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('fixture.markers','library-2')")
+        .execute(store.pool()).await.unwrap();
+    emit(
+        &store,
+        "marker-film-granted",
+        "media.added",
+        2,
+        "source-b2",
+        104,
+    )
+    .await;
+    automation::drain(&store, 105, 100).await.unwrap();
+    let film: Vec<String> = query_scalar(
+        "SELECT l.operation FROM automation_task_links l JOIN durable_tasks t ON t.id=l.task_id WHERE l.extension_id='fixture.markers' AND t.target_id='asset-2'",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(film, ["intro.parse_chapters"]);
 }
 
 #[tokio::test]

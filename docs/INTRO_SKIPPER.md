@@ -4,6 +4,35 @@ IntroSkipper est le composant de détection automatique des introductions et gé
 
 ---
 
+## 0. Refonte du 8 novembre 2026 (plugin 0.2.0)
+
+Ce qui empêchait la détection d'aboutir, et ce qui a changé :
+
+| Problème | Correction |
+|---|---|
+| Les films étaient exclus partout (file d'attente, persistance, corrections manuelles refusées en 422) | Un film a ses chapitres lus (`intro.parse_chapters`, `mediaType: "movie"`) ; ses corrections manuelles sont acceptées ; un générique de film peut durer 20 min (plafond 1200 s pour `credits`, 600 s pour le reste) |
+| `intro.detect` ne recevait pas les chapitres : aucune fusion chapitre + audio | Le Core envoie les chapitres de l'épisode cible ; le plugin garde un chapitre nommé tel quel (0,99 si l'audio confirme) et cale une limite audio sur un chapitre à moins de 3 s (`chapter_snap_window`) |
+| Le Node donnait le fichier à ffmpeg par un tube : MP4 sans *faststart* illisibles, queue atteinte en décodant tout le fichier (délai de 90 s) | Entrée `-fd 0 -i fd:` (relisible, vrai seek) ; repli sur le tube pour un ffmpeg antérieur à 6.1 |
+| Noms `OP1`, `ED2`, `01 - Opening`, `♪ Ending`, `オープニング`, `Abspann`… non reconnus | Nouveau classement : nom découpé à ses séparateurs, numérotation ignorée, listes FR/EN/DE/ES/PT/IT/JA ; « Opening Night », « Post-credits scene » ne sont jamais sautés |
+| Chapitres sans nom (« Chapitre 03 ») des animés ignorés | Les deux chapitres de la durée d'une chanson (75–100 s), au début et à la fin, sont proposés comme opening/ending (0,86 si les deux sont trouvés, 0,72 seul) ; l'audio les confirme (0,99) ou les remplace (`enable_chapter_structure`) |
+| Un chapitre deviné ou nommé suffisait à ne jamais calculer l'empreinte audio | Seul un chapitre **nommé** pour l'intro et le générique dispense de l'empreinte |
+| Changer les réglages relisait les chapitres mais pas l'audio | Après une relecture des chapitres, la détection acoustique est relancée avec l'extraction existante |
+| Une relance ne supprimait jamais un marqueur devenu faux | `intro.detect` remplace tous les types du fichier pour cette extension ; la lecture seule des chapitres ne supprime rien |
+| Un marqueur invalide faisait échouer tout le résultat | Il est ignoré, les autres sont enregistrés |
+
+Édition manuelle :
+- **Film** : onglet « Intros & génériques » de la fiche (administrateurs), pour la version sélectionnée.
+- **Épisode** : bouton « Intro & générique » sur chaque épisode, qui ouvre l'onglet de la saison sur cet épisode.
+- Frise avec les chapitres du fichier, poignées à faire glisser (flèches ±1 s, Maj ±5 s, Alt ±0,1 s), calage sur un chapitre proche, zoom sur le segment, saisie précise, reprise d'une détection ou d'un chapitre, copie sur toute la saison.
+- État de l'analyse étape par étape (lecture des chapitres, empreinte audio, comparaison avec la saison) avec le message d'erreur de la tâche.
+- API : `GET /api/v1/admin/assets/{asset}/segments`, `POST /api/v1/admin/assets/{asset}/analyze-markers`.
+
+Non établi : aucun essai sur une vraie bibliothèque ni sur le Node de production ; la qualité de la forme des
+chapitres d'animé n'est mesurée que sur des cas construits ; un film sans chapitre nommé n'a toujours aucun
+générique automatique (pas d'analyse vidéo).
+
+---
+
 ## 1. Pipeline complet de détection
 
 Le code relie les étapes suivantes sans transcodage vidéo. L'extraction acoustique

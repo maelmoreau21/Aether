@@ -429,9 +429,15 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 let episode: i64 = query_scalar("SELECT COUNT(*) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE a.id=?")
                     .bind(&asset).fetch_one(&mut *tx).await?;
                 if episode == 0 {
-                    continue;
+                    // A film has no season to compare its audio with: its segments come from
+                    // its chapters (and the administrator's corrections) only.
+                    let film: i64 = query_scalar("SELECT COUNT(*) FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.id=? AND w.kind='film'")
+                        .bind(&asset).fetch_one(&mut *tx).await?;
+                    if film == 0 || fingerprint_ready {
+                        continue;
+                    }
                 }
-                if fingerprint_ready {
+                if episode > 0 && fingerprint_ready {
                     let peers:i64=query_scalar("SELECT COUNT(DISTINCT peer.work_id) FROM inventory_assets current_asset JOIN inventory_sources current_source ON current_source.id=current_asset.source_id JOIN inventory_versions current_version ON current_version.id=current_source.version_id JOIN inventory_editions current_edition ON current_edition.id=current_version.edition_id JOIN inventory_episodes current_ep ON current_ep.work_id=current_edition.work_id JOIN inventory_episodes peer ON peer.season_id=current_ep.season_id AND peer.work_id!=current_ep.work_id JOIN inventory_editions peer_edition ON peer_edition.work_id=peer.work_id JOIN inventory_versions peer_version ON peer_version.edition_id=peer_edition.id JOIN inventory_sources peer_source ON peer_source.version_id=peer_version.id JOIN inventory_assets peer_asset ON peer_asset.source_id=peer_source.id JOIN durable_tasks fp ON fp.target_id=peer_asset.id AND fp.category='analyze' AND fp.component='fingerprint' AND fp.status='completed' WHERE current_asset.id=? AND peer_asset.available=1")
                         .bind(&asset).fetch_one(&mut *tx).await?;
                     if peers == 0 {
@@ -557,9 +563,10 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 if matches!(kind.as_str(), "manual" | "metadata.missing" | "scheduled")
                     && pending < 100000
                 {
+                    // An explicit reanalysis reruns a completed marker task: the acoustic
+                    // detection of an episode, or the chapter reading of a film.
                     let reanalyze_markers = kind == "manual"
                         && marker_plugin
-                        && fingerprint_ready
                         && event_payload["reanalyzeMarkers"] == true;
                     let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='' WHERE (status IN ('error','cancelled') OR (status='completed' AND ?=1)) AND lease_until IS NULL AND id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
                     .bind(now).bind(now).bind(i64::from(reanalyze_markers || kind == "scheduled")).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
@@ -693,11 +700,6 @@ async fn persist_timeline_markers(
     result: &Value,
     now: i64,
 ) -> Result<(), sqlx::Error> {
-    let season:Option<String>=query_scalar("SELECT ep.season_id FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE a.id=? AND a.available=1")
-        .bind(&job.target_id).fetch_optional(&mut **tx).await?;
-    let Some(season) = season else {
-        return Err(sqlx::Error::Protocol("marker episode missing".into()));
-    };
     let results: Vec<(String, &Vec<Value>)> = if link.operation == "intro.parse_chapters" {
         vec![(
             job.target_id.clone(),
@@ -728,14 +730,12 @@ async fn persist_timeline_markers(
         if asset != job.target_id {
             continue;
         }
-        let state:Option<(String,String,String)>=query_as("SELECT ep.season_id,obs.fingerprint,a.probe_json FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN automation_observations obs ON obs.asset_id=a.id WHERE a.id=? AND a.available=1")
+        // Episodes and films alike: the marker belongs to this file revision.
+        let state: Option<(String, String)> = query_as("SELECT obs.fingerprint,a.probe_json FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id WHERE a.id=? AND a.available=1")
             .bind(&asset).fetch_optional(&mut **tx).await?;
-        let Some((candidate_season, source_fingerprint, probe)) = state else {
+        let Some((source_fingerprint, probe)) = state else {
             return Err(sqlx::Error::Protocol("marker source missing".into()));
         };
-        if candidate_season != season {
-            return Err(sqlx::Error::Protocol("marker season mismatch".into()));
-        }
         let duration = serde_json::from_str::<Value>(&probe)
             .ok()
             .and_then(|v| {
@@ -745,6 +745,7 @@ async fn persist_timeline_markers(
             })
             .filter(|n| n.is_finite() && *n > 0.0)
             .ok_or_else(|| sqlx::Error::Protocol("marker duration missing".into()))?;
+        let mut reported = std::collections::HashSet::new();
         for marker in markers {
             let Some(kind) = marker["markerType"]
                 .as_str()
@@ -757,24 +758,44 @@ async fn persist_timeline_markers(
                 marker["end"].as_f64(),
                 marker["confidence"].as_f64(),
             ) else {
-                return Err(sqlx::Error::Protocol("invalid marker".into()));
+                continue;
             };
+            // One malformed segment is dropped; it must not discard the others.
             if !start.is_finite()
                 || !end.is_finite()
                 || !confidence.is_finite()
                 || start < 0.0
                 || end <= start
                 || end > duration
-                || end - start > 600.0
+                || end - start > max_marker_length(kind)
                 || !(0.0..=1.0).contains(&confidence)
+                || !reported.insert(kind)
             {
-                return Err(sqlx::Error::Protocol("marker outside timeline".into()));
+                continue;
             }
             query("INSERT INTO automatic_timeline_markers(asset_id,extension_id,marker_type,start_seconds,end_seconds,confidence,source_fingerprint,generation,task_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id,extension_id,marker_type) DO UPDATE SET start_seconds=excluded.start_seconds,end_seconds=excluded.end_seconds,confidence=excluded.confidence,source_fingerprint=excluded.source_fingerprint,generation=excluded.generation,task_id=excluded.task_id,updated_at=excluded.updated_at")
                 .bind(&asset).bind(&link.extension_id).bind(kind).bind(start).bind(end).bind(confidence).bind(&source_fingerprint).bind(&link.generation).bind(&job.id).bind(now).execute(&mut **tx).await?;
         }
+        // The acoustic detection reads the chapters as well, so it reports every kind it can
+        // find: a kind it no longer reports (after a settings change or a better analysis) is
+        // stale and must not keep reaching the player. The chapter pass alone never deletes,
+        // since it cannot see what the audio found.
+        if link.operation == "intro.detect" {
+            for kind in ["intro", "credits", "recap", "preview"] {
+                if !reported.contains(kind) {
+                    query("DELETE FROM automatic_timeline_markers WHERE asset_id=? AND extension_id=? AND marker_type=?")
+                        .bind(&asset).bind(&link.extension_id).bind(kind).execute(&mut **tx).await?;
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// Longest automatic or manual segment of a kind, in seconds: a film's credits often run
+/// 8 to 15 minutes, any other segment stays under 10.
+pub(crate) fn max_marker_length(kind: &str) -> f64 {
+    if kind == "credits" { 1200.0 } else { 600.0 }
 }
 
 /// Merge only absent automatic fields. Manual corrections remain a separate
@@ -1391,13 +1412,50 @@ pub(crate) async fn complete_with_marker_sources(
     if !persist_result(&mut tx, job, link, result, now).await? {
         return Ok(false);
     }
-    if link.operation == "intro.parse_chapters" {
+    let is_episode: i64 = if link.operation == "intro.parse_chapters" {
+        query_scalar("SELECT COUNT(*) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE a.id=?")
+            .bind(&job.target_id).fetch_one(&mut *tx).await?
+    } else {
+        0
+    };
+    if link.operation == "intro.parse_chapters" && is_episode > 0 {
         let found: std::collections::HashSet<&str> = result
             .as_array()
             .into_iter()
             .flatten()
+            // Only a named chapter settles a kind; a segment guessed from the shape of
+            // unnamed chapters still needs the audio to confirm it.
+            .filter(|marker| marker["confidence"].as_f64().is_some_and(|c| c >= 0.98))
             .filter_map(|marker| marker["markerType"].as_str())
             .collect();
+        let source: Option<String> =
+            query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
+                .bind(&job.target_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        // The chapters were read again (new settings or a new plugin version) while the
+        // episode's audio is already fingerprinted: run the acoustic detection again too, or
+        // it would keep the result of the old settings. The completed extraction is reused.
+        if let Some(source) = &source {
+            let key = format!("fp:{}", hash(&(&job.target_id, source, "chromaprint-v1"))?);
+            let completed: Option<String> = query_scalar("SELECT id FROM durable_tasks WHERE owner IN ('system',?) AND idempotency_key=? AND target_id=? AND component='fingerprint' AND status='completed' ORDER BY finished_at DESC LIMIT 1")
+                .bind(&job.owner).bind(&key).bind(&job.target_id).fetch_optional(&mut *tx).await?;
+            if let Some(completed) = completed {
+                emit(
+                    &mut tx,
+                    &EventInput {
+                        key: &format!("marker-chapters-reread:{}", job.id),
+                        kind: "manual",
+                        library_id: &job.library_id,
+                        asset_id: &job.target_id,
+                        fingerprint: source,
+                        payload: &serde_json::json!({"fingerprintTaskId": completed, "reanalyzeMarkers": true, "stale": false, "extensionId": link.extension_id}),
+                    },
+                    now,
+                )
+                .await?;
+            }
+        }
         if !found.contains("intro") || !found.contains("credits") {
             let source: Option<String> =
                 query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")

@@ -19,6 +19,8 @@
   import Icon from '../ui/Icon.svelte';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import ChapterImages from './ChapterImages.svelte';
+  import MediaSegments from './MediaSegments.svelte';
+  import { session } from '../auth/session';
   import { t } from '../i18n';
 
   let { work, playableMedia = [], allowedIds = [], selected = $bindable(''), mediaError = '', similarCandidates = [], onPlay }: {
@@ -34,7 +36,9 @@
   const hasCast = $derived(creditPeople(work).length > 0);
   const tabs = $derived([
     { id: 'details', label: $t('detail_tab_details') },
-    ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : [])
+    ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : []),
+    // Administrators check and correct the detected intro and credits of the selected version.
+    ...($session?.user.role === 'administrator' && !work.synthetic && currentSelectedMedia ? [{ id: 'segments', label: $t('segments_tab') }] : [])
   ]);
   let tab = $state('details');
   $effect(() => { void work.id; tab = 'details'; });
@@ -123,6 +127,8 @@
     >
       {#if tab === 'cast' && hasCast}
         <EditorialCredits {work} />
+      {:else if tab === 'segments' && currentSelectedMedia && $session?.user.role === 'administrator'}
+        {#key currentSelectedMedia.id}<MediaSegments assetId={currentSelectedMedia.id} title={work.title} />{/key}
       {:else}
         <WorkDetails {work}>
           {#if currentSelectedMedia && !work.synthetic}{#key currentSelectedMedia.id}<ChapterImages assetId={currentSelectedMedia.id} />{/key}{/if}

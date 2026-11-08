@@ -1,6 +1,7 @@
 // Episode timeline segments (intro, credits, recap, preview): what the season overview
 // endpoint returns, and the rules the editor applies before saving a correction.
 // The server repeats every check; these only give immediate, precise feedback.
+import type { TranslationKey } from '../i18n/messages';
 
 export const segmentKinds = ['intro', 'credits', 'recap', 'preview'] as const;
 export type SegmentKind = typeof segmentKinds[number];
@@ -16,10 +17,14 @@ export type SegmentEpisode = {
   duration: number | null; minConfidence: number; detectionEnabled: boolean;
   chapters: { start: number; title: string }[];
   fingerprint: TaskState; detection: TaskState;
+  /** Reading of the file's chapters (absent from servers before November 2026). */
+  chapterReading?: TaskState;
   automatic: AutomaticSegment[]; manual: ManualSegment[];
 };
 export type SegmentProvider = { id: string; name: string; version: string; enabled: boolean };
 export type SeasonSegments = { seasonId: string; providers: SegmentProvider[]; episodes: SegmentEpisode[] };
+/** One file (a film or an episode) in the segment editor. */
+export type AssetSegments = { kind: 'film' | 'episode'; seasonId: string | null; providers: SegmentProvider[]; asset: SegmentEpisode };
 
 export type EffectiveSegment =
   | { source: 'manual'; start: number; end: number }
@@ -27,8 +32,10 @@ export type EffectiveSegment =
   | { source: 'disabled' }
   | { source: 'none' };
 
-/** Largest manual segment the server accepts, in seconds. */
+/** Largest manual segment the server accepts, in seconds (film credits may run 20 minutes). */
 export const MAX_SEGMENT_LENGTH = 600;
+export const MAX_CREDITS_LENGTH = 1200;
+export const maxSegmentLength = (kind?: SegmentKind) => kind === 'credits' ? MAX_CREDITS_LENGTH : MAX_SEGMENT_LENGTH;
 
 /** What the player will use: a manual correction wins, then the best usable detection. */
 export function effectiveSegment(episode: SegmentEpisode, kind: SegmentKind): EffectiveSegment {
@@ -77,15 +84,54 @@ export function formatClock(seconds: number | null | undefined, precise = false)
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${secondsText}` : `${minutes}:${secondsText}`;
 }
 
-export type SegmentProblem = 'segment_invalid_time' | 'segment_end_before_start' | 'segment_beyond_duration' | 'segment_too_long';
+export type SegmentProblem = 'segment_invalid_time' | 'segment_end_before_start' | 'segment_beyond_duration' | 'segment_too_long' | 'segment_too_long_credits';
 
 /** First problem that would make the server refuse this segment, or null. */
-export function segmentProblem(start: number | null, end: number | null, duration: number | null): SegmentProblem | null {
+export function segmentProblem(start: number | null, end: number | null, duration: number | null, kind?: SegmentKind): SegmentProblem | null {
   if (start === null || end === null || !Number.isFinite(start) || !Number.isFinite(end) || start < 0) return 'segment_invalid_time';
   if (end <= start) return 'segment_end_before_start';
   if (duration !== null && end > duration) return 'segment_beyond_duration';
-  if (end - start > MAX_SEGMENT_LENGTH) return 'segment_too_long';
+  if (end - start > maxSegmentLength(kind)) return kind === 'credits' ? 'segment_too_long_credits' : 'segment_too_long';
   return null;
+}
+
+/** The point of `points` within `window` seconds of `time`, else `time` (timeline snapping). */
+export function snapTo(points: number[], time: number, window: number): number {
+  let best = time, distance = window;
+  for (const point of points) {
+    const gap = Math.abs(point - time);
+    if (gap <= distance) { best = point; distance = gap; }
+  }
+  return best;
+}
+
+/** Label of one analysis task's status. */
+export function taskLabel(status: string): TranslationKey {
+  switch (status) {
+    case 'queued': return 'segment_task_queued';
+    case 'running': return 'segment_task_running';
+    case 'paused': return 'segment_task_paused';
+    case 'completed': return 'segment_task_completed';
+    case 'error': return 'segment_task_error';
+    case 'cancelled': return 'segment_task_cancelled';
+    default: return 'segment_task_missing';
+  }
+}
+
+/** Where the analysis of a file stands, from its three tasks. */
+export type AnalysisState = { key: TranslationKey; tone: 'ok' | 'wait' | 'err' | 'mute'; detail?: string };
+export function analysisState(episode: SegmentEpisode, film = false): AnalysisState {
+  if (!episode.detectionEnabled) return { key: 'segment_status_detection_off', tone: 'mute' };
+  const chapters = episode.chapterReading ?? { status: 'missing', error: null, updatedAt: null };
+  const tasks = film ? [chapters] : [chapters, episode.fingerprint, episode.detection];
+  const failed = tasks.find(task => task.status === 'error');
+  if (!film && episode.detection.status === 'error') return { key: 'segment_status_detection_failed', tone: 'err', detail: episode.detection.error ?? undefined };
+  if (!film && episode.fingerprint.status === 'error') return { key: 'segment_status_audio_failed', tone: 'err', detail: episode.fingerprint.error ?? undefined };
+  if (failed) return { key: 'segment_status_chapters_failed', tone: 'err', detail: failed.error ?? undefined };
+  if (tasks.some(task => ['queued', 'paused'].includes(task.status))) return { key: 'segment_status_queued', tone: 'wait' };
+  if (tasks.some(task => task.status === 'running')) return { key: 'segment_status_running', tone: 'wait' };
+  if (tasks.some(task => task.status === 'completed')) return { key: 'segment_status_analysed', tone: 'ok' };
+  return { key: 'segment_status_not_analysed', tone: 'mute' };
 }
 
 /**
@@ -99,7 +145,7 @@ export function copySegment(kind: SegmentKind, start: number, end: number, from:
     next = { start: to - (from - start), end: to - (from - end) };
   }
   next = { start: Math.max(0, round(next.start)), end: round(next.end) };
-  return segmentProblem(next.start, next.end, to) ? null : next;
+  return segmentProblem(next.start, next.end, to, kind) ? null : next;
 }
 
 const round = (value: number) => Math.round(value * 1000) / 1000;

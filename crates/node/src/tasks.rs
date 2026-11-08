@@ -59,10 +59,16 @@ pub async fn clear_fingerprint_cache() -> io::Result<u64> {
     Ok(cleared)
 }
 
+/// Fingerprint one window of the file. The file is given to ffmpeg as its standard input; with
+/// `seekable`, ffmpeg reads it through the `fd:` protocol, which can seek: an MP4 whose index
+/// is at the end (no "faststart") can be read at all, and the tail window is reached by a seek
+/// instead of decoding the whole file through a pipe. ffmpeg before 6.1 has no `fd:` protocol:
+/// the caller then retries through the pipe.
 async fn run_single_chromaprint(
     opened: &crate::files::OpenedFile,
     seek_seconds: Option<f64>,
     max_duration_seconds: f64,
+    seekable: bool,
 ) -> io::Result<Vec<u32>> {
     let mut file = opened.try_clone_std()?;
     std::io::Seek::rewind(&mut file)?;
@@ -81,9 +87,12 @@ async fn run_single_chromaprint(
     if let Some(seek) = seek_seconds.filter(|s| *s > 0.0) {
         cmd.args(["-ss", &format!("{:.3}", seek)]);
     }
+    if seekable {
+        cmd.args(["-fd", "0", "-i", "fd:"]);
+    } else {
+        cmd.args(["-i", "-"]);
+    }
     cmd.args([
-        "-i",
-        "-",
         "-map",
         "0:a:0",
         "-vn",
@@ -159,7 +168,15 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
         })
         .filter(|d| d.is_finite() && *d > 0.0);
 
-    let mut intro_fps = run_single_chromaprint(opened, None, HEAD_SECONDS).await?;
+    // Seekable input first; a Node whose ffmpeg predates the `fd:` protocol uses the pipe.
+    let (mut intro_fps, seekable) =
+        match run_single_chromaprint(opened, None, HEAD_SECONDS, true).await {
+            Ok(fps) if !fps.is_empty() => (fps, true),
+            Ok(_) | Err(_) => (
+                run_single_chromaprint(opened, None, HEAD_SECONDS, false).await?,
+                false,
+            ),
+        };
     if intro_fps.is_empty() {
         return Err(io::Error::other("fingerprint_empty"));
     }
@@ -173,7 +190,8 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
             (Some(intro_fps[start_idx..].to_vec()), Some(t_start))
         } else {
             let t_start = (dur - TAIL_SECONDS).max(0.0);
-            if let Ok(mut tail) = run_single_chromaprint(opened, Some(t_start), TAIL_SECONDS).await
+            if let Ok(mut tail) =
+                run_single_chromaprint(opened, Some(t_start), TAIL_SECONDS, seekable).await
             {
                 tail.truncate(TAIL_ITEMS);
                 (Some(tail), Some(t_start))

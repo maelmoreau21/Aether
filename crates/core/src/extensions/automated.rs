@@ -29,6 +29,48 @@ const MARKER_EPISODE_OVERHEAD: usize = 320;
 /// Left free in the request for the extension settings' growth and the envelope.
 const MARKER_REQUEST_MARGIN: usize = 1024;
 
+/// Chapters sent with each episode of an acoustic detection (a typical file has 4 to 12).
+const MARKER_CHAPTERS_MAX: usize = 40;
+
+/// The chapters of an ffprobe result as the plugin reads them: start, end and title, sorted,
+/// at most `limit`. A chapter without a title is kept with an empty one: its boundaries still
+/// help, and unnamed chapters reveal an anime episode's structure.
+pub(super) fn probe_chapters(probe: &Value, limit: usize) -> Vec<Value> {
+    let mut chapters: Vec<(f64, Option<f64>, String)> = probe["chapters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|chapter| {
+            let number = |key: &str| {
+                chapter[key]
+                    .as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| chapter[key].as_f64())
+                    .filter(|n| n.is_finite() && *n >= 0.0)
+            };
+            let round = |n: f64| (n * 1000.0).round() / 1000.0;
+            let start = round(number("start_time")?);
+            let end = number("end_time").map(round).filter(|end| *end > start);
+            let title: String = chapter["tags"]["title"]
+                .as_str()
+                .unwrap_or("")
+                .chars()
+                .take(64)
+                .collect();
+            Some((start, end, title))
+        })
+        .collect();
+    chapters.sort_by(|a, b| a.0.total_cmp(&b.0));
+    chapters
+        .into_iter()
+        .take(limit)
+        .map(|(start, end, title)| match end {
+            Some(end) => json!({"start": start, "end": end, "title": title}),
+            None => json!({"start": start, "title": title}),
+        })
+        .collect()
+}
+
 /// Order the candidates of one season for a detection: the target first, then the episodes whose
 /// number is closest to it (neighbours most often share the same opening), keeping the incoming
 /// order between equals. Returns indices into `episodes`: `(is_target, number)`.
@@ -296,8 +338,19 @@ pub(crate) async fn run_automated(
             else {
                 continue;
             };
+            // The plugin reads the chapters with the audio: named chapters are kept as authored,
+            // and an acoustic boundary close to a chapter mark lands on it. Only the target's
+            // result is stored (each peer has its own task), so only its chapters are sent: the
+            // request has no room to spare for three episodes.
+            let chapters = if episodes.is_empty() {
+                probe_chapters(&probe, MARKER_CHAPTERS_MAX)
+            } else {
+                Vec::new()
+            };
+            let chapters_size = serde_json::to_vec(&chapters).map_or(0, |bytes| bytes.len());
             let size = bytes.len().div_ceil(3) * 4
                 + tail_compact.as_ref().map_or(0, String::len)
+                + chapters_size
                 + MARKER_EPISODE_OVERHEAD;
             if !episodes.is_empty() && !marker_request_fits(request_bytes, size, request_budget) {
                 continue;
@@ -316,6 +369,9 @@ pub(crate) async fn run_automated(
                 // rate (8.6133), so the rate is the algorithm's, never the stored one.
                 "fingerprintRate": media_node::tasks::FINGERPRINT_RATE
             });
+            if !chapters.is_empty() {
+                ep_val["chapters"] = json!(chapters);
+            }
             if let Some(compact) = tail_compact {
                 ep_val["tailFingerprintsCompact"] = json!(compact);
             }
@@ -335,7 +391,7 @@ pub(crate) async fn run_automated(
         let context = context
             .as_ref()
             .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"))?;
-        if context.kind != "episode" {
+        if context.kind != "episode" && context.kind != "film" {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"));
         }
         let raw: String = query_scalar(
@@ -353,20 +409,19 @@ pub(crate) async fn run_automated(
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "duration_required"))?;
-        let chapters = probe["chapters"].as_array().cloned().unwrap_or_default();
-        if chapters.len() > 1000 {
+        if probe["chapters"]
+            .as_array()
+            .is_some_and(|list| list.len() > 1000)
+        {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "too_many_chapters"));
         }
-        let chapters: Vec<Value> = chapters
-            .iter()
-            .filter_map(|chapter| {
-                let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
-                let title = chapter["tags"]["title"].as_str()?;
-                (start.is_finite() && start >= 0.0 && title.len() <= 128)
-                    .then(|| json!({"start":start,"title":title}))
-            })
-            .collect();
-        json!({"episodeId":work_id,"duration":duration,"chapters":chapters})
+        let chapters = probe_chapters(&probe, 256);
+        json!({
+            "episodeId": work_id,
+            "duration": duration,
+            "chapters": chapters,
+            "mediaType": if context.kind == "film" { "movie" } else { "episode" },
+        })
     } else {
         let context = context
             .as_ref()

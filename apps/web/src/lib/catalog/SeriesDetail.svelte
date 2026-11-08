@@ -119,6 +119,13 @@
   ]);
   let tab = $state('episodes');
   $effect(() => { void work.id; tab = 'episodes'; });
+  // An episode's « Intro & générique » action opens the segment editor on that episode.
+  let segmentFocus = $state<string | null>(null);
+  function editSegments(episode: Work) {
+    segmentFocus = episode.id;
+    tab = 'segments';
+    scrollToSections();
+  }
 
   // « Reprendre S2 · É4 » : l'épisode en cours le plus récent de cette série.
   const resume = $derived(work.synthetic ? null : resumeTarget(work, $history, item => isResumable(item, $serverPresentation), pageEpisodes, season));
@@ -171,7 +178,7 @@
   {#if tab === 'details'}
     <div class="panel" role="tabpanel" id="series-detail-panel-details" aria-labelledby="series-detail-tab-details"><WorkDetails {work} /></div>
   {:else if tab === 'segments' && activeSeason && $session?.user.role === 'administrator'}
-    <div class="panel" role="tabpanel" id="series-detail-panel-segments" aria-labelledby="series-detail-tab-segments"><SegmentEditor seasonId={activeSeason.id} seasonTitle={seasonLabel(activeSeason)} /></div>
+    <div class="panel" role="tabpanel" id="series-detail-panel-segments" aria-labelledby="series-detail-tab-segments"><SegmentEditor seasonId={activeSeason.id} seasonTitle={seasonLabel(activeSeason)} focusWork={segmentFocus} /></div>
   {:else if tab === 'cast' && hasCast}
     <div class="panel" role="tabpanel" id="series-detail-panel-cast" aria-labelledby="series-detail-tab-cast"><EditorialCredits {work} /></div>
   {:else}
@@ -234,7 +241,10 @@
             <div class="episode-actions-row">
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
               {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} compact />{/if}
-              {#if !episode.synthetic && $session?.user.role === 'administrator'}<WorkTools work={episode} selectedMedia={descriptor} />{/if}
+              {#if !episode.synthetic && $session?.user.role === 'administrator'}
+                <WorkTools work={episode} selectedMedia={descriptor} />
+                <button type="button" class="segment-shortcut" onclick={() => editSegments(episode)} title={$t('segment_edit_episode_hint')}><Icon name="edit" size={15} /><span>{$t('segment_edit_episode')}</span></button>
+              {/if}
               {#if descriptor && !episode.synthetic}<ChapterImages assetId={descriptor.id} />{/if}
             </div>
           </div>
@@ -288,6 +298,8 @@
   .analyze-markers-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; font-size: 13px; font-weight: 700; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); border: 0; cursor: pointer; transition: background-color var(--t-fast) ease; }
   .analyze-markers-btn:hover:not(:disabled) { background: var(--pn-3); }
   .analyze-markers-btn:disabled { opacity: 0.6; cursor: wait; }
+  .segment-shortcut { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; font: inherit; font-size: 13px; font-weight: 700; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); border: 0; cursor: pointer; }
+  .segment-shortcut:hover { background: var(--pn-3); }
   .analyze-feedback { font-size: 13px; color: var(--ac); font-weight: 600; }
   .episodes-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); gap: 4px 24px; }
   .episode { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); align-items: start; gap: 20px; padding: 14px 12px; border-radius: var(--r-lg); transition: background-color var(--t-fast) ease; }

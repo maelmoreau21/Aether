@@ -132,8 +132,7 @@
       notice = $t('sched_trigger_added');
       await refresh();
     } catch (cause) {
-      const text = message(cause);
-      error = text.startsWith('Ce nom existe déjà') ? $t('sched_trigger_conflict') : text;
+      error = message(cause);
     } finally {
       saving = false;
     }
@@ -170,6 +169,7 @@
         {/if}
       </header>
       <p class="description">{task.description}</p>
+      {#if task.nextRunAt}<p class="next-run">{$t('sched_next', { date: date(task.nextRunAt) })}</p>{/if}
       {#if task.reason}<p class="reason">{task.reason}</p>{/if}
       {#if task.kind === 'backup'}<p class="hint"><a href={resolve('admin/libraries/#backups-section')}>{$t('sched_backups_link')}</a></p>{/if}
 
@@ -244,6 +244,7 @@
                 {:else}
                   <span class="task-subtitle" data-tone={summary.tone}>{summary.text}</span>
                 {/if}
+                {#if task.nextRunAt && task.state === 'idle' && !task.reason}<span class="task-subtitle">{$t('sched_next_short', { date: date(task.nextRunAt) })}</span>{/if}
                 {#if task.reason}<span class="task-subtitle">{task.reason}</span>{/if}
               </a>
               {#if running(task)}
@@ -311,6 +312,7 @@
   h3 { margin: 0; font-size: 16px; font-weight: 600; }
   .list-header, .detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
   .description { max-width: 75ch; margin: 0 0 20px; font-size: 15px; line-height: 1.5; color: var(--color-muted); }
+  .next-run { margin: -12px 0 20px; font-size: 14px; color: var(--color-muted); font-variant-numeric: tabular-nums; }
 
   .category { margin-top: 24px; }
   .category > h3 { margin: 0 0 4px; padding: 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }

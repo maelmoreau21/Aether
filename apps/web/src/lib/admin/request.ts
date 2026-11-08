@@ -81,7 +81,15 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       extension_update_compatibility_unverified: tr('the_update_is_refused_data_compatibility'),
       extension_update_requires_authorization: tr('the_update_requires_new_access'),
       extension_limit: tr('the_limit_of_32_installed_extensions'),
-      extension_unavailable: tr('this_extension_is_not_available')
+      extension_unavailable: tr('this_extension_is_not_available'),
+      task_already_active: tr('sched_err_already_active'),
+      task_unavailable: tr('sched_err_unavailable'),
+      task_not_active: tr('sched_err_not_active'),
+      task_not_found: tr('sched_err_not_found'),
+      trigger_invalid: tr('sched_err_trigger_invalid'),
+      trigger_duplicate: tr('sched_err_trigger_duplicate'),
+      trigger_limit: tr('sched_err_trigger_limit'),
+      trigger_not_found: tr('sched_err_trigger_not_found')
     };
     const code = detail?.pluginError ?? detail?.error;
     if (code && messages[code]) throw new Error(messages[code]);

@@ -24,6 +24,7 @@ pub mod server_settings;
 pub mod system_memory;
 pub mod system_task_queue;
 pub mod system_tasks;
+pub mod task_scheduler;
 pub mod task_triggers;
 use media_contracts::brand;
 pub mod artwork;
@@ -276,6 +277,9 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(scheduler::router(auth.clone()).await?)
             .merge(system_tasks::router(auth.clone(), root.clone()).await?)
             .merge(task_triggers::router(auth.clone()))
+            // Operations queue (`/api/v1/admin/tasks/jobs`): without it the path fell through to
+            // `/api/v1/admin/tasks/{id}` and the operations page answered 404.
+            .merge(task_engine::router(auth.clone()))
             .merge(system_memory::router(auth.clone()))
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))

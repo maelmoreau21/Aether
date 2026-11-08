@@ -692,97 +692,22 @@ async fn update_schedule(
         .into_response())
 }
 
-/// The schedule only *triggers* work: the due run is claimed here (compare-and-set on
-/// `next_due_at`, safe against several ticks) and handed to the durable task queue, whose lease,
-/// fencing token and playback preemption then govern the execution. No backup runs in this loop.
-async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
-    if state.source.is_none() && state.postgres_url.is_none() {
-        return Ok(());
-    }
-    let schedule = load_schedule(state).await?;
-    let started = now();
-    if !schedule.enabled || schedule.next_due_at > started {
-        return Ok(());
-    }
-    // Atomic claim; advance from now to avoid missed-run storms. `running` means queued or running.
-    // The next due instant is the earliest next firing of the backup's triggers.
-    let limit = {
-        let _writer = state.auth.store.task_writes.lock().await;
-        let mut conn = state
-            .auth
-            .store
-            .pool()
-            .acquire()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let mut tx = crate::database::begin_write(&mut conn)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let claimed = crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND enabled=1 AND next_due_at=? AND next_due_at<=?")
-            .bind(started).bind(schedule.next_due_at).bind(started)
-            .execute(&mut *tx).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if claimed.rows_affected() == 0 {
-            return Ok(());
-        }
-        let advance = crate::task_triggers::advance(
-            &mut tx,
-            "backup",
-            "backup",
-            started,
-            schedule.interval_minutes,
-        )
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        crate::database::query(
-            "UPDATE backup_schedule SET next_due_at=?,enabled=? WHERE singleton=1",
-        )
-        .bind(advance.next.unwrap_or(started))
-        .bind(i64::from(advance.next.is_some()))
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        crate::database::commit(tx)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        advance.max_runtime_seconds
-    };
-    if let Err(error) = crate::system_task_queue::enqueue_backup(
-        &state.auth.store,
-        &schedule.next_due_at.to_string(),
-        started,
-        limit,
-    )
-    .await
-    {
-        eprintln!("scheduled backup could not be queued: {error}");
-        crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
-            .bind(now()).bind(started)
-            .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    Ok(())
-}
-
-/// Queue one backup outside the periodic schedule (startup trigger, unified "run" action).
-/// Returns `false` when a backup is already queued or running.
+/// Queue one backup run (backup triggers via `task_scheduler`, the unified "run" action).
+/// Returns `false` when a backup is already queued or running. The durable task's lease, fencing
+/// token and playback rules then govern the execution; `backup_schedule` records its outcome.
 pub(crate) async fn trigger_backup(
     store: &crate::identity::IdentityStore,
     key: &str,
     timestamp: i64,
     max_runtime_seconds: Option<i64>,
 ) -> Result<bool, sqlx::Error> {
-    let claimed = crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND last_outcome!='running'")
-        .bind(timestamp).execute(store.pool()).await?;
-    if claimed.rows_affected() == 0 {
+    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','running','paused')")
+        .fetch_one(store.pool())
+        .await?;
+    if active > 0 {
         return Ok(false);
     }
-    if let Err(error) =
-        crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds).await
-    {
-        crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
-            .bind(now()).bind(timestamp).execute(store.pool()).await?;
-        return Err(error);
-    }
+    crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds).await?;
     Ok(true)
 }
 
@@ -807,6 +732,12 @@ async fn run_scheduled(
     state: &Backups,
     fence: Option<&crate::task_engine::Job>,
 ) -> Result<(), StatusCode> {
+    // `running` is set when the run really starts, never while it only waits in the queue.
+    crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1")
+        .bind(now())
+        .execute(state.auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let result = perform_backup(state).await;
     if let Err(error) = &result {
         eprintln!(
@@ -859,14 +790,7 @@ fn start_worker(state: &Arc<Backups>) {
             let _ = crate::database::query("UPDATE backup_schedule SET last_outcome='interrupted',last_completed_at=? WHERE singleton=1 AND last_outcome='running'")
                 .bind(now()).execute(state.auth.store.pool()).await;
         }
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-            let Some(state) = weak.upgrade() else {
-                break;
-            };
-            let _ = scheduled_tick(&state).await;
-            // Drop strong state before sleeping; worker never owns its own lifetime.
-        }
+        // Scheduled backups fire from their triggers (`task_scheduler`), like every task.
     });
     match state.worker.lock() {
         Ok(mut handle) => *handle = Some(task.abort_handle()),
@@ -953,33 +877,39 @@ mod tests {
             )),
         };
         assert!(!load_schedule(&state).await.unwrap().enabled);
-        crate::database::query("UPDATE backup_schedule SET enabled=1,interval_minutes=60,next_due_at=0 WHERE singleton=1").execute(store.pool()).await.unwrap();
-        // The tick no longer depends on the in-memory gate: exclusion is the durable task's lease.
-        scheduled_tick(&state).await.unwrap();
-        // The tick only queues a durable task; nothing ran yet.
-        let queued: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status='queued'")
-            .fetch_one(store.pool()).await.unwrap();
-        assert_eq!(queued, 1);
-        assert_eq!(load_schedule(&state).await.unwrap().last_outcome, "running");
+        // A due hourly trigger: the scheduler pass only queues a durable task.
+        crate::database::query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,interval_minutes,enabled,next_fire_at,created_at) VALUES('hourly','backup','backup','interval',60,1,0,0)").execute(store.pool()).await.unwrap();
+        let queued_runs = || async {
+            crate::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status='queued'")
+                .fetch_one(store.pool()).await.unwrap()
+        };
+        assert_eq!(
+            crate::task_scheduler::fire_due(&state.auth, now())
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(queued_runs().await, 1);
+        // Queued is not running: the last outcome stays the previous one until the run starts.
+        assert_ne!(load_schedule(&state).await.unwrap().last_outcome, "running");
         assert!(!temp.path().join("backups").exists());
+        // The trigger moved on: another pass right away does not queue a second run.
+        crate::task_scheduler::fire_due(&state.auth, now())
+            .await
+            .unwrap();
+        assert_eq!(queued_runs().await, 1);
         run_scheduled(&state, None).await.unwrap();
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "succeeded");
-        assert!(schedule.next_due_at > now());
-        scheduled_tick(&state).await.unwrap();
+        assert!(schedule.next_due_at > now(), "the mirror follows the trigger");
         assert_eq!(
             std::fs::read_dir(temp.path().join("backups"))
                 .unwrap()
                 .count(),
             1
         );
-        // Failed attempts are terminal until the next interval, not retried every tick.
+        // Failed attempts are terminal until the next firing, not retried every pass.
         state.source = Some(temp.path().join("missing.media-backup"));
-        crate::database::query("UPDATE backup_schedule SET next_due_at=0 WHERE singleton=1")
-            .execute(store.pool())
-            .await
-            .unwrap();
-        scheduled_tick(&state).await.unwrap();
         assert!(run_scheduled(&state, None).await.is_err());
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "failed");

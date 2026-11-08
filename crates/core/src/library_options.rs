@@ -73,6 +73,8 @@ pub struct LibraryOptions {
     pub artwork_pool_enabled: bool,
     /// Administrators see this library in their catalogue (management is unaffected).
     pub admin_access: bool,
+    /// A series library presented as "Animés": same scan and playback, another label.
+    pub anime: bool,
 }
 impl Default for LibraryOptions {
     fn default() -> Self {
@@ -125,6 +127,7 @@ impl Default for LibraryOptions {
             artwork_max_images: 12,
             artwork_pool_enabled: false,
             admin_access: true,
+            anime: false,
         }
     }
 }
@@ -290,6 +293,20 @@ fn valid_providers(providers: &[ProviderPreference]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "Animés" is a label on a series library: stored options without it stay series.
+    #[test]
+    fn anime_label_round_trips_and_defaults_off() {
+        let stored: LibraryOptions = serde_json::from_str(r#"{"adminAccess":true}"#).unwrap();
+        assert!(!stored.anime);
+        let anime: LibraryOptions = serde_json::from_str(r#"{"anime":true}"#).unwrap();
+        assert!(anime.anime);
+        assert!(
+            serde_json::to_string(&anime)
+                .unwrap()
+                .contains(r#""anime":true"#)
+        );
+    }
 
     /// Access checks recognise hidden libraries with `LIKE '%adminAccess__false%'`.
     #[tokio::test]

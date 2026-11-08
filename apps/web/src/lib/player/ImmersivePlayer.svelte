@@ -388,7 +388,29 @@
       subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
+  // What the automatic detection stored for this file, shown beside the manual correction.
+  type StoredMarker = { type: string; start: number | null; end: number | null; confidence?: number; extensionId?: string; enabled?: boolean };
+  let markerDetections = $state<{ assetId: string; automatic: StoredMarker[]; manual: StoredMarker[] } | null>(null);
+  let markerDetectionsLoading = $state(false);
+  async function loadMarkerDetections(assetId: string) {
+    if (markerDetections?.assetId === assetId || markerDetectionsLoading) return;
+    markerDetectionsLoading = true;
+    try {
+      const response = await fetch(`/api/v1/admin/assets/${encodeURIComponent(assetId)}/markers`, { credentials: 'same-origin', cache: 'no-store' });
+      if (response.ok) {
+        const body = await response.json() as { automatic?: StoredMarker[]; manual?: StoredMarker[] };
+        if (active?.id === assetId) markerDetections = { assetId, automatic: body.automatic ?? [], manual: body.manual ?? [] };
+      }
+    } catch { /* The correction form stays usable without the detection summary. */ }
+    finally { markerDetectionsLoading = false; }
+  }
+  const markerClock = (seconds: number | null) => {
+    if (seconds === null || !Number.isFinite(seconds)) return '—';
+    const whole = Math.round(seconds), hours = Math.floor(whole / 3600), minutes = Math.floor(whole % 3600 / 60), rest = String(whole % 60).padStart(2, '0');
+    return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+  };
   function editMarker(kind: 'intro' | 'credits' | 'recap' | 'preview') {
+    if (active) void loadMarkerDetections(active.id);
     markerKind = kind;
     const value = active?.[kind];
     markerEnabled = Boolean(value);
@@ -423,7 +445,7 @@
       } else {
         active = { ...active, [markerKind]: markerEnabled ? { start: markerStart, end: markerEnd } : undefined };
       }
-      markerEditor = false;
+      markerEditor = false; markerDetections = null;
     } catch (error) { markerError = error instanceof Error ? error.message : $t('correction_unavailable'); }
     finally { markerSaving = false; }
   }
@@ -739,6 +761,15 @@
       <section class="marker-editor" aria-label={$t('marker_correction')}>
         <h2>{$t('manual_marker')}</h2>
         <label>{$t('request_type')}<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">{$t('intro')}</option><option value="credits">{$t('credits')}</option><option value="recap">{$t('recap')}</option><option value="preview">{$t('player_preview')}</option></select></label>
+        {#if markerDetections?.assetId === active.id}
+          {@const detected = markerDetections.automatic.filter(item => item.type === markerKind)}
+          <div class="marker-detection" role="status">
+            {#each detected as item, index (index)}
+              <p>{$t('marker_detected', { start: markerClock(item.start), end: markerClock(item.end), confidence: Math.round((item.confidence ?? 0) * 100), source: item.extensionId ?? '—' })}</p>
+            {:else}<p>{$t('marker_not_detected')}</p>{/each}
+            {#if markerDetections.manual.some(item => item.type === markerKind)}<p>{$t('marker_manual_active')}</p>{/if}
+          </div>
+        {:else if markerDetectionsLoading}<p class="marker-detection" role="status">{$t('marker_detection_loading')}</p>{/if}
         <label><input type="checkbox" bind:checked={markerEnabled} /> {$t('enable_this_marker')}</label>
         {#if markerEnabled}
           <label>{$t('report_time_start')}<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
@@ -818,6 +849,9 @@
 <style>
   .marker-editor { position:absolute;z-index:10;top:90px;right:24px;display:grid;gap:10px;width:min(340px,calc(100% - 48px));padding:16px;background:#171923;color:white;border:1px solid #ffffff50;border-radius:10px; }
   .marker-editor label { display:grid;gap:4px; }
+  .marker-detection { margin:0;padding:8px 10px;border-radius:8px;background:#ffffff14;font-size:13px;line-height:1.45; }
+  .marker-detection p { margin:0; }
+  .marker-detection p + p { margin-top:4px; }
   .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
   .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
   .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }

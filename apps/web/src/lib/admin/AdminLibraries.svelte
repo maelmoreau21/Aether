@@ -1,6 +1,5 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { resolve } from '$app/paths';
   import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
   import LibraryOptionsForm, { type LibraryOptionsSection } from './LibraryOptions.svelte';
   import LibraryAccess from './LibraryAccess.svelte';
@@ -74,6 +73,25 @@
       default: return $t('scan_waiting_dispatching');
     }
   }
+  // Every refresh mode is a direct action of the library editor (no intermediate dialog).
+  const refreshModes = $derived([
+    { mode: 'incremental' as RefreshMode, label: $t('quick_refresh'), hint: $t('unchanged_technical_analyses_are_reused') },
+    { mode: 'new_only' as RefreshMode, label: $t('refresh_keep_descriptions'), hint: $t('metadata_of_already_known_media_is') },
+    { mode: 'missing_metadata' as RefreshMode, label: $t('fill_missing_metadata'), hint: $t('local_metadata_already_validated_is_kept') },
+    { mode: 'full' as RefreshMode, label: $t('full_rescan'), hint: $t('all_files_are_re_analysed_local') }
+  ]);
+  let refreshNotice = $state('');
+  async function startRefresh(library: Library, chosen: RefreshMode) {
+    refreshNotice = '';
+    await onscan(library, chosen);
+    if (!error) refreshNotice = $t('library_refresh_started', { mode: refreshModes.find(item => item.mode === chosen)?.label ?? '' });
+  }
+  // "Animés" is a series library shown under another name: same scan, same player.
+  const contentKind = $derived(kind === 'series' && options.anime ? 'anime' : kind);
+  function chooseContentKind(value: string) {
+    kind = value === 'anime' ? 'series' : value as 'films' | 'series' | 'music';
+    options = { ...options, anime: value === 'anime' };
+  }
   function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? $t('local_node') : id); }
   let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
   // Intro/credits analysis of a whole series library (fingerprints queued again where they failed).
@@ -146,7 +164,7 @@
     {#each libraries as library (library.id)}
       {@const folderCount = library.folders?.length ?? 1}
       {@const serverNames = [...new Set((library.folders ?? [{ nodeId: library.nodeId }]).map(folder => folder.nodeId))].map(nodeName)}
-      {@const kindLabel = library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}
+      {@const kindLabel = library.kind === 'music' ? $t('music') : library.kind === 'films' ? $t('films') : library.options?.anime ? $t('anime') : $t('series')}
       {@const scan = scans[library.id]}
       {@const scanning = ['queued','running'].includes(scan?.status)}
       {@const unavailable = !library.enabled || pending.includes(library.id) || scanning}
@@ -197,7 +215,7 @@
       <div class="editor-content" bind:this={editorContent}>
         <div id="library-panel-general" role="tabpanel" aria-labelledby="library-tab-general" data-editor-panel="general" hidden={activeSection !== 'general'} tabindex="0">
           <h3>{$t('library_general')}</h3><p class="panel-description">{$t('library_general_note')}</p>
-          <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" bind:value={kind}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="music">{$t('music')}</option></select></div></div>
+          <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" value={contentKind} onchange={event => chooseContentKind(event.currentTarget.value)}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="anime">{$t('anime')}</option><option value="music">{$t('music')}</option></select></div></div>
           <label class="check"><input type="checkbox" bind:checked={enabled} /> {$t('active_library')}</label><p class="field-hint">{$t('disabled_library_hint')}</p>
           {#if !folders.length}<p class="field-hint">{$t('add_a_folder_in')} <button type="button" class="inline-link" onclick={() => chooseEditorSection('sources')}>{$t('sources_folders')}</button> {$t('to_be_able_to_save')}</p>{/if}
           <div class="preset-row"><p>{$t('reset_settings_to_the_values_recommended')}</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>{$t('apply_recommended_settings')}</button></div>
@@ -207,14 +225,25 @@
             {@const busyLibrary = !editedLibrary.enabled || pending.includes(editedLibrary.id) || ['queued', 'running'].includes(scans[editedLibrary.id]?.status)}
             <div class="library-actions">
               <h4>{$t('actions')}</h4>
-              <div class="action-buttons">
-                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; editor?.close(); refreshLibrary(library); }}><Icon name="refresh" size={16} /> {$t('refresh_the_library')}</button>
-                <button type="button" disabled={busyLibrary} onclick={() => { const library = editedLibrary; target = library; mode = 'missing_metadata'; editor?.close(); refresher?.showModal(); }}>{$t('look_for_missing_metadata')}</button>
-                <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}>{$t('edit_artwork')}</button>
-                {#if editedLibrary.kind === 'series'}<button type="button" disabled={busyLibrary || markersBusy} onclick={() => { if (editedLibrary) void analyzeLibraryMarkers(editedLibrary); }}>{markersBusy ? $t('analysing') : $t('analyse_library_intros')}</button>{/if}
-                <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(editedLibrary.id)}`)} onclick={() => editor?.close()}>{$t('schedule_refresh')}</a>
-              </div>
-              {#if editedLibrary.kind === 'series'}<p class="field-hint">{$t('intro_analysis_hint')}</p>{/if}
+              <ul class="action-list">
+                {#each refreshModes as item (item.mode)}
+                  <li>
+                    <button type="button" disabled={busyLibrary} onclick={() => { if (editedLibrary) void startRefresh(editedLibrary, item.mode); }}><Icon name="refresh" size={16} /> {item.label}</button>
+                    <p>{item.hint}</p>
+                  </li>
+                {/each}
+                <li>
+                  <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}><Icon name="image" size={16} /> {$t('edit_artwork')}</button>
+                  <p>{$t('library_action_artwork_hint')}</p>
+                </li>
+                {#if editedLibrary.kind === 'series'}
+                  <li>
+                    <button type="button" disabled={busyLibrary || markersBusy} onclick={() => { if (editedLibrary) void analyzeLibraryMarkers(editedLibrary); }}><Icon name="play" size={16} /> {markersBusy ? $t('analysing') : $t('analyse_library_intros')}</button>
+                    <p>{$t('intro_analysis_hint')}</p>
+                  </li>
+                {/if}
+              </ul>
+              {#if refreshNotice}<p role="status" class="field-hint">{refreshNotice}</p>{/if}
               {#if markersNotice}<p role="status" class="field-hint">{markersNotice}</p>{/if}
               {#if markersError}<p role="alert" class="editor-error">{markersError}</p>{/if}
             </div>
@@ -290,12 +319,17 @@
   .library-actions, .danger-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--color-line-subtle); }
   .library-actions h4, .danger-zone h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mu); }
   .action-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
-  .action-buttons a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 18px; border: 1px solid var(--color-line); border-radius: var(--r-md); color: var(--tx); font-size: 14px; font-weight: 600; text-decoration: none; }
-  .action-buttons a:hover { background: var(--color-surface-hover); }
+  .action-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .action-list li { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); align-items: center; gap: 6px 16px; padding: 10px 0; border-top: 1px solid var(--color-line-subtle); }
+  .action-list li:first-child { border-top: 0; padding-top: 0; }
+  .action-list button { justify-content: flex-start; width: 100%; text-align: left; }
+  .action-list button :global(svg) { flex: none; }
+  .action-list p { margin: 0; font-size: 13px; line-height: 1.45; }
+  @media (max-width: 800px) { .action-list li { grid-template-columns: minmax(0, 1fr); } }
   .danger { border-color: color-mix(in srgb, var(--err, #e5484d) 55%, transparent); color: var(--err, #e5484d); }
   .danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err, #e5484d) 12%, transparent); }
   @media (max-width: 640px) { .action-buttons > * { width: 100%; justify-content: center; } }
-  button:focus-visible, a:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  button:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   .library-table-panel { overflow-x: auto; background: var(--color-surface); border-radius: var(--r-md); }
   .library-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .library-table thead th { padding: 14px 16px; border-bottom: 1px solid var(--color-line-subtle); color: var(--mu); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-align: left; text-transform: uppercase; white-space: nowrap; }

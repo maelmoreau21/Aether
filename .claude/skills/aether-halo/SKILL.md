@@ -1,11 +1,18 @@
 ---
 name: aether-halo
-description: Thème et design system « Halo » d'Aether (identité, jetons, composants, navigation, responsive téléphone/tablette/PC/TV, clair/sombre). À utiliser pour toute création, modification ou revue d'interface dans apps/web — pages, composants Svelte, styles, textes d'interface — afin que tout le frontend reste uniforme.
+description: Règles UI et design system Halo d'Aether. À utiliser pour les changements d'interface dans apps/web, en partant des sources suivies par Git.
 ---
 
-Le skill complet est partagé avec les autres agents dans `.agents/skills/aether-halo/`.
+# Halo — références disponibles dans un clone propre
 
-Avant toute intervention sur l'interface, lisez et appliquez :
-1. `.agents/skills/aether-halo/SKILL.md` (règles, jetons, composants, navigation, responsive) ;
-2. `.agents/skills/aether-halo/reference/screens.md` (plan de chaque écran et emplacement de chaque fonction) ;
-3. `.agents/skills/aether-halo/assets/halo.css` et `screens.css` (implémentation de référence).
+Le code et les documents versionnés priment sur les copies locales ou fichiers optionnels d'agents.
+
+Avant une intervention visuelle, consulter **uniquement les références pertinentes** :
+1. docs/UI_DIRECTION.md : décisions durables sur la navigation, les thèmes, les écrans et l'accessibilité.
+2. apps/web/src/lib/styles/halo.css : jetons et règles CSS réellement utilisés.
+3. apps/web/src/lib/styles/tokens.css : alias de compatibilité.
+4. Composants réels sous apps/web/src/lib/ui/, catalog/, player/, music/ ou admin/ selon le périmètre.
+
+Le dossier .agents/skills/aether-halo/ peut contenir des références locales supplémentaires, mais il est ignoré par Git : **son absence ne doit jamais bloquer la tâche ni conduire à inventer son contenu**.
+
+Conserver le comportement fonctionnel et les droits ; vérifier la page modifiée en clair/sombre, desktop/mobile et clavier lorsque pertinent. Ne pas modifier l'ensemble du design system pour une correction isolée.

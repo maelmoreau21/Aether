@@ -1,3 +1,5 @@
+> **Lecture actuelle (8 novembre 2026).** Ce document conserve les choix architecturaux et jalons historiques. La structure effective est celle du code et de docs/BACKEND_MODULES.md ; les sections datées ne sont pas des tâches automatiques pour les agents. Vérifier le commit et les tests pour toute affirmation d'état.
+
 > Moteur de tâches à Core unique (25 octobre 2026) : file SQLite/PostgreSQL persistante, décisions Core, exécution confinée dans les Media Nodes appairés et dans le Node standalone, leases/tentatives et priorité à la lecture. Les travaux distribués n’exigent pas plusieurs Core ni un broker externe. Contrat réel et limites : [DISTRIBUTED_TASKS.md](docs/DISTRIBUTED_TASKS.md).
 
 > PostgreSQL 18 optionnel en cours de validation : moteur explicite, migrations indépendantes et premier contrat HTTP commun réussi sur SQLite et PostgreSQL. Voir [PostgreSQL](docs/POSTGRESQL.md) et .ai/MEMORY.md ; P2 reste ouvert.

@@ -64,16 +64,16 @@ Si une planche Jellyfin valide existe, elle est immédiatement servie sans néce
 
 Lorsque aucune planche n'existe et que la génération est activée, le Media Node produit des planches de prévisualisation natives :
 
-### Ligne de commande FFmpeg optimisée
+### Ligne de commande FFmpeg optimisée (WebP par défaut, repli JPEG)
 ```bash
-ffmpeg -v error -threads 2 -ss {seek_start} -i {source_video} \
-  -vf "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuvj420p,tile={cols}x{rows}" \
-  -start_number {start_sheet} -q:v {quality} -f image2 {output_pattern}
+ffmpeg -hide_banner -loglevel error -nostdin -threads 1 -filter_threads 1 -ss {seek_start} -n -i {source_video} \
+  -map 0:v:0 -an -sn -dn -vf "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuv420p,tile={cols}x{rows}" \
+  -frames:v {remaining_sheets} -c:v libwebp -quality {webp_quality} -compression_level 3 -start_number {start_sheet} -f image2 {output_pattern}.webp
 ```
 
 ### Particularités techniques
-1. **AV1 10-bit (`yuv420p10le`) et HDR** :
-   L'insertion de `format=yuvj420p` dans le filtre vidéo convertit de façon robuste les flux 10 bits ou 12 bits vers un espace colorimétrique JPEG 8 bits compatible sans échec du muxer `image2`.
+1. **AV1 10-bit (`yuv420p10le`), HDR et encodage `.webp`** :
+   L'insertion de `format=yuv420p` dans le filtre vidéo convertit de façon robuste les flux 10 bits ou 12 bits vers un espace colorimétrique 8 bits compatible avec `libwebp` et `mjpeg`. Le profil FFmpeg Docker (`scripts/build-ffmpeg.sh`, `Dockerfile`) active explicitement `libwebp` (`--enable-libwebp --enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le`), produisant des planches `.webp` natives (version 2 du manifeste, qualité par défaut `7` soit `86 %` WebP). Si `libwebp` est absent d'un binaire FFmpeg hôte externe, le Media Node se replie sur `mjpeg` (`.jpg`).
 2. **Priorité absolue au streaming** :
    Le Media Node suit le compteur `active_streams`. Dès qu'une lecture vidéo démarre sur le nœud, la génération trickplay est différée et cède immédiatement la priorité CPU et E/S disque.
 3. **Reprise rapide après interruption (Resumable)** :
@@ -108,23 +108,20 @@ Le cache Trickplay est administré par le `TrickplayManager` du Media Node :
 
 ## 5. Configuration & Paramètres d'Administration
 
-### Configuration unique par bibliothèque
+### Configuration par bibliothèque et synchronisation depuis les paramètres serveur
 
-L'activation, la préparation après scan et le profil se règlent dans
-Administration → Bibliothèques → modifier → Prévisualisations. Le panneau global
-« Métadonnées et images » ne contient plus une deuxième configuration Trickplay.
-Les anciens champs `trickplay*` de `server_settings` restent lisibles pour la
-compatibilité des sauvegardes et clients ; ils ne pilotent plus le service.
-Le quota réel est une limite du Media Node, via les variables de son déploiement.
+L'activation, la préparation après scan, la qualité, la largeur, l'intervalle et la taille des planches (`trickplayColumns` × `trickplayRows`) se règlent par bibliothèque dans Administration → Bibliothèques → modifier → Lecture, ainsi que globalement dans Administration → Paramètres du serveur → Général → Aperçus dans la barre de lecture (qui synchronise les bibliothèques lors de l'enregistrement, sans qu'une ancienne ligne `server_settings` ne puisse bloquer une bibliothèque explicitement activée).
 
-| Option de bibliothèque | Défaut | Comportement |
+| Option de bibliothèque / serveur | Défaut | Comportement |
 | :--- | :--- | :--- |
-| `trickplayEnabled` | `true` | Cache natif puis repli Jellyfin en lecture seule |
-| `trickplayDuringScan` | `true` | Préparation après publication d'un scan |
+| `trickplayEnabled` | `true` | Cache natif `.webp` puis repli Jellyfin en lecture seule |
+| `trickplayDuringScan` / `trickplayAutoGenerate` | `true` | Préparation automatique après publication d'un scan |
 | `trickplayWidth` | `320` | Largeur 160–1920 pixels |
 | `trickplayIntervalSeconds` | `10` | Intervalle 1–60 secondes |
-| `trickplayQuality` | `7` | Compression 1–31, 1 étant la meilleure qualité |
-| `trickplaySaveToMedia` | `false` | Aucune écriture à côté des médias |
+| `trickplayQuality` | `7` | Compression 1–31 (`7` ≈ `86 %` en WebP, `1` étant la meilleure qualité) |
+| `trickplayColumns` | `10` | Colonnes par planche (1–20) |
+| `trickplayRows` | `10` | Lignes par planche (1–20) |
+| `trickplaySaveToMedia` | `false` | Aucune écriture à côté des médias (`:ro`) |
 | `chapterImagesEnabled` | `true` | Chapitres réels, images à la demande |
 | `chapterImagesDuringScan` | `false` | Pas de préparation systématique des chapitres |
 

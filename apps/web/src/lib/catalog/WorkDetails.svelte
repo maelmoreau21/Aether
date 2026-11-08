@@ -44,7 +44,7 @@
     </div>
   {/if}
 
-  {#if work.directors?.length || work.writers?.length || work.genres?.length || (work.originalTitle && work.originalTitle !== work.title)}
+  {#if work.directors?.length || work.writers?.length || work.genres?.length || work.studios?.length || work.countries?.length || work.collection?.name || (work.originalTitle && work.originalTitle !== work.title)}
     <dl class="meta-table">
       {#if work.directors?.length}
         <div class="meta-row">
@@ -62,6 +62,24 @@
         <div class="meta-row">
           <dt>{$t('stats_genres_title')}</dt>
           <dd>{work.genres.join(', ')}</dd>
+        </div>
+      {/if}
+      {#if work.studios?.length}
+        <div class="meta-row">
+          <dt>Studios</dt>
+          <dd>{work.studios.join(', ')}</dd>
+        </div>
+      {/if}
+      {#if work.countries?.length}
+        <div class="meta-row">
+          <dt>{($locale ?? 'fr').startsWith('fr') ? 'Pays' : 'Countries'}</dt>
+          <dd>{work.countries.join(', ')}</dd>
+        </div>
+      {/if}
+      {#if work.collection?.name}
+        <div class="meta-row">
+          <dt>{($locale ?? 'fr').startsWith('fr') ? 'Coffret' : 'Collection'}</dt>
+          <dd>{work.collection.name}</dd>
         </div>
       {/if}
       {#if work.originalTitle && work.originalTitle !== work.title}

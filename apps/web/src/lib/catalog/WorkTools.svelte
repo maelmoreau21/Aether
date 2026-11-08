@@ -2,6 +2,7 @@
   import ImageManager from './ImageManager.svelte';
   import ReportButton from '../applications/ReportButton.svelte';
   import IdentifyModal from './IdentifyModal.svelte';
+  import MetadataEditorModal from './MetadataEditorModal.svelte';
   import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { session } from '../auth/session';
@@ -11,7 +12,6 @@
   import { dismissibleDetails } from '../ui/dismissible-details';
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
-  import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
   import { t, fmt } from '../i18n';
   import { startWatchParty } from '../syncplay/launch';
   import {
@@ -56,39 +56,6 @@
   let copiedKey = $state('');
   let detailsById = $state<Record<string, { status: 'loading' | 'ready' | 'error'; data?: AssetDetails; error?: string }>>({});
   let detailsController: AbortController | null = null;
-
-  // Form metadata states
-  let title = $state('');
-  let plot = $state('');
-  let year = $state<number | undefined>();
-  let genres = $state('');
-  let tags = $state('');
-  let ids = $state('{}');
-  let age = $state<number | undefined>();
-  let copyId = $state('');
-
-  let candidates = $state<{
-    id: string;
-    leftWorkId: string;
-    leftTitle: string;
-    rightWorkId: string;
-    rightTitle: string;
-    score: number;
-    reason: string;
-    status: string;
-  }[]>([]);
-  let merges = $state<{ id: string; groupId: string; origin: string }[]>([]);
-
-  $effect(() => {
-    const form = metadataFormFromWork(work);
-    title = form.title;
-    plot = form.plot;
-    year = form.year;
-    genres = form.genres;
-    tags = form.tags;
-    ids = form.ids;
-    age = form.age;
-  });
 
   const isAdmin = $derived($session?.user.role === 'administrator');
 
@@ -135,20 +102,6 @@
     }
   }
 
-  async function loadCandidates() {
-    try {
-      const response = await fetch('/api/v1/admin/media-groups/candidates?status=pending');
-      if (!response.ok) return;
-      const data = await response.json();
-      candidates = (data.candidates ?? []).filter(
-        (c: { leftWorkId: string; rightWorkId: string }) => c.leftWorkId === work.id || c.rightWorkId === work.id
-      );
-      merges = (data.merges ?? []).filter(
-        (m: { groupId: string }) => m.groupId === work.id || m.groupId === work.globalMediaId
-      );
-    } catch {}
-  }
-
   async function mutate(path: string, method: string, body?: unknown, contentType = 'application/json') {
     busy = true;
     error = '';
@@ -170,19 +123,6 @@
       return false;
     } finally {
       busy = false;
-    }
-  }
-
-  async function saveMetadata(event: SubmitEvent) {
-    event.preventDefault();
-    const payload = metadataPayloadFromForm({ title, plot, year, genres, tags, ids, age });
-    if (!payload) {
-      error = $t('the_identifiers_must_be_a_valid');
-      return;
-    }
-    const success = await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'PUT', payload);
-    if (success) {
-      window.location.reload();
     }
   }
 
@@ -324,6 +264,19 @@
     </div>
   </details>
 
+  {#if isAdmin}
+    <button
+      type="button"
+      class="tool-btn icon-btn edit-meta-btn"
+      class:active={metadataOpen}
+      aria-label={$t('edit_metadata')}
+      title={$t('edit_metadata')}
+      onclick={() => (metadataOpen = true)}
+    >
+      <Icon name="edit" size={18} />
+    </button>
+  {/if}
+
   <!-- Three dots menu trigger -->
   <div class="menu-dropdown-wrapper">
     <button
@@ -441,7 +394,6 @@
             onclick={() => {
               menuOpen = false;
               metadataOpen = true;
-              void loadCandidates();
             }}
           >
             <Icon name="edit" size={16} />
@@ -795,185 +747,13 @@
 
 <!-- Modal: Modifier les métadonnées (Admin) -->
 {#if metadataOpen && isAdmin}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
-    <button
-      type="button"
-      class="modal-backdrop-click"
-      aria-label={$t('close_the_window')}
-      tabindex="-1"
-      onclick={() => (metadataOpen = false)}
-    ></button>
-    <div class="modal-card wide">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <Icon name="edit" size={20} />
-          <h3 id="metadata-edit-title">{$t('edit_metadata')}</h3>
-        </div>
-        <button
-          type="button"
-          class="close-modal-btn"
-          aria-label={$t('close')}
-          onclick={() => (metadataOpen = false)}
-        >
-          <Icon name="close" size={18} />
-        </button>
-      </div>
-
-      <form onsubmit={saveMetadata} class="modal-body form-body">
-        <fieldset disabled={busy} class="form-fieldset">
-          <legend class="sr-only">{$t('metadata_form')}</legend>
-
-          <div class="form-grid">
-            <label class="form-field col-8">
-              <span class="field-label">{$t('title')}</span>
-              <input required maxlength="512" bind:value={title} />
-            </label>
-
-            <label class="form-field col-4">
-              <span class="field-label">{$t('stats_w_year')}</span>
-              <input type="number" min="1800" max="2200" bind:value={year} />
-            </label>
-
-            <label class="form-field col-12">
-              <span class="field-label">{$t('description_synopsis')}</span>
-              <textarea bind:value={plot} maxlength="20000" rows="4"></textarea>
-            </label>
-
-            <label class="form-field col-6">
-              <span class="field-label">{$t('genres_comma_separated')}</span>
-              <input bind:value={genres} placeholder={$t('action_adventure_drama')} />
-            </label>
-
-            <label class="form-field col-6">
-              <span class="field-label">{$t('tags_comma_separated')}</span>
-              <input bind:value={tags} maxlength="6400" />
-            </label>
-
-            <label class="form-field col-8">
-              <span class="field-label">{$t('external_identifiers_json_tmdb_imdb')}</span>
-              <textarea bind:value={ids} rows="3" class="code-area"></textarea>
-            </label>
-
-            <label class="form-field col-4">
-              <span class="field-label">{$t('minimum_age_empty_unrated')}</span>
-              <input type="number" min="0" max="21" bind:value={age} />
-            </label>
-          </div>
-
-          {#if work.kind === 'film' || work.kind === 'series'}
-            <hr class="form-divider" />
-            <h4 class="subhead">{$t('group_multi_node_copies')}</h4>
-            <div class="copy-group-row">
-              <label class="form-field flex-grow">
-                <span class="field-label">{$t('exact_identifier_of_the_same_work')}</span>
-                <input bind:value={copyId} placeholder={$t('work_id')} />
-              </label>
-              <button
-                type="button"
-                class="btn secondary-btn self-end"
-                disabled={!copyId || copyId === work.id || busy}
-                onclick={async () => {
-                  if (await mutate('/api/v1/admin/media-groups', 'POST', { workIds: [work.id, copyId], label: work.title })) {
-                    window.location.reload();
-                  }
-                }}
-              >
-                {$t('link_the_two_works')}
-              </button>
-              <button
-                type="button"
-                class="btn danger-btn self-end"
-                disabled={busy}
-                onclick={async () => {
-                  if (await mutate(`/api/v1/admin/media-groups/${work.id}`, 'DELETE')) {
-                    window.location.reload();
-                  }
-                }}
-              >
-                {$t('unlink_this_copy')}
-              </button>
-            </div>
-
-            {#if merges.length > 0}
-              <div class="merges-list">
-                {#each merges as merge (merge.id)}
-                  <button
-                    type="button"
-                    class="btn outline-btn"
-                    onclick={async () => {
-                      if (await mutate(`/api/v1/admin/media-groups/merges/${encodeURIComponent(merge.id)}/undo`, 'POST')) {
-                        window.location.reload();
-                      }
-                    }}
-                  >
-                    {$t('undo_the_merge', { origin: merge.origin })}
-                  </button>
-                {/each}
-              </div>
-            {/if}
-
-            {#if candidates.length > 0}
-              <div class="candidates-box">
-                <strong>{$t('likely_matches_found')}</strong>
-                {#each candidates as candidate (candidate.id)}
-                  <div class="candidate-row">
-                    <span><code>{candidate.leftWorkId === work.id ? candidate.rightTitle : candidate.leftTitle}</code> ({candidate.score}% · {candidate.reason})</span>
-                    <div class="candidate-actions">
-                      <button
-                        type="button"
-                        class="btn small primary-btn"
-                        onclick={async () => {
-                          if (await mutate(`/api/v1/admin/media-groups/candidates/${encodeURIComponent(candidate.id)}/confirm`, 'POST')) {
-                            window.location.reload();
-                          }
-                        }}
-                      >
-                        {$t('confirm')}
-                      </button>
-                      <button
-                        type="button"
-                        class="btn small outline-btn"
-                        onclick={async () => {
-                          if (await mutate(`/api/v1/admin/media-groups/candidates/${encodeURIComponent(candidate.id)}/reject`, 'POST')) {
-                            await loadCandidates();
-                          }
-                        }}
-                      >
-                        {$t('catalog_reject')}
-                      </button>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          {/if}
-        </fieldset>
-
-        <div class="modal-footer">
-          <button
-            type="button"
-            class="btn outline-btn"
-            disabled={busy}
-            onclick={async () => {
-              if (await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'DELETE')) {
-                window.location.reload();
-              }
-            }}
-          >
-            {$t('revert_to_scan_metadata')}
-          </button>
-          <div class="modal-footer-right">
-            <button type="button" class="btn secondary-btn" onclick={() => (metadataOpen = false)}>
-              {$t('sched_cancel')}
-            </button>
-            <button type="submit" class="btn primary-btn" disabled={busy}>
-              {busy ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
+  <MetadataEditorModal
+    {work}
+    onclose={() => (metadataOpen = false)}
+    onsaved={() => {
+      window.location.reload();
+    }}
+  />
 {/if}
 
 

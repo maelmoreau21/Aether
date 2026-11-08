@@ -1,14 +1,13 @@
 <script lang="ts">
   import type { ProviderPreference } from './types';
   import { t } from '../i18n';
-  let { value = $bindable(), label, id, description = '', suggestions = [] }: {
-    value: ProviderPreference[]; label: string; id: string; description?: string; suggestions?: { id: string; name: string }[];
+  let { value = $bindable(), label, id, description = '', suggestions = [], defaultEnabledIds }: {
+    value: ProviderPreference[]; label: string; id: string; description?: string; suggestions?: { id: string; name: string }[]; defaultEnabledIds?: string[];
   } = $props();
-  // An empty list means « every installed provider, in the default order ». The
-  // list shown always includes installed providers so nothing has to be typed.
+  // An empty list uses the default provider selection for the library kind (or all installed providers when unspecified).
   const rows = $derived<ProviderPreference[]>(value.length
     ? [...value, ...suggestions.filter(item => !value.some(entry => entry.id === item.id)).map(item => ({ id: item.id, enabled: false }))]
-    : suggestions.map(item => ({ id: item.id, enabled: true })));
+    : suggestions.map(item => ({ id: item.id, enabled: defaultEnabledIds ? defaultEnabledIds.includes(item.id) : true })));
   const nameOf = (provider: string) => suggestions.find(item => item.id === provider)?.name ?? provider;
   const installed = (provider: string) => suggestions.some(item => item.id === provider);
   const commit = (next: ProviderPreference[]) => { value = next.slice(0, 32); };

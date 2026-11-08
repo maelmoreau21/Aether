@@ -18,6 +18,18 @@
   };
   type Suggestion = { id: string; name: string };
   let metadataProviders = $state<Suggestion[]>([]), imageProviders = $state<Suggestion[]>([]), segmentProviders = $state<Suggestion[]>([]), subtitleProviders = $state<Suggestion[]>([]);
+  const nonVideoMetadataIds = new Set(['discogs', 'musicbrainz', 'lrclib', 'fanart-tv', 'poster-rotator']);
+  const orderedMetadataProviders = $derived.by(() => {
+    const filtered = kind === 'music'
+      ? metadataProviders
+      : metadataProviders.filter(item => !nonVideoMetadataIds.has(item.id));
+    const preferred = kind === 'series' ? 'tvdb' : kind === 'films' ? 'tmdb' : '';
+    return [...filtered].sort((a, b) => {
+      if (a.id === preferred && b.id !== preferred) return -1;
+      if (b.id === preferred && a.id !== preferred) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  });
   let providerError = $state('');
   onMount(() => {
     const controller = new AbortController();
@@ -107,6 +119,7 @@
       {#if options.trickplayEnabled}
         <label class="check"><input type="checkbox" bind:checked={options.trickplayDuringScan} /><span>{$t('prepare_thumbnails_after_media_analysis')}</span></label>
         <div class="grid three"><div><label for="trickplay-interval">{$t('interval_s')}</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">{$t('width_px')}</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div><div><label for="trickplay-quality">{$t('jpeg_quality')}</label><input id="trickplay-quality" type="number" min="1" max="31" step="1" required bind:value={options.trickplayQuality} /></div></div>
+        <div class="grid"><div><label for="trickplay-columns">{$t('trickplay_columns')}</label><input id="trickplay-columns" type="number" min="1" max="20" step="1" required bind:value={() => options.trickplayColumns ?? 10, value => options.trickplayColumns = value} /></div><div><label for="trickplay-rows">{$t('trickplay_rows')}</label><input id="trickplay-rows" type="number" min="1" max="20" step="1" required bind:value={() => options.trickplayRows ?? 10, value => options.trickplayRows = value} /></div></div>
         <p class="hint">{$t('n_320_px_one_preview_every_10')}</p>
       {/if}
       <label class="check"><input type="checkbox" bind:checked={options.chapterImagesEnabled} /><span>{$t('show_chapter_images')}<small>{$t('prepared_on_demand_from_the_files')}</small></span></label>
@@ -119,7 +132,7 @@
   {:else if section === 'providers'}
     <h3>{$t('providers')}</h3><p class="lead">{$t('tick_the_extensions_to_use_and')}</p>
     {#if providerError}<p role="status">{providerError}</p>{/if}
-    <ProviderPriority id="metadata-providers" label={$t('metadata')} description={$t('titles_summaries_cast_and_identifiers')} bind:value={options.metadataProviders} suggestions={metadataProviders} />
+    <ProviderPriority id="metadata-providers" label={$t('metadata')} description={$t('titles_summaries_cast_and_identifiers')} bind:value={options.metadataProviders} suggestions={orderedMetadataProviders} defaultEnabledIds={kind === 'series' ? ['tvdb'] : kind === 'films' ? ['tmdb'] : undefined} />
     <ProviderPriority id="image-providers" label="Images" description={$t('posters_backdrops_logos_and_thumbnails')} bind:value={options.imageProviders} suggestions={imageProviders} />
     <ProviderPriority id="segment-providers" label={$t('intros_credits')} description={$t('detection_of_intros_recaps_and_credits')} bind:value={options.segmentProviders} suggestions={segmentProviders} />
     <ProviderPriority id="subtitle-providers" label="Sous-titres" description={$t('manual_search_from_a_media_item')} bind:value={options.subtitleProviders} suggestions={subtitleProviders} />

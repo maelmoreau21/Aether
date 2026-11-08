@@ -281,6 +281,8 @@ pub async fn run_task_with_trickplay_options(
         category != "trickplay"
             || !(1000..=60000).contains(&options.interval_ms)
             || !(1..=31).contains(&options.quality)
+            || !(1..=20).contains(&options.columns)
+            || !(1..=20).contains(&options.rows)
     }) {
         return Err(invalid());
     }
@@ -397,6 +399,8 @@ pub async fn run_task_with_trickplay_options(
                         interval_ms: None,
                         width,
                         quality: trickplay.map(|options| options.quality),
+                        columns: None,
+                        rows: None,
                         chapter_time: Some(time),
                     };
                     if mgr.check_native_cache(&req).await.is_none() {
@@ -419,6 +423,8 @@ pub async fn run_task_with_trickplay_options(
                 interval_ms: trickplay.map(|options| options.interval_ms),
                 width,
                 quality: trickplay.map(|options| options.quality),
+                columns: trickplay.map(|options| options.columns),
+                rows: trickplay.map(|options| options.rows),
                 chapter_time: None,
             };
             let key = mgr.fingerprint(&req);
@@ -499,6 +505,8 @@ mod tests {
         let profile = media_contracts::protocol::TrickplayTaskOptions {
             interval_ms: 2000,
             quality: 12,
+            columns: 10,
+            rows: 10,
         };
         let result = run_task_with_trickplay_options(
             "trickplay",
@@ -526,6 +534,8 @@ mod tests {
             interval_ms: Some(2000),
             width: Some(240),
             quality: Some(12),
+            columns: Some(10),
+            rows: Some(10),
             chapter_time: None,
         };
         let mgr = &manager;

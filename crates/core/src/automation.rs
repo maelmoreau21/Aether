@@ -376,10 +376,11 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             query("UPDATE durable_tasks SET status='cancelled',updated_at=?,finished_at=CASE WHEN lease_until IS NULL THEN ? ELSE NULL END WHERE target_id=? AND status IN ('queued','running','paused') AND id IN (SELECT l.task_id FROM automation_task_links l JOIN automation_events original ON original.id=l.event_id WHERE original.fingerprint!=?)")
             .bind(now).bind(now).bind(&asset).bind(&file_fingerprint).execute(&mut *tx).await?;
         }
-        let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
-            .bind(&library)
-            .fetch_one(&mut *tx)
-            .await?;
+        let (options, library_kind): (String, String) =
+            query_as("SELECT options_json, kind FROM libraries WHERE id=?")
+                .bind(&library)
+                .fetch_one(&mut *tx)
+                .await?;
         let options: Value = serde_json::from_str(&options)
             .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
         let candidates:Vec<Candidate>=query_as("SELECT e.id,e.package_json,e.generation,COALESCE(p.mode,'automatic') AS mode,COALESCE(p.priority,100) AS priority,COALESCE(p.operation,'') AS operation,COALESCE(p.config_revision,'') AS config_revision,COALESCE(p.algorithm_version,'1') AS algorithm_version,COALESCE(s.settings_json,'{}') AS settings_json FROM extensions e JOIN extension_publishers publisher ON publisher.id=e.publisher_id LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id WHERE e.enabled=1 AND publisher.active=1 AND e.id>? AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND (g.library_id=? OR EXISTS(SELECT 1 FROM library_folders granted WHERE granted.library_id=? AND granted.parent_id=g.library_id AND granted.active=1)))) ORDER BY e.id LIMIT ?").bind(&library).bind(&library).bind(&cursor).bind(&library).bind(&library).bind(budget-examined+1).fetch_all(&mut *tx).await?;
@@ -474,16 +475,32 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             if marker_plugin && !library_options.intro_detection_enabled {
                 continue;
             }
-            let providers = if marker_plugin {
-                &library_options.segment_providers
+            let priority = if marker_plugin {
+                crate::library_options::LibraryOptions::provider_priority(
+                    &library_options.segment_providers,
+                    &c.id,
+                    c.priority,
+                )
             } else if c.operation == "metadata.images" {
-                &library_options.image_providers
+                crate::library_options::LibraryOptions::provider_priority(
+                    &library_options.image_providers,
+                    &c.id,
+                    c.priority,
+                )
+            } else if c.operation == "lyrics.get" || selected.is_some() {
+                crate::library_options::LibraryOptions::provider_priority(
+                    &library_options.metadata_providers,
+                    &c.id,
+                    c.priority,
+                )
             } else {
-                &library_options.metadata_providers
+                library_options.metadata_provider_priority_for_kind(
+                    &library_kind,
+                    &c.id,
+                    c.priority,
+                )
             };
-            let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
-                providers, &c.id, c.priority,
-            ) else {
+            let Some(priority) = priority else {
                 continue;
             };
             c.priority = priority;
@@ -778,19 +795,45 @@ pub async fn apply_missing_metadata(
             continue;
         };
         let manual: Value = serde_json::from_str(&manual_raw).unwrap_or(Value::Null);
+        if manual.get("locked").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let locked_fields: Vec<String> = manual
+            .get("locked_fields")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_field_locked = |dest: &str| -> bool {
+            let group = match dest {
+                "title" | "original_title" | "sort_title" => "title",
+                "plot" | "outline" | "tagline" => "plot",
+                "genres" => "genres",
+                "mpaa" => "mpaa",
+                "directors" | "writers" | "actors" | "crewCredits" => "people",
+                "countries" => "countries",
+                "studios" => "studios",
+                "tags" => "tags",
+                other => other,
+            };
+            locked_fields.iter().any(|f| f == dest || f == group)
+        };
         let priority:i64=query_scalar("SELECT COALESCE((SELECT priority FROM automation_policies WHERE extension_id=? AND library_id=?),(SELECT priority FROM automation_policies WHERE extension_id=? AND library_id=(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)),100)")
             .bind(extension).bind(&library).bind(extension).bind(&library).fetch_one(&mut **tx).await?;
-        let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
-            .bind(&library)
-            .fetch_one(&mut **tx)
-            .await?;
+        let (options, library_kind): (String, String) =
+            query_as("SELECT options_json, kind FROM libraries WHERE id=?")
+                .bind(&library)
+                .fetch_one(&mut **tx)
+                .await?;
         let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
             .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
-        let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
-            &options.metadata_providers,
-            extension,
-            priority,
-        ) else {
+        let Some(priority) =
+            options.metadata_provider_priority_for_kind(&library_kind, extension, priority)
+        else {
             continue;
         };
         let provider_id = result["providerId"]
@@ -819,9 +862,10 @@ pub async fn apply_missing_metadata(
             ("year", &["year"][..]),
             ("collection", &["collection"][..]),
         ] {
-            if manual
-                .as_object()
-                .is_some_and(|m| m.contains_key(destination))
+            if is_field_locked(destination)
+                || manual
+                    .as_object()
+                    .is_some_and(|m| m.get(destination).is_some_and(|v| !v.is_null()))
             {
                 continue;
             }
@@ -1615,6 +1659,9 @@ async fn pump_triggers(
 fn metadata_has_missing_fields(editorial: &str, manual: &str) -> bool {
     let editorial = serde_json::from_str::<Value>(editorial).unwrap_or(Value::Null);
     let manual = serde_json::from_str::<Value>(manual).unwrap_or(Value::Null);
+    if manual.get("locked").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
     ["plot", "outline", "genres"].iter().any(|key| {
         !manual
             .as_object()

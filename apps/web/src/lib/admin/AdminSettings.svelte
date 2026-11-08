@@ -6,6 +6,9 @@
   let { section }: { section: string } = $props();
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let blockSsoLocalAccounts=$state(true);
+  let trickplayEnabled = $state(true), trickplayAutoGenerate = $state(true);
+  let trickplayQuality = $state(7), trickplayWidth = $state(320), trickplayIntervalSeconds = $state(10);
+  let trickplayColumns = $state(10), trickplayRows = $state(10), trickplayMaxCacheMb = $state(5120);
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
   let loading = $state(true), saving = $state(false);
@@ -32,6 +35,9 @@
       if (target === '#general-section') {
         const data = await adminRequest<{
           serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
+          trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
+          trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
+          trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
         }>('/api/v1/admin/settings');
@@ -39,6 +45,14 @@
         name = data.serverName;
         welcome = data.welcomeMessage;
         ssoLabel = data.ssoButtonLabel ?? $t('sign_in_with_sso');
+        trickplayEnabled = data.trickplayEnabled ?? true;
+        trickplayAutoGenerate = data.trickplayAutoGenerate ?? true;
+        trickplayQuality = data.trickplayQuality ?? 7;
+        trickplayWidth = data.trickplayWidth ?? 320;
+        trickplayIntervalSeconds = data.trickplayIntervalSeconds ?? 10;
+        trickplayColumns = data.trickplayColumns ?? 10;
+        trickplayRows = data.trickplayRows ?? 10;
+        trickplayMaxCacheMb = data.trickplayMaxCacheMb ?? 5120;
         minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
@@ -56,6 +70,9 @@
         method: 'PUT',
         body: JSON.stringify({
           serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts,
+          trickplayEnabled, trickplayAutoGenerate,
+          trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
+          trickplayColumns, trickplayRows, trickplayMaxCacheMb,
           minResumePct, maxResumePct, minResumeDurationSeconds,
           activityLogRetentionDays,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
@@ -63,6 +80,9 @@
       });
       const saved = await adminRequest<{
         serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
+        trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
+        trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
+        trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
       }>('/api/v1/admin/settings');
@@ -70,6 +90,14 @@
       name = saved.serverName;
       welcome = saved.welcomeMessage;
       ssoLabel = saved.ssoButtonLabel;
+      trickplayEnabled = saved.trickplayEnabled ?? true;
+      trickplayAutoGenerate = saved.trickplayAutoGenerate ?? true;
+      trickplayQuality = saved.trickplayQuality ?? 7;
+      trickplayWidth = saved.trickplayWidth ?? 320;
+      trickplayIntervalSeconds = saved.trickplayIntervalSeconds ?? 10;
+      trickplayColumns = saved.trickplayColumns ?? 10;
+      trickplayRows = saved.trickplayRows ?? 10;
+      trickplayMaxCacheMb = saved.trickplayMaxCacheMb ?? 5120;
       minResumePct = saved.minResumePct ?? 0; maxResumePct = saved.maxResumePct ?? 90;
       minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
@@ -91,6 +119,24 @@
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />{$t('block_sso_local')}</label>
     </div>
 
+    <details class="adv">
+      <summary>{$t('previews_in_the_playback_bar')}</summary>
+      <fieldset class="settings-fieldset">
+        <p>{$t('trickplay_server_note')}</p>
+        <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />{$t('previews_in_the_playback_bar')}</label>
+        {#if trickplayEnabled}
+          <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />{$t('prepare_thumbnails_after_media_analysis')}</label>
+          <div class="settings-grid">
+            <label>{$t('interval_s')}<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
+            <label>{$t('width_px')}<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
+            <label>{$t('jpeg_quality')}<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
+            <label>{$t('trickplay_columns')}<input type="number" min="1" max="20" step="1" required bind:value={trickplayColumns} /></label>
+            <label>{$t('trickplay_rows')}<input type="number" min="1" max="20" step="1" required bind:value={trickplayRows} /></label>
+            <label>{$t('trickplay_max_cache_mb')}<input type="number" min="128" max="1048576" step="1" required bind:value={trickplayMaxCacheMb} /></label>
+          </div>
+        {/if}
+      </fieldset>
+    </details>
     <details class="adv">
       <summary>{$t('playback_resume')}</summary>
       <fieldset class="settings-fieldset">

@@ -17,6 +17,52 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 8 novembre 2026 — Fournisseurs par défaut (TVDB séries/animés, TMDB films) et éditeur de métadonnées multi-langue
+
+- Fournisseurs par défaut selon le type de média (`library_options.rs`, `automation.rs`,
+  `extensions/automated.rs`, `extensions/identify.rs`, `IdentifyModal.svelte`,
+  `LibraryOptions.svelte`, `ProviderPriority.svelte`) : lorsque `metadataProviders` est vide,
+  seul `tmdb` (TheMovieDB) est activé par défaut pour les bibliothèques `films` et seul `tvdb`
+  (TheTVDB) est activé par défaut pour les `series` et `anime` (ainsi que les épisodes), afin
+  d’éviter qu’un même média soit rattaché simultanément à plusieurs fournisseurs concurrents.
+  L’application d’une identification manuelle (`identify::apply`) remplace désormais les
+  `external_ids` et nettoie les traductions `provider:*` obsolètes.
+- Éditeur de métadonnées multi-langue inspiré de Jellyfin (`MetadataEditorModal.svelte`,
+  `WorkTools.svelte`, `work-metadata.ts`, `product.rs`, `catalogue.rs`, `consolidation.rs`) :
+  ajout d’un bouton direct « Modifier les métadonnées » sur chaque film, série et épisode,
+  ainsi que des routes `GET/PUT /api/v1/admin/works/{work}/metadata` enrichies. Prise en charge
+  du sélecteur de langue d’édition (`work_translations`), du titre de tri, de la langue et du
+  titre d’origine, des dates d’ajout et de sortie, des notes communauté/critiques, de la
+  classification parentale (`mpaa`) et de l’âge minimum, des identifiants externes dédiés
+  (`imdb`, `tmdb`, `tvdb`, coffret `collection`), des listes interactives (`Genres`,
+  `Personnes` avec rôle et type Acteur/Réalisateur/Scénariste, `Pays`, `Studios`, `Étiquettes`)
+  et du verrouillage global ou par champ (`locked`, `lockedFields`) respecté par l’automatisation.
+- Vérifié : `git diff --check` (0 erreur) et ajout de tests unitaires Rust (`library_options.rs`)
+  et Vitest (`work-metadata.test.ts`). Chaînes Rust/Node absentes sur l’hôte Windows courant
+  (validation complète en CI).
+
+## 8 novembre 2026 — Trickplay WebP Docker, cadrage d’aperçu et taille des planches
+
+- Lecteur (`PlayerControls.svelte`) : suppression du débordement vertical (~15 px de la
+  ligne suivante visible en bas de la miniature) causé par `max-width: min(320px, 80vw)`
+  combiné au `padding: 3px` + `border: 1px` de `.seek-preview.has-frame` (qui réduisait la
+  largeur utile de `.trickplay-frame` à 312 px tout en gardant 180 px de hauteur en Flexbox
+  colonne). `.seek-preview.has-frame` utilise désormais `max-width: none` et `.trickplay-frame img`
+  fixe explicitement `style:height="${(previewFrame.fullHeight / previewFrame.height) * 100}%"`.
+- FFmpeg Docker (`scripts/build-ffmpeg.sh`, `Dockerfile`, `.github/actions/setup-ffmpeg/action.yml`,
+  `scripts/smoke-docker-images.py`) : ajout de `libwebp` (`libwebp-dev`, `libwebp7`, `libwebpmux3`,
+  `--enable-libwebp`, `--enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le`) et vérification à la
+  compilation afin que les Media Nodes Docker génèrent nativement leurs planches Trickplay en `.webp`
+  et remplacent les anciennes planches JPEG tout en réutilisant les planches Jellyfin en lecture seule.
+- Réglages serveur et bibliothèques : ajout de `trickplayColumns` et `trickplayRows` (1–20,
+  défaut `10×10`), activation par défaut de `trickplayAutoGenerate` (`true`), et exposition des
+  réglages Trickplay dans `AdminSettings.svelte` et `LibraryOptions.svelte`. L’architecture WebP
+  dédupliquée par SHA-256 des affiches (`artwork/migration.rs`, `assets.rs`) est conservée telle quelle.
+- Vérifié : syntaxe Python (`py_compile` sur `scripts/smoke-docker-images.py` et `scripts/test-build-ffmpeg.py`),
+  syntaxe shell (`sh -n scripts/build-ffmpeg.sh`) et `git diff --check`. `cargo`, `npm` et WSL ne sont
+  pas installés sur l’hôte Windows courant : compilation Rust, tests Vitest/Svelte et build Docker
+  devront être validés en CI ou sur une machine dotée de la chaîne Rust/Node.
+
 ## 6 novembre 2026 — CI formatage et attentes des tests d’avatars
 
 - Formatage de `extensions/automated.rs` corrigé. Test `account` aligné sur le

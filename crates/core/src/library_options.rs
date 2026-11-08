@@ -48,6 +48,8 @@ pub struct LibraryOptions {
     pub trickplay_interval_seconds: u16,
     pub trickplay_width: u16,
     pub trickplay_quality: u8,
+    pub trickplay_columns: u8,
+    pub trickplay_rows: u8,
     pub chapter_images_enabled: bool,
     pub chapter_images_during_scan: bool,
     pub chapter_images_save_to_media: bool,
@@ -110,6 +112,8 @@ impl Default for LibraryOptions {
             trickplay_interval_seconds: 10,
             trickplay_width: 320,
             trickplay_quality: 7,
+            trickplay_columns: 10,
+            trickplay_rows: 10,
             chapter_images_enabled: true,
             chapter_images_during_scan: false,
             chapter_images_save_to_media: false,
@@ -135,7 +139,34 @@ impl Default for LibraryOptions {
         }
     }
 }
+pub const KNOWN_CATALOG_METADATA_PROVIDERS: &[&str] = &[
+    "tmdb",
+    "tvdb",
+    "imdb",
+    "omdb",
+    "discogs",
+    "musicbrainz",
+    "lrclib",
+    "fanart-tv",
+];
+
 impl LibraryOptions {
+    /// Default primary metadata provider for a library or work kind:
+    /// - `"films"` / `"film"` -> `"tmdb"` (TheMovieDB)
+    /// - `"series"` / `"episode"` / `"anime"` -> `"tvdb"` (TheTVDB)
+    pub fn default_metadata_provider_for_kind(kind: &str) -> Option<&'static str> {
+        if kind.eq_ignore_ascii_case("films") || kind.eq_ignore_ascii_case("film") {
+            Some("tmdb")
+        } else if kind.eq_ignore_ascii_case("series")
+            || kind.eq_ignore_ascii_case("episode")
+            || kind.eq_ignore_ascii_case("anime")
+        {
+            Some("tvdb")
+        } else {
+            None
+        }
+    }
+
     /// Empty lists preserve global provider policies; an explicit list is an allowlist.
     /// Larger values run first and win over lower-priority automatic provenance.
     pub fn provider_priority(
@@ -150,6 +181,42 @@ impl LibraryOptions {
             .iter()
             .position(|p| p.id == id && p.enabled)
             .map(|index| 1000 - index as i64)
+    }
+
+    /// Priority for metadata providers taking into account the library kind when
+    /// `metadata_providers` is left empty (default):
+    /// - `"films"` / `"film"` defaults exclusively to `"tmdb"` among known catalog providers.
+    /// - `"series"` / `"episode"` / `"anime"` defaults exclusively to `"tvdb"` among known catalog providers.
+    /// - `"music"` defaults to `"musicbrainz"` then `"discogs"`.
+    pub fn metadata_provider_priority_for_kind(
+        &self,
+        library_kind: &str,
+        id: &str,
+        fallback: i64,
+    ) -> Option<i64> {
+        if !self.metadata_providers.is_empty() {
+            return Self::provider_priority(&self.metadata_providers, id, fallback);
+        }
+        let is_known = KNOWN_CATALOG_METADATA_PROVIDERS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(id));
+        if !is_known {
+            return Some(fallback);
+        }
+        if library_kind.eq_ignore_ascii_case("music") {
+            if id.eq_ignore_ascii_case("musicbrainz") {
+                return Some(1000);
+            }
+            if id.eq_ignore_ascii_case("discogs") {
+                return Some(999);
+            }
+            return None;
+        }
+        match Self::default_metadata_provider_for_kind(library_kind) {
+            Some(default_id) if id.eq_ignore_ascii_case(default_id) => Some(1000),
+            Some(_) => None,
+            None => Some(fallback),
+        }
     }
     pub fn filter_file(&self, file: &mut media_contracts::inventory::ScannedFile) {
         if !self.read_local_nfo {
@@ -214,6 +281,8 @@ impl LibraryOptions {
             && (1..=60).contains(&self.trickplay_interval_seconds)
             && (160..=1920).contains(&self.trickplay_width)
             && (1..=31).contains(&self.trickplay_quality)
+            && (1..=20).contains(&self.trickplay_columns)
+            && (1..=20).contains(&self.trickplay_rows)
             && (50..=99).contains(&self.marker_min_confidence)
             && self.artwork_similarity <= 16
             && self.artwork_min_poster_width <= 4096
@@ -485,6 +554,10 @@ mod tests {
         for value in [
             serde_json::json!({"trickplayQuality": 0}),
             serde_json::json!({"trickplayQuality": 32}),
+            serde_json::json!({"trickplayColumns": 0}),
+            serde_json::json!({"trickplayColumns": 21}),
+            serde_json::json!({"trickplayRows": 0}),
+            serde_json::json!({"trickplayRows": 21}),
             serde_json::json!({"trickplayWidth": 159}),
             serde_json::json!({"trickplayWidth": 1921}),
             serde_json::json!({"trickplayIntervalSeconds":0}),

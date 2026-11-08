@@ -85,6 +85,8 @@ pub(crate) async fn dispatch(
             media_contracts::protocol::TrickplayTaskOptions {
                 interval_ms: u64::from(options.trickplay_interval_seconds) * 1000,
                 quality: options.trickplay_quality,
+                columns: u32::from(options.trickplay_columns),
+                rows: u32::from(options.trickplay_rows),
             },
         ))
     } else {

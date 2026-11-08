@@ -146,6 +146,9 @@ def main():
                     result["ffprobe"] = command(["docker", "run", "--rm", "--network", "none", "--platform", platform, "--entrypoint", "ffprobe", image, "-version"]).splitlines()[0]
                     if "9.0.2" not in result["ffmpeg"] or "9.0.2" not in result["ffprobe"]:
                         raise ValueError("Embedded FFmpeg version mismatch")
+                    encoders = command(["docker", "run", "--rm", "--network", "none", "--platform", platform, "--entrypoint", "ffmpeg", image, "-hide_banner", "-encoders"])
+                    if "libwebp" not in encoders:
+                        raise ValueError("Embedded FFmpeg must include libwebp for WebP trickplay sheets")
                     result["fixtureStreams"] = probe_fixture(image, fixture, platform)
                     result["chapterPreview"] = preview(image, fixture, args.report.parent / f"{role}-{args.arch}.jpg", platform)
                 if role == "node" and inspected["Size"] >= 200_000_000:

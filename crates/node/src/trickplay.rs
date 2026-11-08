@@ -89,6 +89,8 @@ pub struct TrickplayRequest {
     pub interval_ms: Option<u64>,
     pub width: Option<u32>,
     pub quality: Option<u8>,
+    pub columns: Option<u32>,
+    pub rows: Option<u32>,
     /// A real chapter boundary: extract one image rather than a periodic grid.
     pub chapter_time: Option<f64>,
 }
@@ -152,6 +154,23 @@ pub fn parameters(query: &str) -> Option<(f64, u64, u32, u8)> {
         && (160..=1920).contains(&width)
         && (1..=31).contains(&quality))
     .then_some((duration, interval, width, quality))
+}
+
+/// Optional sprite-sheet grid dimensions (`columns` × `rows`, default `10×10`).
+pub fn grid_parameters(query: &str) -> Option<(u32, u32)> {
+    let values: HashMap<_, _> = query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .collect();
+    let cols = match values.get("columns") {
+        Some(v) => v.parse::<u32>().ok()?,
+        None => DEFAULT_COLUMNS,
+    };
+    let rows = match values.get("rows") {
+        Some(v) => v.parse::<u32>().ok()?,
+        None => DEFAULT_ROWS,
+    };
+    ((1..=20).contains(&cols) && (1..=20).contains(&rows)).then_some((cols, rows))
 }
 
 impl TrickplayManager {
@@ -237,6 +256,15 @@ impl TrickplayManager {
         if let Some(time) = request.chapter_time {
             data.extend_from_slice(b":chapter:");
             data.extend_from_slice(&time.to_bits().to_le_bytes());
+        } else {
+            let cols = request.columns.unwrap_or(DEFAULT_COLUMNS);
+            let rows = request.rows.unwrap_or(DEFAULT_ROWS);
+            if cols != DEFAULT_COLUMNS || rows != DEFAULT_ROWS {
+                data.extend_from_slice(b":grid:");
+                data.extend_from_slice(&cols.to_le_bytes());
+                data.push(b'x');
+                data.extend_from_slice(&rows.to_le_bytes());
+            }
         }
 
         media_contracts::protocol::sha256_hex(&data)
@@ -576,8 +604,12 @@ impl TrickplayManager {
         let interval_ms = request.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS);
         let width = request.width.unwrap_or(DEFAULT_WIDTH);
         let quality = request.quality.unwrap_or(DEFAULT_QUALITY);
+        let req_cols = request.columns.unwrap_or(DEFAULT_COLUMNS);
+        let req_rows = request.rows.unwrap_or(DEFAULT_ROWS);
         if !(160..=1920).contains(&width)
             || !(1..=31).contains(&quality)
+            || !(1..=20).contains(&req_cols)
+            || !(1..=20).contains(&req_rows)
             || interval_ms == 0
             || request
                 .chapter_time
@@ -588,12 +620,12 @@ impl TrickplayManager {
         let cols = if request.chapter_time.is_some() {
             1
         } else {
-            DEFAULT_COLUMNS.min(8192 / width)
+            req_cols.min((8192 / width).max(1))
         };
         let rows = if request.chapter_time.is_some() {
             1
         } else {
-            DEFAULT_ROWS.min(8192 / (width * 2))
+            req_rows.min((8192 / (width * 2)).max(1))
         };
 
         let frame_count = if request.chapter_time.is_some() {
@@ -1325,6 +1357,8 @@ mod tests {
             interval_ms: None,
             width: None,
             quality: None,
+            columns: None,
+            rows: None,
             chapter_time: None,
         };
         let cache = temp.path().join("cache");
@@ -1434,9 +1468,21 @@ mod tests {
             interval_ms: Some(10_000),
             width: Some(320),
             quality: Some(7),
+            columns: None,
+            rows: None,
             chapter_time: None,
         };
         let fp1 = mgr.fingerprint(&base);
+
+        let mut mod_default_grid = base.clone();
+        mod_default_grid.columns = Some(10);
+        mod_default_grid.rows = Some(10);
+        assert_eq!(fp1, mgr.fingerprint(&mod_default_grid));
+
+        let mut mod_custom_grid = base.clone();
+        mod_custom_grid.columns = Some(5);
+        mod_custom_grid.rows = Some(5);
+        assert_ne!(fp1, mgr.fingerprint(&mod_custom_grid));
 
         let mut mod_time = base.clone();
         mod_time.modified_ns = "101".into();
@@ -1495,6 +1541,8 @@ mod tests {
             interval_ms: None,
             width: Some(320),
             quality: Some(7),
+            columns: None,
+            rows: None,
             chapter_time: Some(2.0),
         };
         assert_eq!(manager.enqueue(request.clone()), QueueStatus::Queued);
@@ -1539,6 +1587,8 @@ mod tests {
             interval_ms: None,
             width: Some(320),
             quality: Some(7),
+            columns: None,
+            rows: None,
             chapter_time: Some(2.0),
         };
         let key = manager.fingerprint(&request);

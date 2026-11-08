@@ -370,6 +370,8 @@ pub(super) fn chapter_request(
         interval_ms: None,
         width: Some(width),
         quality: Some(quality),
+        columns: None,
+        rows: None,
         chapter_time: Some(time),
     })
 }
@@ -380,6 +382,7 @@ pub(super) fn trickplay_request(
     query: &str,
 ) -> Option<crate::trickplay::TrickplayRequest> {
     let (duration, interval, width, quality) = crate::trickplay::parameters(query)?;
+    let (columns, rows) = crate::trickplay::grid_parameters(query)?;
     let inv = state.inventory.read().unwrap_or_else(|e| e.into_inner());
     let asset = inv.assets.get(id)?;
     Some(crate::trickplay::TrickplayRequest {
@@ -392,6 +395,8 @@ pub(super) fn trickplay_request(
         interval_ms: Some(interval),
         width: Some(width),
         quality: Some(quality),
+        columns: Some(columns),
+        rows: Some(rows),
         chapter_time: None,
     })
 }

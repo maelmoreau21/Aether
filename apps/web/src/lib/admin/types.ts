@@ -33,6 +33,7 @@ export interface LibraryOptions {
   saveNfoToMedia: boolean; saveImagesToMedia: boolean;
   trickplayEnabled: boolean; trickplayDuringScan: boolean; trickplaySaveToMedia: boolean;
   trickplayIntervalSeconds: number; trickplayWidth: number; trickplayQuality: number;
+  trickplayColumns?: number; trickplayRows?: number;
   chapterImagesEnabled: boolean; chapterImagesDuringScan: boolean; chapterImagesSaveToMedia: boolean;
   subtitleDownloadEnabled: boolean; subtitleLanguages: string[];
   subtitleOnlyMissing: boolean; subtitleMatchAudio: boolean; subtitleRequireHash: boolean;
@@ -59,7 +60,7 @@ export function defaultLibraryOptions(): LibraryOptions {
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
     onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true, markerMinConfidence: 80,
     saveNfoToMedia: false, saveImagesToMedia: false,
-    trickplayEnabled: true, trickplayDuringScan: true, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
+    trickplayEnabled: true, trickplayDuringScan: true, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7, trickplayColumns: 10, trickplayRows: 10,
     chapterImagesEnabled: true, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
@@ -72,7 +73,7 @@ export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptio
   const defaults = defaultLibraryOptions();
   const processingKeys = ['realtimeMonitoring', 'automaticCollections', 'introDetectionEnabled',
     'onlineRefreshIntervalDays', 'trickplayEnabled', 'trickplayDuringScan',
-    'trickplayIntervalSeconds', 'trickplayWidth', 'trickplayQuality', 'chapterImagesEnabled'] as const;
+    'trickplayIntervalSeconds', 'trickplayWidth', 'trickplayQuality', 'trickplayColumns', 'trickplayRows', 'chapterImagesEnabled'] as const;
   const next = { ...current };
   for (const key of processingKeys) Object.assign(next, { [key]: defaults[key] });
   return next;

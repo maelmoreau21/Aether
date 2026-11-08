@@ -17,7 +17,7 @@ runs:
     - name: Install source build dependencies
       if: steps.ffmpeg.outputs.cache-hit != 'true'
       shell: bash
-      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils nasm pkg-config libaom-dev libopus-dev libx264-dev libx265-dev
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends build-essential ca-certificates curl xz-utils nasm pkg-config libaom-dev libopus-dev libx264-dev libx265-dev libwebp-dev
     - name: Verify cached FFmpeg runtime dependencies
       if: steps.ffmpeg.outputs.cache-hit == 'true'
       shell: bash
@@ -29,7 +29,7 @@ runs:
           # Shared codec libraries are not part of the binary cache. Restore
           # only their runtime packages if this runner does not provide them.
           sudo apt-get update
-          mapfile -t codecs < <(apt-cache pkgnames | grep -E '^lib(aom[0-9]+|opus0|x264-[0-9]+|x265-[0-9]+)$' | sort -u)
+          mapfile -t codecs < <(apt-cache pkgnames | grep -E '^lib(aom[0-9]+|opus0|x264-[0-9]+|x265-[0-9]+|webp[0-9]+|webpmux[0-9]+)$' | sort -u)
           test "${#codecs[@]}" -ge 4
           sudo apt-get install -y --no-install-recommends "${codecs[@]}"
         fi

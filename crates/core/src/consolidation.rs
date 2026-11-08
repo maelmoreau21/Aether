@@ -238,7 +238,10 @@ pub fn extract_external_ids_from_json(
         serde_json::from_str(external_ids_json).unwrap_or_default();
     if let Some(manual) = manual_json
         && let Ok(val) = serde_json::from_str::<Value>(manual)
-        && let Some(ext) = val.get("externalIds").and_then(Value::as_object)
+        && let Some(ext) = val
+            .get("externalIds")
+            .or_else(|| val.get("external_ids"))
+            .and_then(Value::as_object)
     {
         map.clear();
         for (k, v) in ext {
@@ -300,7 +303,18 @@ pub async fn sync_work_summary_tx(
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
         .unwrap_or(&title);
-    let display_title_sort = if manual_val.get("title").is_some() {
+    let display_title_sort = if let Some(sort) = manual_val
+        .get("sort_title")
+        .or_else(|| editorial_val.get("sort_title"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        sort.trim().to_lowercase()
+    } else if manual_val
+        .get("title")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty())
+    {
         display_title.to_lowercase()
     } else if !title_sort.is_empty() {
         title_sort.clone()

@@ -73,13 +73,13 @@ if [ "$profile" = fixtures ]; then
   # lavfi is an input device in libavdevice, not a libavformat demuxer.
   # Enable only this synthetic input for fixtures; keep physical devices disabled.
   set -- "$@" --enable-avdevice --enable-indev=lavfi \
-    --enable-gpl --enable-libaom --enable-libopus --enable-libx264 --enable-libx265
+    --enable-gpl --enable-libaom --enable-libopus --enable-libx264 --enable-libx265 --enable-libwebp
 else
   # Preview images are application derivatives, separate from playback/remux.
-  # Keep only the JPEG/WebVTT encoders and the filters used by the Node.
+  # Keep only the WebP/JPEG/WebVTT encoders and the filters used by the Node.
   # Audio fingerprints (intro detection) need the chromaprint muxer, the PCM encoder it
   # consumes and the audio resampler that downmixes to 11 kHz mono.
-  set -- "$@" --enable-libdav1d --disable-encoders --enable-encoder=webvtt,mjpeg,pcm_s16le \
+  set -- "$@" --enable-libdav1d --enable-libwebp --disable-encoders --enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le \
     --disable-filters --enable-filter=fps,scale,format,tile,aresample,aformat,anull \
     --enable-chromaprint --enable-muxer=chromaprint \
     --extra-cflags="-I$work/chromaprint-prefix/include" \
@@ -92,6 +92,8 @@ strip --strip-all "$prefix/bin/ffmpeg" "$prefix/bin/ffprobe"
 if [ "$profile" = runtime ]; then
   # Intro detection silently never runs without this muxer: fail the image build instead.
   "$prefix/bin/ffmpeg" -hide_banner -muxers | grep -qw chromaprint
+  # Native Trickplay sheets default to WebP: fail the image build if libwebp is missing.
+  "$prefix/bin/ffmpeg" -hide_banner -encoders | grep -qw libwebp
 fi
 mkdir -p "$prefix/share/media-probe"
 "$prefix/bin/ffmpeg" -version > "$prefix/share/media-probe/version.txt"

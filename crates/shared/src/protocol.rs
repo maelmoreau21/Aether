@@ -200,6 +200,14 @@ impl NodeCommandEnvelope {
 pub struct TrickplayTaskOptions {
     pub interval_ms: u64,
     pub quality: u8,
+    #[serde(default = "default_trickplay_grid")]
+    pub columns: u32,
+    #[serde(default = "default_trickplay_grid")]
+    pub rows: u32,
+}
+
+fn default_trickplay_grid() -> u32 {
+    10
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

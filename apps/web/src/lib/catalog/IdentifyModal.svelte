@@ -29,9 +29,10 @@
     onsaved?: () => void;
   } = $props();
 
+  const preferredProvider = $derived(work.kind === 'series' || work.kind === 'episode' ? 'tvdb' : 'tmdb');
   let searchTitle = $state('');
   let searchYear = $state<number | undefined>(undefined);
-  let searchProvider = $state('all');
+  let searchProvider = $state('');
   let replaceImages = $state(true);
   let tmdbId = $state('');
   let imdbId = $state('');
@@ -78,7 +79,7 @@
           externalIds,
           title: searchTitle.trim(),
           year: searchYear ? Number(searchYear) : undefined,
-          provider: searchProvider === 'all' ? null : searchProvider
+          provider: searchProvider || null
         }),
         signal: AbortSignal.timeout(45000)
       });
@@ -90,6 +91,11 @@
       const data = await response.json();
       results = data.results ?? [];
       providersList = data.providers ?? [];
+      if (!searchProvider) {
+        searchProvider = providersList.some(p => p.id === preferredProvider)
+          ? preferredProvider
+          : (providersList[0]?.id ?? 'all');
+      }
       const failures = (data.errors ?? []) as { providerName?: string; provider: string; error: string }[];
       if (results.length === 0 && failures.length > 0) {
         error = failures
@@ -198,14 +204,16 @@
             />
           </label>
 
-          {#if providersList.length > 1}
+          {#if providersList.length > 0}
             <label class="field-group flex-1">
               <span>{$t('source')}</span>
-              <select bind:value={searchProvider} disabled={searching || applying}>
-                <option value="all">{$t('all_sources')}</option>
+              <select bind:value={searchProvider} onchange={() => void performSearch()} disabled={searching || applying}>
                 {#each providersList as p (p.id)}
                   <option value={p.id}>{p.name}</option>
                 {/each}
+                {#if providersList.length > 1}
+                  <option value="all">{$t('all_sources')}</option>
+                {/if}
               </select>
             </label>
           {/if}

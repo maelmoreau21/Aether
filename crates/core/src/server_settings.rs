@@ -29,7 +29,11 @@ pub struct Settings {
     pub trickplay_width: u16,
     #[serde(default = "default_trickplay_interval")]
     pub trickplay_interval_seconds: u16,
-    #[serde(default = "default_false")]
+    #[serde(default = "default_trickplay_grid")]
+    pub trickplay_columns: u8,
+    #[serde(default = "default_trickplay_grid")]
+    pub trickplay_rows: u8,
+    #[serde(default = "default_true")]
     pub trickplay_auto_generate: bool,
     #[serde(default = "default_trickplay_cache_mb")]
     pub trickplay_max_cache_mb: u32,
@@ -76,9 +80,6 @@ fn default_metadata_country() -> String {
 fn default_true() -> bool {
     true
 }
-fn default_false() -> bool {
-    false
-}
 fn default_trickplay_quality() -> u8 {
     7
 }
@@ -86,6 +87,9 @@ fn default_trickplay_width() -> u16 {
     320
 }
 fn default_trickplay_interval() -> u16 {
+    10
+}
+fn default_trickplay_grid() -> u8 {
     10
 }
 fn default_trickplay_cache_mb() -> u32 {
@@ -109,6 +113,8 @@ struct SettingsInput {
     trickplay_quality: Option<u8>,
     trickplay_width: Option<u16>,
     trickplay_interval_seconds: Option<u16>,
+    trickplay_columns: Option<u8>,
+    trickplay_rows: Option<u8>,
     trickplay_auto_generate: Option<bool>,
     trickplay_max_cache_mb: Option<u32>,
     min_resume_pct: Option<u8>,
@@ -133,7 +139,9 @@ impl Default for Settings {
             trickplay_quality: 7,
             trickplay_width: 320,
             trickplay_interval_seconds: 10,
-            trickplay_auto_generate: false,
+            trickplay_columns: 10,
+            trickplay_rows: 10,
+            trickplay_auto_generate: true,
             trickplay_max_cache_mb: 5120,
             min_resume_pct: 0,
             max_resume_pct: 90,
@@ -197,6 +205,13 @@ async fn write(
 ) -> Result<StatusCode, StatusCode> {
     administrator(&auth, &headers, true).await?;
     let previous = load(&auth.store).await?;
+    let sync_trickplay = input.trickplay_enabled.is_some()
+        || input.trickplay_quality.is_some()
+        || input.trickplay_width.is_some()
+        || input.trickplay_interval_seconds.is_some()
+        || input.trickplay_columns.is_some()
+        || input.trickplay_rows.is_some()
+        || input.trickplay_auto_generate.is_some();
     let input = Settings {
         block_sso_local_accounts: input
             .block_sso_local_accounts
@@ -223,6 +238,14 @@ async fn write(
             .trickplay_interval_seconds
             .filter(|&i| (1..=60).contains(&i))
             .unwrap_or(previous.trickplay_interval_seconds),
+        trickplay_columns: input
+            .trickplay_columns
+            .filter(|&c| (1..=20).contains(&c))
+            .unwrap_or(previous.trickplay_columns),
+        trickplay_rows: input
+            .trickplay_rows
+            .filter(|&r| (1..=20).contains(&r))
+            .unwrap_or(previous.trickplay_rows),
         trickplay_auto_generate: input
             .trickplay_auto_generate
             .unwrap_or(previous.trickplay_auto_generate),
@@ -285,6 +308,34 @@ async fn write(
     }
     let json = serde_json::to_string(&input).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json").bind(json).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    if sync_trickplay {
+        use sqlx::Row;
+        let rows = query("SELECT id, options_json FROM libraries")
+            .fetch_all(&auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        for row in rows {
+            let id: String = row.get("id");
+            let opts_raw: Option<String> = row.get("options_json");
+            let mut opts = opts_raw
+                .and_then(|s| serde_json::from_str::<crate::library_options::LibraryOptions>(&s).ok())
+                .unwrap_or_default();
+            opts.trickplay_enabled = input.trickplay_enabled;
+            opts.trickplay_during_scan = input.trickplay_auto_generate;
+            opts.trickplay_quality = input.trickplay_quality;
+            opts.trickplay_width = input.trickplay_width;
+            opts.trickplay_interval_seconds = input.trickplay_interval_seconds;
+            opts.trickplay_columns = input.trickplay_columns;
+            opts.trickplay_rows = input.trickplay_rows;
+            if let Ok(encoded) = serde_json::to_string(&opts) {
+                let _ = query("UPDATE libraries SET options_json=? WHERE id=?")
+                    .bind(encoded)
+                    .bind(id)
+                    .execute(&auth.store.pool)
+                    .await;
+            }
+        }
+    }
     if let Ok(mut guard) = auth.store.cors_origins.write() {
         *guard = input.cors_hosts.clone();
     }
@@ -406,7 +457,9 @@ mod tests {
         assert_eq!(parsed.trickplay_quality, 7);
         assert_eq!(parsed.trickplay_width, 320);
         assert_eq!(parsed.trickplay_interval_seconds, 10);
-        assert!(!parsed.trickplay_auto_generate);
+        assert_eq!(parsed.trickplay_columns, 10);
+        assert_eq!(parsed.trickplay_rows, 10);
+        assert!(parsed.trickplay_auto_generate);
         assert_eq!(parsed.trickplay_max_cache_mb, 5120);
     }
 
@@ -451,6 +504,8 @@ mod tests {
             "trickplayQuality": 12,
             "trickplayWidth": 240,
             "trickplayIntervalSeconds": 5,
+            "trickplayColumns": 8,
+            "trickplayRows": 6,
             "trickplayAutoGenerate": true,
             "trickplayMaxCacheMb": 10240
         }"#;
@@ -460,6 +515,8 @@ mod tests {
         assert_eq!(parsed.trickplay_quality, 12);
         assert_eq!(parsed.trickplay_width, 240);
         assert_eq!(parsed.trickplay_interval_seconds, 5);
+        assert_eq!(parsed.trickplay_columns, 8);
+        assert_eq!(parsed.trickplay_rows, 6);
         assert!(parsed.trickplay_auto_generate);
         assert_eq!(parsed.trickplay_max_cache_mb, 10240);
 
@@ -468,6 +525,8 @@ mod tests {
         assert_eq!(re_parsed.trickplay_quality, 12);
         assert_eq!(re_parsed.trickplay_width, 240);
         assert_eq!(re_parsed.trickplay_interval_seconds, 5);
+        assert_eq!(re_parsed.trickplay_columns, 8);
+        assert_eq!(re_parsed.trickplay_rows, 6);
         assert!(re_parsed.trickplay_auto_generate);
         assert_eq!(re_parsed.trickplay_max_cache_mb, 10240);
     }

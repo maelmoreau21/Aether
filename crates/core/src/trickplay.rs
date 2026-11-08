@@ -67,10 +67,19 @@ pub(crate) async fn queue_scanned_assets(
             // Chapter images reuse the on-demand profile (width/quality, no
             // interval) so the player hits the prepared cache directly.
             if previews {
+                let grid_suffix = if options.trickplay_columns == 10 && options.trickplay_rows == 10
+                {
+                    String::new()
+                } else {
+                    format!(
+                        ":{}x{}",
+                        options.trickplay_columns, options.trickplay_rows
+                    )
+                };
                 let key = format!(
                     "trickplay:{:x}",
                     Sha256::digest(format!(
-                        "{asset}:{size}:{modified}:{}:{}:{}:webp",
+                        "{asset}:{size}:{modified}:{}:{}:{}:webp{grid_suffix}",
                         options.trickplay_width,
                         options.trickplay_interval_seconds,
                         options.trickplay_quality
@@ -248,6 +257,8 @@ pub async fn chapter_image(
             interval_ms: None,
             width: Some(source.options.trickplay_width.into()),
             quality: Some(source.options.trickplay_quality),
+            columns: None,
+            rows: None,
             chapter_time: Some(*time),
         },
         request,
@@ -273,11 +284,13 @@ pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -
             _ => return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
         };
         let pq = format!(
-            "/internal/v1/node/assets/{asset_id}/trickplay?duration={}&intervalMs={}&width={}&quality={}",
+            "/internal/v1/node/assets/{asset_id}/trickplay?duration={}&intervalMs={}&width={}&quality={}&columns={}&rows={}",
             source.duration,
             (source.options.trickplay_interval_seconds as u64) * 1000,
             source.options.trickplay_width,
-            source.options.trickplay_quality
+            source.options.trickplay_quality,
+            source.options.trickplay_columns,
+            source.options.trickplay_rows
         );
         return crate::nodes::relay_from_remote_node(store, &node, &pq, request).await;
     }
@@ -294,6 +307,8 @@ pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -
         interval_ms: Some((source.options.trickplay_interval_seconds as u64) * 1000),
         width: Some(source.options.trickplay_width as u32),
         quality: Some(source.options.trickplay_quality),
+        columns: Some(u32::from(source.options.trickplay_columns)),
+        rows: Some(u32::from(source.options.trickplay_rows)),
         chapter_time: None,
     };
 
@@ -366,11 +381,13 @@ pub async fn tile(
             _ => return crate::error(StatusCode::SERVICE_UNAVAILABLE, "node_unavailable"),
         };
         let pq = format!(
-            "/internal/v1/node/assets/{asset_id}/trickplay/{index}?duration={}&intervalMs={}&width={}&quality={}",
+            "/internal/v1/node/assets/{asset_id}/trickplay/{index}?duration={}&intervalMs={}&width={}&quality={}&columns={}&rows={}",
             source.duration,
             u64::from(source.options.trickplay_interval_seconds) * 1000,
             source.options.trickplay_width,
-            source.options.trickplay_quality
+            source.options.trickplay_quality,
+            source.options.trickplay_columns,
+            source.options.trickplay_rows
         );
         return crate::nodes::relay_from_remote_node(store, &node, &pq, request).await;
     }
@@ -386,6 +403,8 @@ pub async fn tile(
         interval_ms: Some((source.options.trickplay_interval_seconds as u64) * 1000),
         width: Some(source.options.trickplay_width as u32),
         quality: Some(source.options.trickplay_quality),
+        columns: Some(u32::from(source.options.trickplay_columns)),
+        rows: Some(u32::from(source.options.trickplay_rows)),
         chapter_time: None,
     };
 

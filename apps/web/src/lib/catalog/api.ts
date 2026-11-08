@@ -16,7 +16,7 @@ export interface CatalogSource {
 export interface Edition { id: string; label: string; versions: { id: string; label: string; sources: CatalogSource[] }[] }
 export interface Work {
   tags?: string[]; minimumAge?: number | null; globalMediaId?: string | null;
-  id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
+  id: string; kind: 'film' | 'series' | 'episode'; title: string; sortTitle?: string | null; year: number | null;
   seasonNumber?: number;
   episodesPage?: { season: number | null; offset: number; limit: number; nextOffset: number; hasMore: boolean };
   description: string; libraryId: string; synthetic: boolean; number?: number;
@@ -28,14 +28,17 @@ export interface Work {
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   available?: boolean;
   originalLanguage?: string | null; originalTitle?: string | null; plot?: string | null; outline?: string | null;
-  premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
+  premiered?: string | null; genres?: string[]; studios?: string[]; countries?: string[];
+  rating?: number | null; criticRating?: number | null; mpaa?: string | null;
+  collection?: { id?: string | null; name?: string | null } | null;
+  locked?: boolean; lockedFields?: string[];
   actors?: { name: string; role?: string; imageUrl?: string | null; thumbUrl?: string | null; thumb_url?: string | null }[]; directors?: string[]; writers?: string[];
   crewCredits?: { name: string; role?: string; imageUrl?: string | null; providerId?: string | null }[];
   ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];
   seasons?: { id: string; number: number; title: string; episodeCount?: number; episodes: Work[] }[];
-  translations?: Record<string, { title?: string; overview?: string; plot?: string; tagline?: string }>;
+  translations?: Record<string, { title?: string; sortTitle?: string; overview?: string; plot?: string; tagline?: string }>;
 }
 
 export function localizedTitle(work: Work | null | undefined, locale?: string): string {

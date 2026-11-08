@@ -121,23 +121,36 @@ pub(crate) async fn run_automated(
         return Err(err(StatusCode::CONFLICT, "invalid_settings"));
     }
     let mut settings = resolve_effective_extension_settings(extension_id, settings);
-    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
-        .bind(&job.library_id)
-        .fetch_one(auth.store.pool())
-        .await
-        .map_err(db)?;
+    let (options, library_kind): (String, String) =
+        query_as("SELECT options_json, kind FROM libraries WHERE id=?")
+            .bind(&job.library_id)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
     let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
-    let providers = if operation.starts_with("intro.") {
-        &options.segment_providers
+    let priority = if operation.starts_with("intro.") {
+        crate::library_options::LibraryOptions::provider_priority(
+            &options.segment_providers,
+            extension_id,
+            100,
+        )
     } else if operation == "metadata.images" {
-        &options.image_providers
+        crate::library_options::LibraryOptions::provider_priority(
+            &options.image_providers,
+            extension_id,
+            100,
+        )
+    } else if operation == "lyrics.get" {
+        crate::library_options::LibraryOptions::provider_priority(
+            &options.metadata_providers,
+            extension_id,
+            100,
+        )
     } else {
-        &options.metadata_providers
+        options.metadata_provider_priority_for_kind(&library_kind, extension_id, 100)
     };
-    if crate::library_options::LibraryOptions::provider_priority(providers, extension_id, 100)
-        .is_none()
-    {
+    if priority.is_none() {
         return Err(err(StatusCode::FORBIDDEN, "library_provider_disabled"));
     }
     let legacy = operation == "metadata.propose"

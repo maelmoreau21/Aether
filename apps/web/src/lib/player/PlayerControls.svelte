@@ -456,6 +456,7 @@
             style:width={`min(${previewFrame.width}px, var(--trickplay-max-w), calc(var(--trickplay-max-h) * ${previewFrame.width / previewFrame.height}))`}>
             <img src={previewFrame.url} alt="" draggable="false"
               style:width={`${(previewFrame.fullWidth / previewFrame.width) * 100}%`}
+              style:height={`${(previewFrame.fullHeight / previewFrame.height) * 100}%`}
               style:left={`${(-previewFrame.x / previewFrame.width) * 100}%`}
               style:top={`${(-previewFrame.y / previewFrame.height) * 100}%`}
               onerror={() => { if (previewFrame) preview.markHoveredSheetFailed(); }}
@@ -852,6 +853,7 @@
     animation: seek-preview-in 120ms ease-out;
   }
   .seek-preview.has-frame {
+    max-width: none;
     padding: 3px;
     border-radius: 14px;
     background: rgb(18 20 28 / 0.55);
@@ -870,7 +872,7 @@
     border-radius: 11px;
     background: #000;
   }
-  .trickplay-frame img { position: absolute; display: block; height: auto; max-width: none; max-height: none; }
+  .trickplay-frame img { position: absolute; display: block; max-width: none; max-height: none; }
   .preview-label {
     display: flex;
     flex-direction: column;

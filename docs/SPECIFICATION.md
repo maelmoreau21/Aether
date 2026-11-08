@@ -1,3 +1,5 @@
+> **Archive de périmètre P0/P1 (15–16 octobre 2026).** Ce document explique les jalons initiaux et ne décrit pas l'état actuel complet d'Aether. Il ne définit aucune mission à exécuter dans une nouvelle conversation. Pour les consignes actives, voir [AGENTS.md](../AGENTS.md) et le code/test courant.
+
 > Extension P1 affiches locales Films : inventaire séparé, route image avec
 > session/droits et repli Web. État actuel : [LOCAL_FILM_POSTERS.md](LOCAL_FILM_POSTERS.md).
 > Les mentions historiques « images différées » ci-dessous sont remplacées pour les affiches Films.

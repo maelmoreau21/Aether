@@ -1,5 +1,5 @@
 /* Halo — jetons du design system d'Aether (source de vérité).
-   Référence complète : .agents/skills/aether-halo/SKILL.md
+   Référence suivie par Git : docs/UI_DIRECTION.md et .claude/skills/aether-halo/SKILL.md
    Les composants consomment ces jetons dans leurs styles scopés ; tokens.css
    ne contient plus que des alias pour les anciens noms de variables. */
 

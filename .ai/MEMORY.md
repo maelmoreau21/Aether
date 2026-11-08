@@ -1,5 +1,7 @@
 # Mémoire Aether — point d’entrée
 
+Ce fichier est un **index historique**, pas un prompt, un backlog, ni une liste de tâches à poursuivre automatiquement. Lire seulement l'entrée pertinente pour la mission et vérifier chaque affirmation dans le code/tests de la branche courante. Ne pas charger systématiquement l'archive complète.
+
 Le code et les tests actuels font foi. Cette mémoire est un index de décisions et
 preuves historiques, pas une garantie de comportement ni de déploiement actuel.
 Consulter les documents du domaine et les sources avant toute modification.

@@ -1,3 +1,5 @@
+> **Plan historique (octobre 2026).** Les « prochaines étapes » ci-dessous sont celles de l'époque et ne sont pas une roadmap active. Le développement réel a depuis dépassé ces jalons ; toute nouvelle priorité dépend de la demande utilisateur et de la branche vérifiée. Voir [AGENTS.md](../AGENTS.md).
+
 # Découpage réel
 
 ## Prochaine étape actée — 16 octobre 2026

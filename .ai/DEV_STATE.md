@@ -1,3 +1,5 @@
+> **Index historique, non actualisé automatiquement.** Les sections ci-dessous s'arrêtent principalement au 4 novembre 2026 et ne constituent pas le statut courant. Au commit e4ed826c (8 novembre 2026), la CI de develop a réussi les vérifications Rust, SvelteKit, navigateur Chrome et images Docker amd64/arm64 ; cela ne prouve pas le fonctionnement sur NAS ni toutes les fonctions de production. Vérifier la branche, les tests et les documents du domaine avant de conclure. Ne pas reprendre les anciennes « prochaines étapes » sans demande explicite.
+
 # État de développement
 
 ## 4 novembre 2026 — Compléments ciblés de la mission

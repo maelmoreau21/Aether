@@ -582,9 +582,8 @@ async fn collect(
             })
             .collect();
         let state = active_state(current.iter().map(|(.., status, _)| status.as_str()));
-        let progress = (state == "running").then(|| {
-            current.iter().map(|(.., p)| *p).sum::<i64>() / current.len().max(1) as i64
-        });
+        let progress = (state == "running")
+            .then(|| current.iter().map(|(.., p)| *p).sum::<i64>() / current.len().max(1) as i64);
         // The most recent finished run over every scope of the library.
         let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as("SELECT started_at,finished_at,status,error FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('completed','error','cancelled') ORDER BY COALESCE(finished_at,updated_at) DESC,id LIMIT 1")
             .bind(&library).bind(&library).fetch_optional(pool).await?;
@@ -682,10 +681,7 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<Vec<TaskView>>, ApiError> {
     authorize(&auth, &headers, false).await?;
-    collect(&auth.store, None)
-        .await
-        .map(Json)
-        .map_err(internal)
+    collect(&auth.store, None).await.map(Json).map_err(internal)
 }
 
 async fn detail(
@@ -742,10 +738,9 @@ async fn run(
             crate::task_engine::WAKE.notify_one();
             Ok(StatusCode::ACCEPTED)
         }
-        Admission::AlreadyActive => Err(ApiError::coded(
-            StatusCode::CONFLICT,
-            "task_already_active",
-        )),
+        Admission::AlreadyActive => {
+            Err(ApiError::coded(StatusCode::CONFLICT, "task_already_active"))
+        }
         Admission::Unavailable => Err(ApiError::coded(StatusCode::CONFLICT, "task_unavailable")),
     }
 }

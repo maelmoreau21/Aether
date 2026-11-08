@@ -254,10 +254,12 @@ async fn light_maintenance_is_not_starved_by_scans_and_heavy_work_waits_bounded(
         .unwrap();
     assert!(lease.is_some());
     // After waiting its maximum, heavy maintenance runs even on a busy server.
-    query("UPDATE durable_tasks SET created_at=created_at-3600 WHERE target_id='optimize-database'")
-        .execute(pool)
-        .await
-        .unwrap();
+    query(
+        "UPDATE durable_tasks SET created_at=created_at-3600 WHERE target_id='optimize-database'",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
     scheduler::dispatch_once(&auth, &root, &jobs, now + 1)
         .await
         .unwrap();
@@ -276,14 +278,22 @@ async fn monitoring_polls_and_stale_markers_never_block_a_task() {
     let (cookie, csrf) = login(&app).await;
     let now = media_contracts::protocol::unix_now();
     // A real-time monitoring poll of the library is running.
-    task_engine::enqueue(&store, "films", "library-monitor", "monitor:1:films", 10, now)
-        .await
-        .unwrap();
+    task_engine::enqueue(
+        &store,
+        "films",
+        "library-monitor",
+        "monitor:1:films",
+        10,
+        now,
+    )
+    .await
+    .unwrap();
     let poll = task_engine::claim(&store, "local", now, 600, 1)
         .await
         .unwrap()
         .unwrap();
-    let (status, view, _) = call(&app, "GET", "/api/v1/admin/tasks/scan-films", &cookie, None).await;
+    let (status, view, _) =
+        call(&app, "GET", "/api/v1/admin/tasks/scan-films", &cookie, None).await;
     assert_eq!(status, StatusCode::OK, "{view}");
     assert_eq!(view["state"], "idle", "a monitoring poll is not a scan run");
     task_engine::finish(&store, &poll.id, poll.attempt, "local", now + 1, None)
@@ -324,7 +334,14 @@ async fn monitoring_polls_and_stale_markers_never_block_a_task() {
         .execute(pool)
         .await
         .unwrap();
-    let (_, view, _) = call(&app, "GET", "/api/v1/admin/tasks/clean-cache", &cookie, None).await;
+    let (_, view, _) = call(
+        &app,
+        "GET",
+        "/api/v1/admin/tasks/clean-cache",
+        &cookie,
+        None,
+    )
+    .await;
     assert_eq!(view["state"], "idle");
     assert_eq!(view["lastRun"]["outcome"], "interrupted");
     let (status, _, _) = call(

@@ -901,7 +901,10 @@ mod tests {
         run_scheduled(&state, None).await.unwrap();
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "succeeded");
-        assert!(schedule.next_due_at > now(), "the mirror follows the trigger");
+        assert!(
+            schedule.next_due_at > now(),
+            "the mirror follows the trigger"
+        );
         assert_eq!(
             std::fs::read_dir(temp.path().join("backups"))
                 .unwrap()

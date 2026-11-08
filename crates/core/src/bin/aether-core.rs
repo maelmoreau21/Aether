@@ -6,6 +6,13 @@
 //! - otherwise `MEDIA_FIXTURE_DIR` set: synthetic fixture inventory (tests, benchmarks);
 //! - otherwise: empty local library in a temporary folder (production default).
 use media_poc::{auth::AuthState, node::Inventory, scans::ScanJobs, secure_app_with_jobs};
+
+/// Startup diagnostics also reach the administration log viewer.
+macro_rules! eprintln {
+    ($($arg:tt)*) => {
+        media_poc::server_log::record(format!($($arg)*))
+    };
+}
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     path::PathBuf,
@@ -72,6 +79,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         );
         return Ok(());
     }
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        media_poc::server_log::remember(
+            media_poc::server_log::Level::Error,
+            &format!("panic: {info}"),
+        );
+        default_hook(info);
+    }));
 
     let source = library_source().await?;
     let root = match &source {
@@ -118,6 +133,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std::env::var("MEDIA_PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
     let auth = AuthState::new(database.clone(), public_origin.clone()).await?;
     println!("aether-core listening on {public_origin}/app/");
+    media_poc::server_log::remember(
+        media_poc::server_log::Level::Info,
+        &format!(
+            "aether-core {} listening on {public_origin}/app/",
+            media_contracts::version::current_version()
+        ),
+    );
     let web_dist = media_poc::configured_web_dist();
     if !web_dist.exists() {
         eprintln!(

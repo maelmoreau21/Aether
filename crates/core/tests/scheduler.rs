@@ -532,6 +532,56 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
 }
 
 #[tokio::test]
+async fn missing_credentials_fail_once_while_provider_errors_retry() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("credentials.sqlite"))
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','lib','films','local','synthetic-root',1)")
+        .execute(store.pool()).await.unwrap();
+    for (key, error, expected) in [
+        ("k1", "extension_error:missing_api_key", ("error", 1)),
+        ("k2", "extension_error:unauthorized", ("error", 1)),
+        ("k3", "extension_error:provider_error", ("queued", 1)),
+    ] {
+        media_poc::task_engine::enqueue(&store, "lib", "scheduler", key, 100, 1000)
+            .await
+            .unwrap();
+        let running = media_poc::task_engine::claim(&store, "local", 1000, 30, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        media_poc::task_engine::finish(
+            &store,
+            &running.id,
+            running.attempt,
+            "local",
+            1001,
+            Some(error),
+        )
+        .await
+        .unwrap();
+        let (status, failures): (String, i64) = media_poc::database::query_as(
+            "SELECT status,failure_count FROM durable_tasks WHERE id=?",
+        )
+        .bind(&running.id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!((status.as_str(), failures), expected, "{error}");
+        media_poc::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
+            .bind(&running.id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+    store.close().await;
+}
+
+#[tokio::test]
 async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_work() {
     let temp = tempfile::tempdir().unwrap();
     let root = tokio::fs::canonicalize(temp.path()).await.unwrap();

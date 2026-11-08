@@ -28,7 +28,7 @@
     extension_timeout: 'automation_error_timeout', playback_preempted: 'automation_error_preempted',
     automation_cancelled: 'automation_error_cancelled', metadata_unidentified: 'automation_error_unidentified',
     provider_error: 'automation_error_provider', not_found: 'automation_error_not_found', rate_limited: 'automation_error_rate_limited',
-    missing_api_key: 'automation_error_api_key', invalid_api_key: 'automation_error_api_key', network_error: 'automation_error_network',
+    missing_api_key: 'automation_error_api_key', invalid_api_key: 'automation_error_api_key', unauthorized: 'automation_error_api_key', network_error: 'automation_error_network',
     parse_error: 'automation_error_parse', invalid_output: 'automation_error_parse'
   };
   function describeError(code: string): string {

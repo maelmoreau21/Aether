@@ -7,11 +7,11 @@ export interface AdminDestination { hash: string; label: string; labelKey: Label
 /** A sidebar entry. Entries with tabs group related sections behind one destination. */
 export interface AdminEntry extends AdminDestination { tabs?: AdminDestination[]; extensionId?: 'media-requests' | 'media-reports' }
 
-/** Scheduled tasks first; durable operations and automation stay one click away. */
+/** Scheduled tasks first; automation and the server log stay one click away. */
 const taskTabs: AdminDestination[] = [
   { hash: '#tasks-section', label: 'Tâches planifiées', labelKey: 'admin_nav_tasks', icon: 'clock' },
-  { hash: '#operations-section', label: 'Suivi des opérations', labelKey: 'admin_operations_tab', icon: 'server' },
-  { hash: '#automation-section', label: 'Automatisations', labelKey: 'admin_automation_tab', icon: 'sparkles' }
+  { hash: '#automation-section', label: 'Automatisations', labelKey: 'admin_automation_tab', icon: 'sparkles' },
+  { hash: '#logs-section', label: 'Journaux du serveur', labelKey: 'admin_logs_tab', icon: 'server' }
 ];
 const serverTabs: AdminDestination[] = [
   { hash: '#general-section', label: 'Général', labelKey: 'admin_general', icon: 'settings' },
@@ -55,8 +55,10 @@ export function adminEntryFor(hash: string): AdminEntry | undefined {
 }
 export function parseAdminHash(hash: string): { section: string; task: string | null } {
   const [requested, query = ''] = hash.split('?', 2);
-  // Former sections: trickplay and the image collection now live in each library's settings.
-  const candidate = requested === '#trickplay-section' || requested === '#artwork-section' ? '#libraries-section' : requested;
+  // Former sections: trickplay and the image collection now live in each library's settings;
+  // the operations tab was folded into the scheduled tasks.
+  const candidate = requested === '#trickplay-section' || requested === '#artwork-section' ? '#libraries-section'
+    : requested === '#operations-section' ? '#tasks-section' : requested;
   const section = adminSectionHashes.has(candidate) ? candidate : '#overview';
   return { section, task: section === '#tasks-section' ? new URLSearchParams(query).get('task') || null : null };
 }
@@ -78,7 +80,7 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#groups-section': ['Groupes d’utilisateurs', 'Groupe par défaut', 'Membres du groupe', 'Permissions sur les bibliothèques', 'Type d’affectation', 'Propriétés du groupe'],
   '#api-keys-section': ['Créer une clé', 'Expiration en jours', 'Révoquer une clé', 'Propriétaire de la clé', 'Jetons d’accès'],
   '#tasks-section': ['Planification', 'Tâches planifiées', 'Ajouter un déclencheur', 'Tous les jours', 'Hebdomadaire', 'Intervalle', 'Au démarrage du serveur', 'Limite de temps', 'Nettoyer le cache', 'Nettoyer le journal des extensions', 'Sauvegarde planifiée'],
-  '#operations-section': ['Suivi des opérations', 'File des tâches', 'Opérations distribuées', 'Analyse technique', 'Préparation multimédia', 'Reprendre une opération', 'Annuler une opération'],
+  '#logs-section': ['Journaux du serveur', 'Logs', 'Erreurs du serveur', 'Avertissements', 'Télécharger les journaux', 'Diagnostic'],
   '#automation-section': ['Automatisations', 'Politiques d’automatisation', 'Historique des automatisations', 'Quotas des fournisseurs', 'Sources des métadonnées'],
   '#backups-section': ['Sauvegarde automatique', 'Activer les sauvegardes automatiques', 'Planification automatique', 'Archives', 'Télécharger une sauvegarde', 'Base de données', 'Consommation mémoire', 'Cache disque Linux'],
   '#extensions-section': ['Extensions installées', 'Catalogue', 'Dépôts', 'Adresse du dépôt', 'Mettre à jour une extension', 'Versions des extensions', 'Accès demandés', 'Paramètres des extensions', 'Plugins'],
@@ -104,7 +106,7 @@ export const adminSearchKeywordsEn: Record<string, readonly string[]> = {
   '#groups-section': ['User groups', 'Default group', 'Group members', 'Library permissions', 'Assignment type', 'Group properties'],
   '#api-keys-section': ['Create a key', 'Expiry in days', 'Revoke a key', 'Key owner', 'Access tokens'],
   '#tasks-section': ['Scheduling', 'Scheduled tasks', 'Add a trigger', 'Every day', 'Weekly', 'Interval', 'At server startup', 'Time limit', 'Clear the cache', 'Clear the extension log', 'Scheduled backup'],
-  '#operations-section': ['Operations tracking', 'Task queue', 'Distributed operations', 'Technical analysis', 'Media preparation', 'Resume an operation', 'Cancel an operation'],
+  '#logs-section': ['Server logs', 'Logs', 'Server errors', 'Warnings', 'Download the logs', 'Diagnostics'],
   '#automation-section': ['Automations', 'Automation policies', 'Automation history', 'Provider quotas', 'Metadata sources'],
   '#backups-section': ['Automatic backup', 'Enable automatic backups', 'Automatic scheduling', 'Archives', 'Download a backup', 'Database', 'Memory usage', 'Linux disk cache'],
   '#extensions-section': ['Installed extensions', 'Catalogue', 'Repositories', 'Repository address', 'Update an extension', 'Extension versions', 'Requested access', 'Extension settings', 'Plugins'],

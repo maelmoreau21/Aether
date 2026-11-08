@@ -132,6 +132,26 @@ export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 
   return { text: t('sched_last_run_short', { ago }), tone: 'ok' };
 }
 
+export type TaskStatus = 'running' | 'failed' | 'warning' | 'ok' | 'never';
+
+/** Status of a task at a glance: drives the row icon and the "failed" filter. */
+export function taskStatus(task: Pick<ScheduledTask, 'state' | 'lastRun'>): TaskStatus {
+  if (task.state !== 'idle') return 'running';
+  const outcome = task.lastRun?.outcome;
+  if (!outcome || !(task.lastRun?.end ?? task.lastRun?.start)) return 'never';
+  if (outcome === 'failed') return 'failed';
+  if (outcome === 'interrupted' || outcome === 'cancelled') return 'warning';
+  return 'ok';
+}
+
+/** One line for the list: the first trigger, "+N" for the others, or manual only. */
+export function scheduleSummary(triggers: Pick<TaskTrigger, 'type' | 'timeOfDayMinutes' | 'dayOfWeek' | 'intervalMinutes' | 'enabled'>[], t: Translate): string {
+  const enabled = triggers.filter(trigger => trigger.enabled);
+  if (!enabled.length) return t('sched_manual_only');
+  const first = triggerLabel(enabled[0], t);
+  return enabled.length > 1 ? t('sched_more_triggers', { first, count: enabled.length - 1 }) : first;
+}
+
 /** Request body of `POST /api/v1/admin/tasks/{id}/triggers`. */
 export function triggerPayload(draft: TriggerDraft): Record<string, string | number> {
   const body: Record<string, string | number> = { type: draft.type };

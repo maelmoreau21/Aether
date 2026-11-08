@@ -25,7 +25,7 @@
   import AdminUsers from '../../../lib/admin/AdminUsers.svelte';
   import AdminTasks from '../../../lib/admin/AdminTasks.svelte';
   import AdminMaintenance from '../../../lib/admin/AdminMaintenance.svelte';
-  import DistributedTasks from '../../../lib/admin/DistributedTasks.svelte';
+  import AdminServerLogs from '../../../lib/admin/AdminServerLogs.svelte';
   import AutomationTasks from '../../../lib/admin/AutomationTasks.svelte';
   import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
   import Requests from '../../../lib/applications/Requests.svelte';
@@ -486,8 +486,8 @@
           <div hidden={currentHash !== '#tasks-section'}>
             <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} selectedId={selectedTaskId} active={currentHash === '#tasks-section'} />
           </div>
-          {#if currentHash === '#operations-section'}
-            <DistributedTasks active={true} {libraries} {nodes} />
+          {#if currentHash === '#logs-section'}
+            <AdminServerLogs active={true} />
           {/if}
           {#if currentHash === '#automation-section'}
             <AutomationTasks active={true} {libraries} />

@@ -32,13 +32,16 @@ describe('administration grouping', () => {
     expect(adminSectionHashes.has('#artwork-section')).toBe(false);
     expect(adminEntryFor('#network-section')?.label).toBe('Paramètres du serveur');
   });
-  it('keeps operations tracking and automation reachable beside scheduled tasks', async () => {
+  it('keeps automation and the server log reachable beside scheduled tasks', async () => {
     const { adminEntryFor } = await import('./navigation');
-    for (const hash of ['#operations-section', '#automation-section']) {
+    for (const hash of ['#automation-section', '#logs-section']) {
       expect(parseAdminHash(hash).section).toBe(hash);
       expect(adminEntryFor(hash)?.hash).toBe('#tasks-section');
     }
-    expect(parseAdminHash('#operations-section?task=backup').task).toBeNull();
+    expect(parseAdminHash('#logs-section?task=backup').task).toBeNull();
+    // The former operations tab was removed; old links open the scheduled tasks.
+    expect(parseAdminHash('#operations-section').section).toBe('#tasks-section');
+    expect(adminSectionHashes.has('#operations-section')).toBe(false);
   });
   it('groups API keys under System and application shortcuts under Extensions', async () => {
     const { adminNavigation, adminEntryFor } = await import('./navigation');

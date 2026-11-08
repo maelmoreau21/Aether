@@ -500,6 +500,9 @@ pub async fn finish(
     let error = error.unwrap_or("");
     let error: String = error.chars().take(1024).collect();
     let failed = i64::from(!error.is_empty() && error != "playback_preempted");
+    // A missing or rejected credential fails the same way until an administrator
+    // edits the extension settings: retrying only repeats the request and the wait.
+    let exhausted = i64::from(failed == 1 && permanent_error(&error));
     let delay = if failed == 0 {
         1
     } else if error == crate::extensions::UNIDENTIFIED_ERROR {
@@ -518,11 +521,19 @@ pub async fn finish(
             .saturating_add(jitter as i64)
     };
     let _writer = store.task_writes.lock().await;
-    let changed=query("UPDATE durable_tasks SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN ?='' THEN 'completed' WHEN failure_count+? >= max_attempts THEN 'error' ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN ? ELSE 0 END,progress=CASE WHEN status='running' AND ?='' THEN 100 ELSE progress END,lease_until=NULL,updated_at=?,finished_at=CASE WHEN status='cancelled' OR (status='running' AND (?='' OR failure_count+? >= max_attempts)) THEN ? ELSE NULL END,available_at=CASE WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? WHERE id=? AND attempt=? AND node_id=? AND lease_until>? AND status IN ('running','paused','cancelled')").bind(&error).bind(failed).bind(failed).bind(&error).bind(now).bind(&error).bind(failed).bind(now).bind(now).bind(now.saturating_add(delay)).bind(error).bind(id).bind(attempt).bind(node_id).bind(now).execute(store.pool()).await?.rows_affected()==1;
+    let changed=query("UPDATE durable_tasks SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN ?='' THEN 'completed' WHEN failure_count+? >= max_attempts OR ?=1 THEN 'error' ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN ? ELSE 0 END,progress=CASE WHEN status='running' AND ?='' THEN 100 ELSE progress END,lease_until=NULL,updated_at=?,finished_at=CASE WHEN status='cancelled' OR (status='running' AND (?='' OR failure_count+? >= max_attempts OR ?=1)) THEN ? ELSE NULL END,available_at=CASE WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? WHERE id=? AND attempt=? AND node_id=? AND lease_until>? AND status IN ('running','paused','cancelled')").bind(&error).bind(failed).bind(exhausted).bind(failed).bind(&error).bind(now).bind(&error).bind(failed).bind(exhausted).bind(now).bind(now).bind(now.saturating_add(delay)).bind(error).bind(id).bind(attempt).bind(node_id).bind(now).execute(store.pool()).await?.rows_affected()==1;
     if changed {
         WAKE.notify_one();
     }
     Ok(changed)
+}
+
+/// Extension failures no retry can fix: the configuration must change first.
+fn permanent_error(error: &str) -> bool {
+    matches!(
+        error,
+        "extension_error:missing_api_key" | "extension_error:unauthorized"
+    )
 }
 
 /// Expiry fences prior attempts. Restart only requeues work after the lease expires.

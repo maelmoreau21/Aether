@@ -252,7 +252,8 @@ fn redirect_allowed(from: &url::Url, to: &url::Url) -> bool {
         return false;
     };
     from.eq_ignore_ascii_case(to)
-        || (from.eq_ignore_ascii_case("github.com")
+        || ((from.eq_ignore_ascii_case("github.com")
+            || from.eq_ignore_ascii_case("api.github.com"))
             && [
                 "objects.githubusercontent.com",
                 "release-assets.githubusercontent.com",
@@ -325,7 +326,83 @@ async fn fetch_asset(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
     let _permit = DOWNLOADS
         .try_acquire()
         .map_err(|_| err(StatusCode::TOO_MANY_REQUESTS, "repository_busy"))?;
-    download(raw, maximum, "*/*", Duration::from_secs(60)).await
+    let direct = download(raw, maximum, "*/*", Duration::from_secs(60)).await;
+    let Err(failure) = direct else {
+        return direct;
+    };
+    // github.com can time out (504) on some networks while the API and the asset
+    // content host stay reachable. The checksum and signature still decide trust.
+    let Some((owner, repository, tag, name)) = github_release_asset(raw) else {
+        return Err(failure);
+    };
+    eprintln!("Release download failed ({raw}); retrying through the GitHub API");
+    match github_api_asset(&owner, &repository, &tag, &name, maximum).await {
+        Ok(bytes) => Ok(bytes),
+        Err(_) => Err(failure),
+    }
+}
+/// `https://github.com/{owner}/{repo}/releases/download/{tag}/{asset}`.
+fn github_release_asset(raw: &str) -> Option<(String, String, String, String)> {
+    let url = url::Url::parse(raw).ok()?;
+    if !url.host_str()?.eq_ignore_ascii_case("github.com") || url.query().is_some() {
+        return None;
+    }
+    let segments: Vec<_> = url.path_segments()?.collect();
+    let [owner, repository, "releases", "download", tag, name] = segments.as_slice() else {
+        return None;
+    };
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 200
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'+'))
+    };
+    [owner, repository, tag, name]
+        .iter()
+        .all(|s| plain(s))
+        .then(|| {
+            (
+                owner.to_string(),
+                repository.to_string(),
+                tag.to_string(),
+                name.to_string(),
+            )
+        })
+}
+async fn github_api_asset(
+    owner: &str,
+    repository: &str,
+    tag: &str,
+    name: &str,
+    maximum: usize,
+) -> Result<Vec<u8>, Error> {
+    let release = download(
+        &format!("https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}"),
+        MAX_MANIFEST,
+        "application/vnd.github+json",
+        Duration::from_secs(10),
+    )
+    .await?;
+    let release: Value = serde_json::from_slice(&release)
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "repository_http_error"))?;
+    let asset = release["assets"]
+        .as_array()
+        .and_then(|assets| assets.iter().find(|asset| asset["name"] == name))
+        .and_then(|asset| asset["url"].as_str())
+        .filter(|url| {
+            url.starts_with(&format!(
+                "https://api.github.com/repos/{owner}/{repository}/releases/assets/"
+            ))
+        })
+        .ok_or_else(|| err(StatusCode::BAD_GATEWAY, "repository_http_error"))?
+        .to_owned();
+    download(
+        &asset,
+        maximum,
+        "application/octet-stream",
+        Duration::from_secs(60),
+    )
+    .await
 }
 async fn download(
     raw: &str,
@@ -1866,6 +1943,29 @@ mod tests {
             &url("https://example.com/manifest.json"),
             &url("https://objects.githubusercontent.com/x")
         ));
+        assert!(redirect_allowed(
+            &url("https://api.github.com/repos/o/r/releases/assets/1"),
+            &url("https://release-assets.githubusercontent.com/x?jwt=1")
+        ));
+        assert_eq!(
+            github_release_asset(
+                "https://github.com/o/r/releases/download/p-v0.1.6-beta/p-0.1.6.package.json"
+            ),
+            Some((
+                "o".into(),
+                "r".into(),
+                "p-v0.1.6-beta".into(),
+                "p-0.1.6.package.json".into()
+            ))
+        );
+        for other in [
+            "https://raw.githubusercontent.com/o/r/main/p.json",
+            "https://github.com/o/r/releases/download/v1/p.json?x=1",
+            "https://github.com/o/r/releases/download/v1/../p.json",
+            "https://github.com/o/r/blob/main/p.json",
+        ] {
+            assert_eq!(github_release_asset(other), None, "{other}");
+        }
         assert!(abi_supported("1") && abi_supported("1.0") && abi_supported("1.0.0.0"));
         assert!(!abi_supported("1.1") && !abi_supported("2.0") && !abi_supported("0.9"));
         assert!(!abi_supported("1.0.0.0.0") && !abi_supported("x"));

@@ -31,9 +31,15 @@ L'API unifiée renvoie des codes explicites (`task_already_active`, `task_unavai
 `trigger_limit`, `trigger_not_found`) traduits par l'interface. La liste affiche la prochaine
 exécution de chaque tâche.
 
-La file « Suivi des opérations » (`/api/v1/admin/tasks/jobs`) n'était pas montée dans
-l'application : la requête tombait sur `/api/v1/admin/tasks/{id}` et répondait 404
-(« Opération impossible »). Elle est désormais montée, avec un test sur l'application complète.
+La file des opérations (`/api/v1/admin/tasks/jobs`) reste montée dans l'API, mais l'onglet
+« Suivi des opérations » a été retiré de l'administration (2026-11-08) : il doublait les tâches
+planifiées. À sa place, l'onglet « Journaux du serveur » lit `GET /api/v1/admin/logs` : les
+dernières lignes écrites par le Core sur stderr (2 000 au plus, en mémoire, perdues au
+redémarrage), classées info / avertissement / erreur, les secrets des URL masqués.
+
+Une tâche qui échoue faute de clé API (`extension_error:missing_api_key`) ou parce que le
+fournisseur la refuse (`extension_error:unauthorized`) passe directement en erreur, sans les
+nouvelles tentatives : seul un changement des paramètres de l'extension peut la débloquer.
 
 Tests : `crates/core/tests/task_scheduler.rs` (montage des routes, instant manqué, tâche
 occupée, famine, surveillance, marqueurs périmés) et `crates/core/tests/scheduler.rs`.

@@ -1,4 +1,17 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
+
+/// Every diagnostic the Core prints to stderr is also kept for the administration
+/// log viewer (`server_log`). Defined before the modules so it shadows the standard
+/// macro throughout the crate; output on stderr is unchanged.
+macro_rules! eprintln {
+    () => {
+        $crate::server_log::record(String::new())
+    };
+    ($($arg:tt)*) => {
+        $crate::server_log::record(format!($($arg)*))
+    };
+}
+
 pub mod account;
 pub mod acquisition;
 pub mod admin_backups;
@@ -20,6 +33,7 @@ pub mod oidc;
 pub mod postgres_backup;
 pub mod reports;
 pub mod scheduler;
+pub mod server_log;
 pub mod server_settings;
 pub mod system_memory;
 pub mod system_task_queue;
@@ -284,6 +298,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
             .merge(automation_http::router(auth.clone()))
+            .merge(server_log::router(auth.clone()))
             .merge(timeline_markers::router(auth.clone()))
             .merge(extensions::router(auth.clone()))
             .merge(auth::router(auth))

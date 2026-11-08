@@ -28,8 +28,32 @@ Ce qui empêchait la détection d'aboutir, et ce qui a changé :
 - API : `GET /api/v1/admin/assets/{asset}/segments`, `POST /api/v1/admin/assets/{asset}/analyze-markers`.
 
 Non établi : aucun essai sur une vraie bibliothèque ni sur le Node de production ; la qualité de la forme des
-chapitres d'animé n'est mesurée que sur des cas construits ; un film sans chapitre nommé n'a toujours aucun
-générique automatique (pas d'analyse vidéo).
+chapitres d'animé n'est mesurée que sur des cas construits.
+
+### Générique de fin des films lu à l'image (plugin 0.3.0)
+
+Un film n'a pas d'épisodes à comparer : jusqu'ici, son générique ne venait que d'un chapitre nommé.
+Comme l'analyseur d'images clés du plugin Jellyfin intro-skipper, le Node mesure maintenant la fin
+de l'image (`crates/node/src/end_credits.rs`, tâche `analyze` de composant `credits`) :
+
+1. Après la lecture des chapitres d'un film, le Core met en file la mesure de cette révision du
+   fichier (clé `cs:`, propriétaire `system`, différée pendant une lecture comme les empreintes).
+2. Le Node décode **les images clés seulement** (`-skip_frame nokey`) des 20 dernières minutes,
+   réduites à 480 px, avec `blackframe` (seuil 28) et `signalstats`. Une image clé est noire à
+   85 % de pixels noirs ; elle est lettrée si `YMAX − YLOW ≥ 60` (texte clair sur le noir). Le
+   début des quatre derniers passages noirs de plus de 30 s est placé sur l'image exacte par un
+   décodage complet (8 i/s) de l'intervalle entre deux images clés.
+3. Le Node renvoie les passages noirs (`blackframe-v1` : début, fin, images, images lettrées).
+   À la fin de la mesure, le Core relit les chapitres du film une fois, avec `blackFrames`.
+4. Le plugin retient le dernier passage noir lettré sur plus de la moitié de ses images, d'au
+   moins 60 s, finissant dans le dernier quart du film (deux passages séparés de moins de 12 s,
+   par un logo, n'en font qu'un). Confiance 0,84 seul (au moins 90 s), 0,92 quand un chapitre
+   commence à moins de 15 s (le début se cale dessus). Un chapitre « Fin »/« Ending » ambigu
+   (0,72) qu'il confirme passe à 0,92 ; un chapitre clairement nommé reste tel quel. Le générique
+   s'arrête où le noir s'arrête : une scène post-générique en couleur n'est pas sautée.
+
+Pas de générique pour un fondu au noir, un noir sans texte (scène de nuit, entracte) ou une carte de
+moins d'une minute. Limite : un générique qui défile **sur des images** (fond non noir) n'est pas lu.
 
 ---
 
@@ -114,7 +138,7 @@ de détection sur une bibliothèque réelle :
 - **Cache persistant disque** : Sur chaque Node dans `MEDIA_FINGERPRINT_CACHE_DIR` (par défaut `data/cache/fingerprints/{asset_id}_{size}_{mtime}.json`).
 - **Invalidation automatique** : Si la taille ou le timestamp de modification du média change, le cache est automatiquement régénéré.
 - **Purge manuelle administrateur** : Route API `POST /api/v1/admin/maintenance/clear-fingerprint-cache` et bouton dédié dans la section Général de l'administration.
-- **Priorité absolue à la lecture** : L'admission des tâches d'analyse audio cède le pas aux requêtes de lecture et de streaming en temps réel.
+- **Priorité absolue à la lecture** : L'admission des tâches d'analyse audio et de mesure de la fin des films cède le pas aux requêtes de lecture et de streaming en temps réel.
 
 ---
 

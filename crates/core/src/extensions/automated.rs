@@ -413,12 +413,22 @@ pub(crate) async fn run_automated(
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "too_many_chapters"));
         }
         let chapters = probe_chapters(&probe, 256);
-        json!({
+        let mut input = json!({
             "episodeId": work_id,
             "duration": duration,
             "chapters": chapters,
             "mediaType": if context.kind == "film" { "movie" } else { "episode" },
-        })
+        });
+        // A film's end credits are also read from its picture once the Node measured it
+        // (lettering on black, see `media_node::end_credits`).
+        if context.kind == "film"
+            && let Some(frames) = crate::automation::film_credits_scan(&auth.store, &job.target_id)
+                .await
+                .map_err(db)?
+        {
+            input["blackFrames"] = frames;
+        }
+        input
     } else {
         let context = context
             .as_ref()

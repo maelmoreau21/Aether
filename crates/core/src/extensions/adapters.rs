@@ -337,7 +337,7 @@ fn valid_timeline_marker(marker: &Value) -> bool {
         )
         && matches!(
             marker["method"].as_str(),
-            Some("fingerprint" | "chapter" | "silence" | "manual")
+            Some("fingerprint" | "chapter" | "silence" | "manual" | "black_frame")
         )
 }
 #[cfg(test)]

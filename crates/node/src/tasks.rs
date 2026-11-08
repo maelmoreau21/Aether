@@ -315,6 +315,9 @@ pub async fn run_task_with_trickplay_options(
             if component == Some("fingerprint") {
                 return audio_fingerprint(&opened, asset_id.as_str()).await;
             }
+            if component == Some(crate::end_credits::COMPONENT) {
+                return crate::end_credits::scan(&opened).await;
+            }
             let probe = crate::probe::probe_opened(&opened)
                 .await
                 .map_err(io::Error::other)?;

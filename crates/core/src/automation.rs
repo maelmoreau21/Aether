@@ -363,6 +363,9 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
         let selected = event_payload["extensionId"].as_str().map(str::to_owned);
         let fingerprint_ready =
             event_payload["fingerprintTaskId"].as_str().is_some() && event_payload["stale"] != true;
+        // A film's end picture was measured: its chapters are read again with it.
+        let credits_event = event_payload.get("creditsTaskId").is_some();
+        let credits_ready = credits_event && event_payload["stale"] != true;
         if kind == "media.removed" {
             query("UPDATE durable_tasks SET status='cancelled',updated_at=?,finished_at=CASE WHEN lease_until IS NULL THEN ? ELSE NULL END WHERE target_id=? AND status IN ('queued','running','paused') AND id IN (SELECT task_id FROM automation_task_links)").bind(now).bind(now).bind(&asset).execute(&mut *tx).await?;
             query("UPDATE automation_events SET dispatched_at=? WHERE id=?")
@@ -411,10 +414,11 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 .permissions
                 .iter()
                 .any(|p| p == "playback.markers");
-            if kind == "analysis.completed" && marker_plugin && !fingerprint_ready {
+            if kind == "analysis.completed" && marker_plugin && !fingerprint_ready && !credits_ready
+            {
                 continue;
             }
-            if fingerprint_ready && !marker_plugin {
+            if (fingerprint_ready || credits_event) && !marker_plugin {
                 continue;
             }
             if !package
@@ -436,6 +440,8 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                     if film == 0 || fingerprint_ready {
                         continue;
                     }
+                } else if credits_ready {
+                    continue;
                 }
                 if episode > 0 && fingerprint_ready {
                     // Only peers the detection itself would accept count: a stale extraction
@@ -594,8 +600,9 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 // A new fingerprint (the episode's own, or a peer's) gives a failed detection
                 // a new chance, and reruns a completed one when the event asks for it (a
                 // re-extraction, or a detection that ran with fewer peers than a full batch).
-                let fingerprint_event =
-                    kind == "analysis.completed" && marker_plugin && fingerprint_ready;
+                let fingerprint_event = kind == "analysis.completed"
+                    && marker_plugin
+                    && (fingerprint_ready || credits_ready);
                 if (fingerprint_event
                     || matches!(kind.as_str(), "manual" | "metadata.missing" | "scheduled"))
                     && pending < 100000
@@ -605,7 +612,8 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                     let reanalyze_markers = (kind == "manual"
                         && marker_plugin
                         && event_payload["reanalyzeMarkers"] == true)
-                        || (fingerprint_event && event_payload["redetect"] == true);
+                        || (fingerprint_event
+                            && (event_payload["redetect"] == true || credits_ready));
                     // A restarted task runs under an administrator who can still publish its
                     // result: the one that created it may have been disabled or demoted since.
                     let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='',owner=CASE WHEN EXISTS(SELECT 1 FROM users u WHERE u.id=durable_tasks.owner AND u.role='administrator' AND u.disabled_at IS NULL) THEN durable_tasks.owner ELSE ? END WHERE (durable_tasks.status IN ('error','cancelled') OR (durable_tasks.status='completed' AND ?=1)) AND durable_tasks.lease_until IS NULL AND durable_tasks.id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
@@ -988,6 +996,101 @@ pub(crate) async fn queue_fingerprint(
     } else {
         FingerprintState::Pending
     })
+}
+
+/// Durable key of the end credits picture measurement of one file revision.
+pub fn credits_scan_key(asset: &str, source: &str) -> Result<String, sqlx::Error> {
+    Ok(format!(
+        "cs:{}",
+        hash(&(asset, source, media_node::end_credits::ALGORITHM))?
+    ))
+}
+
+/// Queue the picture measurement of the end of a film (black keyframes with lettering, see
+/// `media_node::end_credits`) for one file revision unless it exists. A completed or pending
+/// one is left alone; a failed or cancelled one is queued again.
+pub(crate) async fn queue_credits_scan(
+    tx: &mut Transaction<'_, Any>,
+    request: &FingerprintRequest<'_>,
+    now: i64,
+) -> Result<(), sqlx::Error> {
+    let key = credits_scan_key(request.asset, request.source)?;
+    let rows: Vec<(String, String, Option<i64>)> = query_as("SELECT id,status,lease_until FROM durable_tasks WHERE idempotency_key=? AND target_id=? AND category='analyze' AND component='credits' ORDER BY updated_at DESC,id")
+        .bind(&key)
+        .bind(request.asset)
+        .fetch_all(&mut **tx)
+        .await?;
+    if rows.iter().any(|row| {
+        matches!(
+            row.1.as_str(),
+            "completed" | "queued" | "running" | "paused"
+        )
+    }) {
+        return Ok(());
+    }
+    if let Some((id, ..)) = rows.iter().find(|row| row.2.is_none()) {
+        query("UPDATE durable_tasks SET status='queued',failure_count=0,error='',finished_at=NULL,available_at=?,updated_at=? WHERE id=? AND status IN ('error','cancelled') AND lease_until IS NULL")
+            .bind(now).bind(now).bind(id).execute(&mut **tx).await?;
+        return Ok(());
+    }
+    if rows.is_empty() {
+        query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'credits',15,?,?,?) ON CONFLICT(owner,idempotency_key) DO NOTHING")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(request.library).bind(FINGERPRINT_OWNER).bind(&key).bind(request.node).bind(request.asset).bind(now).bind(now).bind(now)
+            .execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
+/// Most black runs passed on to the segment plugin (the Node keeps the latest 128).
+const CREDITS_SCAN_MAX_RUNS: usize = 256;
+
+/// The completed end credits measurement of the current revision of a film's file, bounded and
+/// checked, as the segment plugin reads it (`blackFrames`): `None` when there is none.
+pub async fn film_credits_scan(
+    store: &IdentityStore,
+    asset: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    let rows: Vec<(String, String, String)> = query_as("SELECT t.result_json,t.idempotency_key,obs.fingerprint FROM durable_tasks t JOIN automation_observations obs ON obs.asset_id=t.target_id WHERE t.target_id=? AND t.category='analyze' AND t.component='credits' AND t.status='completed' ORDER BY COALESCE(t.finished_at,0) DESC,t.id LIMIT 4")
+        .bind(asset)
+        .fetch_all(store.pool())
+        .await?;
+    for (raw, key, source) in rows {
+        if key != credits_scan_key(asset, &source)? {
+            continue;
+        }
+        return Ok(serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|result| sanitized_credits_scan(&result)));
+    }
+    Ok(None)
+}
+
+/// A Node's measurement reduced to what the plugin reads, or `None` when it is malformed.
+pub(crate) fn sanitized_credits_scan(result: &Value) -> Option<Value> {
+    if result["algorithm"] != media_node::end_credits::ALGORITHM {
+        return None;
+    }
+    let number = |value: &Value| value.as_f64().filter(|n| n.is_finite() && *n >= 0.0);
+    let runs = result["runs"].as_array()?;
+    if runs.len() > CREDITS_SCAN_MAX_RUNS {
+        return None;
+    }
+    let mut clean = Vec::with_capacity(runs.len());
+    for run in runs {
+        let (start, end) = (number(&run["start"])?, number(&run["end"])?);
+        let pages = run["pages"].as_u64().filter(|n| *n <= 100_000)?;
+        let lettered = run["lettered"].as_u64().filter(|n| *n <= pages)?;
+        if end < start {
+            return None;
+        }
+        clean.push(serde_json::json!({"start":start,"end":end,"pages":pages,"lettered":lettered}));
+    }
+    Some(serde_json::json!({
+        "algorithm": media_node::end_credits::ALGORITHM,
+        "windowStart": number(&result["windowStart"])?,
+        "windowEnd": number(&result["windowEnd"])?,
+        "runs": clean,
+    }))
 }
 
 /// One season peer whose completed fingerprint an acoustic detection can use.
@@ -1662,6 +1765,9 @@ pub(crate) async fn complete_with_marker_sources(
     } else {
         0
     };
+    if link.operation == "intro.parse_chapters" && is_episode == 0 {
+        queue_film_credits_scan(&mut tx, job, now).await?;
+    }
     if link.operation == "intro.parse_chapters" && is_episode > 0 {
         let source: Option<String> =
             query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
@@ -1748,6 +1854,51 @@ pub(crate) async fn complete_with_marker_sources(
     crate::database::commit(tx).await?;
     crate::task_engine::WAKE.notify_one();
     Ok(true)
+}
+
+/// After a film's chapters were read: measure the end of its picture, unless that is done for
+/// this revision. When the measurement completes, the chapters are read again with it (see
+/// `pump_triggers`), so a film whose chapters say nothing still gets its credits.
+async fn queue_film_credits_scan(
+    tx: &mut Transaction<'_, Any>,
+    job: &Job,
+    now: i64,
+) -> Result<(), sqlx::Error> {
+    let film: i64 = query_scalar("SELECT COUNT(*) FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.id=? AND w.kind='film'")
+        .bind(&job.target_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if film == 0 {
+        return Ok(());
+    }
+    let intro_enabled = query_scalar::<_, String>("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&job.library_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .and_then(|encoded| {
+            serde_json::from_str::<crate::library_options::LibraryOptions>(&encoded).ok()
+        })
+        .is_none_or(|options| options.intro_detection_enabled);
+    let source: Option<String> =
+        query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
+            .bind(&job.target_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if let Some(source) = source.filter(|_| intro_enabled) {
+        queue_credits_scan(
+            tx,
+            &FingerprintRequest {
+                library: &job.library_id,
+                node: &job.node_id,
+                asset: &job.target_id,
+                source: &source,
+                reextract_tailless: false,
+            },
+            now,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -1914,6 +2065,27 @@ async fn pump_triggers(
             )
             .await?;
         }
+    }
+    // A film's end picture was measured: its chapters are read again with the measurement.
+    let scans: Vec<(String, String, String, String, String, i64)> = query_as("SELECT t.id,t.library_id,t.target_id,t.idempotency_key,obs.fingerprint,t.attempt FROM durable_tasks t JOIN automation_observations obs ON obs.asset_id=t.target_id WHERE t.category='analyze' AND t.component='credits' AND t.status='completed' AND NOT EXISTS(SELECT 1 FROM automation_events ev WHERE ev.event_key='credits-ready:' || t.id || ':' || CAST(t.attempt AS TEXT)) ORDER BY t.finished_at,t.id LIMIT ?")
+        .bind(limit)
+        .fetch_all(&mut **tx)
+        .await?;
+    for (task, library, asset, key, source, attempt) in scans {
+        let stale = key != credits_scan_key(&asset, &source)?;
+        emit(
+            tx,
+            &EventInput {
+                key: &format!("credits-ready:{task}:{attempt}"),
+                kind: "analysis.completed",
+                library_id: &library,
+                asset_id: &asset,
+                fingerprint: &source,
+                payload: &serde_json::json!({"creditsTaskId": task, "stale": stale}),
+            },
+            now,
+        )
+        .await?;
     }
     let due:Vec<(String,String,i64,i64)>=query_as("SELECT extension_id,library_id,interval_seconds,next_run_at FROM automation_policies WHERE mode='scheduled' AND next_run_at<=? ORDER BY next_run_at,extension_id,library_id LIMIT ?").bind(now).bind(limit).fetch_all(&mut **tx).await?;
     for (extension, library, interval, due) in due {

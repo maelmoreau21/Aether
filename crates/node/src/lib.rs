@@ -6,6 +6,7 @@
 
 mod cache_dirs;
 mod disk_cache;
+pub mod end_credits;
 pub mod external_audio;
 pub mod files;
 pub mod fingerprint;

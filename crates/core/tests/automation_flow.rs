@@ -2321,3 +2321,196 @@ async fn library_provider_allowlist_controls_admission_and_provenance_priority_m
         "Local lyrics"
     );
 }
+
+/// A film whose chapters say nothing: once its chapters are read, the Node measures the end of
+/// its picture (here a real ffmpeg fixture, lettering on black for its last 90 s), and the
+/// chapters are read again with that measurement, once.
+#[tokio::test]
+async fn a_film_end_picture_is_measured_then_its_chapters_are_read_again_with_it() {
+    use media_contracts::{
+        ids::{AssetId, LibraryId, NodeId},
+        inventory::{ReadGrant, ReadTarget},
+    };
+    let fixture = tempfile::tempdir().unwrap();
+    let made = std::process::Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=320x180:r=24:d=150", "-f", "lavfi", "-i"])
+        .arg("color=c=black:s=320x180:r=24:d=90,drawbox=x=90:y=50:w=140:h=6:color=white:t=fill,drawbox=x=110:y=80:w=100:h=6:color=white:t=fill,drawbox=x=100:y=110:w=120:h=6:color=white:t=fill")
+        .args(["-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", "-c:v", "mpeg4", "-q:v", "5", "-g", "48"])
+        .arg(fixture.path().join("film.mkv"))
+        .status();
+    if !made.is_ok_and(|status| status.success()) {
+        eprintln!("ffmpeg unavailable: end credits measurement not exercised");
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("film-credits.sqlite"))
+        .await
+        .unwrap();
+    setup(&store).await;
+    query("UPDATE extensions SET enabled=0 WHERE id='fixture.metadata'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE inventory_assets SET probe_json=? WHERE id='asset-2'")
+        .bind(r#"{"format":{"duration":"240.0"},"chapters":[]}"#)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let package = media_extension_sdk::Package {
+        manifest: media_extension_sdk::Manifest {
+            api_version: 1,
+            id: "fixture.markers".into(),
+            version: "1.0.0".into(),
+            permissions: vec!["playback.markers".into()],
+            ..Default::default()
+        },
+        publisher_id: "fixture-publisher".into(),
+        wasm: String::new(),
+        sha256: "synthetic-markers".into(),
+        signature: String::new(),
+    };
+    query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.markers','fixture-publisher',?,1,'generation-1')")
+        .bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('fixture.markers','library-2')")
+        .execute(store.pool()).await.unwrap();
+    let mut tx = store.pool().begin().await.unwrap();
+    automation::emit_snapshot(&mut tx, "library-2", "scan", 100)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    automation::drain(&store, 100, 100).await.unwrap();
+
+    // The chapters are read first (nothing found).
+    let chapters = task_engine::claim_batch(&store, &["node-2".into()], 101, 60)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    let link = automation::task_link(&store, &chapters.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(link.operation, "intro.parse_chapters");
+    assert!(
+        automation::complete(&store, &chapters, &link, &json!([]), 102)
+            .await
+            .unwrap()
+    );
+
+    // Then the end of the picture is measured, by the real Node operation.
+    let measure = task_engine::claim_batch(&store, &["node-2".into()], 103, 60)
+        .await
+        .unwrap()
+        .pop()
+        .expect("end credits measurement queued");
+    assert_eq!(
+        (measure.category.as_str(), measure.component.as_str()),
+        ("analyze", "credits")
+    );
+    let source: String =
+        query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id='asset-2'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    let key: String = query_scalar("SELECT idempotency_key FROM durable_tasks WHERE id=?")
+        .bind(&measure.id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        key,
+        automation::credits_scan_key("asset-2", &source).unwrap()
+    );
+    let root = tokio::fs::canonicalize(fixture.path()).await.unwrap();
+    let opened = media_node::LocalNode
+        .open_media(&root, std::path::Path::new("film.mkv"))
+        .await
+        .unwrap();
+    let grant = ReadGrant {
+        target: ReadTarget::Asset(AssetId::new("asset-2")),
+        library_id: LibraryId::new("library-2"),
+        node_id: NodeId::new("node-2"),
+        root_snapshot: root.to_string_lossy().into_owned(),
+        relative_path: "film.mkv".into(),
+        mime: "video/x-matroska".into(),
+    };
+    let measured = media_node::tasks::run_task_on_grant(
+        "analyze",
+        &grant,
+        Some("credits"),
+        None,
+        &media_node::packaging::Preparations::default(),
+        opened.size(),
+        opened.modified_ns(),
+    )
+    .await
+    .unwrap();
+    assert!(
+        task_engine::record_result(
+            &store,
+            &measure.id,
+            measure.attempt,
+            "node-2",
+            104,
+            &measured
+        )
+        .await
+        .unwrap()
+    );
+    assert!(
+        task_engine::finish(&store, &measure.id, measure.attempt, "node-2", 104, None)
+            .await
+            .unwrap()
+    );
+
+    // What the plugin receives: the lettered black run of the last 90 s.
+    let frames = automation::film_credits_scan(&store, "asset-2")
+        .await
+        .unwrap()
+        .expect("measurement for the current revision");
+    assert_eq!(frames["algorithm"], "blackframe-v1");
+    let roll = frames["runs"].as_array().unwrap().last().unwrap().clone();
+    assert!(
+        (roll["start"].as_f64().unwrap() - 150.0).abs() <= 0.5,
+        "{frames}"
+    );
+    assert!(
+        (roll["end"].as_f64().unwrap() - 240.0).abs() <= 0.5,
+        "{frames}"
+    );
+    assert!(roll["lettered"].as_u64().unwrap() * 10 >= roll["pages"].as_u64().unwrap() * 9);
+
+    // The completed chapter reading runs again, with the measurement, and only once.
+    automation::drain(&store, 105, 100).await.unwrap();
+    let status: String = query_scalar("SELECT status FROM durable_tasks WHERE id=?")
+        .bind(&chapters.id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(status, "queued");
+    let again = task_engine::claim_batch(&store, &["node-2".into()], 106, 60)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(again.id, chapters.id);
+    assert!(
+        automation::complete(&store, &again, &link, &json!([]), 107)
+            .await
+            .unwrap()
+    );
+    automation::drain(&store, 108, 100).await.unwrap();
+    let rerun: Vec<(String, String)> = query_as(
+        "SELECT component,status FROM durable_tasks WHERE target_id='asset-2' ORDER BY component",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rerun,
+        [
+            ("".into(), "completed".into()),
+            ("credits".into(), "completed".into())
+        ]
+    );
+}

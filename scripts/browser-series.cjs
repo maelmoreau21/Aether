@@ -165,7 +165,12 @@ fs.mkdirSync(out, {recursive: true});
     assert.ok((await listRead.json()).items.length>0);
     await page.locator('summary[aria-label="Ajouter à une playlist"]').first().click();
     report.results.quickFeedbackAndListMenu=true;
+    // The title page groups its sections in tabs: the cast lives under « Distribution ».
+    const seriesSections = page.getByRole('tablist',{name:'Sections de la fiche',exact:true});
+    await seriesSections.getByRole('tab',{name:'Distribution',exact:true}).click();
     await page.getByText('Synthetic Actor',{exact:true}).waitFor();
+    await seriesSections.getByRole('tab',{name:'Épisodes',exact:true}).click();
+    await seasons.waitFor();
     const seasonImage = seasons.getByRole('tab',{selected:true}).locator('img');
     await seasonImage.scrollIntoViewIfNeeded();
     await seasonImage.evaluate(image=>image.decode());
@@ -372,9 +377,12 @@ fs.mkdirSync(out, {recursive: true});
     const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
     await filmCard.waitFor();
     await filmCard.click({position:{x:12,y:12}});
+    // Audio languages are in the masthead's quick facts; the cast is behind its tab.
+    const filmFacts = page.getByRole('complementary',{name:'En bref',exact:true});
+    assert.match(await filmFacts.innerText(),/français/);
+    assert.match(await filmFacts.innerText(),/anglais/);
+    await page.getByRole('tablist',{name:'Sections de la fiche',exact:true}).getByRole('tab',{name:'Distribution',exact:true}).click();
     await page.getByText('Film Actor',{exact:true}).waitFor();
-    assert.match(await page.locator('.media-experience-strip').innerText(),/français/);
-    assert.match(await page.locator('.media-experience-strip').innerText(),/anglais/);
     for (const theme of ['light','dark']) {
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
       for (const width of [390,1440]) {

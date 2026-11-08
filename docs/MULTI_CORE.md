@@ -5,6 +5,11 @@
 > terminale, sans garantir les effets des tâches ou leur routage entre Core.
 > [Contrat, portée et limites](MULTI_CORE_READINESS.md#lot-du-3-novembre--propriété-de-lhistorique-des-extensions).
 
+> 7 novembre : la conception complète (propriété durable des canaux, fencing, caches, effets
+> externes) est dans [`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md). Le tableau ci-dessous reste
+> l'inventaire d'origine ; `ACTIVE_CHANNELS` y est désormais une boîte aux lettres à échéance
+> (toujours locale au processus) décrite dans [`MULTI_NODE_RELIABILITY.md`](MULTI_NODE_RELIABILITY.md).
+
 Statut : **audit par inspection du code (grep + lecture ciblée), aucun test multi-Core exécuté.** Le multi-Core reste hors MVP. SQLite = un seul Core. Les Media Nodes ne parlent jamais à PostgreSQL.
 
 ## Déjà compatible (constaté)

@@ -312,6 +312,32 @@ pub fn effective_connection_mode(rec: &MediaNodeRecord) -> &'static str {
     }
 }
 
+/// A paired Node heartbeats every 15 s (and long-polls the control channel every 25 s at most).
+/// Five missed beats mean the Node is gone, even if no request ever failed to tell the Core:
+/// a power cut or a network partition produces no TCP reset on the Core side.
+pub const DEFAULT_NODE_STALE_SECS: i64 = 75;
+
+/// Seconds without any sign of life after which a remote Node counts as disconnected.
+/// `MEDIA_NODE_STALE_SECS=0` restores the former behaviour (never stale).
+pub fn node_stale_limit_secs() -> i64 {
+    std::env::var("MEDIA_NODE_STALE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .map_or(DEFAULT_NODE_STALE_SECS, |v| v.max(0))
+}
+
+/// Pure staleness rule shared by Node scoring and by direct-URL issuance, so a route is never
+/// handed to a browser for a Node that the ranking already considers gone.
+pub fn node_is_stale(rec: &MediaNodeRecord, now: i64) -> bool {
+    let limit = node_stale_limit_secs();
+    limit > 0
+        && rec.id != "local"
+        && rec.kind == "remote"
+        && rec
+            .last_seen_at
+            .is_some_and(|seen| now.saturating_sub(seen) > limit)
+}
+
 /// Pure O(1) warm-cache node & source scoring function.
 /// Never performs network I/O. Computes a deterministic priority score:
 /// - Connected status (+10_000) vs Disconnected (-100_000) vs Revoked (-1_000_000)
@@ -332,16 +358,7 @@ pub fn score_node_entry(
         return ("revoked".to_owned(), conn_mode.to_owned(), -1_000_000);
     }
 
-    let stale_limit = std::env::var("MEDIA_NODE_STALE_SECS")
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(0);
-    let is_stale = stale_limit > 0
-        && rec.id != "local"
-        && rec.kind == "remote"
-        && rec
-            .last_seen_at
-            .is_some_and(|seen| now.saturating_sub(seen) > stale_limit);
+    let is_stale = node_is_stale(rec, now);
 
     let effective_status = if rec.id == "local" {
         "connected"
@@ -564,4 +581,75 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
         });
     }
     Ok(views)
+}
+
+#[cfg(test)]
+mod staleness_tests {
+    use super::*;
+
+    fn record(kind: &str, id: &str, last_seen_at: Option<i64>) -> MediaNodeRecord {
+        MediaNodeRecord {
+            id: id.into(),
+            name: id.into(),
+            kind: kind.into(),
+            base_url: None,
+            public_url: None,
+            status: "connected".into(),
+            version: None,
+            connection_mode: "direct".into(),
+            key_id: "k".into(),
+            shared_secret: "s".into(),
+            roots_json: "[]".into(),
+            paired_at: 0,
+            last_seen_at,
+            revoked_at: None,
+        }
+    }
+
+    #[test]
+    fn a_silent_remote_node_is_stale_after_five_missed_heartbeats_by_default() {
+        // The default must hold unless an operator overrides it in the environment.
+        if std::env::var_os("MEDIA_NODE_STALE_SECS").is_some() {
+            return;
+        }
+        assert_eq!(node_stale_limit_secs(), DEFAULT_NODE_STALE_SECS);
+        let now = 10_000;
+        let remote = |seen| record("remote", "node-a", Some(seen));
+        assert!(!node_is_stale(&remote(now - DEFAULT_NODE_STALE_SECS), now));
+        assert!(node_is_stale(
+            &remote(now - DEFAULT_NODE_STALE_SECS - 1),
+            now
+        ));
+    }
+
+    #[test]
+    fn local_nodes_and_nodes_without_any_history_are_never_stale() {
+        let now = 10_000;
+        assert!(!node_is_stale(&record("local", "local", Some(0)), now));
+        assert!(!node_is_stale(&record("remote", "local", Some(0)), now));
+        assert!(!node_is_stale(&record("remote", "node-b", None), now));
+    }
+
+    #[test]
+    fn a_stale_node_scores_as_disconnected_and_is_never_handed_out() {
+        if std::env::var_os("MEDIA_NODE_STALE_SECS").is_some() {
+            return;
+        }
+        let now = 10_000;
+        let entry = NodeRuntimeEntry {
+            record: record("remote", "node-c", Some(now - 3_600)),
+            telemetry: NodeRuntimeTelemetry::default(),
+        };
+        let (status, _, score) = score_node_entry(&entry, Some("video/mp4"), None, now);
+        assert_eq!(status, "disconnected");
+        assert!(score < 0);
+        let fresh = NodeRuntimeEntry {
+            record: record("remote", "node-c", Some(now - 5)),
+            telemetry: NodeRuntimeTelemetry::default(),
+        };
+        assert_eq!(
+            score_node_entry(&fresh, Some("video/mp4"), None, now).0,
+            "connected"
+        );
+    }
 }

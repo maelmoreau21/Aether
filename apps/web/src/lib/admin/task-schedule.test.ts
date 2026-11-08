@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import { t } from '../i18n';
-import { agoLabel, categoryOrder, clockLabel, durationLabel, lastRunSummary, timeSlots, triggerLabel, triggerPayload, type TaskLastRun } from './task-schedule';
+import { agoLabel, categoryOrder, clockLabel, durationLabel, lastRunSummary, scheduleSummary, taskStatus, timeSlots, triggerLabel, triggerPayload, type TaskLastRun } from './task-schedule';
 
 const fr = get(t);
 
@@ -37,6 +37,19 @@ describe('scheduled task summaries', () => {
       .toEqual({ text: 'Échec : I/O error (StorageFull)', tone: 'error' });
     expect(lastRunSummary({ state: 'running', progress: 42, lastRun: null }, now, fr)).toEqual({ text: 'En cours : 42 %', tone: 'active' });
     expect(lastRunSummary({ state: 'queued', progress: null, lastRun: run({}) }, now, fr).tone).toBe('active');
+  });
+  it('classifies the status of a row and summarises its schedule', () => {
+    expect(taskStatus({ state: 'idle', lastRun: run({}) })).toBe('ok');
+    expect(taskStatus({ state: 'idle', lastRun: run({ outcome: 'failed' }) })).toBe('failed');
+    expect(taskStatus({ state: 'idle', lastRun: run({ outcome: 'interrupted' }) })).toBe('warning');
+    expect(taskStatus({ state: 'queued', lastRun: run({ outcome: 'failed' }) })).toBe('running');
+    expect(taskStatus({ state: 'idle', lastRun: null })).toBe('never');
+    const daily = { type: 'daily' as const, timeOfDayMinutes: 180, dayOfWeek: null, intervalMinutes: null, enabled: true };
+    const startup = { type: 'startup' as const, timeOfDayMinutes: null, dayOfWeek: null, intervalMinutes: null, enabled: true };
+    expect(scheduleSummary([], fr)).toBe('Manuelle uniquement');
+    expect(scheduleSummary([{ ...daily, enabled: false }], fr)).toBe('Manuelle uniquement');
+    expect(scheduleSummary([daily], fr)).toBe('Tous les jours à 03:00');
+    expect(scheduleSummary([daily, startup], fr)).toBe('Tous les jours à 03:00 (+1)');
   });
   it('formats durations, ages and category order', () => {
     expect(durationLabel(45)).toBe('45 s');

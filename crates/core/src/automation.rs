@@ -363,6 +363,9 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
         let selected = event_payload["extensionId"].as_str().map(str::to_owned);
         let fingerprint_ready =
             event_payload["fingerprintTaskId"].as_str().is_some() && event_payload["stale"] != true;
+        // A film's end picture was measured: its chapters are read again with it.
+        let credits_event = event_payload.get("creditsTaskId").is_some();
+        let credits_ready = credits_event && event_payload["stale"] != true;
         if kind == "media.removed" {
             query("UPDATE durable_tasks SET status='cancelled',updated_at=?,finished_at=CASE WHEN lease_until IS NULL THEN ? ELSE NULL END WHERE target_id=? AND status IN ('queued','running','paused') AND id IN (SELECT task_id FROM automation_task_links)").bind(now).bind(now).bind(&asset).execute(&mut *tx).await?;
             query("UPDATE automation_events SET dispatched_at=? WHERE id=?")
@@ -376,10 +379,11 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             query("UPDATE durable_tasks SET status='cancelled',updated_at=?,finished_at=CASE WHEN lease_until IS NULL THEN ? ELSE NULL END WHERE target_id=? AND status IN ('queued','running','paused') AND id IN (SELECT l.task_id FROM automation_task_links l JOIN automation_events original ON original.id=l.event_id WHERE original.fingerprint!=?)")
             .bind(now).bind(now).bind(&asset).bind(&file_fingerprint).execute(&mut *tx).await?;
         }
-        let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
-            .bind(&library)
-            .fetch_one(&mut *tx)
-            .await?;
+        let (options, library_kind): (String, String) =
+            query_as("SELECT options_json, kind FROM libraries WHERE id=?")
+                .bind(&library)
+                .fetch_one(&mut *tx)
+                .await?;
         let options: Value = serde_json::from_str(&options)
             .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
         let candidates:Vec<Candidate>=query_as("SELECT e.id,e.package_json,e.generation,COALESCE(p.mode,'automatic') AS mode,COALESCE(p.priority,100) AS priority,COALESCE(p.operation,'') AS operation,COALESCE(p.config_revision,'') AS config_revision,COALESCE(p.algorithm_version,'1') AS algorithm_version,COALESCE(s.settings_json,'{}') AS settings_json FROM extensions e JOIN extension_publishers publisher ON publisher.id=e.publisher_id LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id WHERE e.enabled=1 AND publisher.active=1 AND e.id>? AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND (g.library_id=? OR EXISTS(SELECT 1 FROM library_folders granted WHERE granted.library_id=? AND granted.parent_id=g.library_id AND granted.active=1)))) ORDER BY e.id LIMIT ?").bind(&library).bind(&library).bind(&cursor).bind(&library).bind(&library).bind(budget-examined+1).fetch_all(&mut *tx).await?;
@@ -410,10 +414,11 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 .permissions
                 .iter()
                 .any(|p| p == "playback.markers");
-            if kind == "analysis.completed" && marker_plugin && !fingerprint_ready {
+            if kind == "analysis.completed" && marker_plugin && !fingerprint_ready && !credits_ready
+            {
                 continue;
             }
-            if fingerprint_ready && !marker_plugin {
+            if (fingerprint_ready || credits_event) && !marker_plugin {
                 continue;
             }
             if !package
@@ -428,12 +433,51 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                 let episode: i64 = query_scalar("SELECT COUNT(*) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE a.id=?")
                     .bind(&asset).fetch_one(&mut *tx).await?;
                 if episode == 0 {
+                    // A film has no season to compare its audio with: its segments come from
+                    // its chapters (and the administrator's corrections) only.
+                    let film: i64 = query_scalar("SELECT COUNT(*) FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.id=? AND w.kind='film'")
+                        .bind(&asset).fetch_one(&mut *tx).await?;
+                    if film == 0 || fingerprint_ready {
+                        continue;
+                    }
+                } else if credits_ready {
                     continue;
                 }
-                if fingerprint_ready {
-                    let peers:i64=query_scalar("SELECT COUNT(DISTINCT peer.work_id) FROM inventory_assets current_asset JOIN inventory_sources current_source ON current_source.id=current_asset.source_id JOIN inventory_versions current_version ON current_version.id=current_source.version_id JOIN inventory_editions current_edition ON current_edition.id=current_version.edition_id JOIN inventory_episodes current_ep ON current_ep.work_id=current_edition.work_id JOIN inventory_episodes peer ON peer.season_id=current_ep.season_id AND peer.work_id!=current_ep.work_id JOIN inventory_editions peer_edition ON peer_edition.work_id=peer.work_id JOIN inventory_versions peer_version ON peer_version.edition_id=peer_edition.id JOIN inventory_sources peer_source ON peer_source.version_id=peer_version.id JOIN inventory_assets peer_asset ON peer_asset.source_id=peer_source.id JOIN durable_tasks fp ON fp.target_id=peer_asset.id AND fp.category='analyze' AND fp.component='fingerprint' AND fp.status='completed' WHERE current_asset.id=? AND peer_asset.available=1")
-                        .bind(&asset).fetch_one(&mut *tx).await?;
-                    if peers == 0 {
+                if episode > 0 && fingerprint_ready {
+                    // Only peers the detection itself would accept count: a stale extraction
+                    // or one from another library would make it fail for good.
+                    let peers: std::collections::HashSet<String> =
+                        usable_fingerprint_peers(&mut tx, &asset, &library)
+                            .await?
+                            .into_iter()
+                            .map(|peer| peer.work_id)
+                            .collect();
+                    if peers.is_empty() {
+                        // Episodes whose chapters name every segment were not fingerprinted
+                        // by older builds: give them one, so this episode has peers once they
+                        // complete (their own fingerprint-ready events re-offer it).
+                        let enabled = serde_json::from_value::<
+                            crate::library_options::LibraryOptions,
+                        >(options.clone())
+                        .is_ok_and(|options| options.intro_detection_enabled);
+                        if enabled {
+                            for (peer, peer_library, node, source) in
+                                season_fingerprint_candidates(&mut tx, &asset, &library, 64).await?
+                            {
+                                queue_fingerprint(
+                                    &mut tx,
+                                    &FingerprintRequest {
+                                        library: &peer_library,
+                                        node: &node,
+                                        asset: &peer,
+                                        source: &source,
+                                        reextract_tailless: false,
+                                    },
+                                    now,
+                                )
+                                .await?;
+                            }
+                        }
                         continue;
                     }
                 }
@@ -471,16 +515,35 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             let library_options: crate::library_options::LibraryOptions =
                 serde_json::from_value(options.clone())
                     .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
-            let providers = if marker_plugin {
-                &library_options.segment_providers
+            if marker_plugin && !library_options.intro_detection_enabled {
+                continue;
+            }
+            let priority = if marker_plugin {
+                crate::library_options::LibraryOptions::provider_priority(
+                    &library_options.segment_providers,
+                    &c.id,
+                    c.priority,
+                )
             } else if c.operation == "metadata.images" {
-                &library_options.image_providers
+                crate::library_options::LibraryOptions::provider_priority(
+                    &library_options.image_providers,
+                    &c.id,
+                    c.priority,
+                )
+            } else if c.operation == "lyrics.get" || selected.is_some() {
+                crate::library_options::LibraryOptions::provider_priority(
+                    &library_options.metadata_providers,
+                    &c.id,
+                    c.priority,
+                )
             } else {
-                &library_options.metadata_providers
+                library_options.metadata_provider_priority_for_kind(
+                    &library_kind,
+                    &c.id,
+                    c.priority,
+                )
             };
-            let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
-                providers, &c.id, c.priority,
-            ) else {
+            let Some(priority) = priority else {
                 continue;
             };
             c.priority = priority;
@@ -534,15 +597,27 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             .fetch_one(&mut *tx)
             .await?;
             if exists > 0 {
-                if matches!(kind.as_str(), "manual" | "metadata.missing" | "scheduled")
+                // A new fingerprint (the episode's own, or a peer's) gives a failed detection
+                // a new chance, and reruns a completed one when the event asks for it (a
+                // re-extraction, or a detection that ran with fewer peers than a full batch).
+                let fingerprint_event = kind == "analysis.completed"
+                    && marker_plugin
+                    && (fingerprint_ready || credits_ready);
+                if (fingerprint_event
+                    || matches!(kind.as_str(), "manual" | "metadata.missing" | "scheduled"))
                     && pending < 100000
                 {
-                    let reanalyze_markers = kind == "manual"
+                    // An explicit reanalysis reruns a completed marker task: the acoustic
+                    // detection of an episode, or the chapter reading of a film.
+                    let reanalyze_markers = (kind == "manual"
                         && marker_plugin
-                        && fingerprint_ready
-                        && event_payload["reanalyzeMarkers"] == true;
-                    let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='' WHERE (status IN ('error','cancelled') OR (status='completed' AND ?=1)) AND lease_until IS NULL AND id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
-                    .bind(now).bind(now).bind(i64::from(reanalyze_markers || kind == "scheduled")).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
+                        && event_payload["reanalyzeMarkers"] == true)
+                        || (fingerprint_event
+                            && (event_payload["redetect"] == true || credits_ready));
+                    // A restarted task runs under an administrator who can still publish its
+                    // result: the one that created it may have been disabled or demoted since.
+                    let restarted=query("UPDATE durable_tasks SET status='queued',failure_count=0,available_at=?,updated_at=?,finished_at=NULL,error='',owner=CASE WHEN EXISTS(SELECT 1 FROM users u WHERE u.id=durable_tasks.owner AND u.role='administrator' AND u.disabled_at IS NULL) THEN durable_tasks.owner ELSE ? END WHERE (durable_tasks.status IN ('error','cancelled') OR (durable_tasks.status='completed' AND ?=1)) AND durable_tasks.lease_until IS NULL AND durable_tasks.id IN (SELECT task_id FROM automation_task_links WHERE extension_id=? AND fingerprint=?)")
+                    .bind(now).bind(now).bind(&owner).bind(i64::from(reanalyze_markers || kind == "scheduled")).bind(&c.id).bind(&fingerprint).execute(&mut *tx).await?.rows_affected();
                     pending += restarted as i64;
                     admitted += restarted;
                 }
@@ -673,11 +748,6 @@ async fn persist_timeline_markers(
     result: &Value,
     now: i64,
 ) -> Result<(), sqlx::Error> {
-    let season:Option<String>=query_scalar("SELECT ep.season_id FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE a.id=? AND a.available=1")
-        .bind(&job.target_id).fetch_optional(&mut **tx).await?;
-    let Some(season) = season else {
-        return Err(sqlx::Error::Protocol("marker episode missing".into()));
-    };
     let results: Vec<(String, &Vec<Value>)> = if link.operation == "intro.parse_chapters" {
         vec![(
             job.target_id.clone(),
@@ -708,27 +778,39 @@ async fn persist_timeline_markers(
         if asset != job.target_id {
             continue;
         }
-        let state:Option<(String,String,String)>=query_as("SELECT ep.season_id,obs.fingerprint,a.probe_json FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN automation_observations obs ON obs.asset_id=a.id WHERE a.id=? AND a.available=1")
+        // Episodes and films alike: the marker belongs to this file revision.
+        let state: Option<(String, String)> = query_as("SELECT obs.fingerprint,a.probe_json FROM inventory_assets a JOIN automation_observations obs ON obs.asset_id=a.id WHERE a.id=? AND a.available=1")
             .bind(&asset).fetch_optional(&mut **tx).await?;
-        let Some((candidate_season, source_fingerprint, probe)) = state else {
+        let Some((source_fingerprint, probe)) = state else {
             return Err(sqlx::Error::Protocol("marker source missing".into()));
         };
-        if candidate_season != season {
-            return Err(sqlx::Error::Protocol("marker season mismatch".into()));
-        }
-        let duration = serde_json::from_str::<Value>(&probe)
-            .ok()
-            .and_then(|v| {
-                v["format"]["duration"]
-                    .as_str()
-                    .and_then(|s| s.parse::<f64>().ok())
-            })
+        let probe = serde_json::from_str::<Value>(&probe).unwrap_or(Value::Null);
+        let duration = probe["format"]["duration"]
+            .as_str()
+            .and_then(|s| s.parse::<f64>().ok())
             .filter(|n| n.is_finite() && *n > 0.0)
             .ok_or_else(|| sqlx::Error::Protocol("marker duration missing".into()))?;
+        // Which pass may replace or delete which row. No column records the writer: the row's
+        // task_id is joined to automation_task_links.operation.
+        // - intro.detect reads the chapters as well as the audio, so for this file revision it
+        //   has the last word: it replaces any row and deletes the kinds it no longer reports,
+        //   except, when the file has more chapters than the detection was sent, the rows the
+        //   chapter pass wrote (they may come from a chapter the detection never saw).
+        // - intro.parse_chapters replaces and deletes only the rows it wrote itself, or rows of
+        //   another file revision or plugin generation (which the player ignores anyway). It never
+        //   touches a current acoustic result: a re-read that no detection follows (no peers, a
+        //   detection already running) must not leave the episode with a worse segment.
+        let chapter_pass = link.operation == "intro.parse_chapters";
+        let upsert = if chapter_pass {
+            "INSERT INTO automatic_timeline_markers(asset_id,extension_id,marker_type,start_seconds,end_seconds,confidence,source_fingerprint,generation,task_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id,extension_id,marker_type) DO UPDATE SET start_seconds=excluded.start_seconds,end_seconds=excluded.end_seconds,confidence=excluded.confidence,source_fingerprint=excluded.source_fingerprint,generation=excluded.generation,task_id=excluded.task_id,updated_at=excluded.updated_at WHERE automatic_timeline_markers.source_fingerprint!=excluded.source_fingerprint OR automatic_timeline_markers.generation!=excluded.generation OR NOT EXISTS(SELECT 1 FROM automation_task_links writer WHERE writer.task_id=automatic_timeline_markers.task_id AND writer.operation='intro.detect')"
+        } else {
+            "INSERT INTO automatic_timeline_markers(asset_id,extension_id,marker_type,start_seconds,end_seconds,confidence,source_fingerprint,generation,task_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id,extension_id,marker_type) DO UPDATE SET start_seconds=excluded.start_seconds,end_seconds=excluded.end_seconds,confidence=excluded.confidence,source_fingerprint=excluded.source_fingerprint,generation=excluded.generation,task_id=excluded.task_id,updated_at=excluded.updated_at"
+        };
+        let mut reported = std::collections::HashSet::new();
         for marker in markers {
             let Some(kind) = marker["markerType"]
                 .as_str()
-                .filter(|kind| matches!(*kind, "intro" | "credits"))
+                .filter(|kind| matches!(*kind, "intro" | "credits" | "recap" | "preview"))
             else {
                 continue;
             };
@@ -737,24 +819,330 @@ async fn persist_timeline_markers(
                 marker["end"].as_f64(),
                 marker["confidence"].as_f64(),
             ) else {
-                return Err(sqlx::Error::Protocol("invalid marker".into()));
+                continue;
             };
+            // One malformed segment is dropped; it must not discard the others.
             if !start.is_finite()
                 || !end.is_finite()
                 || !confidence.is_finite()
                 || start < 0.0
                 || end <= start
                 || end > duration
-                || end - start > 600.0
+                || end - start > max_marker_length(kind)
                 || !(0.0..=1.0).contains(&confidence)
+                || !reported.insert(kind)
             {
-                return Err(sqlx::Error::Protocol("marker outside timeline".into()));
+                continue;
             }
-            query("INSERT INTO automatic_timeline_markers(asset_id,extension_id,marker_type,start_seconds,end_seconds,confidence,source_fingerprint,generation,task_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(asset_id,extension_id,marker_type) DO UPDATE SET start_seconds=excluded.start_seconds,end_seconds=excluded.end_seconds,confidence=excluded.confidence,source_fingerprint=excluded.source_fingerprint,generation=excluded.generation,task_id=excluded.task_id,updated_at=excluded.updated_at")
-                .bind(&asset).bind(&link.extension_id).bind(kind).bind(start).bind(end).bind(confidence).bind(&source_fingerprint).bind(&link.generation).bind(&job.id).bind(now).execute(&mut **tx).await?;
+            query(upsert)
+                .bind(&asset)
+                .bind(&link.extension_id)
+                .bind(kind)
+                .bind(start)
+                .bind(end)
+                .bind(confidence)
+                .bind(&source_fingerprint)
+                .bind(&link.generation)
+                .bind(&job.id)
+                .bind(now)
+                .execute(&mut **tx)
+                .await?;
+        }
+        // A kind no longer reported (after a settings change or a better analysis) is stale and
+        // must not keep reaching the player, within the ownership rule above.
+        let protected_writer = if chapter_pass {
+            Some("intro.detect")
+        } else if probe["chapters"]
+            .as_array()
+            .is_some_and(|chapters| chapters.len() > crate::extensions::MARKER_CHAPTERS_MAX)
+        {
+            Some("intro.parse_chapters")
+        } else {
+            None
+        };
+        for kind in ["intro", "credits", "recap", "preview"] {
+            if reported.contains(kind) {
+                continue;
+            }
+            match protected_writer {
+                Some(writer) => query("DELETE FROM automatic_timeline_markers WHERE asset_id=? AND extension_id=? AND marker_type=? AND (source_fingerprint!=? OR generation!=? OR NOT EXISTS(SELECT 1 FROM automation_task_links writer WHERE writer.task_id=automatic_timeline_markers.task_id AND writer.operation=?))")
+                    .bind(&asset).bind(&link.extension_id).bind(kind).bind(&source_fingerprint).bind(&link.generation).bind(writer)
+                    .execute(&mut **tx).await?,
+                None => query("DELETE FROM automatic_timeline_markers WHERE asset_id=? AND extension_id=? AND marker_type=?")
+                    .bind(&asset).bind(&link.extension_id).bind(kind)
+                    .execute(&mut **tx).await?,
+            };
         }
     }
     Ok(())
+}
+
+/// Longest automatic or manual segment of a kind, in seconds: a film's credits often run
+/// 8 to 15 minutes, any other segment stays under 10.
+pub(crate) fn max_marker_length(kind: &str) -> f64 {
+    if kind == "credits" { 1200.0 } else { 600.0 }
+}
+
+/// Owner of every audio fingerprint task, whichever path queues it (automatic chapter pass,
+/// detection or an administrator's Analyze). Builds before November 2026 also queued them under
+/// the first administrator, so every lookup below matches the key under any owner.
+pub(crate) const FINGERPRINT_OWNER: &str = "system";
+
+/// Durable key of the audio fingerprint of one file revision.
+pub(crate) fn fingerprint_key(asset: &str, source: &str) -> Result<String, sqlx::Error> {
+    Ok(format!("fp:{}", hash(&(asset, source, "chromaprint-v1"))?))
+}
+
+/// The completed fingerprint task of this file revision, under any owner.
+pub(crate) async fn completed_fingerprint(
+    tx: &mut Transaction<'_, Any>,
+    asset: &str,
+    source: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    query_scalar("SELECT id FROM durable_tasks WHERE idempotency_key=? AND target_id=? AND category='analyze' AND component='fingerprint' AND status='completed' ORDER BY COALESCE(finished_at,0) DESC,id LIMIT 1")
+        .bind(fingerprint_key(asset, source)?)
+        .bind(asset)
+        .fetch_optional(&mut **tx)
+        .await
+}
+
+/// What `queue_fingerprint` found or did for one file revision.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FingerprintState {
+    /// A task was inserted or queued again.
+    Queued,
+    /// A task is already queued or running (or a cancelled one still holds its lease).
+    Pending,
+    /// The extraction is done: the id of its task.
+    Completed(String),
+}
+
+/// One file whose audio fingerprint is wanted.
+pub(crate) struct FingerprintRequest<'a> {
+    pub library: &'a str,
+    pub node: &'a str,
+    pub asset: &'a str,
+    pub source: &'a str,
+    /// Extract again a completed result that has no tail although the file is longer than the
+    /// head window (builds before November 2026 often lost the tail on slow storage).
+    pub reextract_tailless: bool,
+}
+
+/// Queue the audio fingerprint of one file revision unless it exists: a completed extraction is
+/// reused, a pending one is left alone and a failed or cancelled one is queued again (with its
+/// error and backoff cleared). Rows created under another owner by older builds count as well.
+pub(crate) async fn queue_fingerprint(
+    tx: &mut Transaction<'_, Any>,
+    request: &FingerprintRequest<'_>,
+    now: i64,
+) -> Result<FingerprintState, sqlx::Error> {
+    let key = fingerprint_key(request.asset, request.source)?;
+    let rows: Vec<(String, String, Option<i64>, i64)> = query_as("SELECT id,status,lease_until,CAST(CASE WHEN result_json LIKE '%\"tailFingerprints\"%' THEN 1 ELSE 0 END AS BIGINT) FROM durable_tasks WHERE idempotency_key=? AND target_id=? AND category='analyze' AND component='fingerprint' ORDER BY COALESCE(finished_at,0) DESC,updated_at DESC,id")
+        .bind(&key)
+        .bind(request.asset)
+        .fetch_all(&mut **tx)
+        .await?;
+    if let Some((id, _, _, has_tail)) = rows.iter().find(|row| row.1 == "completed") {
+        if !request.reextract_tailless || *has_tail == 1 {
+            return Ok(FingerprintState::Completed(id.clone()));
+        }
+        let probe: Option<String> =
+            query_scalar("SELECT probe_json FROM inventory_assets WHERE id=?")
+                .bind(request.asset)
+                .fetch_optional(&mut **tx)
+                .await?;
+        let long = probe
+            .and_then(|probe| serde_json::from_str::<Value>(&probe).ok())
+            .and_then(|probe| {
+                probe["format"]["duration"]
+                    .as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+            })
+            .is_some_and(|duration| duration > media_node::tasks::HEAD_SECONDS);
+        if !long {
+            return Ok(FingerprintState::Completed(id.clone()));
+        }
+        let requeued = query("UPDATE durable_tasks SET status='queued',failure_count=0,error='',finished_at=NULL,available_at=?,updated_at=? WHERE id=? AND status='completed' AND lease_until IS NULL")
+            .bind(now).bind(now).bind(id).execute(&mut **tx).await?.rows_affected();
+        return Ok(if requeued > 0 {
+            FingerprintState::Queued
+        } else {
+            FingerprintState::Completed(id.clone())
+        });
+    }
+    if rows
+        .iter()
+        .any(|row| matches!(row.1.as_str(), "queued" | "running" | "paused"))
+    {
+        return Ok(FingerprintState::Pending);
+    }
+    if let Some((id, ..)) = rows.iter().find(|row| row.2.is_none()) {
+        let requeued = query("UPDATE durable_tasks SET status='queued',failure_count=0,error='',finished_at=NULL,available_at=?,updated_at=? WHERE id=? AND status IN ('error','cancelled') AND lease_until IS NULL")
+            .bind(now).bind(now).bind(id).execute(&mut **tx).await?.rows_affected();
+        return Ok(if requeued > 0 {
+            FingerprintState::Queued
+        } else {
+            FingerprintState::Pending
+        });
+    }
+    if !rows.is_empty() {
+        return Ok(FingerprintState::Pending);
+    }
+    let inserted = query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'fingerprint',20,?,?,?) ON CONFLICT(owner,idempotency_key) DO NOTHING")
+        .bind(uuid::Uuid::new_v4().to_string()).bind(request.library).bind(FINGERPRINT_OWNER).bind(&key).bind(request.node).bind(request.asset).bind(now).bind(now).bind(now)
+        .execute(&mut **tx).await?.rows_affected();
+    Ok(if inserted > 0 {
+        FingerprintState::Queued
+    } else {
+        FingerprintState::Pending
+    })
+}
+
+/// Durable key of the end credits picture measurement of one file revision.
+pub fn credits_scan_key(asset: &str, source: &str) -> Result<String, sqlx::Error> {
+    Ok(format!(
+        "cs:{}",
+        hash(&(asset, source, media_node::end_credits::ALGORITHM))?
+    ))
+}
+
+/// Queue the picture measurement of the end of a film (black keyframes with lettering, see
+/// `media_node::end_credits`) for one file revision unless it exists. A completed or pending
+/// one is left alone; a failed or cancelled one is queued again.
+pub(crate) async fn queue_credits_scan(
+    tx: &mut Transaction<'_, Any>,
+    request: &FingerprintRequest<'_>,
+    now: i64,
+) -> Result<(), sqlx::Error> {
+    let key = credits_scan_key(request.asset, request.source)?;
+    let rows: Vec<(String, String, Option<i64>)> = query_as("SELECT id,status,lease_until FROM durable_tasks WHERE idempotency_key=? AND target_id=? AND category='analyze' AND component='credits' ORDER BY updated_at DESC,id")
+        .bind(&key)
+        .bind(request.asset)
+        .fetch_all(&mut **tx)
+        .await?;
+    if rows.iter().any(|row| {
+        matches!(
+            row.1.as_str(),
+            "completed" | "queued" | "running" | "paused"
+        )
+    }) {
+        return Ok(());
+    }
+    if let Some((id, ..)) = rows.iter().find(|row| row.2.is_none()) {
+        query("UPDATE durable_tasks SET status='queued',failure_count=0,error='',finished_at=NULL,available_at=?,updated_at=? WHERE id=? AND status IN ('error','cancelled') AND lease_until IS NULL")
+            .bind(now).bind(now).bind(id).execute(&mut **tx).await?;
+        return Ok(());
+    }
+    if rows.is_empty() {
+        query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'credits',15,?,?,?) ON CONFLICT(owner,idempotency_key) DO NOTHING")
+            .bind(uuid::Uuid::new_v4().to_string()).bind(request.library).bind(FINGERPRINT_OWNER).bind(&key).bind(request.node).bind(request.asset).bind(now).bind(now).bind(now)
+            .execute(&mut **tx).await?;
+    }
+    Ok(())
+}
+
+/// Most black runs passed on to the segment plugin (the Node keeps the latest 128).
+const CREDITS_SCAN_MAX_RUNS: usize = 256;
+
+/// The completed end credits measurement of the current revision of a film's file, bounded and
+/// checked, as the segment plugin reads it (`blackFrames`): `None` when there is none.
+pub async fn film_credits_scan(
+    store: &IdentityStore,
+    asset: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    let rows: Vec<(String, String, String)> = query_as("SELECT t.result_json,t.idempotency_key,obs.fingerprint FROM durable_tasks t JOIN automation_observations obs ON obs.asset_id=t.target_id WHERE t.target_id=? AND t.category='analyze' AND t.component='credits' AND t.status='completed' ORDER BY COALESCE(t.finished_at,0) DESC,t.id LIMIT 4")
+        .bind(asset)
+        .fetch_all(store.pool())
+        .await?;
+    for (raw, key, source) in rows {
+        if key != credits_scan_key(asset, &source)? {
+            continue;
+        }
+        return Ok(serde_json::from_str::<Value>(&raw)
+            .ok()
+            .and_then(|result| sanitized_credits_scan(&result)));
+    }
+    Ok(None)
+}
+
+/// A Node's measurement reduced to what the plugin reads, or `None` when it is malformed.
+pub(crate) fn sanitized_credits_scan(result: &Value) -> Option<Value> {
+    if result["algorithm"] != media_node::end_credits::ALGORITHM {
+        return None;
+    }
+    let number = |value: &Value| value.as_f64().filter(|n| n.is_finite() && *n >= 0.0);
+    let runs = result["runs"].as_array()?;
+    if runs.len() > CREDITS_SCAN_MAX_RUNS {
+        return None;
+    }
+    let mut clean = Vec::with_capacity(runs.len());
+    for run in runs {
+        let (start, end) = (number(&run["start"])?, number(&run["end"])?);
+        let pages = run["pages"].as_u64().filter(|n| *n <= 100_000)?;
+        let lettered = run["lettered"].as_u64().filter(|n| *n <= pages)?;
+        if end < start {
+            return None;
+        }
+        clean.push(serde_json::json!({"start":start,"end":end,"pages":pages,"lettered":lettered}));
+    }
+    Some(serde_json::json!({
+        "algorithm": media_node::end_credits::ALGORITHM,
+        "windowStart": number(&result["windowStart"])?,
+        "windowEnd": number(&result["windowEnd"])?,
+        "runs": clean,
+    }))
+}
+
+/// One season peer whose completed fingerprint an acoustic detection can use.
+pub(crate) struct FingerprintPeer {
+    pub task_id: String,
+    pub asset_id: String,
+    pub source: String,
+    pub work_id: String,
+}
+
+/// The season peers of `asset` whose completed fingerprint `intro.detect` can compare it with:
+/// the rule `run_automated` applies when it builds the batch (same library, current folder
+/// snapshot, and an extraction of the peer's current revision). Admission and the re-offer of
+/// earlier episodes use it too, so they never queue a detection that is bound to fail.
+pub(crate) async fn usable_fingerprint_peers(
+    tx: &mut Transaction<'_, Any>,
+    asset: &str,
+    library: &str,
+) -> Result<Vec<FingerprintPeer>, sqlx::Error> {
+    let rows: Vec<(String, String, String, String, String)> = query_as("SELECT fp.id,peer_asset.id,obs.fingerprint,fp.idempotency_key,peer.work_id FROM inventory_assets current_asset JOIN inventory_sources current_source ON current_source.id=current_asset.source_id JOIN inventory_versions current_version ON current_version.id=current_source.version_id JOIN inventory_editions current_edition ON current_edition.id=current_version.edition_id JOIN inventory_episodes current_ep ON current_ep.work_id=current_edition.work_id JOIN inventory_episodes peer ON peer.season_id=current_ep.season_id AND peer.work_id!=current_ep.work_id JOIN inventory_editions peer_edition ON peer_edition.work_id=peer.work_id JOIN inventory_versions peer_version ON peer_version.edition_id=peer_edition.id JOIN inventory_sources peer_source ON peer_source.version_id=peer_version.id JOIN inventory_assets peer_asset ON peer_asset.source_id=peer_source.id JOIN libraries peer_library ON peer_library.id=peer_asset.library_id JOIN automation_observations obs ON obs.asset_id=peer_asset.id JOIN durable_tasks fp ON fp.target_id=peer_asset.id AND fp.category='analyze' AND fp.component='fingerprint' AND fp.status='completed' WHERE current_asset.id=? AND peer_asset.library_id=? AND peer_asset.available=1 AND peer_source.root_snapshot=peer_library.root ORDER BY fp.id LIMIT 256")
+        .bind(asset)
+        .bind(library)
+        .fetch_all(&mut **tx)
+        .await?;
+    let mut peers = Vec::new();
+    for (task_id, asset_id, source, key, work_id) in rows {
+        if key == fingerprint_key(&asset_id, &source)? {
+            peers.push(FingerprintPeer {
+                task_id,
+                asset_id,
+                source,
+                work_id,
+            });
+        }
+    }
+    Ok(peers)
+}
+
+/// Season peers of `asset` in its library that are available and observed, with their Node:
+/// candidates for a fingerprint so that the episode's detection has something to compare with.
+pub(crate) async fn season_fingerprint_candidates(
+    tx: &mut Transaction<'_, Any>,
+    asset: &str,
+    library: &str,
+    limit: i64,
+) -> Result<Vec<(String, String, String, String)>, sqlx::Error> {
+    query_as("SELECT DISTINCT peer_asset.id,peer_asset.library_id,peer_library.node_id,obs.fingerprint FROM inventory_assets current_asset JOIN inventory_sources current_source ON current_source.id=current_asset.source_id JOIN inventory_versions current_version ON current_version.id=current_source.version_id JOIN inventory_editions current_edition ON current_edition.id=current_version.edition_id JOIN inventory_episodes current_ep ON current_ep.work_id=current_edition.work_id JOIN inventory_episodes peer ON peer.season_id=current_ep.season_id AND peer.work_id!=current_ep.work_id JOIN inventory_editions peer_edition ON peer_edition.work_id=peer.work_id JOIN inventory_versions peer_version ON peer_version.edition_id=peer_edition.id JOIN inventory_sources peer_source ON peer_source.version_id=peer_version.id JOIN inventory_assets peer_asset ON peer_asset.source_id=peer_source.id JOIN libraries peer_library ON peer_library.id=peer_asset.library_id JOIN media_nodes node ON node.id=peer_library.node_id JOIN automation_observations obs ON obs.asset_id=peer_asset.id WHERE current_asset.id=? AND peer_asset.library_id=? AND peer_asset.available=1 AND peer_source.root_snapshot=peer_library.root AND node.status!='revoked' ORDER BY peer_asset.id LIMIT ?")
+        .bind(asset)
+        .bind(library)
+        .bind(limit)
+        .fetch_all(&mut **tx)
+        .await
 }
 
 /// Merge only absent automatic fields. Manual corrections remain a separate
@@ -775,19 +1163,45 @@ pub async fn apply_missing_metadata(
             continue;
         };
         let manual: Value = serde_json::from_str(&manual_raw).unwrap_or(Value::Null);
+        if manual.get("locked").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let locked_fields: Vec<String> = manual
+            .get("locked_fields")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(Value::as_str)
+                    .map(|s| s.to_ascii_lowercase())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let is_field_locked = |dest: &str| -> bool {
+            let group = match dest {
+                "title" | "original_title" | "sort_title" => "title",
+                "plot" | "outline" | "tagline" => "plot",
+                "genres" => "genres",
+                "mpaa" => "mpaa",
+                "directors" | "writers" | "actors" | "crewCredits" => "people",
+                "countries" => "countries",
+                "studios" => "studios",
+                "tags" => "tags",
+                other => other,
+            };
+            locked_fields.iter().any(|f| f == dest || f == group)
+        };
         let priority:i64=query_scalar("SELECT COALESCE((SELECT priority FROM automation_policies WHERE extension_id=? AND library_id=?),(SELECT priority FROM automation_policies WHERE extension_id=? AND library_id=(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)),100)")
             .bind(extension).bind(&library).bind(extension).bind(&library).fetch_one(&mut **tx).await?;
-        let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
-            .bind(&library)
-            .fetch_one(&mut **tx)
-            .await?;
+        let (options, library_kind): (String, String) =
+            query_as("SELECT options_json, kind FROM libraries WHERE id=?")
+                .bind(&library)
+                .fetch_one(&mut **tx)
+                .await?;
         let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
             .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
-        let Some(priority) = crate::library_options::LibraryOptions::provider_priority(
-            &options.metadata_providers,
-            extension,
-            priority,
-        ) else {
+        let Some(priority) =
+            options.metadata_provider_priority_for_kind(&library_kind, extension, priority)
+        else {
             continue;
         };
         let provider_id = result["providerId"]
@@ -816,9 +1230,10 @@ pub async fn apply_missing_metadata(
             ("year", &["year"][..]),
             ("collection", &["collection"][..]),
         ] {
-            if manual
-                .as_object()
-                .is_some_and(|m| m.contains_key(destination))
+            if is_field_locked(destination)
+                || manual
+                    .as_object()
+                    .is_some_and(|m| m.get(destination).is_some_and(|v| !v.is_null()))
             {
                 continue;
             }
@@ -923,8 +1338,11 @@ pub async fn apply_missing_metadata(
                     .await?;
             }
         }
-        if let Some(trans) = proposal.get("translations").filter(|v| v.is_object()) {
-            fields.insert("translations".into(), trans.clone());
+        // Provider translations never replace each other's or manual rows: they are
+        // stored per (locale, provider) and ranked when read.
+        if crate::translations::store_proposal_translations(tx, extension, &work, proposal).await?
+            > 0
+        {
             changed = true;
         }
         let kind: Option<String> = query_scalar("SELECT kind FROM inventory_works WHERE id=?")
@@ -1098,6 +1516,9 @@ pub async fn apply_missing_metadata(
             None
         };
 
+        // The background image filler completes the other kinds (logo, banner…) or the
+        // multi-image pool of this newly identified work on its next pass.
+        crate::extensions::request_artwork_check();
         if (poster_url.is_some() || backdrop_url.is_some())
             && let Some(store) = crate::identity::active_store()
         {
@@ -1338,28 +1759,80 @@ pub(crate) async fn complete_with_marker_sources(
     if !persist_result(&mut tx, job, link, result, now).await? {
         return Ok(false);
     }
-    if link.operation == "intro.parse_chapters" {
-        let found: std::collections::HashSet<&str> = result
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|marker| marker["markerType"].as_str())
-            .collect();
-        if !found.contains("intro") || !found.contains("credits") {
-            let source: Option<String> =
-                query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
-                    .bind(&job.target_id)
-                    .fetch_optional(&mut *tx)
-                    .await?;
-            if let Some(source) = source {
-                let key = format!("fp:{}", hash(&(&job.target_id, &source, "chromaprint-v1"))?);
-                query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,component,priority,created_at,updated_at,available_at) VALUES(?,?,?,?,?,'analyze',?,'fingerprint',20,?,?,?) ON CONFLICT(owner,idempotency_key) DO NOTHING")
-                    .bind(uuid::Uuid::new_v4().to_string()).bind(&job.library_id).bind(&job.owner).bind(key).bind(&job.node_id).bind(&job.target_id).bind(now).bind(now).bind(now).execute(&mut *tx).await?;
-            }
+    let is_episode: i64 = if link.operation == "intro.parse_chapters" {
+        query_scalar("SELECT COUNT(*) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE a.id=?")
+            .bind(&job.target_id).fetch_one(&mut *tx).await?
+    } else {
+        0
+    };
+    if link.operation == "intro.parse_chapters" && is_episode == 0 {
+        queue_film_credits_scan(&mut tx, job, now).await?;
+    }
+    if link.operation == "intro.parse_chapters" && is_episode > 0 {
+        let source: Option<String> =
+            query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
+                .bind(&job.target_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        // The chapters were read again (new settings or a new plugin version) while the
+        // episode's audio is already fingerprinted: run the acoustic detection again too, or
+        // it would keep the result of the old settings. The completed extraction is reused.
+        // A chapter task is restarted in place, so the key names the attempt: each re-read
+        // asks for its own detection.
+        if let Some(source) = &source
+            && let Some(completed) = completed_fingerprint(&mut tx, &job.target_id, source).await?
+        {
+            emit(
+                &mut tx,
+                &EventInput {
+                    key: &format!("marker-chapters-reread:{}:{}", job.id, job.attempt),
+                    kind: "manual",
+                    library_id: &job.library_id,
+                    asset_id: &job.target_id,
+                    fingerprint: source,
+                    payload: &serde_json::json!({"fingerprintTaskId": completed, "reanalyzeMarkers": true, "stale": false, "extensionId": link.extension_id}),
+                },
+                now,
+            )
+            .await?;
+        }
+        let intro_enabled =
+            query_scalar::<_, String>("SELECT options_json FROM libraries WHERE id=?")
+                .bind(&job.library_id)
+                .fetch_optional(&mut *tx)
+                .await?
+                .and_then(|encoded| {
+                    serde_json::from_str::<crate::library_options::LibraryOptions>(&encoded).ok()
+                })
+                .is_none_or(|options| options.intro_detection_enabled);
+        // Every episode is fingerprinted, even one whose chapters name its intro and credits:
+        // it is the peer that its season's chapterless episodes are compared with. A failed
+        // extraction (e.g. a Node without the chromaprint muxer) is queued again instead of
+        // blocking detection for good.
+        if let Some(source) = source.filter(|_| intro_enabled) {
+            queue_fingerprint(
+                &mut tx,
+                &FingerprintRequest {
+                    library: &job.library_id,
+                    node: &job.node_id,
+                    asset: &job.target_id,
+                    source: &source,
+                    reextract_tailless: false,
+                },
+                now,
+            )
+            .await?;
         }
     }
-    query("UPDATE durable_tasks SET status='completed',result_json=?,progress=100,processed_items=1,lease_until=NULL,finished_at=?,updated_at=? WHERE id=? AND attempt=? AND status='running'")
- .bind(result.to_string()).bind(now).bind(now).bind(&job.id).bind(job.attempt).execute(&mut *tx).await?;
+    // An acoustic detection records how many episodes it compared, so that one run with fewer
+    // than a full batch is offered again when more peers are fingerprinted.
+    let processed = if link.operation == "intro.detect" {
+        marker_sources.len().max(1) as i64
+    } else {
+        1
+    };
+    query("UPDATE durable_tasks SET status='completed',result_json=?,progress=100,processed_items=?,lease_until=NULL,finished_at=?,updated_at=? WHERE id=? AND attempt=? AND status='running'")
+ .bind(result.to_string()).bind(processed).bind(now).bind(now).bind(&job.id).bind(job.attempt).execute(&mut *tx).await?;
     let key = format!("analysis:{}", job.id);
     let fingerprint: String = query_scalar("SELECT fingerprint FROM automation_events WHERE id=?")
         .bind(&link.event_id)
@@ -1381,6 +1854,51 @@ pub(crate) async fn complete_with_marker_sources(
     crate::database::commit(tx).await?;
     crate::task_engine::WAKE.notify_one();
     Ok(true)
+}
+
+/// After a film's chapters were read: measure the end of its picture, unless that is done for
+/// this revision. When the measurement completes, the chapters are read again with it (see
+/// `pump_triggers`), so a film whose chapters say nothing still gets its credits.
+async fn queue_film_credits_scan(
+    tx: &mut Transaction<'_, Any>,
+    job: &Job,
+    now: i64,
+) -> Result<(), sqlx::Error> {
+    let film: i64 = query_scalar("SELECT COUNT(*) FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.id=? AND w.kind='film'")
+        .bind(&job.target_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    if film == 0 {
+        return Ok(());
+    }
+    let intro_enabled = query_scalar::<_, String>("SELECT options_json FROM libraries WHERE id=?")
+        .bind(&job.library_id)
+        .fetch_optional(&mut **tx)
+        .await?
+        .and_then(|encoded| {
+            serde_json::from_str::<crate::library_options::LibraryOptions>(&encoded).ok()
+        })
+        .is_none_or(|options| options.intro_detection_enabled);
+    let source: Option<String> =
+        query_scalar("SELECT fingerprint FROM automation_observations WHERE asset_id=?")
+            .bind(&job.target_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if let Some(source) = source.filter(|_| intro_enabled) {
+        queue_credits_scan(
+            tx,
+            &FingerprintRequest {
+                library: &job.library_id,
+                node: &job.node_id,
+                asset: &job.target_id,
+                source: &source,
+                reextract_tailless: false,
+            },
+            now,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, sqlx::FromRow)]
@@ -1475,19 +1993,95 @@ async fn pump_triggers(
     now: i64,
     limit: i64,
 ) -> Result<(), sqlx::Error> {
-    let ready:Vec<(String,String,String,String,String)>=query_as("SELECT t.id,t.library_id,t.target_id,t.idempotency_key,obs.fingerprint FROM durable_tasks t JOIN automation_observations obs ON obs.asset_id=t.target_id WHERE t.category='analyze' AND t.component='fingerprint' AND t.status='completed' AND NOT EXISTS(SELECT 1 FROM automation_events ev WHERE ev.event_key='fingerprint-ready:' || t.id) ORDER BY t.finished_at,t.id LIMIT ?")
-        .bind(limit).fetch_all(&mut **tx).await?;
-    for (task, library, asset, key, source) in ready {
-        let stale = key != format!("fp:{}", hash(&(&asset, &source, "chromaprint-v1"))?);
+    let ready: Vec<(String, String, String, String, String, i64)> = query_as("SELECT t.id,t.library_id,t.target_id,t.idempotency_key,obs.fingerprint,t.attempt FROM durable_tasks t JOIN automation_observations obs ON obs.asset_id=t.target_id WHERE t.category='analyze' AND t.component='fingerprint' AND t.status='completed' AND NOT EXISTS(SELECT 1 FROM automation_events ev WHERE ev.event_key=CASE WHEN t.attempt<=1 THEN 'fingerprint-ready:' || t.id ELSE 'fingerprint-ready:' || t.id || ':' || CAST(t.attempt AS TEXT) END) ORDER BY t.finished_at,t.id LIMIT ?")
+        .bind(limit)
+        .fetch_all(&mut **tx)
+        .await?;
+    for (task, library, asset, key, source, attempt) in ready {
+        let stale = key != fingerprint_key(&asset, &source)?;
+        let reextracted = attempt > 1;
+        let event_key = if reextracted {
+            format!("fingerprint-ready:{task}:{attempt}")
+        } else {
+            format!("fingerprint-ready:{task}")
+        };
+        let payload = serde_json::json!({
+            "fingerprintTaskId": task,
+            "stale": stale,
+            "redetect": reextracted,
+        });
         emit(
             tx,
             &EventInput {
-                key: &format!("fingerprint-ready:{task}"),
+                key: &event_key,
                 kind: "analysis.completed",
                 library_id: &library,
                 asset_id: &asset,
                 fingerprint: &source,
-                payload: &serde_json::json!({"fingerprintTaskId":task,"stale":stale}),
+                payload: &payload,
+            },
+            now,
+        )
+        .await?;
+        if stale {
+            continue;
+        }
+        // Episodes fingerprinted before any season peer were skipped by
+        // intro.detect, and episodes detected before a 3rd peer existed ran
+        // with a 2-episode batch. Re-offer them now; task-link fingerprints deduplicate.
+        for peer in usable_fingerprint_peers(tx, &asset, &library)
+            .await?
+            .into_iter()
+            .take(8)
+        {
+            let existing: Option<(String, i64)> = query_as("SELECT detect.status,detect.processed_items FROM automation_task_links link JOIN durable_tasks detect ON detect.id=link.task_id WHERE link.operation='intro.detect' AND detect.target_id=? ORDER BY detect.updated_at DESC,detect.id LIMIT 1")
+                .bind(&peer.asset_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+            let redetect = existing
+                .as_ref()
+                .is_some_and(|(status, items)| status == "completed" && *items > 0 && *items < 3);
+            if existing.as_ref().is_some_and(|(status, _)| {
+                !matches!(status.as_str(), "error" | "cancelled") && !redetect
+            }) {
+                continue;
+            }
+            let peer_payload = serde_json::json!({
+                "fingerprintTaskId": peer.task_id,
+                "stale": false,
+                "redetect": redetect,
+            });
+            emit(
+                tx,
+                &EventInput {
+                    key: &format!("fingerprint-peer:{}:{task}", peer.task_id),
+                    kind: "analysis.completed",
+                    library_id: &library,
+                    asset_id: &peer.asset_id,
+                    fingerprint: &peer.source,
+                    payload: &peer_payload,
+                },
+                now,
+            )
+            .await?;
+        }
+    }
+    // A film's end picture was measured: its chapters are read again with the measurement.
+    let scans: Vec<(String, String, String, String, String, i64)> = query_as("SELECT t.id,t.library_id,t.target_id,t.idempotency_key,obs.fingerprint,t.attempt FROM durable_tasks t JOIN automation_observations obs ON obs.asset_id=t.target_id WHERE t.category='analyze' AND t.component='credits' AND t.status='completed' AND NOT EXISTS(SELECT 1 FROM automation_events ev WHERE ev.event_key='credits-ready:' || t.id || ':' || CAST(t.attempt AS TEXT)) ORDER BY t.finished_at,t.id LIMIT ?")
+        .bind(limit)
+        .fetch_all(&mut **tx)
+        .await?;
+    for (task, library, asset, key, source, attempt) in scans {
+        let stale = key != credits_scan_key(&asset, &source)?;
+        emit(
+            tx,
+            &EventInput {
+                key: &format!("credits-ready:{task}:{attempt}"),
+                kind: "analysis.completed",
+                library_id: &library,
+                asset_id: &asset,
+                fingerprint: &source,
+                payload: &serde_json::json!({"creditsTaskId": task, "stale": stale}),
             },
             now,
         )
@@ -1572,6 +2166,9 @@ async fn pump_triggers(
 fn metadata_has_missing_fields(editorial: &str, manual: &str) -> bool {
     let editorial = serde_json::from_str::<Value>(editorial).unwrap_or(Value::Null);
     let manual = serde_json::from_str::<Value>(manual).unwrap_or(Value::Null);
+    if manual.get("locked").and_then(Value::as_bool) == Some(true) {
+        return false;
+    }
     ["plot", "outline", "genres"].iter().any(|key| {
         !manual
             .as_object()
@@ -1643,7 +2240,7 @@ async fn can_write_catalogue(
         }))
 }
 
-type FingerprintState = (
+type CurrentFingerprintRow = (
     String,
     String,
     String,
@@ -1663,7 +2260,7 @@ async fn current_fingerprint_matches(
     asset: &str,
     link: &TaskLink,
 ) -> Result<bool, sqlx::Error> {
-    let current:Option<FingerprintState>=query_as("SELECT e.package_json,COALESCE(p.config_revision,''),COALESCE(p.algorithm_version,'1'),COALESCE(s.settings_json,'{}'),a.modified_ns,CAST(a.size AS TEXT),CAST(a.available AS TEXT),source.root_snapshot,COALESCE(p.operation,''),lib.options_json,a.probe_json FROM extensions e LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id JOIN inventory_assets a ON a.id=? JOIN inventory_sources source ON source.id=a.source_id JOIN libraries lib ON lib.id=a.library_id WHERE e.id=? AND source.root_snapshot=lib.root AND COALESCE(p.mode,'automatic')!='disabled'")
+    let current:Option<CurrentFingerprintRow>=query_as("SELECT e.package_json,COALESCE(p.config_revision,''),COALESCE(p.algorithm_version,'1'),COALESCE(s.settings_json,'{}'),a.modified_ns,CAST(a.size AS TEXT),CAST(a.available AS TEXT),source.root_snapshot,COALESCE(p.operation,''),lib.options_json,a.probe_json FROM extensions e LEFT JOIN automation_policies p ON p.extension_id=e.id AND p.library_id=COALESCE((SELECT own.library_id FROM automation_policies own WHERE own.extension_id=e.id AND own.library_id=?),(SELECT parent_id FROM library_folders WHERE library_id=? AND active=1 LIMIT 1)) LEFT JOIN extension_settings s ON s.extension_id=e.id JOIN inventory_assets a ON a.id=? JOIN inventory_sources source ON source.id=a.source_id JOIN libraries lib ON lib.id=a.library_id WHERE e.id=? AND source.root_snapshot=lib.root AND COALESCE(p.mode,'automatic')!='disabled'")
  .bind(library).bind(library).bind(asset).bind(&link.extension_id).fetch_optional(&mut **tx).await?;
     let mut music_fingerprint = None;
     let (

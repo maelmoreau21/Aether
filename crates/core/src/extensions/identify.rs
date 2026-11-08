@@ -51,24 +51,48 @@ pub(super) async fn search(
     let search_input =
         adapters::metadata_input(&context, &input.work_id, "metadata.search", &requested)?;
 
-    let rows: Vec<(String, String, String)> = query_as(
+    let mut rows: Vec<(String, String, String)> = query_as(
         "SELECT e.id, e.package_json, e.generation FROM extensions e \
          JOIN extension_publishers p ON p.id = e.publisher_id \
-         WHERE e.enabled = 1 AND p.active = 1 ORDER BY CASE e.id WHEN 'tmdb' THEN 0 WHEN 'imdb' THEN 1 WHEN 'omdb' THEN 2 ELSE 3 END,e.id LIMIT 32",
+         WHERE e.enabled = 1 AND p.active = 1 ORDER BY e.id LIMIT 32",
     )
     .fetch_all(auth.store.pool())
     .await
     .map_err(db)?;
 
-    let mut results = Vec::new();
-    let mut available_providers = Vec::new();
-    let mut errors: Vec<Value> = Vec::new();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(35);
-    let s_settings = crate::server_settings::load(&auth.store)
-        .await
-        .unwrap_or_default();
+    let is_series = context.kind == "series" || context.kind == "episode";
+    rows.sort_by(|(a, _, _), (b, _, _)| {
+        let rank = |id: &str| -> u8 {
+            if is_series {
+                match id {
+                    "tvdb" => 0,
+                    "tmdb" => 1,
+                    "imdb" => 2,
+                    "omdb" => 3,
+                    _ => 4,
+                }
+            } else {
+                match id {
+                    "tmdb" => 0,
+                    "imdb" => 1,
+                    "omdb" => 2,
+                    "tvdb" => 3,
+                    _ => 4,
+                }
+            }
+        };
+        rank(a).cmp(&rank(b)).then_with(|| a.cmp(b))
+    });
 
+    let mut permitted_rows = Vec::new();
+    let mut available_providers = Vec::new();
     for (id, stored, generation) in rows {
+        if matches!(
+            id.as_str(),
+            "discogs" | "musicbrainz" | "lrclib" | "fanart-tv" | "poster-rotator"
+        ) {
+            continue;
+        }
         let package: Package = serde_json::from_str(&stored)
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
 
@@ -80,6 +104,12 @@ pub(super) async fn search(
         {
             continue;
         }
+        if matches!(
+            package.manifest.category.as_deref(),
+            Some("Lyrics" | "Artwork" | "Subtitles" | "Playback" | "Applications")
+        ) {
+            continue;
+        }
 
         if !permitted(&auth, &headers, &id, &library_id, &generation).await? {
             continue;
@@ -89,11 +119,30 @@ pub(super) async fn search(
             "id": id,
             "name": package.manifest.name,
         }));
+        permitted_rows.push((id, package));
+    }
 
-        if let Some(target) = input
-            .provider
-            .as_deref()
-            .filter(|s| !s.is_empty() && *s != "all")
+    let explicit_provider = input.provider.as_deref().map(str::trim).unwrap_or_default();
+    let effective_target: Option<String> = if explicit_provider == "all" {
+        None
+    } else if !explicit_provider.is_empty() {
+        Some(explicit_provider.to_owned())
+    } else {
+        let preferred = crate::library_options::LibraryOptions::default_metadata_provider_for_kind(
+            &context.kind,
+        );
+        preferred
+            .filter(|pref| permitted_rows.iter().any(|(id, _)| id == pref))
+            .map(str::to_owned)
+            .or_else(|| permitted_rows.first().map(|(id, _)| id.clone()))
+    };
+
+    let mut results = Vec::new();
+    let mut errors: Vec<Value> = Vec::new();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(35);
+
+    for (id, package) in permitted_rows {
+        if let Some(target) = effective_target.as_deref()
             && id != target
         {
             continue;
@@ -101,8 +150,7 @@ pub(super) async fn search(
 
         let known_id = known_metadata_id(&search_input, &id).map(str::to_owned);
         let mut provider_input = search_input.clone();
-        provider_input["language"] = json!(s_settings.preferred_metadata_language);
-        provider_input["country"] = json!(s_settings.metadata_country_code);
+        // The common run path applies the owning library's language and country.
         if let Some(candidate_id) = &known_id {
             provider_input["id"] = json!(candidate_id);
         }
@@ -323,19 +371,9 @@ pub(super) async fn apply(
         metadata_map.insert("mpaa".into(), json!(v));
     }
 
-    // Merge external IDs
-    let current_ids_raw: Option<String> =
-        query_scalar("SELECT external_ids_json FROM inventory_works WHERE id=?")
-            .bind(&input.work_id)
-            .fetch_optional(auth.store.pool())
-            .await
-            .map_err(db)?;
-
-    let mut external_ids: std::collections::BTreeMap<String, String> = current_ids_raw
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_default();
-
+    // Replace external IDs with the newly identified candidate's IDs so stale IDs from a
+    // previous mistaken provider identification do not linger on the work.
+    let mut external_ids = std::collections::BTreeMap::<String, String>::new();
     external_ids.insert(input.provider.clone(), input.candidate_id.clone());
 
     if let Some(ext) = proposal.get("externalIds").and_then(Value::as_object) {
@@ -344,10 +382,6 @@ pub(super) async fn apply(
                 external_ids.insert(k.clone(), s.to_string());
             }
         }
-    }
-
-    if let Some(v) = proposal.get("translations").filter(|v| v.is_object()) {
-        metadata_map.insert("translations".into(), v.clone());
     }
 
     metadata_map.insert("external_ids".into(), json!(external_ids));
@@ -366,6 +400,21 @@ pub(super) async fn apply(
     .bind(serde_json::to_string(&metadata_map).unwrap_or_default())
     .bind(&input.work_id)
     .execute(&mut *tx)
+    .await
+    .map_err(db)?;
+
+    // Clear provider translations from other providers before storing the newly identified provider's translations.
+    query("DELETE FROM work_translations WHERE work_id=? AND source LIKE 'provider:%'")
+        .bind(&input.work_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
+    crate::translations::store_proposal_translations(
+        &mut tx,
+        &input.provider,
+        &input.work_id,
+        &proposal,
+    )
     .await
     .map_err(db)?;
 

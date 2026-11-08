@@ -1,6 +1,7 @@
 /** Appels REST des séances partagées utilisés par la fenêtre de création / liste (WatchPartyModal). */
 import type { ControlMode, PartySummary, UserInvitePayload } from './types';
 
+import { tr } from '../i18n';
 export interface EligibleUser { id: string; login: string; displayName: string }
 
 export interface CatalogWorkOption {
@@ -14,6 +15,8 @@ export interface CreatePartyRequest {
   mediaId: string;
   controlMode: ControlMode;
   waitForBuffering: boolean;
+  /** Public (default): listed and open to anyone who may see the title. Private: invited users only. */
+  isPublic?: boolean;
   inviteUserIds?: string[];
   inviteUsernames?: string[];
 }
@@ -25,9 +28,9 @@ export function initials(name: string, length = 2): string {
   return name.slice(0, length).toUpperCase();
 }
 
-/** Lien d'invitation vers une séance. */
-export function partyInviteUrl(origin: string, partyId: string): string {
-  return `${origin}/parties?id=${encodeURIComponent(partyId)}`;
+/** Lien d'invitation vers une séance : la page d'accueil de l'application la rejoint (`?party=`). */
+export function partyInviteUrl(appUrl: string, partyId: string): string {
+  return `${appUrl.endsWith('/') ? appUrl : `${appUrl}/`}?party=${encodeURIComponent(partyId)}`;
 }
 
 /** Message d'erreur renvoyé par l'API (`{ error }`), ou `fallback`. */
@@ -102,7 +105,7 @@ export async function createParty(request: CreatePartyRequest, csrfToken: string
     headers: postHeaders(csrfToken, true),
     body: JSON.stringify(request)
   });
-  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Impossible de créer la séance.'));
+  if (!res.ok) throw new Error(await responseErrorMessage(res, tr('unable_to_create_the_session')));
   return res.json();
 }
 
@@ -113,7 +116,7 @@ export async function acceptPartyInvite(token: string, csrfToken: string): Promi
     ...SAME_ORIGIN,
     headers: postHeaders(csrfToken)
   });
-  if (!res.ok) throw new Error(await responseErrorMessage(res, "L'invitation a expiré ou est invalide."));
+  if (!res.ok) throw new Error(await responseErrorMessage(res, tr('the_invitation_has_expired_or_is')));
 }
 
 /** Rejoint une séance ; lève une `Error` au message affichable en cas d'échec. */
@@ -123,5 +126,5 @@ export async function joinParty(partyId: string, csrfToken: string): Promise<voi
     ...SAME_ORIGIN,
     headers: postHeaders(csrfToken)
   });
-  if (!res.ok) throw new Error(await responseErrorMessage(res, 'Impossible de rejoindre cette séance.'));
+  if (!res.ok) throw new Error(await responseErrorMessage(res, tr('unable_to_join_this_session')));
 }

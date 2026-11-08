@@ -1,29 +1,30 @@
 # Index de la documentation Aether
 
-Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigences ou des comptes rendus, pas des preuves d'implémentation** ; seuls le code et les tests effectivement exécutés font foi (voir [`../AGENTS.md`](../AGENTS.md), sections 2 et 11).
+Point d'entrée thématique de `docs/`. Les documents datés peuvent décrire un état ancien ; le code et les tests réellement exécutés déterminent le comportement actuel. Voir [`AGENTS.md`](../AGENTS.md) et le [workflow des agents](AI_WORKFLOW.md).
 
-## Sources de vérité (chemins à ne pas déplacer)
+## Références et contexte (chemins stables)
 
 | Document | Rôle |
 | --- | --- |
-| [`../AGENTS.md`](../AGENTS.md) | Règles de contribution et ordre des priorités |
+| [`../AGENTS.md`](../AGENTS.md) | Invariants et méthode de contribution des agents ; pas de mission par défaut |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Composants et frontières |
-| [`../.ai/MEMORY.md`](../.ai/MEMORY.md) | État courant et décisions (anciennes entrées : [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md)) |
-| [`SPECIFICATION.md`](SPECIFICATION.md) | Exigences et périmètre |
+| [`../.ai/MEMORY.md`](../.ai/MEMORY.md) | Index historique des décisions ; archives : [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md) |
+| [`SPECIFICATION.md`](SPECIFICATION.md) | Périmètre historique du premier démonstrateur P0/P1 |
 | [`MEDIA_FORMATS.md`](MEDIA_FORMATS.md) | Modèle des pistes et formats |
 | [`STREAMING_COMPATIBILITY.md`](STREAMING_COMPATIBILITY.md) | Preuves de lecture observées |
 | [`SECURITY.md`](SECURITY.md) | Modèle de menaces et authentification |
 | [`API.md`](API.md) | Contrats d'API provisoires |
 | [`TEST_PLAN.md`](TEST_PLAN.md) | Vérifications et jeux d'essai |
-| [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) | Phases et critères de passage |
+| [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) | Plan historique d'octobre 2026 ; ne pas exécuter comme roadmap courante |
 
 ## Démarrer
 
 - [`../README.md`](../README.md) : présentation, installation rapide, fonctionnalités.
 - [`INSTALLATION_LOCALE.md`](INSTALLATION_LOCALE.md) : installer Aether sur un PC Windows.
 - [`LOCAL_ADMIN.md`](LOCAL_ADMIN.md) : SQLite et premier administrateur local.
-- [`../.ai/DEV_STATE.md`](../.ai/DEV_STATE.md) : journal d'état de développement.
-- [`../.ai/ORIGINAL_REQUEST.md`](../.ai/ORIGINAL_REQUEST.md) et [`../.ai/PROMPT_DEMARRAGE_IA.md`](../.ai/PROMPT_DEMARRAGE_IA.md) : demande initiale et premier développement confié à l'IA.
+- [`../.ai/DEV_STATE.md`](../.ai/DEV_STATE.md) : journal historique ; vérifier le commit courant avant d'en déduire l'état.
+- [`AI_WORKFLOW.md`](AI_WORKFLOW.md) : méthode actuelle pour Claude Code, Codex et autres agents (périmètre, worktrees, validation, clôture).
+- [`../.ai/ORIGINAL_REQUEST.md`](../.ai/ORIGINAL_REQUEST.md) et [`../.ai/PROMPT_DEMARRAGE_IA.md`](../.ai/PROMPT_DEMARRAGE_IA.md) : archives de la demande initiale et du premier prompt, **à ne pas relancer automatiquement**.
 - [`PRODUCT_FEATURES.md`](PRODUCT_FEATURES.md) et [`PRODUCT_BACKLOG.md`](PRODUCT_BACKLOG.md) : fonctions produit et demandes suivies.
 - [`JELLYFIN_FUNCTIONAL_GAPS.md`](JELLYFIN_FUNCTIONAL_GAPS.md) : comparaison fonctionnelle Jellyfin / Aether.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) et [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) : contribution et conduite.
@@ -31,16 +32,17 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 ## Architecture
 
 - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) : vue d'ensemble Core / Node / Web.
-- [`ARCHITECTURE_ROADMAP.md`](ARCHITECTURE_ROADMAP.md) : audit Rust et feuille de route.
+- [`ARCHITECTURE_ROADMAP.md`](ARCHITECTURE_ROADMAP.md) : audit Rust daté d'octobre 2026, historique ; état du découpage livré dans `BACKEND_MODULES.md`.
 - [`BACKEND_MODULES.md`](BACKEND_MODULES.md) : modules internes du backend.
 - [`DISTRIBUTED_TASKS.md`](DISTRIBUTED_TASKS.md), [`SCHEDULED_TASKS.md`](SCHEDULED_TASKS.md), [`AUTOMATION.md`](AUTOMATION.md) : moteur de tâches, planification, automatisation événementielle.
-- [`MULTI_CORE.md`](MULTI_CORE.md) et [`MULTI_CORE_READINESS.md`](MULTI_CORE_READINESS.md) : préparation de plusieurs Core (expérimental).
+- [`MULTI_NODE_RELIABILITY.md`](MULTI_NODE_RELIABILITY.md) : un Core, plusieurs Media Nodes — audit, correctifs, mesures avant/après, limites.
+- [`MULTI_CORE.md`](MULTI_CORE.md), [`MULTI_CORE_READINESS.md`](MULTI_CORE_READINESS.md) et [`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md) : préparation de plusieurs Core (expérimental) et feuille de route.
 - [`POSTGRESQL.md`](POSTGRESQL.md), [`SQL_PERFORMANCE.md`](SQL_PERFORMANCE.md) : PostgreSQL facultatif, performance SQL du catalogue.
 - [`API.md`](API.md) et [`extensions-v1.openapi.json`](extensions-v1.openapi.json) : contrats d'API.
 
 ## Média, bibliothèques et streaming
 
-- Formats et lecture : [`MEDIA_FORMATS.md`](MEDIA_FORMATS.md), [`STREAMING_COMPATIBILITY.md`](STREAMING_COMPATIBILITY.md), [`STREAMING_PERFORMANCE.md`](STREAMING_PERFORMANCE.md), [`STREAMING_SYSTEM_BENCHMARK.md`](STREAMING_SYSTEM_BENCHMARK.md), [`NAS_PLAYBACK_DIAGNOSTICS.md`](NAS_PLAYBACK_DIAGNOSTICS.md), [`NEXT_MEDIA_TESTS.md`](NEXT_MEDIA_TESTS.md).
+- Formats et lecture : [`MEDIA_FORMATS.md`](MEDIA_FORMATS.md), [`STREAMING_COMPATIBILITY.md`](STREAMING_COMPATIBILITY.md), [`STREAMING_PERFORMANCE.md`](STREAMING_PERFORMANCE.md), [`STREAMING_SYSTEM_BENCHMARK.md`](STREAMING_SYSTEM_BENCHMARK.md), [`NAS_PLAYBACK_DIAGNOSTICS.md`](NAS_PLAYBACK_DIAGNOSTICS.md), [`PLAYBACK_DIAGNOSTICS.md`](PLAYBACK_DIAGNOSTICS.md), [`NEXT_MEDIA_TESTS.md`](NEXT_MEDIA_TESTS.md).
 - Pistes et sources séparées : [`SEPARATED_MEDIA.md`](SEPARATED_MEDIA.md), [`PLAYER_TRACK_PREPARATION.md`](PLAYER_TRACK_PREPARATION.md).
 - Sous-titres, images, vignettes : [`SUBTITLE_ASS_RENDERING.md`](SUBTITLE_ASS_RENDERING.md), [`OPENSUBTITLES.md`](OPENSUBTITLES.md), [`CHAPTER_IMAGES.md`](CHAPTER_IMAGES.md), [`TRICKPLAY.md`](TRICKPLAY.md), [`ARTWORK_ROTATION.md`](ARTWORK_ROTATION.md), [`INTRO_SKIPPER.md`](INTRO_SKIPPER.md).
 - Bibliothèques et scanner : [`LIBRARIES_AND_SCANNER.md`](LIBRARIES_AND_SCANNER.md), [`LIBRARY_FOLDERS.md`](LIBRARY_FOLDERS.md), [`LIBRARY_OPTIONS.md`](LIBRARY_OPTIONS.md), [`LIBRARY_SCANNING_PLAN.md`](LIBRARY_SCANNING_PLAN.md).
@@ -61,6 +63,9 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - Déploiement : [`DEPLOYMENT.md`](DEPLOYMENT.md) (historique, renvoie vers Docker), [`DEPLOYMENT_DOCKER.md`](DEPLOYMENT_DOCKER.md), [`DEPLOYMENT_SYNOLOGY.md`](DEPLOYMENT_SYNOLOGY.md).
 - Publication : [`CI_GHCR.md`](CI_GHCR.md), [`RELEASES_AND_VERSIONING.md`](RELEASES_AND_VERSIONING.md), [`GITHUB_GOVERNANCE_AND_MIGRATION.md`](GITHUB_GOVERNANCE_AND_MIGRATION.md).
 - Réglages : [`SETTINGS_AND_REFRESH.md`](SETTINGS_AND_REFRESH.md), [`SETTINGS_REVIEW.md`](SETTINGS_REVIEW.md), [`PREFERENCES.md`](PREFERENCES.md).
+- Métadonnées traduites par compte : [`METADATA_LOCALIZATION.md`](METADATA_LOCALIZATION.md).
+- Stockage en lecture seule, caches, NFO, identifiants et renommages : [`STORAGE_AND_CACHES.md`](STORAGE_AND_CACHES.md).
+- Interface bilingue, langues séparées, formats et caches : [`I18N.md`](I18N.md).
 
 ## Extensions (plugins)
 
@@ -70,6 +75,7 @@ Point d'entrée thématique de `docs/`. Rappel : **les documents sont des exigen
 - [`EXTENSION_STORAGE.md`](EXTENSION_STORAGE.md) et [`PLUGIN_STORAGE.md`](PLUGIN_STORAGE.md) : stockage des extensions (deux angles, à lire ensemble).
 - [`PLUGIN_UPDATE_LIFECYCLE.md`](PLUGIN_UPDATE_LIFECYCLE.md), [`PLUGIN_SETTINGS_AND_COLLECTIONS.md`](PLUGIN_SETTINGS_AND_COLLECTIONS.md) : mises à jour, paramètres, collections.
 - [`FUTURE_PLUGIN_ARCHITECTURE.md`](FUTURE_PLUGIN_ARCHITECTURE.md) : écosystème futur (prospectif).
+- [`CORE_PLUGIN_RESPONSIBILITIES.md`](CORE_PLUGIN_RESPONSIBILITIES.md) : matrice Core / extensions, duplications confirmées et feuille de route.
 
 ## Player et UX
 
@@ -98,7 +104,7 @@ Rapports datés, missions et expériences terminées, conservés pour l'historiq
 | `archive/fixes/` | Correctifs ponctuels (NAS, métadonnées, UI, sélection audio AV1/Opus) |
 | `archive/ux/` | Jalons de refonte UX d'octobre 2026 (`UX_*`) |
 | `archive/player-experiments/` | Expériences P0C (MSE, Shaka, marges audio) et rapports lecteur datés |
-| `archive/milestones/` | Jalons P1 / P3-P4 et livrable de refonte du stockage |
+| `archive/milestones/` | Jalons P0/P1/P3-P4, ancien prompt de démarrage et livrable de refonte du stockage |
 
 ## Conventions de documentation (CONTRIBUTING-docs)
 
@@ -107,7 +113,7 @@ Rapports datés, missions et expériences terminées, conservés pour l'historiq
 - **Préfixe / suffixe de date** : un rapport lié à un jour précis porte la date en suffixe `_AAAA_MM_JJ` (ex. `MISSION_FEATURES_2026_11_03.md`). Les rapports datés vont directement dans `archive/<thème>/` une fois la mission terminée.
 - **Quand archiver** : mission, audit, expérience, correctif ou jalon terminé et dont le contenu utile a été reporté dans un document vivant ; ou document remplacé par un autre. Utiliser `git mv` (historique conservé), jamais de suppression sans trace.
 - **Après un déplacement** : corriger tous les liens entrants (`*.md`, scripts, `.github/`, code) et ajouter le document à l'index ci-dessus. Vérifier que les liens relatifs Markdown résolvent.
-- **Sources de vérité** : les chemins listés plus haut sont référencés par `AGENTS.md` et ne se déplacent pas.
+- **Références** : ne déplacer les chemins actifs qu'après vérification de tous leurs consommateurs ; l'historique peut être réorganisé si ses liens sont mis à jour.
 - **Preuves** : les journaux et captures vont dans `evidence/<date>/<sujet>/`, pas dans les documents ; un document cite la preuve, il ne la remplace pas.
 - **Secrets** : aucune clé, jeton ni mot de passe réel dans la documentation.
 - **Doublons** : privilégier un renvoi croisé à une fusion risquée ; en cas de contenu réellement redondant, fusionner dans le document vivant et archiver l'ancien avec renvoi.

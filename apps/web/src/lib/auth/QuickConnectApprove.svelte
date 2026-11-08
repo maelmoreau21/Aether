@@ -2,6 +2,7 @@
   import { onDestroy, untrack } from 'svelte';
   import { getSessionGeneration, session } from './session';
   import { deviceRequest, normalizeDeviceCode, PENDING_DEVICE_CODE } from './quick-connect';
+  import { t } from '../i18n';
   let { initialCode = '' }: { initialCode?: string } = $props();
   let code = $state(untrack(() => initialCode));
   let device = $state('');
@@ -18,7 +19,7 @@
   async function inspect(event: SubmitEvent) {
     event.preventDefault();
     const normalized = normalizeDeviceCode(code);
-    if (!normalized) { error = 'Saisissez les 8 caractères du code affiché sur le nouvel appareil.'; return; }
+    if (!normalized) { error = $t('enter_the_8_characters_of_the'); return; }
     if (!$session || busy) return;
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal, generation = getSessionGeneration();
@@ -27,7 +28,7 @@
       const result = await deviceRequest<{ device: string }>('inspect', { code: normalized }, $session.csrfToken, signal);
       if (signal.aborted || generation !== getSessionGeneration()) return;
       device = result.device; checkedCode = normalized;
-    } catch (cause) { if (!signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error ? cause.message : 'Code indisponible.'; }
+    } catch (cause) { if (!signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error ? cause.message : $t('code_unavailable'); }
     finally { if (!signal.aborted && generation === getSessionGeneration()) busy = false; }
   }
   async function approve() {
@@ -39,28 +40,28 @@
       await deviceRequest('approve', { code: checkedCode }, $session.csrfToken, signal);
       if (signal.aborted || generation !== getSessionGeneration()) return;
       success = true; device = ''; code = ''; sessionStorage.removeItem(PENDING_DEVICE_CODE);
-    } catch (cause) { if (!signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error ? cause.message : 'Autorisation impossible.'; }
+    } catch (cause) { if (!signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error ? cause.message : $t('authorisation_failed'); }
     finally { if (!signal.aborted && generation === getSessionGeneration()) busy = false; }
   }
 </script>
 
 <section class="approval" aria-labelledby="device-approval-title">
-  <h3 id="device-approval-title">Connecter un appareil</h3>
-  <p>Sur le nouvel appareil, ouvrez la page de connexion et choisissez « Afficher le QR code ». Scannez-le avec cet appareil ou saisissez son code ici.</p>
+  <h3 id="device-approval-title">{$t('connect_a_device')}</h3>
+  <p>{$t('on_the_new_device_open_the')}</p>
   <form onsubmit={inspect}>
-    <label for="device-connection-code">Code du nouvel appareil</label>
-    <div class="code-field"><input id="device-connection-code" bind:value={code} oninput={() => { device = ''; success = false; }} autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" placeholder="ABCD–1234" required disabled={busy} /><button disabled={busy || !code.trim()}>{busy ? 'Vérification…' : 'Vérifier le code'}</button></div>
+    <label for="device-connection-code">{$t('new_device_code')}</label>
+    <div class="code-field"><input id="device-connection-code" bind:value={code} oninput={() => { device = ''; success = false; }} autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="12" placeholder={$t('abcd_1234')} required disabled={busy} /><button disabled={busy || !code.trim()}>{busy ? 'Vérification…' : $t('check_the_code')}</button></div>
   </form>
   {#if device}
     <div class="confirmation">
-      <strong>Autoriser cet appareil à accéder à votre compte ?</strong>
+      <strong>{$t('allow_this_device_to_access_your')}</strong>
       <p class="device-name">{device}</p>
-      <p>Code {checkedCode.slice(0, 4)}–{checkedCode.slice(4)} · Compte {$session?.user.displayName || $session?.user.login}</p>
-      <p>Confirmez uniquement si ce code est affiché sur un appareil que vous souhaitez connecter.</p>
-      <div class="actions"><button disabled={busy} onclick={() => void approve()}>Autoriser la connexion</button><button class="secondary" disabled={busy} onclick={() => device = ''}>Annuler</button></div>
+      <p>{$t('code_account', { code: `${checkedCode.slice(0, 4)}–${checkedCode.slice(4)}`, account: $session?.user.displayName || $session?.user.login })}</p>
+      <p>{$t('confirm_only_if_this_code_is')}</p>
+      <div class="actions"><button disabled={busy} onclick={() => void approve()}>{$t('allow_sign_in')}</button><button class="secondary" disabled={busy} onclick={() => device = ''}>{$t('sched_cancel')}</button></div>
     </div>
   {/if}
-  {#if success}<p class="success" role="status">Connexion autorisée. Le nouvel appareil va ouvrir votre médiathèque.</p>{/if}
+  {#if success}<p class="success" role="status">{$t('sign_in_approved_the_new_device')}</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 </section>
 

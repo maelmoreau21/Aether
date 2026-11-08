@@ -1,5 +1,7 @@
-//! Administrator-only SQLite/PostgreSQL backups. Archives are unencrypted and contain secrets.
-use crate::{auth::AuthState, identity::Role};
+//! Administrator-only SQLite/PostgreSQL backups. Archives contain secrets and are encrypted
+//! (`MDBK0003`) with the operator key from `MEDIA_BACKUP_KEY_FILE` / `MEDIA_BACKUP_KEY`; without
+//! a key no archive is produced unless `MEDIA_BACKUP_ALLOW_UNENCRYPTED=true` is set explicitly.
+use crate::{auth::AuthState, backup_bundle::Protection, identity::Role};
 use axum::{
     Json, Router,
     body::Body,
@@ -26,7 +28,14 @@ struct Backups {
     gate: Arc<Semaphore>,
     worker: Mutex<Option<tokio::task::AbortHandle>>,
     configuration: BTreeMap<String, String>,
+    /// `None` when no valid key is configured: backups then fail closed.
+    protection: Option<Protection>,
 }
+
+const KEY_REQUIRED: (&str, &str) = (
+    "backup_key_required",
+    "Aucune clé de sauvegarde valide n’est configurée. Définissez MEDIA_BACKUP_KEY_FILE (64 caractères hexadécimaux, par ex. `openssl rand -hex 32`) puis redémarrez Core.",
+);
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -92,12 +101,12 @@ pub async fn router(
 }
 
 fn environment_inputs() -> (Option<PathBuf>, BTreeMap<String, String>) {
-    let directory = std::env::var_os("MEDIA_BACKUP_DIR").map(PathBuf::from);
+    let directory = std::env::var_os("MEDIA_BACKUP_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    // Key settings are consumed (and stripped from the archived configuration) by `build_state`.
     let configuration = std::env::vars()
-        .filter(|(name, _)| {
-            (name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
-                && !matches!(name.as_str(), "MEDIA_BACKUP_KEY" | "MEDIA_BACKUP_KEY_FILE")
-        })
+        .filter(|(name, _)| name.starts_with("MEDIA_") || name.starts_with("OIDC_"))
         .collect();
     (directory, configuration)
 }
@@ -120,8 +129,29 @@ async fn build_state(
     directory: Option<PathBuf>,
     mut configuration: BTreeMap<String, String>,
 ) -> Result<Backups, Box<dyn std::error::Error + Send + Sync>> {
-    configuration.remove("MEDIA_BACKUP_KEY");
-    configuration.remove("MEDIA_BACKUP_KEY_FILE");
+    let protection = {
+        let lookup = |name: &str| configuration.get(name).cloned();
+        match crate::backup_bundle::protection_from_settings(&lookup) {
+            Ok(Protection::Unencrypted) => {
+                eprintln!(
+                    "admin_backups: WARNING backups will be UNENCRYPTED (MEDIA_BACKUP_ALLOW_UNENCRYPTED)"
+                );
+                Some(Protection::Unencrypted)
+            }
+            Ok(protection) => Some(protection),
+            Err(error) => {
+                eprintln!("admin_backups: backups disabled: {error}");
+                None
+            }
+        }
+    };
+    for name in [
+        "MEDIA_BACKUP_KEY",
+        "MEDIA_BACKUP_KEY_FILE",
+        "MEDIA_BACKUP_ALLOW_UNENCRYPTED",
+    ] {
+        configuration.remove(name);
+    }
     let mut connection = auth.store.pool().acquire().await?;
     let source = if connection.backend_name() == "SQLite" {
         let rows = crate::database::query("PRAGMA database_list")
@@ -152,7 +182,15 @@ async fn build_state(
         .as_ref()
         .and_then(|source| source.parent())
         .map(|parent| parent.join("backups"))
-        .unwrap_or(std::env::current_dir()?.join("backups"));
+        .unwrap_or_else(|| {
+            if DiskPath::new("/backups").is_dir() {
+                PathBuf::from("/backups")
+            } else if DiskPath::new("/data").is_dir() {
+                PathBuf::from("/data/backups")
+            } else {
+                PathBuf::from("backups")
+            }
+        });
     let directory = Some(directory.unwrap_or(default_directory));
     if let Some(directory) = &directory {
         configuration.insert(
@@ -188,6 +226,7 @@ async fn build_state(
         gate: Arc::new(Semaphore::new(1)),
         worker: Mutex::new(None),
         configuration,
+        protection,
     })
 }
 
@@ -247,7 +286,12 @@ fn safe_directory(directory: &DiskPath, media_root: &DiskPath) -> Result<(), Sta
     if let Ok(metadata) = std::fs::symlink_metadata(directory) {
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o077 != 0 {
-            return Err(StatusCode::CONFLICT);
+            eprintln!(
+                "admin_backups: backup directory {:?} must have mode 0700 (current {:o})",
+                directory,
+                metadata.permissions().mode() & 0o777
+            );
+            return Err(StatusCode::FORBIDDEN);
         }
     }
     for ancestor in directory.ancestors().filter(|p| !p.as_os_str().is_empty()) {
@@ -380,6 +424,13 @@ async fn list(
                     }
                 }
             }
+            Err(StatusCode::FORBIDDEN) => (
+                false,
+                Some(
+                    "Le dossier de sauvegarde doit être privé (permissions 0700). Vérifiez aussi qu’il appartient à l’UID/GID du conteneur.",
+                ),
+                Vec::new(),
+            ),
             Err(_) => (
                 false,
                 Some(
@@ -388,6 +439,11 @@ async fn list(
                 Vec::new(),
             ),
         }
+    };
+    let (available, reason) = if available && state.protection.is_none() {
+        (false, Some(KEY_REQUIRED.1))
+    } else {
+        (available, reason)
     };
     let schedule = load_schedule(&state).await?;
     Ok((
@@ -404,6 +460,11 @@ async fn list(
 }
 
 async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
+    // Fail closed before any snapshot: no key means no plaintext copy of the secrets on disk.
+    let protection = state
+        .protection
+        .clone()
+        .ok_or_else(|| BackupFailure::new(StatusCode::CONFLICT, KEY_REQUIRED.0, KEY_REQUIRED.1))?;
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -495,6 +556,7 @@ async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
         &directory.join(format!("{id}.media-backup")),
         engine,
         Some(assets),
+        protection,
     )
     .await
     .map_err(|error| {
@@ -630,97 +692,22 @@ async fn update_schedule(
         .into_response())
 }
 
-/// The schedule only *triggers* work: the due run is claimed here (compare-and-set on
-/// `next_due_at`, safe against several ticks) and handed to the durable task queue, whose lease,
-/// fencing token and playback preemption then govern the execution. No backup runs in this loop.
-async fn scheduled_tick(state: &Backups) -> Result<(), StatusCode> {
-    if state.source.is_none() && state.postgres_url.is_none() {
-        return Ok(());
-    }
-    let schedule = load_schedule(state).await?;
-    let started = now();
-    if !schedule.enabled || schedule.next_due_at > started {
-        return Ok(());
-    }
-    // Atomic claim; advance from now to avoid missed-run storms. `running` means queued or running.
-    // The next due instant is the earliest next firing of the backup's triggers.
-    let limit = {
-        let _writer = state.auth.store.task_writes.lock().await;
-        let mut conn = state
-            .auth
-            .store
-            .pool()
-            .acquire()
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let mut tx = crate::database::begin_write(&mut conn)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let claimed = crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND enabled=1 AND next_due_at=? AND next_due_at<=?")
-            .bind(started).bind(schedule.next_due_at).bind(started)
-            .execute(&mut *tx).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if claimed.rows_affected() == 0 {
-            return Ok(());
-        }
-        let advance = crate::task_triggers::advance(
-            &mut tx,
-            "backup",
-            "backup",
-            started,
-            schedule.interval_minutes,
-        )
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        crate::database::query(
-            "UPDATE backup_schedule SET next_due_at=?,enabled=? WHERE singleton=1",
-        )
-        .bind(advance.next.unwrap_or(started))
-        .bind(i64::from(advance.next.is_some()))
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        crate::database::commit(tx)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        advance.max_runtime_seconds
-    };
-    if let Err(error) = crate::system_task_queue::enqueue_backup(
-        &state.auth.store,
-        &schedule.next_due_at.to_string(),
-        started,
-        limit,
-    )
-    .await
-    {
-        eprintln!("scheduled backup could not be queued: {error}");
-        crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
-            .bind(now()).bind(started)
-            .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        return Err(StatusCode::INTERNAL_SERVER_ERROR);
-    }
-    Ok(())
-}
-
-/// Queue one backup outside the periodic schedule (startup trigger, unified "run" action).
-/// Returns `false` when a backup is already queued or running.
+/// Queue one backup run (backup triggers via `task_scheduler`, the unified "run" action).
+/// Returns `false` when a backup is already queued or running. The durable task's lease, fencing
+/// token and playback rules then govern the execution; `backup_schedule` records its outcome.
 pub(crate) async fn trigger_backup(
     store: &crate::identity::IdentityStore,
     key: &str,
     timestamp: i64,
     max_runtime_seconds: Option<i64>,
 ) -> Result<bool, sqlx::Error> {
-    let claimed = crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1 AND last_outcome!='running'")
-        .bind(timestamp).execute(store.pool()).await?;
-    if claimed.rows_affected() == 0 {
+    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','running','paused')")
+        .fetch_one(store.pool())
+        .await?;
+    if active > 0 {
         return Ok(false);
     }
-    if let Err(error) =
-        crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds).await
-    {
-        crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome='failed' WHERE singleton=1 AND last_started_at=?")
-            .bind(now()).bind(timestamp).execute(store.pool()).await?;
-        return Err(error);
-    }
+    crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds).await?;
     Ok(true)
 }
 
@@ -745,6 +732,12 @@ async fn run_scheduled(
     state: &Backups,
     fence: Option<&crate::task_engine::Job>,
 ) -> Result<(), StatusCode> {
+    // `running` is set when the run really starts, never while it only waits in the queue.
+    crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1")
+        .bind(now())
+        .execute(state.auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let result = perform_backup(state).await;
     if let Err(error) = &result {
         eprintln!(
@@ -797,14 +790,7 @@ fn start_worker(state: &Arc<Backups>) {
             let _ = crate::database::query("UPDATE backup_schedule SET last_outcome='interrupted',last_completed_at=? WHERE singleton=1 AND last_outcome='running'")
                 .bind(now()).execute(state.auth.store.pool()).await;
         }
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-            let Some(state) = weak.upgrade() else {
-                break;
-            };
-            let _ = scheduled_tick(&state).await;
-            // Drop strong state before sleeping; worker never owns its own lifetime.
-        }
+        // Scheduled backups fire from their triggers (`task_scheduler`), like every task.
     });
     match state.worker.lock() {
         Ok(mut handle) => *handle = Some(task.abort_handle()),
@@ -883,35 +869,50 @@ mod tests {
             gate: Arc::new(Semaphore::new(1)),
             worker: Mutex::new(None),
             configuration: BTreeMap::new(),
+            protection: Some(Protection::Encrypted(
+                crate::backup_bundle::BackupKey::parse(
+                    "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12",
+                )
+                .unwrap(),
+            )),
         };
         assert!(!load_schedule(&state).await.unwrap().enabled);
-        crate::database::query("UPDATE backup_schedule SET enabled=1,interval_minutes=60,next_due_at=0 WHERE singleton=1").execute(store.pool()).await.unwrap();
-        // The tick no longer depends on the in-memory gate: exclusion is the durable task's lease.
-        scheduled_tick(&state).await.unwrap();
-        // The tick only queues a durable task; nothing ran yet.
-        let queued: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status='queued'")
-            .fetch_one(store.pool()).await.unwrap();
-        assert_eq!(queued, 1);
-        assert_eq!(load_schedule(&state).await.unwrap().last_outcome, "running");
+        // A due hourly trigger: the scheduler pass only queues a durable task.
+        crate::database::query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,interval_minutes,enabled,next_fire_at,created_at) VALUES('hourly','backup','backup','interval',60,1,0,0)").execute(store.pool()).await.unwrap();
+        let queued_runs = || async {
+            crate::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status='queued'")
+                .fetch_one(store.pool()).await.unwrap()
+        };
+        assert_eq!(
+            crate::task_scheduler::fire_due(&state.auth, now())
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(queued_runs().await, 1);
+        // Queued is not running: the last outcome stays the previous one until the run starts.
+        assert_ne!(load_schedule(&state).await.unwrap().last_outcome, "running");
         assert!(!temp.path().join("backups").exists());
+        // The trigger moved on: another pass right away does not queue a second run.
+        crate::task_scheduler::fire_due(&state.auth, now())
+            .await
+            .unwrap();
+        assert_eq!(queued_runs().await, 1);
         run_scheduled(&state, None).await.unwrap();
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "succeeded");
-        assert!(schedule.next_due_at > now());
-        scheduled_tick(&state).await.unwrap();
+        assert!(
+            schedule.next_due_at > now(),
+            "the mirror follows the trigger"
+        );
         assert_eq!(
             std::fs::read_dir(temp.path().join("backups"))
                 .unwrap()
                 .count(),
             1
         );
-        // Failed attempts are terminal until the next interval, not retried every tick.
+        // Failed attempts are terminal until the next firing, not retried every pass.
         state.source = Some(temp.path().join("missing.media-backup"));
-        crate::database::query("UPDATE backup_schedule SET next_due_at=0 WHERE singleton=1")
-            .execute(store.pool())
-            .await
-            .unwrap();
-        scheduled_tick(&state).await.unwrap();
         assert!(run_scheduled(&state, None).await.is_err());
         let schedule = load_schedule(&state).await.unwrap();
         assert_eq!(schedule.last_outcome, "failed");
@@ -943,6 +944,25 @@ mod tests {
         assert!(!valid_id("../secret"));
         assert!(!valid_id("00000000-0000-0000-0000-000000000000"));
         assert!(valid_id(&uuid::Uuid::new_v4().to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_policy_reports_non_private_mount_without_changing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let backups = root.path().join("backups");
+        let media = root.path().join("media");
+        std::fs::create_dir(&backups).unwrap();
+        std::fs::create_dir(&media).unwrap();
+        std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(safe_directory(&backups, &media), Err(StatusCode::FORBIDDEN));
+        assert_eq!(
+            std::fs::metadata(&backups).unwrap().permissions().mode() & 0o777,
+            0o755
+        );
+        std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(safe_directory(&backups, &media).is_ok());
     }
 
     #[cfg(unix)]

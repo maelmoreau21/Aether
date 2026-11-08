@@ -8,6 +8,7 @@
   import { st, statLocale } from './i18n';
   import { browserTimeZone, growthInfo, monthName, shortDuration, weekdayName, wrappedSlides, wrappedSummary, type SlideId } from './insights';
   import { imagePreviewUrl } from '../catalog/image-url';
+  import { t } from '../i18n';
 
   let { userId = '' }: { userId?: string } = $props();
   const SLIDE_MS = 8000;
@@ -179,7 +180,7 @@
     {:else if data}
       {#if backdrop}<img class="backdrop" src={backdrop} alt="" aria-hidden="true" onerror={() => fail(backdrop)} /><span class="veil" aria-hidden="true"></span>{/if}
       {#key `${data.year}-${data.kind}-${current}`}
-        <section class={`slide ${current}`} aria-roledescription="slide" aria-label={$st('w_slide', { index: index + 1, count: slides.length })}>
+        <section class={`slide ${current}`} aria-roledescription={$t('slide')} aria-label={$st('w_slide', { index: index + 1, count: slides.length })}>
           {#if current === 'empty'}
             <h1 class="rise">{$st('w_empty_title', { year: data.year })}</h1>
             <p class="lead rise" style:--i={1}>{$st('w_empty_text')}</p>

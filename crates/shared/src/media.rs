@@ -61,6 +61,10 @@ pub struct FilmMetadata {
     pub writers: Vec<String>,
     pub ratings: Vec<ProviderRating>,
     pub external_ids: BTreeMap<String, String>,
+    /// Providers for which the file carried contradictory identifiers. None of the
+    /// contradicting values is kept in `external_ids`; they must not be trusted for matching.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_id_conflicts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub season: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

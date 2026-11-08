@@ -325,7 +325,8 @@ fn valid_timeline_marker(marker: &Value) -> bool {
         && confidence.is_finite()
         && start >= 0.0
         && end > start
-        && end - start <= 600.0
+        && end - start
+            <= crate::automation::max_marker_length(marker["markerType"].as_str().unwrap_or(""))
         && (0.0..=1.0).contains(&confidence)
         && marker["id"]
             .as_str()
@@ -336,7 +337,7 @@ fn valid_timeline_marker(marker: &Value) -> bool {
         )
         && matches!(
             marker["method"].as_str(),
-            Some("fingerprint" | "chapter" | "silence" | "manual")
+            Some("fingerprint" | "chapter" | "silence" | "manual" | "black_frame")
         )
 }
 #[cfg(test)]
@@ -543,6 +544,9 @@ pub(super) async fn avatar_operation(
         .map_err(|s| err(s, "authentication_required"))?;
     auth.require_csrf(&headers, &actor)
         .map_err(|s| err(s, "csrf_required"))?;
+    if input.apply {
+        return Err(err(StatusCode::FORBIDDEN, "avatar_gallery_required"));
+    }
     if !matches!(
         input.operation.as_str(),
         "avatars.list" | "avatars.generate"
@@ -583,28 +587,7 @@ pub(super) async fn avatar_operation(
         },
     );
     let result = invoke_worker(&auth, &headers, &id, "", &generation, invocation).await?;
-    if input.apply {
-        let svg = result["svg"]
-            .as_str()
-            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
-        let _lock = MUTATIONS.lock().await;
-        if !permitted(&auth, &headers, &id, "", &generation).await? {
-            return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
-        }
-        let meta = auth
-            .store
-            .assets
-            .put_bytes(svg.as_bytes(), "image/svg+xml")
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
-        query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256")
-            .bind(&actor.user.id)
-            .bind(&meta.sha256)
-            .execute(auth.store.pool())
-            .await
-            .map_err(db)?;
-    }
-    Ok(Json(json!({"result":result,"applied":input.apply})))
+    Ok(Json(json!({"result":result,"applied":false})))
 }
 
 #[derive(Deserialize)]
@@ -816,6 +799,21 @@ async fn import_image_checked(
     for permission in ["images", "metadata.write"] {
         if !package.manifest.permissions.iter().any(|p| p == permission) {
             return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+        }
+    }
+    // A full pool downloads nothing: automatic collection stops at 12 images of a
+    // kind, a manual choice only at the 64 images of a work.
+    if input.append {
+        let (same_kind, total): (i64, i64) = query_as(
+            "SELECT COALESCE(SUM(CASE WHEN kind=? THEN 1 ELSE 0 END),0),COUNT(*) FROM work_image_entries WHERE work_id=?",
+        )
+        .bind(&input.kind)
+        .bind(&input.work_id)
+        .fetch_one(store.pool())
+        .await
+        .map_err(db)?;
+        if (input.apply_collection_policy && same_kind >= 12) || total >= 64 {
+            return Err(err(StatusCode::CONFLICT, "image_pool_full"));
         }
     }
     let bytes = download_provider_image(&package, &input.url).await?;

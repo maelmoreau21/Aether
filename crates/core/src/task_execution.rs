@@ -47,15 +47,60 @@ pub(crate) async fn dispatch(
     if node != job.node_id || size < 0 {
         return Err(sqlx::Error::Protocol("Task inventory mismatch".into()));
     }
+    let trickplay_options = if job.category == "trickplay" {
+        let encoded: String =
+            crate::database::query_scalar("SELECT options_json FROM libraries WHERE id=?")
+                .bind(&job.library_id)
+                .fetch_one(auth.store.pool())
+                .await?;
+        let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+            .map_err(|_| sqlx::Error::Protocol("Invalid library trickplay options".into()))?;
+        // The library policy is checked again at dispatch, so disabling a library
+        // feature also stops work already waiting behind a scan or active playback.
+        let chapters = job.component == "chapters";
+        let disabled = if chapters {
+            !options.chapter_images_enabled
+                || (job.owner == "library-chapter-images" && !options.chapter_images_during_scan)
+        } else {
+            !options.trickplay_enabled
+                || (job.owner == "library-trickplay" && !options.trickplay_during_scan)
+        };
+        if disabled {
+            task_engine::finish(
+                &auth.store,
+                &job.id,
+                job.attempt,
+                &job.node_id,
+                media_contracts::protocol::unix_now(),
+                None,
+            )
+            .await?;
+            query("UPDATE durable_tasks SET status='cancelled',error=? WHERE id=? AND attempt=? AND status='completed' AND lease_until IS NULL")
+                .bind(if chapters { "library_chapter_images_disabled" } else { "library_trickplay_disabled" })
+                .bind(&job.id).bind(job.attempt).execute(auth.store.pool()).await?;
+            return Ok(());
+        }
+        Some((
+            options.trickplay_width,
+            media_contracts::protocol::TrickplayTaskOptions {
+                interval_ms: u64::from(options.trickplay_interval_seconds) * 1000,
+                quality: options.trickplay_quality,
+                columns: u32::from(options.trickplay_columns),
+                rows: u32::from(options.trickplay_rows),
+            },
+        ))
+    } else {
+        None
+    };
     if node == "local" {
         crate::local_mounts::validate(Path::new(&snapshot), root)
             .await
             .map_err(|_| sqlx::Error::Protocol("Local task root denied".into()))?;
     }
-    query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'running',0,0) ON CONFLICT(library_id) DO UPDATE SET status='running',errors_json='[]',errors_count=0,warnings_count=0")
-        .bind(&job.library_id).execute(auth.store.pool()).await?;
-    query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES(?,?,?) ON CONFLICT(library_id) DO UPDATE SET scan_id=excluded.scan_id,node_id=excluded.node_id")
-        .bind(&job.library_id).bind(&run).bind(&node).execute(auth.store.pool()).await?;
+    // Task runs are fenced by their own row: the library scan status and its
+    // active scan fence stay untouched by post-scan previews or analyses.
+    query("INSERT INTO active_task_runs(run_id,library_id,node_id,status,error) VALUES(?,?,?,'running','') ON CONFLICT(run_id) DO UPDATE SET library_id=excluded.library_id,node_id=excluded.node_id,status='running',error=''")
+        .bind(&run).bind(&job.library_id).bind(&node).execute(auth.store.pool()).await?;
     let cancel = Arc::new(AtomicBool::new(false));
     jobs.cancellations
         .lock()
@@ -68,7 +113,12 @@ pub(crate) async fn dispatch(
         category: job.category.clone(),
         target_id: job.target_id.clone(),
         component: (!job.component.is_empty()).then(|| job.component.clone()),
-        width: Some(job.width as u32),
+        width: Some(
+            trickplay_options
+                .as_ref()
+                .map_or(job.width as u32, |(width, _)| u32::from(*width)),
+        ),
+        trickplay: trickplay_options.map(|(_, options)| options),
         core_base_url: std::env::var("MEDIA_CORE_INTERNAL_URL")
             .ok()
             .filter(|s| !s.is_empty())
@@ -97,12 +147,12 @@ pub(crate) async fn dispatch(
     let task = tokio::spawn(async move {
         if node != "local" {
             if let Err(error) = crate::nodes::dispatch_remote_task(&store, &request).await {
-                let _ = set_scan_result(&store, &job.library_id, &run, Some(&error)).await;
+                let _ = set_task_result(&store, &run, Some(&error)).await;
             }
         } else {
             let outcome=async {
                 let _permit=jobs_task.slots.acquire().await.map_err(|_|"Task worker stopped".to_owned())?;
-                let future=media_node::tasks::run_task_on_grant(&job.category,&grant,request.component.as_deref(),request.width,&jobs_task.preparations,size as u64,&modified);
+                let future=media_node::tasks::run_task_with_trickplay_options(&job.category,&grant,request.component.as_deref(),request.width,&jobs_task.preparations,size as u64,&modified,request.trickplay.as_ref(),None);
                 tokio::pin!(future);
                 let mut interval=tokio::time::interval(std::time::Duration::from_millis(100));
                 loop { tokio::select! {
@@ -114,7 +164,7 @@ pub(crate) async fn dispatch(
                 }}
             }.await;
             let _effects = task_engine::EFFECT_GATE.lock().await;
-            if crate::nodes::scan_run_authorized(&store, &job.library_id, &node, &run).await {
+            if crate::nodes::task_run_authorized(&store, &job.library_id, &node, &run).await {
                 let error = match outcome {
                     Ok(result) => match task_engine::record_result(
                         &store,
@@ -131,7 +181,7 @@ pub(crate) async fn dispatch(
                     },
                     Err(error) => Some(error),
                 };
-                let _ = set_scan_result(&store, &job.library_id, &run, error.as_deref()).await;
+                let _ = set_task_result(&store, &run, error.as_deref()).await;
             }
         }
         if let Ok(mut tokens) = jobs_task.cancellations.lock() {
@@ -143,17 +193,25 @@ pub(crate) async fn dispatch(
     Ok(())
 }
 
-pub(crate) async fn set_scan_result(
+pub(crate) async fn set_task_result(
     store: &crate::identity::IdentityStore,
-    library: &str,
     run: &str,
     error: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    let errors = error
-        .map(|e| serde_json::json!([e]).to_string())
-        .unwrap_or_else(|| "[]".into());
-    query("UPDATE scan_jobs SET status=?,errors_json=?,errors_count=?,discovered=1,probed=1 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-        .bind(if error.is_some(){"error"}else{"completed"}).bind(errors).bind(i64::from(error.is_some())).bind(library).bind(run).execute(store.pool()).await?;
+    query("UPDATE active_task_runs SET status=?,error=? WHERE run_id=? AND status='running'")
+        .bind(if error.is_some() {
+            "error"
+        } else {
+            "completed"
+        })
+        .bind(
+            error
+                .map(|e| e.chars().take(1024).collect::<String>())
+                .unwrap_or_default(),
+        )
+        .bind(run)
+        .execute(store.pool())
+        .await?;
     Ok(())
 }
 

@@ -10,6 +10,7 @@
   import type { Work } from './api';
   import { selectArtwork } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
+  import { t } from '../i18n';
   let { works = [] }: { works?: Work[] } = $props();
   // landscape.jpg is the 16:9 artwork made for resume cards; backdrop and thumb are fallbacks.
   function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); const artwork=selectArtwork(work, $session); return imagePreviewUrl(artwork.landscape || artwork.backdrop || artwork.thumb,640); }
@@ -57,10 +58,10 @@
 </script>
 
 {#if error || continuing.length}
-<section class="continue-shelf" aria-label="Continuer à regarder">
+<section class="continue-shelf" aria-label={$t('continue_watching')}>
   <div class="shelf-header">
     <div class="title-group">
-      <h2>Reprendre</h2>
+      <h2>{$t('resume')}</h2>
       {#if continuing.length > 0}
         <span class="count-badge">{continuing.length}</span>
       {/if}
@@ -73,7 +74,7 @@
           class="nav-arrow"
           disabled={!canScrollLeft}
           onclick={() => scroll('left')}
-          aria-label="Faire défiler vers la gauche"
+          aria-label={$t('scroll_left')}
         >
           <Icon name="chevron-left" size={18} />
         </button>
@@ -82,7 +83,7 @@
           class="nav-arrow"
           disabled={!canScrollRight}
           onclick={() => scroll('right')}
-          aria-label="Faire défiler vers la droite"
+          aria-label={$t('scroll_right')}
         >
           <Icon name="chevron-right" size={18} />
         </button>
@@ -101,7 +102,7 @@
           void loadHistory().catch(e => (error = e.message));
         }}
       >
-        Réessayer
+        {$t('request_retry')}
       </button>
     </div>
   {:else if !continuing.length}
@@ -110,8 +111,8 @@
         <Icon name="clock" size={28} />
       </div>
       <div class="empty-copy">
-        <strong>Aucune séance en cours</strong>
-        <p>Vos séances en cours apparaîtront ici.</p>
+        <strong>{$t('no_sessions_in_progress')}</strong>
+        <p>{$t('your_sessions_in_progress_will_appear')}</p>
       </div>
     </div>
   {:else}
@@ -125,7 +126,7 @@
         <a
           class="continue-card"
           href={resolve(`${item.kind === 'episode' ? 'series/' : 'films/'}?work=${encodeURIComponent(item.seriesId ?? item.workId)}`)}
-          aria-label={`Reprendre la lecture de ${item.title}`}
+          aria-label={$t('catalog_resume', { title: item.title })}
         >
           <div class="card-thumb">
             {#if image && !failedImages.includes(image)}<img class="resume-image" src={image} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => failedImages = [...failedImages, image]} />{/if}
@@ -141,7 +142,7 @@
               <progress
                 value={item.position}
                 max={item.duration}
-                aria-label={`Progression de ${item.title}`}
+                aria-label={$t('catalog_progress_of', { title: item.title })}
               ></progress>
             </div>
           </div>
@@ -152,12 +153,12 @@
                 {item.kind === 'episode' ? 'ÉPISODE' : 'FILM'}
               </span>
               <span class="card-time-remaining">
-                {Math.max(1, Math.round((item.duration - item.position) / 60))} min restantes
+                {$t('min_left', { value: Math.max(1, Math.round((item.duration - item.position) / 60)) })}
               </span>
             </div>
             <strong>{item.title}</strong>
             <span class="card-position-text">
-              {Math.floor(item.position / 60)} / {Math.ceil(item.duration / 60)} min
+              {$t('position_of_duration_min', { position: Math.floor(item.position / 60), duration: Math.ceil(item.duration / 60) })}
             </span>
           </div>
         </a>
@@ -225,7 +226,7 @@
 
   .card-thumb {
     position: relative;
-    aspect-ratio: 16 / 9;
+    aspect-ratio: var(--artwork-ratio, 16 / 9);
     overflow: hidden;
     border-radius: 14px;
     background: var(--bg-2);

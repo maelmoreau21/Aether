@@ -28,7 +28,6 @@ async fn browser_statistics_video_music_and_restart() {
         )
         .await
         .unwrap();
-    media_poc::extensions::bootstrap_essential_plugins(&store).await;
     query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await

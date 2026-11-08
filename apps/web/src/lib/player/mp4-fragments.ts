@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 // Inspect bounded moov/moof boxes while forwarding mdat bytes without retaining
 // them. Keyframe timestamps let MSE eviction stop at a known past random-access
 // point instead of accidentally removing dependencies of the current frame.
@@ -22,10 +23,10 @@ export class Mp4Fragments {
         const view = new DataView(this.pending.buffer);let size = view.getUint32(0);
         if (size === 1 && need === 8) continue;
         if (size === 1) size = Number(view.getBigUint64(8));
-        if (!Number.isSafeInteger(size) || size < need) throw new Error('Taille fMP4 progressive invalide.');
+        if (!Number.isSafeInteger(size) || size < need) throw new Error(tr('invalid_progressive_fmp4_size'));
         this.type = String.fromCharCode(...this.pending.subarray(4, 8));
         if (this.type === 'moov' || this.type === 'moof') {
-          if (size > 1024 * 1024) throw new Error('Index fMP4 supérieur à 1 Mio.');
+          if (size > 1024 * 1024) throw new Error(tr('fmp4_index_larger_than_1_mib'));
           this.captured = new Uint8Array(size);this.captured.set(this.pending);this.cursor = need;
         }
         this.remaining = size - need;this.pending = new Uint8Array();
@@ -38,29 +39,29 @@ export class Mp4Fragments {
     }
   }
   private finish() {if (this.captured) this.complete(this.type, this.captured.buffer as ArrayBuffer,this.start);this.captured = undefined;}
-  finishStream() {if (this.remaining || this.pending.length) throw new Error('Flux fMP4 tronqué.');}
+  finishStream() {if (this.remaining || this.pending.length) throw new Error(tr('fmp4_stream_truncated'));}
 }
 type Box = {start: number; end: number; type: string};
 function children(data: ArrayBuffer, start: number, end: number): Box[] {
   const result: Box[] = [],view = new DataView(data);
   while (start < end) {
-    if (end - start < 8 || result.length >= 16384) throw new Error('Index fMP4 invalide.');
+    if (end - start < 8 || result.length >= 16384) throw new Error(tr('invalid_fmp4_index'));
     const size = view.getUint32(start);
-    if (size < 8 || size > end - start) throw new Error('Boîte fMP4 tronquée.');
+    if (size < 8 || size > end - start) throw new Error(tr('fmp4_box_truncated'));
     result.push({start: start + 8, end: start + size, type: String.fromCharCode(...new Uint8Array(data, start + 4, 4))});start += size;
   }return result;
 }
 function child(data: ArrayBuffer, parent: Box, type: string): Box {
   const found = children(data, parent.start, parent.end).find(box => box.type === type);
-  if (!found) throw new Error(`Index fMP4 sans ${type}.`);return found;
+  if (!found) throw new Error(tr('fmp4_index_without', { type }));return found;
 }
 export function mp4Timescale(data: ArrayBuffer): number {
   const moov = children(data, 0, data.byteLength).find(box => box.type === 'moov');
-  if (!moov) throw new Error('Initialisation fMP4 absente.');
+  if (!moov) throw new Error(tr('fmp4_initialisation_missing'));
   const mdhd = child(data, child(data, child(data, moov, 'trak'), 'mdia'), 'mdhd'),view = new DataView(data);
   const version = view.getUint8(mdhd.start),at = mdhd.start + (version === 1 ? 20 : 12);
-  if (version > 1 || at + 4 > mdhd.end) throw new Error('Horloge fMP4 incompatible.');
-  const scale = view.getUint32(at);if (!scale) throw new Error('Horloge fMP4 nulle.');return scale;
+  if (version > 1 || at + 4 > mdhd.end) throw new Error(tr('incompatible_fmp4_clock'));
+  const scale = view.getUint32(at);if (!scale) throw new Error(tr('zero_fmp4_clock'));return scale;
 }
 export function mp4RandomAccess(data: ArrayBuffer, scale: number): number | undefined {
   const moof = children(data, 0, data.byteLength).find(box => box.type === 'moof');if (!moof) return;
@@ -77,5 +78,5 @@ export function mp4RandomAccess(data: ArrayBuffer, scale: number): number | unde
   const decode = view.getUint8(tfdt.start) === 1 ? Number(view.getBigUint64(tfdt.start + 4)) : view.getUint32(tfdt.start + 4);
   const composition = runFlags & 2048 ? (view.getUint8(trun.start) === 1 ? view.getInt32(at) : view.getUint32(at)) : 0;
   const time = (decode + composition) / scale;
-  if (!Number.isFinite(time) || time < 0) throw new Error('Horodatage fMP4 invalide.');return time;
+  if (!Number.isFinite(time) || time < 0) throw new Error(tr('invalid_fmp4_timestamp'));return time;
 }

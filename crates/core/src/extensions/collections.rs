@@ -535,20 +535,17 @@ async fn assign_missing(
     admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     check(&auth, &id).await?;
-    let images: Vec<String> = if id.is_native() {
-        query_scalar(
-            "SELECT i.sha256 FROM avatar_images i JOIN avatar_packs p ON p.id=i.pack_id LIMIT 500",
-        )
-        .fetch_all(auth.store.pool())
-        .await
-        .map_err(db)?
-    } else {
-        query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500")
+    if id.is_native() {
+        let count = crate::avatars::defaults::assign_missing(&auth.store)
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
+        return Ok(Json(json!({"count":count})));
+    }
+    let images: Vec<String> = query_scalar("SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id=? LIMIT 500")
             .bind(id.extension_id())
             .fetch_all(auth.store.pool())
             .await
-            .map_err(db)?
-    };
+            .map_err(db)?;
     if images.is_empty() {
         return Err(err(StatusCode::BAD_REQUEST, "avatar_gallery_empty"));
     }
@@ -572,21 +569,15 @@ async fn assign_missing(
 }
 // Used by local and OIDC account creation; existing user photos are never overwritten.
 pub(crate) async fn assign_new_user(auth: &AuthState, user: &str) -> Result<(), Error> {
-    if crate::avatars::load_policy(auth)
+    crate::avatars::defaults::assign_user(&auth.store, user)
         .await
-        .map_err(|s| err(s, "avatar_policy_unavailable"))?
-        .assign_on_create
-    {
-        let images: Vec<String> = query_scalar("SELECT sha256 FROM avatar_images LIMIT 16000")
-            .fetch_all(auth.store.pool())
-            .await
-            .map_err(db)?;
-        if !images.is_empty() {
-            let index = (uuid::Uuid::new_v4().as_u128() % images.len() as u128) as usize;
-            query("INSERT INTO user_avatars(user_id,sha256) VALUES(?,?) ON CONFLICT(user_id) DO NOTHING").bind(user).bind(&images[index]).execute(auth.store.pool()).await.map_err(db)?;
-        }
-    }
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?;
     Ok(())
+}
+async fn fallback_available(auth: &AuthState) -> Result<bool, Error> {
+    let count: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM avatar_images)+(SELECT COUNT(*) FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id JOIN extensions e ON e.id=p.extension_id JOIN extension_publishers pub ON pub.id=e.publisher_id WHERE e.enabled=1 AND pub.active=1)")
+        .fetch_one(auth.store.pool()).await.map_err(db)?;
+    Ok(count == 0)
 }
 async fn account_packs(
     State(auth): State<AuthState>,
@@ -596,6 +587,11 @@ async fn account_packs(
         .await
         .map_err(|s| err(s, "authentication_required"))?;
     let rows:Vec<(String,String,i64)>=query_as("SELECT a.id,a.name,COUNT(i.id) FROM avatar_packs a JOIN avatar_images i ON i.pack_id=a.id GROUP BY a.id,a.name UNION ALL SELECT a.id,a.name,COUNT(i.id) FROM extension_avatar_packs a JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_avatar_images i ON i.pack_id=a.id WHERE e.enabled=1 AND p.active=1 GROUP BY a.id,a.name ORDER BY 2").fetch_all(auth.store.pool()).await.map_err(db)?;
+    if rows.is_empty() {
+        return Ok(Json(
+            json!({"packs":[{"id":crate::avatars::defaults::FALLBACK_PACK,"name":"Orbites · galerie de secours","count":12}]}),
+        ));
+    }
     Ok(Json(
         json!({"packs":rows.into_iter().map(|(id,name,count)|json!({"id":id,"name":name,"count":count})).collect::<Vec<_>>()}),
     ))
@@ -608,12 +604,28 @@ async fn images(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
+    if pack == crate::avatars::defaults::FALLBACK_PACK && fallback_available(&auth).await? {
+        return Ok(Json(
+            json!({"images":crate::avatars::defaults::fallback_images()}),
+        ));
+    }
     let rows:Vec<(String,String)>=query_as("SELECT i.id,i.name FROM avatar_images i JOIN avatar_packs a ON a.id=i.pack_id WHERE a.id=? UNION ALL SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND e.enabled=1 AND p.active=1 ORDER BY 2 LIMIT 500").bind(&pack).bind(&pack).fetch_all(auth.store.pool()).await.map_err(db)?;
     Ok(Json(
         json!({"images":rows.into_iter().map(|(id,name)|json!({"id":id,"name":name,"url":format!("/api/v1/account/avatar/collections/{pack}/{id}")})).collect::<Vec<_>>()}),
     ))
 }
 async fn sha256(auth: &AuthState, pack: &str, image: &str) -> Result<String, Error> {
+    if pack == crate::avatars::defaults::FALLBACK_PACK && fallback_available(auth).await? {
+        let bytes = crate::avatars::defaults::fallback_image(image)
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "avatar_not_found"))?;
+        return Ok(auth
+            .store
+            .assets
+            .put_bytes(&bytes, "image/svg+xml")
+            .await
+            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?
+            .sha256);
+    }
     query_scalar("SELECT i.sha256 FROM avatar_images i JOIN avatar_packs a ON a.id=i.pack_id WHERE a.id=? AND i.id=? UNION ALL SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1").bind(pack).bind(image).bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))
 }
 async fn image(
@@ -624,6 +636,11 @@ async fn image(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
+    if pack == crate::avatars::defaults::FALLBACK_PACK && fallback_available(&auth).await? {
+        let bytes = crate::avatars::defaults::fallback_image(&id)
+            .ok_or_else(|| err(StatusCode::NOT_FOUND, "avatar_not_found"))?;
+        return Ok(crate::avatars::fallback_response(bytes));
+    }
     let sha = sha256(&auth, &pack, &id).await?;
     auth.store
         .assets
@@ -761,8 +778,77 @@ mod tests {
         let policy: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(
             policy,
-            json!({"allowCustom":true,"allowGravatar":false,"assignOnCreate":false})
+            json!({"allowCustom":true,"allowGravatar":false,"assignOnCreate":true,"requireAvatar":true})
         );
+        // A clean installation offers usable local images without a plugin or upload.
+        let gallery = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/account/avatar/collections/native-orbits")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(gallery.status(), StatusCode::OK);
+        let gallery: Value =
+            serde_json::from_slice(&gallery.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(gallery["images"].as_array().unwrap().len(), 12);
+        let first_image = gallery["images"][0]["url"].as_str().unwrap();
+        let image_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(first_image)
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(image_response.status(), StatusCode::OK);
+        assert_eq!(
+            image_response.headers()[header::CONTENT_TYPE],
+            "image/svg+xml"
+        );
+        let assign = |with_csrf| {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/api/v1/admin/avatars/assign-missing")
+                .header(header::COOKIE, &cookie)
+                .header(header::ORIGIN, "http://localhost");
+            if with_csrf {
+                request.header("x-csrf-token", &csrf)
+            } else {
+                request
+            }
+            .body(Body::empty())
+            .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(assign(false)).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        query("DELETE FROM user_avatars")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        for expected in [1, 0] {
+            let response = app.clone().oneshot(assign(true)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body: Value =
+                serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                    .unwrap();
+            assert_eq!(body["count"], expected);
+        }
+        // Continue the import and manual-choice contract with an empty account photo.
+        query("DELETE FROM user_avatars")
+            .execute(store.pool())
+            .await
+            .unwrap();
         let mut png = std::io::Cursor::new(Vec::new());
         image::DynamicImage::new_rgb8(8, 8)
             .write_to(&mut png, image::ImageFormat::Jpeg)
@@ -939,7 +1025,7 @@ mod tests {
                     .header("x-csrf-token", &csrf)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"allowCustom":false,"allowGravatar":true,"assignOnCreate":true}"#,
+                        r#"{"allowCustom":false,"allowGravatar":false,"assignOnCreate":true}"#,
                     ))
                     .unwrap(),
             )
@@ -957,6 +1043,266 @@ mod tests {
                 .await
                 .unwrap(),
             1
+        );
+        for valid_policy in [
+            json!({"allowCustom":true,"allowGravatar":false,"assignOnCreate":true}),
+            json!({"allowCustom":false,"allowGravatar":false,"assignOnCreate":false}),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/admin/avatar-policy")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(valid_policy.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        }
+        // Mandatory avatars and personal uploads are independent persisted settings.
+        let mut png = std::io::Cursor::new(Vec::new());
+        ::image::DynamicImage::new_rgb8(8, 8)
+            .write_to(&mut png, ::image::ImageFormat::Png)
+            .unwrap();
+        for (required, custom) in [(true, true), (true, false), (false, true), (false, false)] {
+            let expected = json!({"allowCustom":custom,"allowGravatar":false,"assignOnCreate":false,"requireAvatar":required});
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/admin/avatar-policy")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(expected.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/v1/admin/avatar-policy")
+                        .header(header::COOKIE, &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(
+                    &response.into_body().collect().await.unwrap().to_bytes()
+                )
+                .unwrap(),
+                expected
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri("/api/v1/account/avatar")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .header(header::CONTENT_TYPE, "image/png")
+                        .body(Body::from(png.get_ref().clone()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if custom {
+                    StatusCode::NO_CONTENT
+                } else {
+                    StatusCode::FORBIDDEN
+                }
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("DELETE")
+                        .uri("/api/v1/account/avatar")
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if required {
+                    StatusCode::FORBIDDEN
+                } else {
+                    StatusCode::NO_CONTENT
+                }
+            );
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/v1/account/avatar")
+                        .header(header::COOKIE, &cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if required {
+                    StatusCode::OK
+                } else {
+                    StatusCode::NOT_FOUND
+                }
+            );
+        }
+        // Optional avatars with automatic assignment disabled stay absent on account creation.
+        query("INSERT INTO users(id,role) VALUES('optional-user','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assign_new_user(&auth, "optional-user").await.unwrap();
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM user_avatars WHERE user_id='optional-user'"
+            )
+            .fetch_one(store.pool())
+            .await
+            .unwrap(),
+            0
+        );
+        let reopened = crate::identity::IdentityStore::open(&root.path().join("native.sqlite"))
+            .await
+            .unwrap();
+        let reopened_auth = AuthState::new(reopened.clone(), "http://localhost".into())
+            .await
+            .unwrap();
+        assert!(
+            !crate::avatars::load_policy(&reopened_auth)
+                .await
+                .unwrap()
+                .require_avatar
+        );
+        assert_eq!(
+            query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM user_avatars WHERE user_id='optional-user'"
+            )
+            .fetch_one(reopened.pool())
+            .await
+            .unwrap(),
+            0
+        );
+        drop(reopened_auth);
+        reopened.close().await;
+        query("DELETE FROM users WHERE id='optional-user'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        // Restore mandatory policy for the remaining empty-gallery checks.
+        query("UPDATE avatar_requirements SET required=1")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        crate::avatars::defaults::assign_user(
+            &store,
+            &auth
+                .authenticate(&HeaderMap::from_iter([(
+                    header::COOKIE,
+                    cookie.parse().unwrap(),
+                )]))
+                .await
+                .unwrap()
+                .user
+                .id,
+        )
+        .await
+        .unwrap();
+        // Removing every administrative collection leaves assigned photos intact
+        // and exposes a usable local gallery for new selections.
+        query("DELETE FROM avatar_packs")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("DELETE FROM user_avatars WHERE user_id='new-user'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let response = app.clone().oneshot(assign(true)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            serde_json::from_slice::<Value>(
+                &response.into_body().collect().await.unwrap().to_bytes()
+            )
+            .unwrap()["count"],
+            1
+        );
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/account/avatar/collections")
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let gallery: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(
+            gallery["packs"][0]["id"],
+            crate::avatars::defaults::FALLBACK_PACK
+        );
+        let fallback = format!(
+            "/api/v1/account/avatar/collections/{}/0",
+            crate::avatars::defaults::FALLBACK_PACK
+        );
+        for method in ["GET", "POST"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(&fallback)
+                        .header(header::COOKIE, &cookie)
+                        .header(header::ORIGIN, "http://localhost")
+                        .header("x-csrf-token", &csrf)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                if method == "GET" {
+                    StatusCode::OK
+                } else {
+                    StatusCode::NO_CONTENT
+                }
+            );
+        }
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM user_avatars")
+                .fetch_one(store.pool())
+                .await
+                .unwrap(),
+            2
         );
     }
     #[tokio::test]

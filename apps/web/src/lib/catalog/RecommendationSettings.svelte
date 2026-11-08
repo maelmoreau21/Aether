@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session } from '../auth/session';
+  import { t } from '../i18n';
   type Options = { enabled: boolean; excludeWatched: boolean; historyDays: number };
   let options = $state<Options>({ enabled: true, excludeWatched: true, historyDays: 180 });
   let loading = $state(true);
@@ -14,7 +15,7 @@
     if (!owner) { loading = false; return; }
     void fetch('/api/v1/account/recommendations/preferences', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
       .then(async response => { if (!response.ok) throw new Error(); const value = await response.json(); if (!controller.signal.aborted) options = value; })
-      .catch(() => { if (!controller.signal.aborted) error = 'Chargement des préférences impossible.'; })
+      .catch(() => { if (!controller.signal.aborted) error = $t('unable_to_load_the_preferences'); })
       .finally(() => { loading = false; });
     return () => controller.abort();
   });
@@ -30,25 +31,25 @@
       if (!response.ok) throw new Error();
       const value = await response.json();
       if ($session?.user.id !== owner) return;
-      options = value; notice = 'Préférences enregistrées.';
+      options = value; notice = $t('preferences_saved');
       window.dispatchEvent(new Event('media-recommendations-changed'));
-    } catch { if ($session?.user.id === owner) error = 'Enregistrement impossible. Vérifiez votre session et les valeurs.'; }
+    } catch { if ($session?.user.id === owner) error = $t('saving_failed_check_your_session_and'); }
     finally { saving = false; }
   }
 </script>
 <section class="card" aria-labelledby="recommendations-heading">
-  <h2 id="recommendations-heading">Recommandations personnelles</h2>
-  <p>Calcul local à partir des genres, personnes, favoris, notes et contenus vus de votre compte. Aucun service externe ni profil calculé conservé. Les contenus similaires d’une fiche restent distincts.</p>
+  <h2 id="recommendations-heading">{$t('personal_recommendations')}</h2>
+  <p>{$t('computed_locally_from_the_genres_people')}</p>
   <form onsubmit={save}>
     <fieldset disabled={loading || saving}>
-      <label><input type="checkbox" bind:checked={options.enabled} /> Activer les recommandations sur l’accueil</label>
-      <label><input type="checkbox" bind:checked={options.excludeWatched} /> Exclure les contenus déjà vus</label>
-      <label>Historique utilisé (jours)<input type="number" min="1" max="3650" required bind:value={options.historyDays} /></label>
-      <p>Cette durée limite le calcul ; elle ne supprime pas votre historique de lecture. Vos favoris et notes actuels restent pris en compte. Le calcul examine au maximum les 1 000 titres les plus récents accessibles.</p>
-      <button type="submit">{saving ? 'Enregistrement…' : 'Enregistrer les recommandations'}</button>
+      <label><input type="checkbox" bind:checked={options.enabled} /> {$t('enable_recommendations_on_the_home_page')}</label>
+      <label><input type="checkbox" bind:checked={options.excludeWatched} /> {$t('exclude_content_already_watched')}</label>
+      <label>{$t('history_used_days')}<input type="number" min="1" max="3650" required bind:value={options.historyDays} /></label>
+      <p>{$t('this_duration_limits_the_computation_it')}</p>
+      <button type="submit">{saving ? 'Enregistrement…' : $t('save_recommendations')}</button>
     </fieldset>
   </form>
-  {#if loading}<p role="status">Chargement…</p>{/if}
+  {#if loading}<p role="status">{$t('loading_settings_short')}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
 </section>

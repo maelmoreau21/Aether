@@ -287,6 +287,7 @@ impl Oidc {
                 .map_err(db)?;
         }
         tx.commit().await.map_err(db)?;
+        drop(conn);
         if crate::extensions::collections::assign_new_user(&self.auth, &user)
             .await
             .is_err()

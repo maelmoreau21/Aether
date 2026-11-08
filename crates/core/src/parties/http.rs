@@ -64,6 +64,9 @@ pub(super) struct CreatePartyInput {
     pub media_id: String,
     pub control_mode: Option<String>,
     pub wait_for_buffering: Option<bool>,
+    /// Public (the default): anyone who may see the title finds and joins it.
+    /// Private: invited users only.
+    pub is_public: Option<bool>,
     pub invite_user_ids: Option<Vec<String>>,
     pub invite_usernames: Option<Vec<String>>,
 }
@@ -119,6 +122,7 @@ pub(super) async fn create_party(
         .map(ControlMode::from_str)
         .unwrap_or(ControlMode::HostOnly);
     let wait_buffering = input.wait_for_buffering.unwrap_or(true);
+    let is_locked = !input.is_public.unwrap_or(true);
 
     let party_id = Uuid::new_v4().to_string();
     let now = current_epoch_s();
@@ -136,7 +140,7 @@ pub(super) async fn create_party(
 
     query(
         "INSERT INTO watch_parties (id, name, host_user_id, media_id, control_mode, state, current_position_ms, position_updated_at_ms, is_locked, wait_for_buffering, created_at) \
-         VALUES (?, ?, ?, ?, ?, 'waiting', 0, ?, 0, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, 'waiting', 0, ?, ?, ?, ?)",
     )
     .bind(&party_id)
     .bind(&party_name)
@@ -144,6 +148,7 @@ pub(super) async fn create_party(
     .bind(media_id)
     .bind(control_mode.as_str())
     .bind(now_ms)
+    .bind(i64::from(is_locked))
     .bind(i64::from(wait_buffering))
     .bind(now)
     .execute(&mut *tx)
@@ -250,6 +255,7 @@ pub(super) async fn create_party(
         "mediaId": media_id,
         "mediaTitle": media_title,
         "controlMode": control_mode.as_str(),
+        "isLocked": is_locked,
         "state": "waiting",
         "createdAt": now
     })))
@@ -260,9 +266,13 @@ pub(super) async fn list_parties(
     headers: HeaderMap,
 ) -> Result<Json<Value>, Error> {
     let actor = auth.authenticate(&headers).await?;
+    // A party nobody is connected to any more is over: never list it as in progress.
+    let _ = super::cleanup::end_abandoned_parties(&auth.store).await;
+    let presence = room_presence().await;
     let now = current_epoch_s();
 
-    // Parties where user is member, host, or invited to
+    // Parties where user is member, host, or invited to, plus the open (unlocked)
+    // parties someone is watching right now: anyone who may see the title may join them.
     let rows: Vec<(
         String,
         String,
@@ -289,6 +299,7 @@ pub(super) async fn list_parties(
          LEFT JOIN inventory_works w ON w.id = p.media_id \
          WHERE p.ended_at IS NULL \
            AND (p.host_user_id = ? \
+                OR p.is_locked = 0 \
                 OR EXISTS(SELECT 1 FROM watch_party_members m WHERE m.party_id = p.id AND m.user_id = ?) \
                 OR EXISTS(SELECT 1 FROM watch_party_invites i WHERE i.party_id = p.id AND (i.target_user_id = ? OR i.target_user_id IS NULL) AND i.expires_at > ? AND i.revoked_at IS NULL)) \
          ORDER BY p.created_at DESC",
@@ -320,6 +331,25 @@ pub(super) async fn list_parties(
         is_member,
     ) in rows
     {
+        let online_count = presence.get(&id).map_or(0, |room| room.online);
+        let own = host_id == actor.user.id || is_member != 0;
+        // Someone else's open party is only offered while it is being watched.
+        let invited = || async {
+            let count: i64 = query_scalar(
+                "SELECT COUNT(*) FROM watch_party_invites WHERE party_id = ? AND (target_user_id = ? OR target_user_id IS NULL) AND expires_at > ? AND revoked_at IS NULL",
+            )
+            .bind(&id)
+            .bind(&actor.user.id)
+            .bind(now)
+            .fetch_one(&auth.store.pool)
+            .await
+            .unwrap_or(0);
+            count > 0
+        };
+        let invited_or_own = own || is_locked != 0 || invited().await;
+        if !invited_or_own && online_count == 0 {
+            continue;
+        }
         // Enforce media authorization
         if can_user_access_media(&auth.store, &actor.user.id, &actor.user.role, &media_id).await {
             parties.push(PartySummary {
@@ -335,6 +365,7 @@ pub(super) async fn list_parties(
                 is_locked: is_locked != 0,
                 wait_for_buffering: wait_buffering != 0,
                 members_count: members_count as usize,
+                online_count,
                 created_at: created,
                 is_host: host_id == actor.user.id,
                 is_member: is_member != 0,
@@ -394,18 +425,20 @@ pub(super) async fn join_party(
     State((auth, hub)): State<(AuthState, WatchPartyHub)>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<Value>, PartyApiError> {
     let actor = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &actor)?;
 
-    let room_arc = hub
-        .get_or_load_room(&id)
-        .await
-        .ok_or(StatusCode::NOT_FOUND)?;
+    let room_arc = hub.get_or_load_room(&id).await.ok_or_else(|| {
+        PartyApiError(
+            StatusCode::NOT_FOUND,
+            "Cette séance est terminée ou n'existe plus.".to_string(),
+        )
+    })?;
     let mut room = room_arc.write().await;
 
     if room.state == PartyState::Ended {
-        return Err(StatusCode::GONE);
+        return Err(StatusCode::GONE.into());
     }
 
     // Verify access to media
@@ -417,12 +450,31 @@ pub(super) async fn join_party(
     )
     .await
     {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(PartyApiError(
+            StatusCode::FORBIDDEN,
+            "Votre compte n'a pas accès à ce titre (bibliothèque ou contrôle parental)."
+                .to_string(),
+        ));
     }
 
-    // If locked and not already a member, reject
-    if room.is_locked && !room.participants.contains_key(&actor.user.id) {
-        return Err(StatusCode::FORBIDDEN);
+    // A private (locked) session admits its members and the users it invited.
+    let invited = || async {
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*) FROM watch_party_invites WHERE party_id = ? AND target_user_id = ? AND expires_at > ? AND revoked_at IS NULL",
+        )
+        .bind(&id)
+        .bind(&actor.user.id)
+        .bind(current_epoch_s())
+        .fetch_one(&auth.store.pool)
+        .await
+        .unwrap_or(0);
+        count > 0
+    };
+    if room.is_locked && !room.participants.contains_key(&actor.user.id) && !invited().await {
+        return Err(PartyApiError(
+            StatusCode::FORBIDDEN,
+            "La séance est verrouillée : demandez une invitation à l'hôte.".to_string(),
+        ));
     }
 
     let now = current_epoch_s();
@@ -444,7 +496,7 @@ pub(super) async fn join_party(
     .bind(now)
     .execute(&auth.store.pool)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|_| PartyApiError::from(StatusCode::INTERNAL_SERVER_ERROR))?;
 
     let participant = LiveParticipant {
         user_id: actor.user.id.clone(),
@@ -512,36 +564,10 @@ pub(super) async fn leave_party(
             reason: Some("A quitté la séance".to_string()),
         });
 
-        // If host leaves, try to transfer to next online participant
-        if room.host_user_id == actor.user.id {
-            if let Some(next_host_id) = room.online_user_ids.iter().next().cloned() {
-                let next_name = room
-                    .participants
-                    .get(&next_host_id)
-                    .map(|p| p.display_name.clone())
-                    .unwrap_or_else(|| next_host_id.clone());
-
-                room.host_user_id = next_host_id.clone();
-                if let Some(p) = room.participants.get_mut(&next_host_id) {
-                    p.role = "host".to_string();
-                }
-
-                let _ = query("UPDATE watch_parties SET host_user_id = ? WHERE id = ?")
-                    .bind(&next_host_id)
-                    .bind(&room.id)
-                    .execute(&auth.store.pool)
-                    .await;
-                let _ = query("UPDATE watch_party_members SET role = 'host' WHERE party_id = ? AND user_id = ?")
-                    .bind(&room.id)
-                    .bind(&next_host_id)
-                    .execute(&auth.store.pool)
-                    .await;
-
-                let _ = room.broadcast_tx.send(ServerMessage::HostTransferred {
-                    new_host_id: next_host_id,
-                    new_host_name: next_name,
-                });
-            }
+        // The host role passes to someone still connected; nobody left ends the party.
+        if after_member_left(&mut room, &actor.user.id, &auth.store).await {
+            drop(room);
+            hub.evict_room(&id).await;
         }
     }
 
@@ -825,6 +851,7 @@ pub(super) async fn list_user_invites(
     headers: HeaderMap,
 ) -> Result<Json<Value>, Error> {
     let actor = auth.authenticate(&headers).await?;
+    let _ = super::cleanup::end_abandoned_parties(&auth.store).await;
     let now = current_epoch_s();
 
     let rows: Vec<(String, String, String, String, String, String, i64, i64)> = query_as(
@@ -869,7 +896,7 @@ pub(super) async fn accept_invite(
     State((auth, hub)): State<(AuthState, WatchPartyHub)>,
     Path(token): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Value>, Error> {
+) -> Result<Json<Value>, PartyApiError> {
     let actor = auth.authenticate(&headers).await?;
     auth.require_csrf(&headers, &actor)?;
 
@@ -886,12 +913,12 @@ pub(super) async fn accept_invite(
     let (_, party_id, target_user_id, expires_at, revoked_at) = row.ok_or(StatusCode::NOT_FOUND)?;
 
     if revoked_at.is_some() || expires_at <= now {
-        return Err(StatusCode::GONE);
+        return Err(StatusCode::GONE.into());
     }
 
     if let Some(target) = target_user_id {
         if target != actor.user.id {
-            return Err(StatusCode::FORBIDDEN);
+            return Err(StatusCode::FORBIDDEN.into());
         }
     }
 
@@ -902,7 +929,7 @@ pub(super) async fn accept_invite(
     let mut room = room_arc.write().await;
 
     if room.state == PartyState::Ended {
-        return Err(StatusCode::GONE);
+        return Err(StatusCode::GONE.into());
     }
 
     if !can_user_access_media(
@@ -913,7 +940,7 @@ pub(super) async fn accept_invite(
     )
     .await
     {
-        return Err(StatusCode::FORBIDDEN);
+        return Err(StatusCode::FORBIDDEN.into());
     }
 
     let display_name = actor

@@ -89,6 +89,8 @@ pub struct TrickplayRequest {
     pub interval_ms: Option<u64>,
     pub width: Option<u32>,
     pub quality: Option<u8>,
+    pub columns: Option<u32>,
+    pub rows: Option<u32>,
     /// A real chapter boundary: extract one image rather than a periodic grid.
     pub chapter_time: Option<f64>,
 }
@@ -132,6 +134,43 @@ impl Default for TrickplayManager {
     fn default() -> Self {
         Self::from_env()
     }
+}
+
+/// Parameters come only from authenticated Core requests, and remain bounded on
+/// both direct HTTP and outbound-channel transports before looking up a cache.
+pub fn parameters(query: &str) -> Option<(f64, u64, u32, u8)> {
+    let values: HashMap<_, _> = query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .collect();
+    let duration = values.get("duration")?.parse::<f64>().ok()?;
+    let interval = values.get("intervalMs")?.parse::<u64>().ok()?;
+    let width = values.get("width")?.parse::<u32>().ok()?;
+    let quality = values.get("quality")?.parse::<u8>().ok()?;
+    (duration.is_finite()
+        && duration > 0.0
+        && duration <= 86400.0
+        && (1000..=60000).contains(&interval)
+        && (160..=1920).contains(&width)
+        && (1..=31).contains(&quality))
+    .then_some((duration, interval, width, quality))
+}
+
+/// Optional sprite-sheet grid dimensions (`columns` × `rows`, default `10×10`).
+pub fn grid_parameters(query: &str) -> Option<(u32, u32)> {
+    let values: HashMap<_, _> = query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .collect();
+    let cols = match values.get("columns") {
+        Some(v) => v.parse::<u32>().ok()?,
+        None => DEFAULT_COLUMNS,
+    };
+    let rows = match values.get("rows") {
+        Some(v) => v.parse::<u32>().ok()?,
+        None => DEFAULT_ROWS,
+    };
+    ((1..=20).contains(&cols) && (1..=20).contains(&rows)).then_some((cols, rows))
 }
 
 impl TrickplayManager {
@@ -217,6 +256,15 @@ impl TrickplayManager {
         if let Some(time) = request.chapter_time {
             data.extend_from_slice(b":chapter:");
             data.extend_from_slice(&time.to_bits().to_le_bytes());
+        } else {
+            let cols = request.columns.unwrap_or(DEFAULT_COLUMNS);
+            let rows = request.rows.unwrap_or(DEFAULT_ROWS);
+            if cols != DEFAULT_COLUMNS || rows != DEFAULT_ROWS {
+                data.extend_from_slice(b":grid:");
+                data.extend_from_slice(&cols.to_le_bytes());
+                data.push(b'x');
+                data.extend_from_slice(&rows.to_le_bytes());
+            }
         }
 
         media_contracts::protocol::sha256_hex(&data)
@@ -242,6 +290,10 @@ impl TrickplayManager {
             || meta.width == 0
             || meta.height == 0
         {
+            return None;
+        }
+        // Legacy JPEG sheets are regenerated as WebP once this Node's FFmpeg can encode it.
+        if meta.mime == "image/jpeg" && self.enabled && self.supports_libwebp().await {
             return None;
         }
 
@@ -511,6 +563,21 @@ impl TrickplayManager {
         supported
     }
 
+    /// Durable task work shares the same single worker and operator kill switch
+    /// as previews requested by a player. The Core/Node task runner handles
+    /// cancellation and playback preemption while this future waits or decodes.
+    pub async fn generate_background(
+        &self,
+        request: &TrickplayRequest,
+        key: &str,
+    ) -> Result<(), &'static str> {
+        if !self.enabled {
+            return Err("generation_disabled");
+        }
+        let _permit = self.worker.acquire().await.map_err(|_| "worker_closed")?;
+        self.execute_generation(request, key).await
+    }
+
     /// Execute the FFmpeg generation, resuming partial work if present.
     pub async fn execute_generation(
         &self,
@@ -537,8 +604,12 @@ impl TrickplayManager {
         let interval_ms = request.interval_ms.unwrap_or(DEFAULT_INTERVAL_MS);
         let width = request.width.unwrap_or(DEFAULT_WIDTH);
         let quality = request.quality.unwrap_or(DEFAULT_QUALITY);
+        let req_cols = request.columns.unwrap_or(DEFAULT_COLUMNS);
+        let req_rows = request.rows.unwrap_or(DEFAULT_ROWS);
         if !(160..=1920).contains(&width)
             || !(1..=31).contains(&quality)
+            || !(1..=20).contains(&req_cols)
+            || !(1..=20).contains(&req_rows)
             || interval_ms == 0
             || request
                 .chapter_time
@@ -549,12 +620,12 @@ impl TrickplayManager {
         let cols = if request.chapter_time.is_some() {
             1
         } else {
-            DEFAULT_COLUMNS.min(8192 / width)
+            req_cols.min((8192 / width).max(1))
         };
         let rows = if request.chapter_time.is_some() {
             1
         } else {
-            DEFAULT_ROWS.min(8192 / (width * 2))
+            req_rows.min((8192 / (width * 2)).max(1))
         };
 
         let frame_count = if request.chapter_time.is_some() {
@@ -687,6 +758,9 @@ impl TrickplayManager {
 
         match publish_work_dir(&work, &target).await {
             Ok(_) => {
+                if request.chapter_time.is_none() {
+                    self.remove_superseded(&request.asset_id, key).await;
+                }
                 self.enforce_quota().await;
                 Ok(())
             }
@@ -843,6 +917,29 @@ impl TrickplayManager {
             .verify_unchanged_sync()
             .map_err(|_| "source_changed")?;
         Ok(())
+    }
+
+    /// A modified source or a new profile publishes under a new fingerprint: earlier
+    /// preview grids of the same asset are obsolete and removed (chapter images stay).
+    async fn remove_superseded(&self, asset_id: &str, keep: &str) {
+        let Ok(mut read_dir) = tokio::fs::read_dir(&self.cache_root).await else {
+            return;
+        };
+        while let Ok(Some(entry)) = read_dir.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == keep || !cache_key(&name) {
+                continue;
+            }
+            let Ok(bytes) = tokio::fs::read(entry.path().join("manifest.json")).await else {
+                continue;
+            };
+            let Ok(meta) = serde_json::from_slice::<CacheManifest>(&bytes) else {
+                continue;
+            };
+            if meta.asset_id == asset_id && (meta.columns > 1 || meta.rows > 1) {
+                remove_dir_tolerant(&entry.path()).await;
+            }
+        }
     }
 
     /// Enforce global cache size quota using LRU eviction.
@@ -1260,12 +1357,20 @@ mod tests {
             interval_ms: None,
             width: None,
             quality: None,
+            columns: None,
+            rows: None,
             chapter_time: None,
         };
         let cache = temp.path().join("cache");
         std::fs::create_dir(&cache).unwrap();
-        let manager =
-            TrickplayManager::new(cache.clone(), 16 * 1024 * 1024, "ffmpeg".into(), true, None);
+        // No FFmpeg here: legacy JPEG caches stay valid when WebP cannot be produced.
+        let manager = TrickplayManager::new(
+            cache.clone(),
+            16 * 1024 * 1024,
+            "aether-missing-ffmpeg".into(),
+            true,
+            None,
+        );
         let key = manager.fingerprint(&request);
         let image = image::DynamicImage::new_rgb8(320, 180);
         let jellyfin = media.join("film.mkv.trickplay").join("320 - 1x1");
@@ -1299,8 +1404,13 @@ mod tests {
                 serde_json::to_vec(&metadata).unwrap(),
             )
             .unwrap();
-            let restarted =
-                TrickplayManager::new(cache.clone(), 16 * 1024 * 1024, "ffmpeg".into(), true, None);
+            let restarted = TrickplayManager::new(
+                cache.clone(),
+                16 * 1024 * 1024,
+                "aether-missing-ffmpeg".into(),
+                true,
+                None,
+            );
             assert_eq!(
                 restarted.check_native_cache(&request).await.unwrap().mime,
                 mime
@@ -1358,9 +1468,21 @@ mod tests {
             interval_ms: Some(10_000),
             width: Some(320),
             quality: Some(7),
+            columns: None,
+            rows: None,
             chapter_time: None,
         };
         let fp1 = mgr.fingerprint(&base);
+
+        let mut mod_default_grid = base.clone();
+        mod_default_grid.columns = Some(10);
+        mod_default_grid.rows = Some(10);
+        assert_eq!(fp1, mgr.fingerprint(&mod_default_grid));
+
+        let mut mod_custom_grid = base.clone();
+        mod_custom_grid.columns = Some(5);
+        mod_custom_grid.rows = Some(5);
+        assert_ne!(fp1, mgr.fingerprint(&mod_custom_grid));
 
         let mut mod_time = base.clone();
         mod_time.modified_ns = "101".into();
@@ -1379,6 +1501,24 @@ mod tests {
         let first = mgr.fingerprint(&chapter);
         chapter.chapter_time = Some(20.0);
         assert_ne!(first, mgr.fingerprint(&chapter));
+    }
+
+    #[test]
+    fn signed_trickplay_parameters_bound_both_transports() {
+        assert_eq!(
+            parameters("duration=120&intervalMs=5000&width=410&quality=12"),
+            Some((120.0, 5000, 410, 12))
+        );
+        for query in [
+            "duration=NaN&intervalMs=5000&width=320&quality=7",
+            "duration=0&intervalMs=5000&width=320&quality=7",
+            "duration=120&intervalMs=0&width=320&quality=7",
+            "duration=120&intervalMs=5000&width=9999&quality=7",
+            "duration=120&intervalMs=5000&width=320&quality=0",
+            "",
+        ] {
+            assert!(parameters(query).is_none(), "{query}");
+        }
     }
 
     #[tokio::test]
@@ -1401,6 +1541,8 @@ mod tests {
             interval_ms: None,
             width: Some(320),
             quality: Some(7),
+            columns: None,
+            rows: None,
             chapter_time: Some(2.0),
         };
         assert_eq!(manager.enqueue(request.clone()), QueueStatus::Queued);
@@ -1445,6 +1587,8 @@ mod tests {
             interval_ms: None,
             width: Some(320),
             quality: Some(7),
+            columns: None,
+            rows: None,
             chapter_time: Some(2.0),
         };
         let key = manager.fingerprint(&request);

@@ -176,6 +176,7 @@ async fn cached_scan_skips_probe_and_temporary_files() {
     let cache = HashMap::from([(
         "Film (2024)/film.mp4".into(),
         CachedFile {
+            content_fingerprint: None,
             size: m.len(),
             modified_ns: m
                 .modified()
@@ -306,6 +307,7 @@ async fn dense_directory_scan_caches_folder_videos_and_reuses_sidecars() {
         cache.insert(
             format!("Dense [tmdb-777]/{filename}"),
             CachedFile {
+                content_fingerprint: None,
                 size: meta.len(),
                 modified_ns,
                 probe: Probe {
@@ -353,6 +355,7 @@ async fn scanner_ignores_nas_system_folders_nomedia_and_custom_exclusions() {
     let cache = HashMap::from([(
         "Valid (2024)/valid.mp4".into(),
         CachedFile {
+            content_fingerprint: None,
             size: m.len(),
             modified_ns: m
                 .modified()
@@ -579,4 +582,216 @@ async fn cancelled_traversal_is_interrupted() {
         .unwrap();
     assert!(!report.complete);
     assert!(report.interrupted);
+}
+
+/// Everything observable about a tree: kind, size, mtime and permissions of every entry.
+type TreeSnapshot = BTreeMap<String, (bool, u64, Option<std::time::SystemTime>, bool)>;
+
+fn snapshot(root: &Path) -> TreeSnapshot {
+    fn walk(dir: &Path, root: &Path, out: &mut TreeSnapshot) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let meta = entry.metadata().unwrap();
+            let rel = entry
+                .path()
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.insert(
+                rel,
+                (
+                    meta.is_dir(),
+                    meta.len(),
+                    meta.modified().ok(),
+                    meta.permissions().readonly(),
+                ),
+            );
+            if meta.is_dir() {
+                walk(&entry.path(), root, out);
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    walk(root, root, &mut out);
+    out
+}
+
+fn cached(path: &Path) -> CachedFile {
+    let m = std::fs::metadata(path).unwrap();
+    CachedFile {
+        content_fingerprint: None,
+        size: m.len(),
+        modified_ns: m
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string(),
+        probe: Probe {
+            chapters: Vec::new(),
+            streams: vec![],
+            format: BTreeMap::new(),
+        },
+    }
+}
+
+#[cfg(unix)]
+fn set_modes(root: &Path, dir_mode: u32, file_mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fn walk(dir: &Path, dir_mode: u32, file_mode: u32) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, dir_mode, file_mode);
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(dir_mode)).unwrap();
+            } else {
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(file_mode))
+                    .unwrap();
+            }
+        }
+    }
+    walk(root, dir_mode, file_mode);
+    std::fs::set_permissions(root, std::fs::Permissions::from_mode(dir_mode)).unwrap();
+}
+
+#[tokio::test]
+async fn scanning_a_library_never_writes_beside_the_media() {
+    let temp = tempfile::tempdir().unwrap();
+    let library = temp.path().join("library");
+    let film = library.join("Film (2024)");
+    tokio::fs::create_dir_all(&film).await.unwrap();
+    tokio::fs::write(film.join("film.mp4"), vec![7u8; 300_000])
+        .await
+        .unwrap();
+    tokio::fs::write(
+        film.join("movie.nfo"),
+        b"<movie><title>T</title><tmdbid>5</tmdbid></movie>",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(film.join("poster.jpg"), b"not really an image")
+        .await
+        .unwrap();
+    let cache = HashMap::from([(
+        "Film (2024)/film.mp4".to_owned(),
+        cached(&film.join("film.mp4")),
+    )]);
+    #[cfg(unix)]
+    set_modes(&library, 0o555, 0o444);
+    let before = snapshot(&library);
+    let cold = scan(&library, &HashMap::new(), &AtomicBool::new(false)).await;
+    let warm = scan(&library, &cache, &AtomicBool::new(false)).await;
+    let after = snapshot(&library);
+    #[cfg(unix)]
+    set_modes(&library, 0o755, 0o644);
+    let (cold, warm) = (cold.unwrap(), warm.unwrap());
+    assert_eq!(
+        before, after,
+        "a scan must leave the library exactly as it found it"
+    );
+    assert!(
+        after.keys().all(|p| !p.contains(".aether")),
+        "no .aether folder or file may appear beside the media: {after:?}"
+    );
+    // The cold scan probes (and fails on synthetic bytes); the warm one runs the same read-only
+    // path through NFO, artwork and fingerprint discovery.
+    assert_eq!(cold.discovered, 1);
+    assert_eq!(warm.discovered, 1);
+    assert_eq!(warm.files.len(), 1);
+}
+
+#[tokio::test]
+async fn content_fingerprint_is_computed_once_then_reused_until_the_file_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("Film (2024).mp4");
+    tokio::fs::write(&path, vec![9u8; 400_000]).await.unwrap();
+    let entry = cached(&path);
+    let one = |entry: CachedFile| HashMap::from([("Film (2024).mp4".to_owned(), entry)]);
+
+    let fresh = scan(temp.path(), &one(entry.clone()), &AtomicBool::new(false))
+        .await
+        .unwrap();
+    let computed = fresh.files[0]
+        .content_fingerprint
+        .clone()
+        .expect("unknown to the Core: fingerprinted");
+    assert!(crate::fingerprint::is_well_formed(&computed));
+    assert!(computed.starts_with("b3s1:400000:"));
+
+    // The Core already knows a value for this exact size and mtime: it is reused verbatim (a
+    // sentinel proves the file was not read again, which keeps a Node restart cheap).
+    let sentinel = "b3s1:400000:00000000000000000000000000000000".to_owned();
+    let mut known = entry.clone();
+    known.content_fingerprint = Some(sentinel.clone());
+    let reused = scan(temp.path(), &one(known.clone()), &AtomicBool::new(false))
+        .await
+        .unwrap();
+    assert_eq!(reused.reused, 1);
+    assert_eq!(
+        reused.files[0].content_fingerprint.as_deref(),
+        Some(sentinel.as_str())
+    );
+
+    // A malformed cached value is ignored, not trusted.
+    known.content_fingerprint = Some("garbage".into());
+    let repaired = scan(temp.path(), &one(known), &AtomicBool::new(false))
+        .await
+        .unwrap();
+    assert_eq!(
+        repaired.files[0].content_fingerprint.as_deref(),
+        Some(computed.as_str())
+    );
+
+    // The file changes: the stale cached value no longer applies, even though it is well formed.
+    tokio::fs::write(&path, vec![9u8; 400_001]).await.unwrap();
+    let mut stale = entry;
+    stale.content_fingerprint = Some(sentinel.clone());
+    let changed = scan(temp.path(), &one(stale), &AtomicBool::new(false))
+        .await
+        .unwrap();
+    assert!(
+        changed
+            .files
+            .iter()
+            .all(|f| f.content_fingerprint.as_deref() != Some(sentinel.as_str()))
+    );
+}
+
+#[tokio::test]
+async fn contradictory_nfo_identifiers_warn_and_are_not_used() {
+    let temp = tempfile::tempdir().unwrap();
+    let film = temp.path().join("Dense [tmdb-777] (2024)");
+    tokio::fs::create_dir(&film).await.unwrap();
+    let path = film.join("film.mp4");
+    tokio::fs::write(&path, b"synthetic").await.unwrap();
+    // The NFO disagrees with the folder name (and so does its own second source).
+    tokio::fs::write(
+        film.join("movie.nfo"),
+        b"<movie><title>Dense</title><tmdbid>1</tmdbid><imdbid>tt0000001</imdbid></movie>",
+    )
+    .await
+    .unwrap();
+    let cache = HashMap::from([("Dense [tmdb-777] (2024)/film.mp4".to_owned(), cached(&path))]);
+    let report = scan(temp.path(), &cache, &AtomicBool::new(false))
+        .await
+        .unwrap();
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.message.contains("contradictory tmdb")),
+        "{:?}",
+        report.warnings
+    );
+    match &report.files[0].editorial {
+        super::super::nfo::NfoOutcome::Valid { metadata, .. } => {
+            assert_eq!(metadata.title.as_deref(), Some("Dense"), "the rest is kept");
+            assert_eq!(metadata.external_ids["imdb"], "tt0000001");
+        }
+        other => panic!("expected a valid NFO, got {other:?}"),
+    }
+    // The name keeps its own id for matching; the Core drops the contradicted provider.
+    assert_eq!(report.files[0].external_ids["tmdb"], "777");
 }

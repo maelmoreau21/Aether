@@ -239,6 +239,13 @@ pub struct MetadataCollection {
     pub name: String,
 }
 
+/// Version of the localisation contract (`DetailsRequest::languages`, regional
+/// `translations` keys, season and episode translations, `StructuredMetadata::locale`).
+/// Version 1 is the original single-language contract. Both sides ignore fields they do
+/// not know, so a version-1 plugin keeps working against a version-2 Core and the reverse:
+/// the Core simply receives no per-language data from it.
+pub const LOCALIZATION_CONTRACT: u32 = 2;
+
 /// Full structured metadata returned by a provider
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -255,6 +262,10 @@ pub struct StructuredMetadata {
     pub original_title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original_language: Option<String>,
+    /// Language the provider actually used for `title`, `tagline` and `synopsis`, as a
+    /// BCP-47 tag (`fr-FR`). Absent: unknown, the library language is assumed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tagline: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -287,6 +298,8 @@ pub struct StructuredMetadata {
     pub images: Vec<MediaImage>,
     #[serde(default)]
     pub seasons: Vec<SeasonMetadata>,
+    /// Keyed by BCP-47 tag. Regional tags (`fr-CA`) are kept distinct; a bare
+    /// language (`fr`) means the provider has no regional variant for it.
     #[serde(default)]
     pub translations: BTreeMap<String, TranslationItem>,
 }
@@ -320,6 +333,9 @@ pub struct EpisodeMetadata {
     pub still_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rating: Option<f64>,
+    /// Additional languages requested through `DetailsRequest::languages`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub translations: BTreeMap<String, TranslationItem>,
 }
 
 /// Metadata for a TV season
@@ -335,6 +351,9 @@ pub struct SeasonMetadata {
     pub poster_url: Option<String>,
     #[serde(default)]
     pub episodes: Vec<EpisodeMetadata>,
+    /// Additional languages requested through `DetailsRequest::languages`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub translations: BTreeMap<String, TranslationItem>,
 }
 
 /// Search query payload sent to the extension
@@ -387,6 +406,21 @@ pub struct DetailsRequest {
     pub media_type: MediaType,
     #[serde(default)]
     pub external_ids: BTreeMap<String, String>,
+    /// Extra languages the Core wants in `translations`, besides the main language of
+    /// the request. Bounded by the Core; a provider may return fewer, never more.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+}
+
+impl Default for DetailsRequest {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            media_type: default_media_type(),
+            external_ids: BTreeMap::new(),
+            languages: Vec::new(),
+        }
+    }
 }
 
 /// Images request payload

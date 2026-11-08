@@ -6,10 +6,10 @@ import { extensionPins, readExtensionPins, toggleExtensionPin } from './extensio
 const account = (id: string, role: 'administrator' | 'user' = 'administrator'): Session => ({ user: { id, login: id, role }, csrfToken: 'private' });
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 
-it('ignores corrupt, unknown and duplicate pin values', () => {
+it('ignores corrupt, invalid and duplicate pin values; any extension id is pinnable', () => {
   expect(readExtensionPins('invalid')).toEqual([]);
   expect(readExtensionPins('{}')).toEqual([]);
-  expect(readExtensionPins('["media-reports",null,"unknown","media-reports"]')).toEqual(['media-reports']);
+  expect(readExtensionPins('["media-reports",null,"Bad id!","tmdb","media-reports"]')).toEqual(['media-reports', 'tmdb']);
 });
 
 it('persists pins per administrator and never leaks them to another account', () => {
@@ -30,5 +30,6 @@ it('keeps pinning usable when browser storage is blocked', () => {
   session.set(account('a')); toggleExtensionPin('media-reports');
   expect(get(extensionPins)).toEqual(['media-reports']);
   toggleExtensionPin('media-reports'); expect(get(extensionPins)).toEqual([]);
-  toggleExtensionPin('unknown'); expect(get(extensionPins)).toEqual([]);
+  toggleExtensionPin('Bad id!'); expect(get(extensionPins)).toEqual([]);
+  toggleExtensionPin('fanart-tv', 'Fanart.tv'); expect(get(extensionPins)).toEqual(['fanart-tv']);
 });

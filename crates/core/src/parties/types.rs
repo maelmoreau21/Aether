@@ -74,6 +74,9 @@ pub struct PartySummary {
     pub is_locked: bool,
     pub wait_for_buffering: bool,
     pub members_count: usize,
+    /// Members connected right now.
+    #[serde(default)]
+    pub online_count: usize,
     pub created_at: i64,
     pub is_host: bool,
     pub is_member: bool,

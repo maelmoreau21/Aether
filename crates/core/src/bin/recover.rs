@@ -1,7 +1,7 @@
 //! Offline recovery staging. Never connects to a database or applies configuration.
 use std::{ffi::OsString, path::PathBuf};
 
-const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nOnly version 2 archives are supported. The output directory must not exist; its parent must exist. Archives are unencrypted and contain sensitive data. Stop Core and use media-restore separately.";
+const USAGE: &str = "usage: media-recover ARCHIVE NEW_OUTPUT_DIR\nSupported: MDBK0003 (encrypted; set MEDIA_BACKUP_KEY_FILE or MEDIA_BACKUP_KEY) and legacy MDBK0002 (unencrypted). MDBK0001 needs the Aether release that created it. The output directory must not exist; its parent must exist. The archive is only read, never modified. Extracted files are not encrypted and contain sensitive data. Stop Core and use media-restore separately.";
 
 fn paths(mut args: impl Iterator<Item = OsString>) -> Result<(PathBuf, PathBuf), &'static str> {
     let source = args.next().ok_or(USAGE)?;
@@ -45,9 +45,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!(
         "Windows: recovered files inherit the destination folder's ACL. Verify access to the folder and any copies; Aether does not validate or restrict these ACLs."
     );
-    let summary = media_poc::backup_bundle::extract(&source, &target).await?;
+    // Only MDBK0003 needs a key; legacy MDBK0002 archives stay readable without one.
+    let key = media_poc::backup_bundle::key_from_settings(&|name: &str| std::env::var(name).ok())?;
+    let summary = media_poc::backup_bundle::extract(&source, &target, key.as_ref()).await?;
     println!(
-        "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings."
+        "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings and the extracted files are NOT encrypted."
     );
     println!("{}", next_steps(&summary.engine)?);
     if summary.assets > 0 {

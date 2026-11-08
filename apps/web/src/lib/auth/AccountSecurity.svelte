@@ -3,6 +3,7 @@
   import { session } from './session';
   import DeviceSessions from './DeviceSessions.svelte';
   import QuickConnectApprove from './QuickConnectApprove.svelte';
+  import { t } from '../i18n';
   let { mode = 'security' }: { mode?: 'security' | 'devices' } = $props();
   let canCreate=$state(false),login=$state('');
   let currentPassword = $state('');
@@ -17,29 +18,29 @@
       const response = await fetch(path, { method, headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' }, body: body === undefined ? undefined : JSON.stringify(body) });
       if (!response.ok) {
         const code = (await response.json()).error;
-        throw new Error(({ invalid_current_password: 'Le mot de passe actuel est incorrect.', invalid_password: 'Utilisez 15 à 128 caractères sans caractère de contrôle.', local_credentials_required: 'Le mot de passe est géré par votre fournisseur SSO.', recent_login_required: 'Reconnectez-vous avec le SSO puis réessayez dans les cinq minutes.', sso_local_accounts_blocked: 'La création d’identifiants locaux est désactivée.', local_credentials_conflict: 'Identifiant indisponible ou compte déjà configuré.', try_later: 'Trop de tentatives. Réessayez dans une minute.' } as Record<string,string>)[code] ?? 'Opération impossible. Réessayez.');
+        throw new Error(({ invalid_current_password: $t('the_current_password_is_incorrect'), invalid_password: $t('use_15_to_128_characters_with'), local_credentials_required: $t('the_password_is_managed_by_your'), recent_login_required: $t('sign_in_again_with_sso_then'), sso_local_accounts_blocked: $t('creating_local_credentials_is_disabled'), local_credentials_conflict: $t('username_unavailable_or_account_already'), try_later: $t('too_many_attempts_try_again_in') } as Record<string,string>)[code] ?? $t('operation_not_possible_try_again'));
       }
       return true;
-    } catch (cause) { error = cause instanceof Error ? cause.message : 'Opération impossible.'; return false; }
+    } catch (cause) { error = cause instanceof Error ? cause.message : $t('operation_failed'); return false; }
     finally { busy = false; currentPassword = ''; newPassword = ''; confirmation = ''; }
   }
   async function change(event: SubmitEvent) {
     event.preventDefault();
-    if (newPassword !== confirmation) { error = 'Les deux nouveaux mots de passe doivent être identiques.'; return; }
+    if (newPassword !== confirmation) { error = $t('the_two_new_passwords_must_be'); return; }
     if (await mutate($session?.user.sso ? '/api/v1/account/local-credentials' : '/api/v1/account/password', $session?.user.sso ? 'POST' : 'PUT', $session?.user.sso ? {login,password:newPassword} : { currentPassword, newPassword })) window.location.reload();
   }
 </script>
 <section>
-{#if mode === 'security'}<h3>Connexion par mot de passe</h3>
-{#if $session?.user.sso}<p>Votre mot de passe est géré par votre fournisseur SSO.</p>{/if}
+{#if mode === 'security'}<h3>{$t('password_sign_in')}</h3>
+{#if $session?.user.sso}<p>{$t('your_password_is_managed_by_your')}</p>{/if}
 {#if !$session?.user.sso || canCreate}
 <form onsubmit={change}>
-{#if $session?.user.sso}<p>Reconnectez-vous avec le SSO avant de créer vos identifiants locaux (moins de cinq minutes).</p><label>Identifiant local<input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" autocomplete="username" bind:value={login} disabled={busy} /></label>{:else}
-  <label>Mot de passe actuel<input type="password" autocomplete="current-password" required maxlength="512" bind:value={currentPassword} disabled={busy} /></label>
+{#if $session?.user.sso}<p>{$t('sign_in_again_with_sso_before')}</p><label>{$t('local_username')}<input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" autocomplete="username" bind:value={login} disabled={busy} /></label>{:else}
+  <label>{$t('current_password')}<input type="password" autocomplete="current-password" required maxlength="512" bind:value={currentPassword} disabled={busy} /></label>
   {/if}
-  <label>Nouveau mot de passe<input type="password" autocomplete="new-password" required minlength="15" maxlength="128" bind:value={newPassword} disabled={busy} /></label>
-  <label>Confirmer le nouveau mot de passe<input type="password" autocomplete="new-password" required minlength="15" maxlength="128" bind:value={confirmation} disabled={busy} /></label>
-  {#if !$session?.user.sso}<p>Toutes vos sessions seront déconnectées après le changement.</p>{/if}<button disabled={busy}>{$session?.user.sso ? 'Créer mes identifiants locaux' : 'Changer le mot de passe'}</button>
+  <label>{$t('new_password')}<input type="password" autocomplete="new-password" required minlength="15" maxlength="128" bind:value={newPassword} disabled={busy} /></label>
+  <label>{$t('confirm_the_new_password')}<input type="password" autocomplete="new-password" required minlength="15" maxlength="128" bind:value={confirmation} disabled={busy} /></label>
+  {#if !$session?.user.sso}<p>{$t('all_your_sessions_will_be_signed')}</p>{/if}<button disabled={busy}>{$session?.user.sso ? $t('create_my_local_credentials') : $t('change_the_password')}</button>
 </form>{/if}
 {:else}<QuickConnectApprove /><DeviceSessions />
 {/if}

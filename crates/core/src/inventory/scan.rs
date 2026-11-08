@@ -30,6 +30,7 @@ pub async fn load_cache(
                     size: r.get::<i64, _>("size") as u64,
                     modified_ns: r.get("modified_ns"),
                     probe: decode(r.get("probe_json"))?,
+                    content_fingerprint: None,
                 },
             ))
         })
@@ -48,7 +49,7 @@ pub async fn load_scan_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let mut rows = query(
-        "SELECT relative_path,size,modified_ns FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
+        "SELECT a.relative_path,a.size,a.modified_ns,f.fingerprint FROM inventory_assets a LEFT JOIN inventory_asset_fingerprints f ON f.asset_id=a.id AND f.size=a.size AND f.modified_ns=a.modified_ns WHERE a.library_id=? AND a.available=1 AND a.source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
     )
     .bind(library_id)
     .fetch(&store.pool);
@@ -61,6 +62,7 @@ pub async fn load_scan_cache(
                 size: r.get::<i64, _>("size") as u64,
                 modified_ns: r.get("modified_ns"),
                 probe: Probe::default(),
+                content_fingerprint: r.get::<Option<String>, _>("fingerprint"),
             },
         );
     }
@@ -359,6 +361,10 @@ pub async fn clean_staging(store: &IdentityStore, scan_id: &str) -> Result<(), s
         .bind(scan_id)
         .execute(&store.pool)
         .await?;
+    query("DELETE FROM scan_staging_fingerprints WHERE scan_id=?")
+        .bind(scan_id)
+        .execute(&store.pool)
+        .await?;
     query("DELETE FROM scan_staging_issues WHERE scan_id=?")
         .bind(scan_id)
         .execute(&store.pool)
@@ -564,6 +570,20 @@ pub async fn stage_batch(
             .bind(&file.relative_path)
             .execute(&mut *tx)
             .await?;
+        // A malformed or absent fingerprint only means "no rename hint" for this file.
+        if let Some(fingerprint) = file
+            .content_fingerprint
+            .as_deref()
+            .filter(|value| crate::node::fingerprint::is_well_formed(value))
+        {
+            query("INSERT INTO scan_staging_fingerprints(scan_id,relative_path,library_id,fingerprint) VALUES(?,?,?,?) ON CONFLICT(scan_id,relative_path) DO UPDATE SET fingerprint=excluded.fingerprint,library_id=excluded.library_id")
+                .bind(scan_id)
+                .bind(&file.relative_path)
+                .bind(library_id)
+                .bind(fingerprint)
+                .execute(&mut *tx)
+                .await?;
+        }
     }
 
     if let Some((job, attempt)) = scan_id.split_once(':')

@@ -4,6 +4,8 @@
   import type { SyncPartyClient } from './sync-client.svelte';
   import type { ControlMode } from './types';
   import { initials, partyInviteUrl } from './party-api';
+  import { t, fmt } from '../i18n';
+  import { resolve } from '$app/paths';
 
   let {
     client,
@@ -73,7 +75,7 @@
 
   function copyInviteLink() {
     if (typeof window === 'undefined' || !client.party) return;
-    const url = partyInviteUrl(window.location.origin, client.party.id);
+    const url = partyInviteUrl(`${window.location.origin}${resolve('/')}`, client.party.id);
     if (navigator?.clipboard) {
       void navigator.clipboard.writeText(url);
     }
@@ -120,30 +122,30 @@
   <div class="countdown-backdrop" role="alert">
     <div class="countdown-circle">
       <span class="countdown-number">{client.countdownSeconds}</span>
-      <span class="countdown-label">Départ collectif...</span>
+      <span class="countdown-label">{$t('starting_together')}</span>
     </div>
   </div>
 {/if}
 
 <!-- Salon d'attente (Waiting Room) -->
 {#if isWaiting}
-  <div class="waiting-room-overlay" role="dialog" aria-label="Salon d'attente de la séance">
+  <div class="waiting-room-overlay" role="dialog" aria-label={$t('session_waiting_room')}>
     <div class="waiting-room-card">
       <header class="waiting-header">
         <div class="badge-live">
           <span class="pulse-dot"></span>
-          <span>SALON D'ATTENTE</span>
+          <span>{$t('waiting_room')}</span>
         </div>
-        <h2>{client.party?.name ?? 'Séance communautaire'}</h2>
-        <p class="waiting-media-title">Film / Épisode : <strong>{client.party?.mediaTitle}</strong></p>
+        <h2>{client.party?.name ?? $t('community_session')}</h2>
+        <p class="waiting-media-title">{$t('film_episode')} <strong>{client.party?.mediaTitle}</strong></p>
       </header>
 
-      <section class="members-lobby" aria-label="Participants dans le salon">
+      <section class="members-lobby" aria-label={$t('participants_in_the_room')}>
         <div class="lobby-header">
-          <h3>Participants ({client.members.length})</h3>
+          <h3>{$t('participants', { count: client.members.length })}</h3>
           <button type="button" class="btn-copy-invite" onclick={copyInviteLink}>
             <Icon name="copy" size={14} />
-            <span>Copier le lien d'invitation</span>
+            <span>{$t('copy_the_invitation_link')}</span>
           </button>
         </div>
 
@@ -157,11 +159,11 @@
                 <span class="member-name">{member.displayName}</span>
                 <span class="member-role">
                   {#if member.role === 'host'}
-                    <Icon name="star" size={14} /> Organisateur
+                    <Icon name="star" size={14} /> {$t('organiser')}
                   {:else if member.isReady}
-                    <Icon name="check" size={14} /> Prêt
+                    <Icon name="check" size={14} /> {$t('ready')}
                   {:else}
-                    <Icon name="clock" size={14} /> En attente
+                    <Icon name="clock" size={14} /> {$t('waiting')}
                   {/if}
                 </span>
               </div>
@@ -175,14 +177,14 @@
         <section class="host-settings-panel">
           <div class="settings-row">
             <label>
-              Contrôles de lecture :
+              {$t('player_playback_controls')}
               <select
                 value={client.party?.controlMode ?? 'host_only'}
                 onchange={(e) => updateControlMode(e.currentTarget.value as ControlMode)}
               >
-                <option value="host_only">Organisateur uniquement</option>
-                <option value="shared">Contrôles partagés (tous)</option>
-                <option value="request">Contrôle sur demande</option>
+                <option value="host_only">{$t('organiser_only')}</option>
+                <option value="shared">{$t('shared_controls_all')}</option>
+                <option value="request">{$t('control_on_request')}</option>
               </select>
             </label>
 
@@ -192,7 +194,7 @@
                 checked={client.party?.waitForBuffering ?? true}
                 onchange={toggleWaitForBuffering}
               />
-              <span>Attendre les participants en buffering</span>
+              <span>{$t('wait_for_buffering_participants')}</span>
             </label>
 
             <label class="checkbox-label">
@@ -201,7 +203,7 @@
                 checked={client.party?.isLocked ?? false}
                 onchange={toggleLock}
               />
-              <span>Verrouiller la séance (interdire nouveaux arrivants)</span>
+              <span>{$t('lock_the_session_no_new_arrivals')}</span>
             </label>
           </div>
         </section>
@@ -216,7 +218,7 @@
             onclick={toggleReady}
           >
             <Icon name={isReady ? 'check' : 'clock'} size={18} />
-            <span>{isReady ? 'Je suis prêt' : 'Me marquer comme prêt'}</span>
+            <span>{isReady ? $t('i_m_ready') : $t('mark_me_as_ready')}</span>
           </button>
         {/if}
 
@@ -228,7 +230,7 @@
             onclick={startParty}
           >
             <Icon name="play" size={20} />
-            <span>Lancer la séance pour tous</span>
+            <span>{$t('start_the_session_for_everyone')}</span>
           </button>
         {/if}
 
@@ -240,7 +242,7 @@
             onCloseParty?.();
           }}
         >
-          Quitter la séance
+          {$t('leave_the_session')}
         </button>
       </footer>
     </div>
@@ -253,7 +255,7 @@
     type="button"
     class="pill-trigger"
     class:active={drawerOpen}
-    aria-label="Ouvrir le panneau communautaire"
+    aria-label={$t('open_the_community_panel')}
     onclick={() => (drawerOpen = !drawerOpen)}
   >
     <Icon name="users" size={16} />
@@ -263,12 +265,12 @@
 
 <!-- Bottom Quick Reactions Bar (when controls are visible or hover) -->
 {#if !isWaiting && !muteOverlay}
-  <div class="quick-reactions-bar" aria-label="Réactions rapides">
+  <div class="quick-reactions-bar" aria-label={$t('quick_reactions')}>
     {#each quickEmojis as emoji (emoji)}
       <button
         type="button"
         class="reaction-btn"
-        aria-label={`Réagir avec ${emoji}`}
+        aria-label={$t('react_with', { emoji })}
         onclick={() => client.sendReaction(emoji)}
       >
         {emoji}
@@ -279,17 +281,17 @@
 
 <!-- Community Drawer (Chat, Members, Queue, Polls) -->
 {#if drawerOpen}
-  <aside class="community-drawer" aria-label="Panneau interactif de la séance">
+  <aside class="community-drawer" aria-label={$t('interactive_session_panel')}>
     <header class="drawer-header">
       <div class="drawer-title">
         <Icon name="users" size={18} />
-        <strong>Séance : {client.party?.name}</strong>
+        <strong>{$t('session', { name: client.party?.name })}</strong>
       </div>
       <div class="header-tools">
         <button
           type="button"
           class="btn-icon"
-          title={muteOverlay ? 'Afficher les réactions' : 'Masquer les réactions'}
+          title={muteOverlay ? $t('show_reactions') : $t('hide_reactions')}
           onclick={() => (muteOverlay = !muteOverlay)}
         >
           <Icon name={muteOverlay ? 'eye-off' : 'eye'} size={16} />
@@ -297,7 +299,7 @@
         <button
           type="button"
           class="btn-icon"
-          aria-label="Fermer le panneau"
+          aria-label={$t('close_the_panel')}
           onclick={() => (drawerOpen = false)}
         >
           <Icon name="close" size={18} />
@@ -306,14 +308,14 @@
     </header>
 
     <!-- Navigation Tabs -->
-    <nav class="drawer-tabs" aria-label="Onglets communautaires">
+    <nav class="drawer-tabs" aria-label={$t('community_tabs')}>
       <button
         type="button"
         class="tab-btn"
         class:active={activeTab === 'chat'}
         onclick={() => (activeTab = 'chat')}
       >
-        Chat
+        {$t('chat')}
       </button>
       <button
         type="button"
@@ -321,7 +323,7 @@
         class:active={activeTab === 'members'}
         onclick={() => (activeTab = 'members')}
       >
-        Participants ({onlineMembers.length})
+        {$t('participants', { count: onlineMembers.length })}
       </button>
       <button
         type="button"
@@ -329,7 +331,7 @@
         class:active={activeTab === 'queue'}
         onclick={() => (activeTab = 'queue')}
       >
-        File ({client.queue.length})
+        {$t('queue', { count: client.queue.length })}
       </button>
       <button
         type="button"
@@ -337,7 +339,7 @@
         class:active={activeTab === 'polls'}
         onclick={() => (activeTab = 'polls')}
       >
-        Sondage
+        {$t('poll')}
       </button>
     </nav>
 
@@ -350,12 +352,12 @@
               <div class="chat-bubble" class:is-self={msg.userId === $session?.user.id}>
                 <div class="chat-author">
                   <strong>{msg.displayName}</strong>
-                  <time>{new Date(msg.createdAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
+                  <time>{$fmt.time(msg.createdAt)}</time>
                 </div>
                 <p class="chat-text">{msg.content}</p>
               </div>
             {:else}
-              <p class="empty-state">Aucun message pour l'instant. Dites bonjour !</p>
+              <p class="empty-state">{$t('no_messages_yet_say_hello')}</p>
             {/each}
           </div>
 
@@ -363,7 +365,7 @@
             <input
               type="text"
               maxlength="500"
-              placeholder="Écrire un message…"
+              placeholder={$t('write_a_message')}
               bind:value={chatInput}
               onkeydown={handleKeydown}
             />
@@ -373,7 +375,7 @@
               disabled={!chatInput.trim()}
               onclick={sendChatMessage}
             >
-              Envoyer
+              {$t('send')}
             </button>
           </div>
         </div>
@@ -389,7 +391,7 @@
                   <div class="name-line">
                     <strong>{m.displayName}</strong>
                     {#if m.role === 'host'}
-                      <span class="badge-role"><Icon name="star" size={12} /> Organisateur</span>
+                      <span class="badge-role"><Icon name="star" size={12} /> {$t('organiser')}</span>
                     {/if}
                   </div>
                   <div class="status-line">
@@ -398,7 +400,7 @@
                       class:online={m.isOnline}
                       class:buffering={m.isOnline && m.isBuffering}
                     ></span>
-                    <span>{m.isOnline ? (m.isBuffering ? 'Chargement…' : 'En ligne') : 'Absent'}</span>
+                    <span>{m.isOnline ? (m.isBuffering ? 'Chargement…' : $t('online')) : 'Absent'}</span>
                   </div>
                 </div>
 
@@ -409,7 +411,7 @@
                       <button
                         type="button"
                         class="btn-action-small"
-                        title={m.hasControl ? 'Retirer le contrôle' : 'Donner le contrôle'}
+                        title={m.hasControl ? $t('remove_control') : $t('give_control')}
                         onclick={() => m.hasControl ? client.revokeControl(m.userId) : client.grantControl(m.userId)}
                       >
                         {m.hasControl ? 'Retirer' : 'Autoriser'}
@@ -418,8 +420,8 @@
                     <button
                       type="button"
                       class="btn-action-small"
-                      title="Transférer le rôle d'organisateur"
-                      aria-label="Transférer le rôle d'organisateur"
+                      title={$t('transfer_the_organiser_role')}
+                      aria-label={$t('transfer_the_organiser_role')}
                       onclick={() => client.transferHost(m.userId)}
                     >
                       <Icon name="star" size={16} />
@@ -427,8 +429,8 @@
                     <button
                       type="button"
                       class="btn-action-small danger"
-                      title="Exclure de la séance"
-                      aria-label="Exclure de la séance"
+                      title={$t('remove_from_the_session')}
+                      aria-label={$t('remove_from_the_session')}
                       onclick={() => client.kickMember(m.userId)}
                     >
                       <Icon name="close" size={16} />
@@ -446,15 +448,15 @@
               <div class="queue-card">
                 <div class="queue-info">
                   <strong>{item.mediaTitle}</strong>
-                  <span>Ajouté par {item.addedByName}</span>
+                  <span>{$t('added_by', { addedByName: item.addedByName })}</span>
                 </div>
                 {#if client.canControl}
                   <div class="queue-btns">
                     <button
                       type="button"
                       class="btn-action-small"
-                      title="Monter dans la file"
-                      aria-label="Monter dans la file"
+                      title={$t('move_up_in_the_queue')}
+                      aria-label={$t('move_up_in_the_queue')}
                       disabled={idx === 0}
                       onclick={() => client.moveQueueItem(item.id, idx - 1)}
                     >
@@ -463,8 +465,8 @@
                     <button
                       type="button"
                       class="btn-action-small"
-                      title="Descendre dans la file"
-                      aria-label="Descendre dans la file"
+                      title={$t('move_down_in_the_queue')}
+                      aria-label={$t('move_down_in_the_queue')}
                       disabled={idx === client.queue.length - 1}
                       onclick={() => client.moveQueueItem(item.id, idx + 1)}
                     >
@@ -473,17 +475,17 @@
                     <button
                       type="button"
                       class="btn-action-small"
-                      title="Lancer maintenant"
+                      title={$t('start_now')}
                       onclick={() => client.playQueueItem(item.id)}
                     >
                       <Icon name="play" size={14} />
-                      <span>Lancer</span>
+                      <span>{$t('start')}</span>
                     </button>
                     <button
                       type="button"
                       class="btn-action-small danger"
-                      title="Retirer"
-                      aria-label="Retirer"
+                      title={$t('remove')}
+                      aria-label={$t('remove')}
                       onclick={() => client.removeFromQueue(item.id)}
                     >
                       <Icon name="close" size={16} />
@@ -492,7 +494,7 @@
                 {/if}
               </div>
             {:else}
-              <p class="empty-state">La file d'attente est vide.</p>
+              <p class="empty-state">{$t('the_queue_is_empty')}</p>
             {/each}
           </div>
         </div>
@@ -502,8 +504,7 @@
             <div class="active-poll-card">
               <h4>{client.poll.question}</h4>
               <p class="poll-meta">
-                {client.poll.totalVotes} vote{client.poll.totalVotes > 1 ? 's' : ''} ·
-                {client.poll.isClosed ? 'Terminé' : 'En cours'}
+                {$t('poll_summary', { count: client.poll.totalVotes, state: client.poll.isClosed ? $t('done') : $t('stats_kpi_active') })}
               </p>
 
               <div class="poll-options">
@@ -530,45 +531,45 @@
                   class="btn-close-poll"
                   onclick={() => client.closePoll(client.poll!.id)}
                 >
-                  Clôturer le sondage
+                  {$t('close_the_poll')}
                 </button>
               {/if}
             </div>
           {:else if isHost}
             {#if pollCreating}
               <div class="create-poll-form">
-                <h4>Créer un sondage</h4>
+                <h4>{$t('create_a_poll')}</h4>
                 <label>
-                  Question :
-                  <input type="text" placeholder="Ex: Quel film ensuite ?" bind:value={pollQuestion} />
+                  {$t('question')}
+                  <input type="text" placeholder={$t('e_g_which_film_next')} bind:value={pollQuestion} />
                 </label>
                 <label>
-                  Option 1 :
-                  <input type="text" placeholder="Option 1" bind:value={pollOption1} />
+                  {$t('option_1')}
+                  <input type="text" placeholder={$t('player_option_1')} bind:value={pollOption1} />
                 </label>
                 <label>
-                  Option 2 :
-                  <input type="text" placeholder="Option 2" bind:value={pollOption2} />
+                  {$t('option_2')}
+                  <input type="text" placeholder={$t('player_option_2')} bind:value={pollOption2} />
                 </label>
                 <label>
-                  Option 3 (facultatif) :
-                  <input type="text" placeholder="Option 3" bind:value={pollOption3} />
+                  {$t('option_3_optional')}
+                  <input type="text" placeholder={$t('option_3')} bind:value={pollOption3} />
                 </label>
                 <div class="poll-form-actions">
-                  <button type="button" class="btn-send" onclick={handlePollSubmit}>Créer</button>
-                  <button type="button" class="btn-cancel" onclick={() => (pollCreating = false)}>Annuler</button>
+                  <button type="button" class="btn-send" onclick={handlePollSubmit}>{$t('create')}</button>
+                  <button type="button" class="btn-cancel" onclick={() => (pollCreating = false)}>{$t('sched_cancel')}</button>
                 </div>
               </div>
             {:else}
               <div class="empty-state">
-                <p>Aucun sondage actif.</p>
+                <p>{$t('no_active_poll')}</p>
                 <button type="button" class="btn-send" onclick={() => (pollCreating = true)}>
-                  Créer un sondage
+                  {$t('create_a_poll')}
                 </button>
               </div>
             {/if}
           {:else}
-            <p class="empty-state">Aucun sondage en cours.</p>
+            <p class="empty-state">{$t('no_poll_in_progress')}</p>
           {/if}
         </div>
       {/if}

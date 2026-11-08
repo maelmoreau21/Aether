@@ -100,12 +100,17 @@ pub(super) struct SearchCandidates {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct Collect {
     pub(super) work_id: String,
-    #[serde(default = "default_languages")]
-    pub(super) languages: Vec<String>,
-    #[serde(default = "yes")]
-    pub(super) include_neutral: bool,
-    #[serde(default = "default_max")]
-    pub(super) max_images: usize,
+    /// Omitted values come from the owning library's image options.
+    #[serde(default)]
+    pub(super) languages: Option<Vec<String>>,
+    #[serde(default)]
+    pub(super) include_neutral: Option<bool>,
+    #[serde(default)]
+    pub(super) max_images: Option<usize>,
+    /// Single-image mode: at most one image of each enabled kind, and only the kinds
+    /// the work does not have yet (local file, provider image or legacy poster).
+    #[serde(default)]
+    pub(super) one_per_kind: bool,
 }
 fn default_languages() -> Vec<String> {
     vec!["fr".into(), "en".into()]
@@ -272,9 +277,10 @@ pub(super) async fn collect_batch(
         let title = effective_title(title, &editorial, manual.as_deref());
         let request = Collect {
             work_id: work_id.clone(),
-            languages: input.languages.clone(),
-            include_neutral: input.include_neutral,
-            max_images: input.max_images,
+            languages: Some(input.languages.clone()),
+            include_neutral: Some(input.include_neutral),
+            max_images: Some(input.max_images),
+            one_per_kind: false,
         };
         let item = match collect(State(auth.clone()), headers.clone(), Json(request)).await {
             Ok(Json(result)) => json!({"workId":work_id,"title":title,"result":result}),
@@ -475,17 +481,11 @@ pub(super) async fn collect_with_context(
     input: Collect,
     background: Option<super::run::Background<'_>>,
 ) -> Result<Json<Value>, Error> {
-    if input.max_images == 0 || input.max_images > 12 {
+    if input.max_images.is_some_and(|max| max == 0 || max > 12) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_limit"));
     }
-    let mut ordered = languages(&json!({"languages":input.languages}))?;
-    if let Some(original) = crate::artwork::original_language(&auth.store, &input.work_id)
-        .await
-        .map_err(db)?
-        && !ordered.iter().any(|v| v == &original)
-        && ordered.len() < 5
-    {
-        ordered.push(original);
+    if let Some(requested) = &input.languages {
+        languages(&json!({"languages":requested}))?;
     }
     let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
         .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
@@ -513,6 +513,30 @@ pub(super) async fn collect_with_context(
         .map_err(db)?;
     let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
+    let include_neutral = input
+        .include_neutral
+        .unwrap_or(options.artwork_include_neutral);
+    let one_per_kind = input.one_per_kind;
+    let max_images = if one_per_kind {
+        // One image of each of the six kinds at most.
+        6
+    } else {
+        input
+            .max_images
+            .unwrap_or(usize::from(options.artwork_max_images))
+            .clamp(1, 12)
+    };
+    let mut ordered = languages(&json!({
+        "languages": input.languages.clone().unwrap_or_else(|| options.artwork_languages.clone())
+    }))?;
+    if let Some(original) = crate::artwork::original_language(&auth.store, &input.work_id)
+        .await
+        .map_err(db)?
+        && !ordered.iter().any(|v| v == &original)
+        && ordered.len() < 5
+    {
+        ordered.push(original);
+    }
     rows.retain(|(id, _, _)| {
         crate::library_options::LibraryOptions::provider_priority(&options.image_providers, id, 100)
             .is_some()
@@ -571,7 +595,7 @@ pub(super) async fn collect_with_context(
                 "mediaType": media_type,
                 "externalIds": ids,
                 "languages": ordered,
-                "includeNeutral": input.include_neutral
+                "includeNeutral": include_neutral
             }),
         };
         providers += 1;
@@ -587,7 +611,7 @@ pub(super) async fn collect_with_context(
                     .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_output"))?;
                 for image in images {
                     if let Some(priority) =
-                        rank(image.language.as_deref(), &ordered, input.include_neutral)
+                        rank(image.language.as_deref(), &ordered, include_neutral)
                     {
                         candidates.push((priority, id.clone(), image));
                     }
@@ -650,16 +674,48 @@ pub(super) async fn collect_with_context(
             .map_err(db)?;
     let mut counts: std::collections::HashMap<String, i64> = counts.into_iter().collect();
     let mut total: i64 = counts.values().sum();
+    // Artwork already beside the media (poster.jpg, logo.png… often written by
+    // Radarr/Sonarr) is authoritative: re-downloading the same picture from a
+    // provider only produced visible duplicates. Single-image roles are skipped
+    // when a local file exists; backdrops still accept additional pictures.
+    let local_kinds: HashSet<String> = query_scalar::<_, String>(
+        "SELECT DISTINCT i.role FROM inventory_images i LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id WHERE i.work_id=? AND i.available=1 AND h.image_id IS NULL",
+    )
+    .bind(&input.work_id)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?
+    .into_iter()
+    .collect();
+    let legacy_poster: i64 = query_scalar("SELECT COUNT(*) FROM work_posters WHERE work_id=?")
+        .bind(&input.work_id)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
     for (provider, image) in queue {
         let image_kind = kind(image.image_type);
+        // Kinds switched off in the library settings (Images) are never fetched.
+        if !options.image_enabled(image_kind) {
+            skipped += 1;
+            continue;
+        }
+        if one_per_kind
+            && (local_kinds.contains(image_kind)
+                || counts.get(image_kind).copied().unwrap_or(0) > 0
+                || (image_kind == "poster" && legacy_poster > 0))
+        {
+            skipped += 1;
+            continue;
+        }
+        if image_kind != "backdrop" && local_kinds.contains(image_kind) {
+            skipped += 1;
+            continue;
+        }
         if total >= 64 || counts.get(image_kind).copied().unwrap_or(0) >= 12 {
             skipped += 1;
             continue;
         }
-        if downloaded >= input.max_images
-            || attempts >= 24
-            || tokio::time::Instant::now() >= deadline
-        {
+        if downloaded >= max_images || attempts >= 24 || tokio::time::Instant::now() >= deadline {
             partial = true;
             break;
         }
@@ -708,9 +764,12 @@ pub(super) async fn collect_with_context(
                     *counts.entry(image_kind.into()).or_default() += 1;
                 }
             }
-            Ok(Err((status, _))) => {
-                errors.push(json!({"provider":provider,"status":status.as_u16()}))
-            }
+            Ok(Err((status, body))) => errors.push(json!({
+                "provider": provider,
+                "kind": image_kind,
+                "status": status.as_u16(),
+                "error": body.0["error"].as_str().unwrap_or("image_import_failed")
+            })),
             Err(_) => {
                 partial = true;
                 break;

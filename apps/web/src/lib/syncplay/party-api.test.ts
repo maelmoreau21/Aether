@@ -14,7 +14,8 @@ describe('party helpers', () => {
   it('builds initials and invite urls', () => {
     expect(initials('alice')).toBe('AL');
     expect(initials('alice', 1)).toBe('A');
-    expect(partyInviteUrl('http://x', 'a b')).toBe('http://x/parties?id=a%20b');
+    expect(partyInviteUrl('http://x', 'a b')).toBe('http://x/?party=a%20b');
+    expect(partyInviteUrl('http://x/app/', 'p1')).toBe('http://x/app/?party=p1');
   });
 
   it('extracts API error messages with a fallback', async () => {

@@ -31,6 +31,7 @@ fs.mkdirSync(out, {recursive:true});
         await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
         await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
         await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.locator('#library-root').fill(process.env.MEDIA_TEST_LIBRARY_ROOT || '');
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
         await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
         await page.getByRole('heading',{name:'Films scanner navigateur',exact:true}).waitFor();
@@ -38,9 +39,9 @@ fs.mkdirSync(out, {recursive:true});
       const article=page.locator('article').filter({has:page.getByRole('heading',{name:'Films scanner navigateur',exact:true})});
       const runScan = async () => {
         const posted=page.waitForResponse(r=>r.request().method()==='POST' && r.url().endsWith('/scan'));
-        await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+        await page.getByLabel('Paramètres de Films scanner navigateur',{exact:true}).click();
+      await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+      await page.getByRole('dialog').waitFor({state:'hidden'});
         assert.equal((await posted).status(),202);
         await page.waitForFunction(async()=>{
           const data=await (await fetch('/api/v1/admin/libraries')).json();
@@ -155,7 +156,7 @@ fs.mkdirSync(out, {recursive:true});
       await page.locator('a.media-card img.poster-image').waitFor();
     }
     await page.screenshot({path:`${out}/catalog-${phase}.png`});
-    await page.locator('a.media-card').click();
+    await page.locator('a.media-card').click({position:{x:12,y:12}});
     await page.getByRole('heading',{name:expectedTitle,exact:true}).waitFor();
     {
       assert.equal(await page.locator('.synopsis').textContent(),expectedSynopsis);

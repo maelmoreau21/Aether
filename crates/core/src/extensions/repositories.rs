@@ -167,6 +167,9 @@ struct InstallInput {
     confirm_downgrade: bool,
     expected_version: Option<String>,
     expected_sha256: Option<String>,
+    /// New permissions and HTTP hosts of this version the administrator approved.
+    #[serde(default)]
+    approved_access: super::AccessApproval,
 }
 
 pub(super) fn router() -> Router<AuthState> {
@@ -212,6 +215,36 @@ fn checked_url(raw: &str, maximum: usize) -> Result<url::Url, Error> {
 fn safe_url(raw: &str) -> Result<url::Url, Error> {
     checked_url(raw, 2048)
 }
+/// Accept the public GitHub pages administrators copy from their browser, while
+/// storing the actual JSON endpoint. Package and redirect URL rules are unchanged.
+fn catalogue_url(raw: &str) -> Result<url::Url, Error> {
+    let url = safe_url(raw)?;
+    if url.host_str() != Some("github.com") || url.query().is_some() {
+        return Ok(url);
+    }
+    let segments: Vec<_> = url.path().trim_matches('/').split('/').collect();
+    let (owner, repository, branch, path) = match segments.as_slice() {
+        [owner, repository] => (
+            *owner,
+            *repository,
+            "main",
+            "repository/manifest.json".into(),
+        ),
+        [owner, repository, "tree", branch] => (
+            *owner,
+            *repository,
+            *branch,
+            "repository/manifest.json".into(),
+        ),
+        [owner, repository, "blob", branch, path @ ..] if !path.is_empty() => {
+            (*owner, *repository, *branch, path.join("/"))
+        }
+        _ => return Ok(url),
+    };
+    safe_url(&format!(
+        "https://raw.githubusercontent.com/{owner}/{repository}/{branch}/{path}"
+    ))
+}
 /// GitHub serves release assets through a redirect to its content hosts. Any
 /// other cross-host redirect is refused; every hop is validated again.
 fn redirect_allowed(from: &url::Url, to: &url::Url) -> bool {
@@ -219,7 +252,8 @@ fn redirect_allowed(from: &url::Url, to: &url::Url) -> bool {
         return false;
     };
     from.eq_ignore_ascii_case(to)
-        || (from.eq_ignore_ascii_case("github.com")
+        || ((from.eq_ignore_ascii_case("github.com")
+            || from.eq_ignore_ascii_case("api.github.com"))
             && [
                 "objects.githubusercontent.com",
                 "release-assets.githubusercontent.com",
@@ -292,7 +326,99 @@ async fn fetch_asset(raw: &str, maximum: usize) -> Result<Vec<u8>, Error> {
     let _permit = DOWNLOADS
         .try_acquire()
         .map_err(|_| err(StatusCode::TOO_MANY_REQUESTS, "repository_busy"))?;
-    download(raw, maximum, "*/*", Duration::from_secs(60)).await
+    let Some((owner, repository, tag, name)) = github_release_asset(raw) else {
+        return download(raw, maximum, "*/*", Duration::from_secs(60)).await;
+    };
+    // github.com (web pages and releases/download) can hang or answer 504 on some
+    // networks while api.github.com and the asset CDN stay reachable. Both routes end
+    // on the same CDN object and the checksum and signature still decide trust, so the
+    // API goes first (one retry), then the direct link, all inside the 70 s the admin
+    // page waits for an answer.
+    let deadline = Instant::now() + Duration::from_secs(58);
+    let left = || deadline.saturating_duration_since(Instant::now());
+    for attempt in 1..=2 {
+        if left() < Duration::from_secs(8) {
+            break;
+        }
+        match github_api_asset(&owner, &repository, &tag, &name, maximum, left()).await {
+            Ok(bytes) => return Ok(bytes),
+            Err(failure) => eprintln!(
+                "GitHub API release download failed ({owner}/{repository} {tag}/{name}, attempt {attempt}): {}",
+                error_code(&failure)
+            ),
+        }
+    }
+    let timeout = left().max(Duration::from_secs(5));
+    download(raw, maximum, "*/*", timeout)
+        .await
+        .inspect_err(|failure| {
+            eprintln!("Release download failed ({raw}): {}", error_code(failure));
+        })
+}
+fn error_code(failure: &Error) -> &str {
+    failure.1.0["error"].as_str().unwrap_or("unknown")
+}
+/// `https://github.com/{owner}/{repo}/releases/download/{tag}/{asset}`.
+fn github_release_asset(raw: &str) -> Option<(String, String, String, String)> {
+    let url = url::Url::parse(raw).ok()?;
+    if !url.host_str()?.eq_ignore_ascii_case("github.com") || url.query().is_some() {
+        return None;
+    }
+    let segments: Vec<_> = url.path_segments()?.collect();
+    let [owner, repository, "releases", "download", tag, name] = segments.as_slice() else {
+        return None;
+    };
+    let plain = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 200
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'+'))
+    };
+    [owner, repository, tag, name]
+        .iter()
+        .all(|s| plain(s))
+        .then(|| {
+            (
+                owner.to_string(),
+                repository.to_string(),
+                tag.to_string(),
+                name.to_string(),
+            )
+        })
+}
+async fn github_api_asset(
+    owner: &str,
+    repository: &str,
+    tag: &str,
+    name: &str,
+    maximum: usize,
+    budget: Duration,
+) -> Result<Vec<u8>, Error> {
+    let started = Instant::now();
+    let release = download(
+        &format!("https://api.github.com/repos/{owner}/{repository}/releases/tags/{tag}"),
+        MAX_MANIFEST,
+        "application/vnd.github+json",
+        budget.min(Duration::from_secs(10)),
+    )
+    .await?;
+    let release: Value = serde_json::from_slice(&release)
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "repository_http_error"))?;
+    let asset = release["assets"]
+        .as_array()
+        .and_then(|assets| assets.iter().find(|asset| asset["name"] == name))
+        .and_then(|asset| asset["url"].as_str())
+        .filter(|url| {
+            url.starts_with(&format!(
+                "https://api.github.com/repos/{owner}/{repository}/releases/assets/"
+            ))
+        })
+        .ok_or_else(|| err(StatusCode::BAD_GATEWAY, "repository_http_error"))?
+        .to_owned();
+    let left = budget
+        .saturating_sub(started.elapsed())
+        .max(Duration::from_secs(5));
+    download(&asset, maximum, "application/octet-stream", left).await
 }
 async fn download(
     raw: &str,
@@ -818,7 +944,7 @@ async fn add(
 ) -> Result<(StatusCode, Json<Value>), Error> {
     admin(&auth, &headers, true).await?;
     let name = input.name.trim();
-    let url = safe_url(input.url.trim())?.to_string();
+    let url = catalogue_url(input.url.trim())?.to_string();
     if name.is_empty() || name.chars().count() > 80 || name.chars().any(char::is_control) {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_repository_name"));
     }
@@ -886,6 +1012,15 @@ async fn remove(
         .map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
+/// Catalogue identifiers whose feature the Core implements natively: avatars
+/// and poster rotation. The catalogue hides them and refuses to install them,
+/// so a published package can never shadow or duplicate the native feature.
+const NATIVE_FEATURES: &[&str] = &["avatars", "poster-rotator"];
+
+fn is_native_feature(id: &str) -> bool {
+    NATIVE_FEATURES.contains(&id)
+}
+
 async fn catalogue(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -900,9 +1035,7 @@ async fn catalogue(
     for (id, name, bytes) in rows {
         // One entry per published version, so earlier versions stay installable.
         for item in parse_manifest(bytes.as_bytes())? {
-            // Avatars and Poster Rotator are native built-in features in Aether Core.
-            // Do not expose them in the extensions catalogue.
-            if matches!(item.id.as_str(), "avatars" | "poster-rotator") {
+            if is_native_feature(&item.id) {
                 continue;
             }
             entries.push(json!({
@@ -1025,7 +1158,7 @@ async fn install(
         .into_iter()
         .find(|item| item.id == input.extension_id && item.version == input.version)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_catalogue_version"))?;
-    if matches!(item.id.as_str(), "avatars" | "poster-rotator") {
+    if is_native_feature(&item.id) {
         return Err(err(StatusCode::BAD_REQUEST, "feature_is_native"));
     }
     if !item_compatible(&item) {
@@ -1096,10 +1229,19 @@ async fn install(
             package,
             item.public_key,
             Some(guard),
+            &input.approved_access,
         )
         .await
     } else if input.upgrade {
-        super::upgrade_with_key(auth, headers, input.extension_id, package, item.public_key).await
+        super::upgrade_with_key(
+            auth,
+            headers,
+            input.extension_id,
+            package,
+            item.public_key,
+            &input.approved_access,
+        )
+        .await
     } else {
         super::install_with_key(auth, headers, package, item.public_key).await
     }
@@ -1155,6 +1297,36 @@ mod tests {
     }
     async fn body(response: Response) -> Value {
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+    }
+
+    #[test]
+    fn github_catalogue_links_keep_the_selected_branch() {
+        for (page, endpoint) in [
+            (
+                "https://github.com/owner/plugins",
+                "https://raw.githubusercontent.com/owner/plugins/main/repository/manifest.json",
+            ),
+            (
+                "https://github.com/owner/plugins/tree/develop",
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+            ),
+            (
+                "https://github.com/owner/plugins/blob/develop/repository/manifest.json",
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+            ),
+            (
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+                "https://raw.githubusercontent.com/owner/plugins/develop/repository/manifest.json",
+            ),
+            (
+                "https://catalogue.example.com/custom.json",
+                "https://catalogue.example.com/custom.json",
+            ),
+        ] {
+            assert_eq!(catalogue_url(page).unwrap().as_str(), endpoint);
+        }
+        assert!(catalogue_url("http://github.com/owner/plugins/tree/develop").is_err());
+        assert!(catalogue_url("https://user:secret@github.com/owner/plugins").is_err());
     }
 
     #[test]
@@ -1787,6 +1959,29 @@ mod tests {
             &url("https://example.com/manifest.json"),
             &url("https://objects.githubusercontent.com/x")
         ));
+        assert!(redirect_allowed(
+            &url("https://api.github.com/repos/o/r/releases/assets/1"),
+            &url("https://release-assets.githubusercontent.com/x?jwt=1")
+        ));
+        assert_eq!(
+            github_release_asset(
+                "https://github.com/o/r/releases/download/p-v0.1.6-beta/p-0.1.6.package.json"
+            ),
+            Some((
+                "o".into(),
+                "r".into(),
+                "p-v0.1.6-beta".into(),
+                "p-0.1.6.package.json".into()
+            ))
+        );
+        for other in [
+            "https://raw.githubusercontent.com/o/r/main/p.json",
+            "https://github.com/o/r/releases/download/v1/p.json?x=1",
+            "https://github.com/o/r/releases/download/v1/../p.json",
+            "https://github.com/o/r/blob/main/p.json",
+        ] {
+            assert_eq!(github_release_asset(other), None, "{other}");
+        }
         assert!(abi_supported("1") && abi_supported("1.0") && abi_supported("1.0.0.0"));
         assert!(!abi_supported("1.1") && !abi_supported("2.0") && !abi_supported("0.9"));
         assert!(!abi_supported("1.0.0.0.0") && !abi_supported("x"));

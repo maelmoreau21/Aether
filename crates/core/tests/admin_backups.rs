@@ -7,6 +7,13 @@ use media_poc::{admin_backups, auth::AuthState, database, identity::IdentityStor
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
 
+fn test_key_configuration() -> std::collections::BTreeMap<String, String> {
+    std::collections::BTreeMap::from([(
+        "MEDIA_BACKUP_KEY".into(),
+        "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12".into(),
+    )])
+}
+
 async fn request(
     app: &Router,
     method: &str,
@@ -90,7 +97,46 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let key = "11".repeat(32);
+    let key = "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12".to_string();
+    // Without a (valid) key the endpoint fails closed: no snapshot and no archive is written.
+    for configuration in [
+        std::collections::BTreeMap::new(),
+        std::collections::BTreeMap::from([("MEDIA_BACKUP_KEY".into(), "11".repeat(32))]),
+    ] {
+        let keyless = admin_backups::router_with_configuration(
+            AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+                .await
+                .unwrap(),
+            media.clone(),
+            Some(temp.path().join("keyless-backups")),
+            configuration,
+        )
+        .await
+        .unwrap();
+        let refused = request(
+            &keyless,
+            "POST",
+            "/api/v1/admin/backups",
+            Some(&cookies[0]),
+            Some(&csrf),
+        )
+        .await;
+        assert_eq!(refused.status(), StatusCode::CONFLICT);
+        let body = to_bytes(refused.into_body(), 4096).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("backup_key_required"));
+        assert!(!temp.path().join("keyless-backups").exists());
+        let listing = request(
+            &keyless,
+            "GET",
+            "/api/v1/admin/backups",
+            Some(&cookies[0]),
+            None,
+        )
+        .await;
+        let listing: serde_json::Value =
+            serde_json::from_slice(&to_bytes(listing.into_body(), 65536).await.unwrap()).unwrap();
+        assert_eq!(listing["available"], false);
+    }
     let app = admin_backups::router_with_configuration(
         auth,
         media,
@@ -101,10 +147,6 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
                 "secret-test-config-marker".into(),
             ),
             ("MEDIA_BACKUP_KEY".into(), key.clone()),
-            (
-                "MEDIA_BACKUP_KEY_FILE".into(),
-                "/private/recovery-key-source".into(),
-            ),
         ]),
     )
     .await
@@ -154,20 +196,26 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
             .starts_with("attachment;")
     );
     let bytes = to_bytes(download.into_body(), 20_000_000).await.unwrap();
-    assert!(
-        bytes
-            .windows(28)
-            .any(|window| window == b"synthetic-node-secret-marker")
-    );
-    assert!(
-        bytes
-            .windows(25)
-            .any(|window| window == b"secret-test-config-marker")
-    );
+    assert_eq!(&bytes[..8], b"MDBK0003");
+    // Secrets, sessions and the key itself never appear in the downloaded bytes.
+    for marker in [
+        &b"synthetic-node-secret-marker"[..],
+        b"secret-test-config-marker",
+        key.as_bytes(),
+    ] {
+        assert!(!bytes.windows(marker.len()).any(|window| window == marker));
+    }
+    assert!(!bytes.windows(15).any(|window| window == b"SQLite format 3"));
     let package = temp.path().join("download.media-backup");
     std::fs::write(&package, &bytes).unwrap();
+    let parsed_key = media_poc::backup_bundle::BackupKey::parse(&key).unwrap();
+    assert!(
+        media_poc::backup_bundle::extract(&package, &temp.path().join("without-key"), None)
+            .await
+            .is_err()
+    );
     let extracted = temp.path().join("extracted");
-    let summary = media_poc::backup_bundle::extract(&package, &extracted)
+    let summary = media_poc::backup_bundle::extract(&package, &extracted, Some(&parsed_key))
         .await
         .unwrap();
     assert_eq!(summary.engine, "sqlite");
@@ -435,7 +483,7 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
         auth.clone(),
         media.clone(),
         Some(media.join("forbidden-backups")),
-        std::collections::BTreeMap::new(),
+        test_key_configuration(),
     )
     .await
     .unwrap();
@@ -461,7 +509,7 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
         auth.clone(),
         media.clone(),
         Some(invalid_directory),
-        std::collections::BTreeMap::new(),
+        test_key_configuration(),
     )
     .await
     .unwrap();
@@ -504,7 +552,7 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
                 auth,
                 media,
                 Some(private.clone()),
-                std::collections::BTreeMap::new(),
+                test_key_configuration(),
             )
             .await
             .unwrap();

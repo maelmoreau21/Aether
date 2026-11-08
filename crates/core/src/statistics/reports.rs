@@ -50,6 +50,12 @@ pub(super) async fn select(
     } else {
         auth.authenticate(headers).await?
     };
+    if !admin
+        && actor.user.role != Role::Administrator
+        && (settings(&auth.store).await?.enabled == 0 || !users_can_view(&auth.store).await?)
+    {
+        return Err(StatusCode::FORBIDDEN);
+    }
     if !admin && !f.user_id.is_empty() && f.user_id != actor.user.id {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -322,7 +328,7 @@ async fn report(
     let s = settings(&auth.store).await?;
     let wrapped = super::insights::wrapped_open(&auth.store, &f.tz, admin).await?;
     Ok(Json(
-        json!({"enabled":s.enabled!=0,"firstEnabledAt":s.first_enabled_at,"eventRetentionDays":s.event_retention_days,"summaryRetentionDays":s.summary_retention_days,"wrappedAvailable":wrapped,
+        json!({"enabled":s.enabled!=0,"usersCanView":users_can_view(&auth.store).await?,"firstEnabledAt":s.first_enabled_at,"eventRetentionDays":s.event_retention_days,"summaryRetentionDays":s.summary_retention_days,"wrappedAvailable":wrapped,
         "periods":periods.iter().map(|r|json!({"startedAt":r.get::<i64,_>("started_at"),"endedAt":r.get::<Option<i64>,_>("ended_at")})).collect::<Vec<_>>(),
         "summary":summary,"sessions":history,"offset":f.offset,"hasMore":f.offset+history.len()<(plays as usize),
         "popular":popular,"users":users,"daily":daily,"hours":hours,"behavior":behavior,"distributions":distributions,"music":music,"facets":facets,"timezone":"UTC"}),

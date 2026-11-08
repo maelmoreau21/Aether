@@ -6,39 +6,24 @@ import { artworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rot
 
 type Choice = { session: number; image: string; switchedAt?: number };
 const history = new Map<string, Record<string, Choice>>();
-const visits = new Map<string, string>();
-onSessionGenerationChange(() => { history.clear(); visits.clear(); });
-
-function visitSeed(current: Session | null): string {
-  if (!current) return 'anonymous';
-  const owner = current.user.id;
-  const auth = hash(`artwork-auth:${current.csrfToken}`);
-  const key = `${owner}:${auth}`;
-  const cached = visits.get(key);
-  if (cached) return cached;
-  const storageKey = `media_artwork_visit_${owner}`;
-  let seed = '';
-  if (typeof sessionStorage !== 'undefined') {
-    try {
-      const raw = sessionStorage.getItem(storageKey);
-      const stored = raw && raw.length < 1024 ? JSON.parse(raw) : null;
-      if (stored?.auth === auth && typeof stored.seed === 'string' && stored.seed.length <= 80) seed = stored.seed;
-    } catch { /* Optional visit cache. */ }
-  }
-  if (!seed) {
-    seed = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
-    if (typeof sessionStorage !== 'undefined') {
-      try { sessionStorage.setItem(storageKey, JSON.stringify({ auth, seed })); } catch { /* In-memory visit remains stable. */ }
-    }
-  }
-  visits.set(key, seed);
-  return seed;
-}
+/** Rich pools are renewed regularly, even during a long visit. */
+const ROTATION_PERIOD_MS = 3_600_000;
+/** Scene images carry no title and can rotate like posters; logos stay stable. */
+const SCENE_KINDS = new Set(['backdrop', 'landscape', 'thumb']);
+/** Lower-priority poster languages join the rotation until it has this many images. */
+const MIN_ROTATION_POOL = 3;
+// Each catalogue page visit draws a new selection; it stays stable while the
+// page is open and when a work opened from it shows its details.
+const newVisit = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
+let pageVisit = newVisit();
+onSessionGenerationChange(() => { history.clear(); pageVisit = newVisit(); });
+export function renewArtworkVisit(): void { pageVisit = newVisit(); }
 
 function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVariants']>, current: Session | null, policy: ArtworkRotationPolicy): string {
   const owner = current?.user.id ?? 'anonymous';
-  const seed = `${owner}:${visitSeed(current)}`;
-  const session = hash(`artwork-session:${seed}`);
+  const seed = `${owner}:${pageVisit}`;
+  const period = Math.floor(Date.now() / ROTATION_PERIOD_MS);
+  const session = hash(`artwork-session:${seed}:${period}`);
   const storageKey = `media_artwork_choices_${owner}`;
   let choices = history.get(owner);
   if (!choices) {
@@ -67,7 +52,7 @@ function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVar
   const pool = candidates.length > 1 && previousIndex >= 0 ? candidates.filter(image => image.id !== previous?.image) : candidates;
   const selected = policy.rotationMode === 'sequential' && previousIndex >= 0
     ? candidates[(previousIndex + 1) % candidates.length]
-    : pool[hash(`${seed}:${work.id}:${kind}`) % pool.length];
+    : pool[hash(`${seed}:${period}:${work.id}:${kind}`) % pool.length];
   delete choices[key];
   choices[key] = { session, image: selected.id, switchedAt: Date.now() };
   while (Object.keys(choices).length > 512) delete choices[Object.keys(choices)[0]];
@@ -100,7 +85,8 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
     const isLibraryAllowed = policy.languageMode ? (work.kind === 'film' || work.kind === 'series') : policy.enabledLibraries !== undefined
       ? policy.enabledLibraries.includes(work.libraryId)
       : ((work.kind === 'film' && (policy.enableMovies ?? true)) || (work.kind === 'series' && (policy.enableSeries ?? true)));
-    const rotation = kind === 'poster' && policy.enabled && isLibraryAllowed;
+    const rotates = policy.enabled && isLibraryAllowed && (kind === 'poster' || SCENE_KINDS.has(kind));
+    const rotation = kind === 'poster' && rotates;
     if (kind === 'poster' && !rotation && !policy.languageMode) {
       const serverChoice = candidates.find(image => image.origin === 'provider' && image.position < 0);
       if (serverChoice) {
@@ -110,10 +96,33 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
     }
     const interfaceLanguage = languages[0] || 'fr';
     const original = work.originalLanguage?.trim();
-    const selectionLanguages = kind === 'poster' && policy.languageMode
-      ? policy.languageMode === 'original' && original && /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(original)
-        ? [original] : [interfaceLanguage]
-      : rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
+    if (kind === 'poster' && policy.languageMode) {
+      // Priority tiers: chosen language, then the other one (interface/original), textless,
+      // English, everything else. Rotation fills its pool tier by tier so a single
+      // localized poster still alternates with the next best ones.
+      const knownOriginal = original && /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/.test(original) ? original : undefined;
+      const order = (policy.languageMode === 'original' ? [knownOriginal, interfaceLanguage] : [interfaceLanguage, knownOriginal])
+        .filter((value): value is string => !!value).map(value => value.toLowerCase().split('-')[0]);
+      const tier = (language?: string | null) => {
+        const value = language?.toLowerCase().split('-')[0];
+        if (!value || ['und', 'xx', '00', 'zxx'].includes(value)) return 2;
+        const index = order.indexOf(value);
+        if (index >= 0) return index;
+        return value === 'en' ? 3 : 4;
+      };
+      const ranked = candidates.map(image => ({ image, rank: tier(image.language) }))
+        .sort((a, b) => a.rank - b.rank || (a.image.language ?? '').localeCompare(b.image.language ?? '') || a.image.id.localeCompare(b.image.id));
+      if (!ranked.length) continue;
+      if (!rotation) { selected[kind] = ranked[0].image.url; continue; }
+      const pool: typeof candidates = [];
+      for (const rank of [...new Set(ranked.map(entry => entry.rank))]) {
+        if (pool.length >= MIN_ROTATION_POOL) break;
+        pool.push(...ranked.filter(entry => entry.rank === rank).map(entry => entry.image));
+      }
+      selected[kind] = choose(work, kind, pool.slice(0, Math.max(policy.poolSize, MIN_ROTATION_POOL)), current, policy);
+      continue;
+    }
+    const selectionLanguages = rotation ? [policy.preferredLanguage, policy.fallbackLanguage] : languages;
     if (rotation) {
       candidates = candidates.filter(image => {
         const language = image.language?.toLowerCase();
@@ -150,7 +159,7 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
     // Stable identity ordering makes API ordering and shelf/detail navigation irrelevant.
     candidates.sort((a, b) => a.id.localeCompare(b.id));
     if (candidates.length) {
-      selected[kind] = rotation ? choose(work, kind, candidates.slice(0, policy.poolSize), current, policy) : candidates[0].url;
+      selected[kind] = rotates ? choose(work, kind, candidates.slice(0, kind === 'poster' ? policy.poolSize : 24), current, policy) : candidates[0].url;
     }
   }
   return selected;

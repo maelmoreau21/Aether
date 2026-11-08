@@ -5,9 +5,11 @@
 //! - `package`: signed package validation.
 //! - `router`: HTTP routes and initialisation.
 //! - `admin`: publishers, audit and installed-extension listing.
-//! - `install`: install, upgrade, bootstrap and uninstall flows.
+//! - `install`: explicit install, upgrade and uninstall flows.
 //! - `settings`: effective settings and configuration endpoints.
 //! - `run`: manual runs, worker invocation and run history.
+//! - `worker`: the disposable worker process and its bounded framing, shared
+//!   by runs, update health checks and the native application surfaces.
 //! - `automated`: automated (scan/refresh) provider runs.
 //! - `matching`: trusted candidate matching for metadata and music.
 use crate::{
@@ -15,6 +17,7 @@ use crate::{
     database::{query, query_as, query_scalar},
 };
 mod artwork_jobs;
+pub(crate) use artwork_jobs::request_automatic_check as request_artwork_check;
 pub(crate) use artwork_jobs::tick as artwork_collection_tick;
 #[cfg(test)]
 use axum::http::HeaderValue;
@@ -29,11 +32,8 @@ use media_extension_sdk::{ExtensionRequest, Manifest, MetadataProposal, Package}
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{process::Stdio, time::Duration};
-use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
-    sync::{Mutex, Semaphore},
-};
+use std::time::Duration;
+use tokio::sync::{Mutex, Semaphore};
 
 static MUTATIONS: Mutex<()> = Mutex::const_new(());
 
@@ -64,6 +64,7 @@ pub(crate) mod subtitles;
 #[cfg(test)]
 mod tests;
 mod updates;
+pub(crate) mod worker;
 
 use admin::*;
 use common::*;
@@ -73,8 +74,8 @@ use package::*;
 use run::*;
 use settings::*;
 
-pub(crate) use automated::run_automated;
-pub use install::{bootstrap_essential_plugins, install_internal_with_key};
+pub(crate) use automated::{MARKER_CHAPTERS_MAX, UNIDENTIFIED_ERROR, run_automated};
+pub use install::install_internal_with_key;
 pub use matching::trusted_music_candidate;
 pub use package::validate_package;
 pub use router::{initialize, router};

@@ -49,6 +49,31 @@ describe('user progress',()=>{
     await vi.waitFor(()=>expect(error).toHaveBeenCalledOnce());tracker.save(state,true);expect(fetch).toHaveBeenCalledTimes(2);
     expect(JSON.parse(fetch.mock.calls[1][1].body).expectedRevision).toBe(7);
   });
+  it('retries a slow progress write instead of showing "signal timed out" and stopping for the session',async()=>{
+    login();vi.stubGlobal('window',{dispatchEvent:vi.fn()});const error=vi.fn();
+    const timeout=()=>Promise.reject(new DOMException('signal timed out','TimeoutError'));
+    const fetch=vi.fn().mockResolvedValueOnce(Response.json({workId:'work',position:0,duration:12,watched:false,revision:3}))
+      .mockImplementationOnce(timeout).mockResolvedValueOnce(new Response(null,{status:503}))
+      .mockResolvedValue(Response.json({workId:'work',position:4,duration:12,watched:false,revision:4}));
+    vi.stubGlobal('fetch',fetch);
+    const tracker=new ProgressTracker('work',error);await tracker.load();
+    tracker.save(state,true);tracker.save(state,true);tracker.save(state,true);
+    await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(4));
+    expect(error).not.toHaveBeenCalled(); // Two transient failures stay silent.
+    expect(JSON.parse(fetch.mock.calls[3][1].body).expectedRevision).toBe(3);
+    tracker.save(state,true);await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(5));
+    expect(JSON.parse(fetch.mock.calls[4][1].body).expectedRevision).toBe(4);
+  });
+  it('tells the viewer, in words, when progress keeps failing to save',async()=>{
+    login();const error=vi.fn();
+    const fetch=vi.fn().mockResolvedValueOnce(Response.json({workId:'work',position:0,duration:12,watched:false,revision:1}))
+      .mockImplementation(()=>Promise.reject(new DOMException('signal timed out','TimeoutError')));
+    vi.stubGlobal('fetch',fetch);
+    const tracker=new ProgressTracker('work',error);await tracker.load();
+    for(let i=0;i<4;i++)tracker.save(state,true);
+    await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(5));
+    expect(error).toHaveBeenCalledOnce();expect(error.mock.calls[0][0]).not.toContain('signal');
+  });
   it('discards pending writes after switching users',async()=>{
     login();const fetch=vi.fn().mockResolvedValue(Response.json({position:4,watched:false,revision:1}));vi.stubGlobal('fetch',fetch);
     const tracker=new ProgressTracker('work',vi.fn());await tracker.load();session.set(null);tracker.save(state,true);await Promise.resolve();expect(fetch).toHaveBeenCalledOnce();

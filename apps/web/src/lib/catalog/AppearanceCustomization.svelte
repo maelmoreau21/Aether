@@ -1,10 +1,11 @@
 <script lang="ts">
   import { preferenceState, savePreferences, DEFAULT_HOME_SECTIONS, type HomeSection } from '../preferences';
-  const names: Record<HomeSection, string> = { hero: 'À la une', continue: 'Reprendre la lecture', tonight: 'Pour ce soir', films: 'Films récents', series: 'Séries récentes', rated: 'Les mieux notés' };
+  import { t, translatedLabels } from '../i18n';
+  const names: Readonly<Record<HomeSection, string>> = translatedLabels({ hero: 'featured', continue: 'resume_watching', tonight: 'for_tonight', films: 'recent_films', series: 'recent_series', rated: 'top_rated' });
   const sections = $derived($preferenceState.homeSections ?? DEFAULT_HOME_SECTIONS);
   let saveError = $state('');
   async function save(patch: Parameters<typeof savePreferences>[0]) {
-    saveError = await savePreferences(patch) ? '' : 'Enregistrement impossible. Modifiez à nouveau le réglage pour réessayer.';
+    saveError = await savePreferences(patch) ? '' : $t('saving_failed_change_the_setting_again');
   }
   function move(index: number, direction: number) {
     const next = [...sections];
@@ -16,34 +17,34 @@
   }
 </script>
 <section class="customization" aria-labelledby="customization-title">
-  <h2 id="customization-title">Personnaliser l’affichage</h2>
-  <p>Ces choix suivent votre compte sur vos appareils. Une page déjà ouverte les recharge quand vous y revenez.</p>
+  <h2 id="customization-title">{$t('customise_the_display')}</h2>
+  <p>{$t('these_choices_follow_your_account_across')}</p>
   <div class="choices">
-    <label>Taille des affiches
+    <label>{$t('poster_size')}
       <select value={$preferenceState.cardSize ?? 'medium'} onchange={event => void save({ cardSize: event.currentTarget.value as 'small' | 'medium' | 'large' })}>
-        <option value="small">Petite</option><option value="medium">Moyenne</option><option value="large">Grande</option>
+        <option value="small">{$t('small')}</option><option value="medium">{$t('stats_average')}</option><option value="large">{$t('large')}</option>
       </select>
     </label>
-    <label>Espacement des cartes
+    <label>{$t('card_spacing')}
       <select value={$preferenceState.cardDensity ?? 'comfortable'} onchange={event => void save({ cardDensity: event.currentTarget.value as 'comfortable' | 'compact' })}>
-        <option value="comfortable">Confortable</option><option value="compact">Compact</option>
+        <option value="comfortable">{$t('comfortable')}</option><option value="compact">{$t('compact')}</option>
       </select>
     </label>
   </div>
-  <h3>Sections de l’accueil</h3>
+  <h3>{$t('home_sections')}</h3>
   <ol>
     {#each sections as section, index (section)}
       <li><span>{names[section]}</span>
-        <button type="button" aria-label={`Monter ${names[section]}`} disabled={index === 0} onclick={() => move(index, -1)}>↑</button>
-        <button type="button" aria-label={`Descendre ${names[section]}`} disabled={index === sections.length - 1} onclick={() => move(index, 1)}>↓</button>
-        <button type="button" onclick={() => toggle(section)}>Masquer</button>
+        <button type="button" aria-label={$t('move_up', { value: names[section] })} disabled={index === 0} onclick={() => move(index, -1)}>↑</button>
+        <button type="button" aria-label={$t('move_down', { value: names[section] })} disabled={index === sections.length - 1} onclick={() => move(index, 1)}>↓</button>
+        <button type="button" onclick={() => toggle(section)}>{$t('hide')}</button>
       </li>
     {/each}
   </ol>
   {#each DEFAULT_HOME_SECTIONS.filter(section => !sections.includes(section)) as section (section)}
-    <button class="restore" type="button" onclick={() => toggle(section)}>Afficher : {names[section]}</button>
+    <button class="restore" type="button" onclick={() => toggle(section)}>{$t('show', { value: names[section] })}</button>
   {/each}
-  <button type="button" onclick={() => void save({ homeSections: [...DEFAULT_HOME_SECTIONS], cardSize: 'medium', cardDensity: 'comfortable' })}>Rétablir l’affichage par défaut</button>
+  <button type="button" onclick={() => void save({ homeSections: [...DEFAULT_HOME_SECTIONS], cardSize: 'medium', cardDensity: 'comfortable' })}>{$t('restore_default_display')}</button>
   {#if saveError}<p role="alert">{saveError}</p>{/if}
 </section>
 <style>

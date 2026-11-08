@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { playbackPreferences, trackPreferences, SKIP_SECONDS } from './playback-preferences';
+import { isForeignAudio, languageDefaults, playbackPreferences, trackPreferences, SKIP_SECONDS } from './playback-preferences';
 
 describe('playback account defaults', () => {
   it('keeps old accounts on manual episode changes and ten-second skips', () => {
@@ -36,5 +36,48 @@ describe('track selection policy', () => {
     expect(trackPreferences({ subtitles: 'always', subtitlePreference: { enabled: false } }).subtitlePreference).toEqual({ enabled: false });
     expect(trackPreferences({ audioLanguage: 'fr-CA', audioTrack: { mediaId: 'movie', trackId: 'old' } }).audioLanguage).toBe('fr');
     expect(trackPreferences({ subtitles: 'off', rememberSubtitleSelections: false, subtitlePreference }).subtitlePreference).toEqual({ enabled: false });
+  });
+});
+
+describe('audio and subtitle languages are independent of the interface language', () => {
+  it('uses the interface language only when nothing else was chosen', () => {
+    expect(languageDefaults({})).toEqual({ audio: 'fr', subtitle: 'fr' });
+    expect(languageDefaults({ locale: 'en' })).toEqual({ audio: 'en', subtitle: 'en' });
+  });
+  it('lets audio, subtitles and metadata each have their own language', () => {
+    expect(languageDefaults({ locale: 'fr', audioLanguage: 'original', metadataLocale: 'en-GB' })).toEqual({ audio: 'original', subtitle: 'en' });
+    expect(languageDefaults({ locale: 'fr', audioLanguage: 'ja', subtitleLanguage: 'de', metadataLocale: 'en' })).toEqual({ audio: 'ja', subtitle: 'de' });
+  });
+  it('builds the default subtitle choice from the subtitle language, not from French', () => {
+    const always = trackPreferences({ locale: 'en', subtitles: 'always', subtitleLanguage: 'es' });
+    expect(always.subtitlePreference).toEqual({ enabled: true, language: 'es', forced: false });
+    expect(trackPreferences({ locale: 'en' }).audioLanguage).toBe('en');
+    expect(trackPreferences({ locale: 'fr' }).audioLanguage).toBe('fr');
+  });
+});
+
+describe('subtitles in original version (VO) are remembered on their own', () => {
+  it('turns full subtitles on for every VO once chosen in VO, not for films in my language', () => {
+    const vo = { enabled: true, language: 'fr', forced: false };
+    const policy = trackPreferences({ locale: 'fr', subtitlePreference: { enabled: false }, subtitlePreferenceForeign: vo });
+    expect(policy.foreignSubtitlePreference).toEqual(vo);
+    expect(policy.subtitlePreference).toEqual({ enabled: false });
+  });
+  it('the VO mode enables subtitles in the reading language until another VO choice is made', () => {
+    expect(trackPreferences({ locale: 'fr', subtitles: 'foreign' }).foreignSubtitlePreference).toEqual({ enabled: true, language: 'fr', forced: false });
+    expect(trackPreferences({ locale: 'fr', subtitles: 'foreign' }).subtitlePreference).toBeUndefined();
+    expect(trackPreferences({ subtitles: 'foreign', subtitlePreference: { enabled: false } }).foreignSubtitlePreference).toEqual({ enabled: true, language: 'fr', forced: false });
+  });
+  it('accounts that never chose in VO keep their single previous choice', () => {
+    const old = { enabled: true, language: 'fr', forced: false };
+    expect(trackPreferences({ subtitlePreference: old }).foreignSubtitlePreference).toEqual(old);
+    expect(trackPreferences({ subtitles: 'off', rememberSubtitleSelections: false, subtitlePreferenceForeign: old }).foreignSubtitlePreference).toEqual({ enabled: false });
+  });
+  it('compares the spoken language with the language subtitles are read in', () => {
+    expect(isForeignAudio('eng', 'fr')).toBe(true);
+    expect(isForeignAudio('fre', 'fr')).toBe(false);
+    expect(isForeignAudio('fr-CA', 'fr')).toBe(false);
+    expect(isForeignAudio('und', 'fr')).toBe(false);
+    expect(isForeignAudio(undefined, 'fr')).toBe(false);
   });
 });

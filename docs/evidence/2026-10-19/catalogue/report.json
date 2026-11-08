@@ -12,9 +12,9 @@
       "seasonSelection": true,
       "responsiveThemes": true
     },
-    "decodedVideoFrames": 8,
+    "decodedVideoFrames": 7,
     "episode1Playback": true,
-    "episodeLaunchMs": 1313,
+    "episodeLaunchMs": 1469,
     "realChapters": true,
     "seekAndPause": true,
     "upNextCard": true,

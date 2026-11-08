@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import { loadArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
+  import { provideQuickPlay } from './quick-play';
   import { serverPresentation } from '../config/presentation';
   import { ensurePreferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
@@ -14,7 +15,7 @@
   import Navbar from '../ui/Navbar.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
-  import { selectArtwork } from './artwork-selection';
+  import { selectArtwork, renewArtworkVisit } from './artwork-selection';
   import { imagePreviewUrl } from './image-url';
   import CatalogGrid from './CatalogGrid.svelte';
   import CatalogSkeleton from './CatalogSkeleton.svelte';
@@ -25,10 +26,15 @@
     fetchMediaDescriptors,
     revalidateMediaDescriptor,
     getCachedMedia,
+    isAbortError,
+    isCatalogAccessError,
+    type CatalogPage,
     type Work
   } from './api';
   import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
+  import { START_WATCH_PARTY, partyFromLocation, takePendingParty, type StartWatchPartyDetail } from '../syncplay/launch';
+  import { joinParty as joinPartyRequest } from '../syncplay/party-api';
   import { t } from '../i18n';
 
   let { section = 'home' }: { section?: 'home' | 'films' | 'series' | 'search' | 'settings' } = $props();
@@ -66,6 +72,7 @@
   let prefSubtitles = $state('forced');
 
   async function launchEpisode(episode: Work, versionId: string): Promise<void> {
+    quickWork = null;
     if (episodeLaunchController) {
       episodeLaunchController.abort();
       episodeLaunchController = null;
@@ -85,12 +92,12 @@
         const probe = document.createElement('video');
         if (known.length === ids.length) {
           const candidate = bestVersion(known, mime => probe.canPlayType(mime));
-          if (!candidate) throw new Error('Aucune version disponible.');
+          if (!candidate) throw new Error($t('no_version_available'));
           return revalidateMediaDescriptor(candidate.id, controller.signal);
         }
         const fresh = await fetchMediaDescriptors(ids, controller.signal, { revalidate: true });
         const candidate = bestVersion(fresh, mime => probe.canPlayType(mime));
-        if (!candidate) throw new Error('Aucune version disponible.');
+        if (!candidate) throw new Error($t('no_version_available'));
         return candidate;
       })();
       void descriptor.catch(() => {});
@@ -139,7 +146,9 @@
     finally { playerLoading = undefined; }
   }
 
-  beforeNavigate(() => {
+  beforeNavigate(({ to }) => {
+    // Opening a work keeps the artwork just clicked; any other page draws new artwork.
+    if (!to?.url.searchParams.get('work')) renewArtworkVisit();
     if (!workId) saveCatalogScroll(page.url.pathname + page.url.search, window.scrollY);
   });
   afterNavigate(() => {
@@ -177,10 +186,13 @@
             ? $t('search')
             : $t('home'))
   );
-  const allowedIds = $derived(detail ? playbackIds(detail) : []);
+  /** A film started from a poster's quick action, without leaving the current page. */
+  let quickWork = $state<Work | null>(null);
+  const playbackSource = $derived(quickWork ?? detail);
+  const allowedIds = $derived(playbackSource ? playbackIds(playbackSource) : []);
   const playableMedia = $derived(media.filter(item => allowedIds.includes(item.id)));
   const episodeIds = $derived(playingEpisode ? playbackIds(playingEpisode) : []);
-  const playerMedia = $derived(detail?.kind === 'series' ? media.filter(item => episodeIds.includes(item.id)) : playableMedia);
+  const playerMedia = $derived(!quickWork && detail?.kind === 'series' ? media.filter(item => episodeIds.includes(item.id)) : playableMedia);
 
   const nextEpisode = $derived.by(() => {
     if (!playingEpisode || detail?.kind !== 'series') return undefined;
@@ -231,9 +243,30 @@
       : resolve(`films/?work=${encodeURIComponent(work.id)}`);
   }
 
+  async function joinFromLink(partyId: string, mediaId?: string) {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('party'); url.searchParams.delete('media');
+    history.replaceState(history.state, '', url);
+    try {
+      await joinPartyRequest(partyId, $session?.csrfToken ?? '');
+      let target = mediaId;
+      if (!target) {
+        const response = await fetch(`/api/v1/parties/${encodeURIComponent(partyId)}`, { credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) throw new Error($t('party_join_failed'));
+        target = ((await response.json()) as { party?: { mediaId?: string } }).party?.mediaId;
+      }
+      await launchWatchParty(partyId, target);
+    } catch (cause) {
+      mediaError = cause instanceof Error ? cause.message : $t('party_join_failed');
+    }
+  }
+
   async function launchWatchParty(partyId: string, targetMediaId?: string) {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
-    const targetId = targetMediaId || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
+    // A session points at the work; the open page plays the version chosen on it, other
+    // pages let the server pick the work's first playable file.
+    const chosen = targetMediaId && targetMediaId === detail?.id && current ? current.id : targetMediaId;
+    const targetId = chosen || current?.id || (allowedIds.includes(selected) ? selected : allowedIds[0]);
     if (!targetId) return;
     const controller = new AbortController();
     episodeLaunchController = controller;
@@ -267,7 +300,7 @@
     }
     const controller = new AbortController();
     episodeLaunchController = controller;
-    if (detail && !detail.synthetic) preloadProgress(detail.id);
+    if (playbackSource && !playbackSource.synthetic) preloadProgress(playbackSource.id);
     const launchGen = getSessionGeneration();
     launching = true;
     mediaError = '';
@@ -300,6 +333,7 @@
     }
   }
 
+  provideQuickPlay(work => handleDirectPlay(work));
   async function handleDirectPlay(work: Work): Promise<void> {
     if (work.kind === 'series') {
       // detailUrl already applies SvelteKit resolve to the route and base.
@@ -307,8 +341,12 @@
       await goto(detailUrl(work));
       return;
     }
-    const ids = playbackIds(work);
-    const targetId = ids[0];
+    // Cards and shelves carry no playable versions: read the full work first.
+    let full = work;
+    if (!playbackIds(work).length) {
+      try { full = await request<Work>(`/api/v1/catalog/${encodeURIComponent(work.id)}?episodeLimit=1`, AbortSignal.timeout(10000)); } catch { full = work; }
+    }
+    const targetId = playbackIds(full)[0];
     if (!targetId) {
       // detailUrl already applies SvelteKit resolve to the route and base.
       // eslint-disable-next-line svelte/no-navigation-without-resolve
@@ -316,7 +354,8 @@
       return;
     }
     try {
-      detail = work;
+      // The player opens over the current page; the page itself does not change.
+      quickWork = detail?.id === full.id ? null : full;
       selected = targetId;
       await openPlayer();
     } catch {
@@ -354,16 +393,22 @@
     };
     window.addEventListener('media-artwork-updated',artworkChanged);
     const onStartParty = (e: Event) => {
-      const d = (e as CustomEvent<{ partyId: string; mediaId?: string; workId?: string }>).detail;
+      // Taken here: the launcher does not fall back to the home page.
+      e.preventDefault();
+      const d = (e as CustomEvent<StartWatchPartyDetail>).detail;
       void launchWatchParty(d.partyId, d.mediaId || d.workId);
     };
-    window.addEventListener('start-watch-party', onStartParty);
-    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener('start-watch-party', onStartParty);};
+    window.addEventListener(START_WATCH_PARTY, onStartParty);
+    // Invitation link or a session started from a page without the player: `?party=`,
+    // or the invitation link opened before signing in.
+    const requested = partyFromLocation(window.location.search) ?? takePendingParty();
+    if (requested) void joinFromLink(requested.partyId, requested.mediaId);
+    return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener(START_WATCH_PARTY, onStartParty);};
   });
 
   function savePreference(key: string, value: string) {
     if (key === 'media_pref_audio') savePreferences({ audioLanguage: value });
-    if (key === 'media_pref_subtitles' && (value === 'forced' || value === 'always' || value === 'off')) savePreferences({ subtitles: value });
+    if (key === 'media_pref_subtitles' && (value === 'forced' || value === 'foreign' || value === 'always' || value === 'off')) savePreferences({ subtitles: value });
     try {
       localStorage.setItem(key, value);
     } catch {
@@ -466,7 +511,14 @@
           const results = await Promise.allSettled(
             requests.map(async ({kind, key, url}) => {
               try {
-                const result = await loadCatalog(key, url);
+                let result: CatalogPage;
+                try { result = await loadCatalog(key, url); }
+                catch (cause) {
+                  // A shared request can be cancelled under us (another shelf got a 403, the cache was
+                  // invalidated): that is not this page's answer. Ask once more for our own.
+                  if (!isAbortError(cause) || controller.signal.aborted || effectSessionGen !== getSessionGeneration()) throw cause;
+                  result = await loadCatalog(key, url);
+                }
                 if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
                 if (kind === 'film') {
                   films = result.items;
@@ -487,10 +539,12 @@
           );
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           void loadPlayer().catch(() => {});
-          const failure = results.find(result => result.status === 'rejected');
-          if (failure?.status === 'rejected') {
-            if (failure.reason instanceof Error && /accès|session/.test(failure.reason.message)) { films = []; series = []; throw failure.reason; }
-            if (completedKinds === 0 && cachedKinds === 0) throw failure.reason;
+          const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason as unknown] : []);
+          // An account-level answer explains every other failure (a 403 cancels the shelves still loading).
+          const failure = failures.find(isCatalogAccessError) ?? failures.find(cause => !isAbortError(cause)) ?? failures[0];
+          if (failure !== undefined) {
+            if (isCatalogAccessError(failure)) { films = []; series = []; throw failure; }
+            if (completedKinds === 0 && cachedKinds === 0) throw isAbortError(failure) ? new Error($t('catalog_connection_failed')) : failure;
             partialCatalogError = $t('partial_catalog_unavailable');
           }
         }
@@ -585,7 +639,7 @@
         bind:selected
         {mediaError}
         similarCandidates={films}
-        onPlay={openPlayer}
+        onPlay={() => { quickWork = null; return openPlayer(); }}
       />
       {:catch}<p role="alert">{$t('movie_load_failed')}</p>{/await}
     {:else}
@@ -637,7 +691,7 @@
   {/if}
 </main>
 
-{#if detail && ImmersivePlayerComponent && createPlayer}
+{#if (detail || quickWork) && ImmersivePlayerComponent && createPlayer}
   <ImmersivePlayerComponent
     bind:this={immersive}
     catalogue={playerMedia}

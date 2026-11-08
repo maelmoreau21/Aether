@@ -434,6 +434,57 @@ async fn test_access_media_permissions() {
     assert!(!can_user_access_media(&store, "user-1", &Role::User, "ep-404").await);
 }
 
+/// A session names a film, an episode or a series; the player needs one of its files.
+#[tokio::test]
+async fn a_party_title_resolves_to_its_first_playable_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("resolve.sqlite"))
+        .await
+        .unwrap();
+    for sql in [
+        "INSERT INTO media_nodes (id, name, base_url, status, shared_secret) VALUES ('local', 'Node', 'http://127.0.0.1:8080', 'connected', 'sec') ON CONFLICT(id) DO UPDATE SET status='connected'",
+        "INSERT INTO libraries (id, name, kind, node_id, root, enabled) VALUES ('lib-1', 'Mixte', 'series', 'local', '/media', 1)",
+        "INSERT INTO inventory_works (id, library_id, identity_key, title, external_ids_json, kind) VALUES \
+         ('film', 'lib-1', 'k-film', 'Film', '{}', 'film'), ('show', 'lib-1', 'k-show', 'Série', '{}', 'series'), \
+         ('sp', 'lib-1', 'k-sp', 'Spécial', '{}', 'episode'), ('e2', 'lib-1', 'k-e2', 'S1E2', '{}', 'episode'), \
+         ('e1', 'lib-1', 'k-e1', 'S1E1', '{}', 'episode'), ('empty', 'lib-1', 'k-empty', 'Vide', '{}', 'film')",
+        "INSERT INTO inventory_seasons (id, series_id, season_number) VALUES ('s0', 'show', 0), ('s1', 'show', 1)",
+        "INSERT INTO inventory_episodes (id, season_id, episode_number, work_id) VALUES ('ep-sp', 's0', 1, 'sp'), ('ep-2', 's1', 2, 'e2'), ('ep-1', 's1', 1, 'e1')",
+    ] {
+        query(sql).execute(&store.pool).await.unwrap();
+    }
+    for work in ["film", "sp", "e2", "e1"] {
+        for sql in [
+            "INSERT INTO inventory_editions (id, work_id) VALUES ('ed-' || ?, ?)",
+            "INSERT INTO inventory_versions (id, edition_id) VALUES ('v-' || ?, 'ed-' || ?)",
+            "INSERT INTO inventory_sources (root_snapshot, id, version_id, library_id) VALUES ('/media', 'src-' || ?, 'v-' || ?, 'lib-1')",
+            "INSERT INTO inventory_assets (id, source_id, library_id, relative_path, size, modified_ns, mime, probe_json, available) VALUES ('a-' || ?, 'src-' || ?, 'lib-1', 'f.mkv-' || ?, 1, '0', 'video/x-matroska', '{}', 1)",
+        ] {
+            let mut statement = query(sql).bind(work).bind(work);
+            if sql.contains("inventory_assets") {
+                statement = statement.bind(work);
+            }
+            statement.execute(&store.pool).await.unwrap();
+        }
+    }
+
+    let resolve = |id: &'static str| {
+        let store = store.clone();
+        async move {
+            crate::inventory::playable_asset_for_work(&store, id)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(resolve("film").await.as_deref(), Some("a-film"));
+    assert_eq!(resolve("e2").await.as_deref(), Some("a-e2"));
+    assert_eq!(resolve("ep-2").await.as_deref(), Some("a-e2"));
+    // A series starts at its first regular episode, specials last.
+    assert_eq!(resolve("show").await.as_deref(), Some("a-e1"));
+    assert_eq!(resolve("empty").await, None);
+    assert_eq!(resolve("missing").await, None);
+}
+
 #[tokio::test]
 async fn test_queue_reordering_and_playing_from_queue() {
     let temp = tempfile::tempdir().unwrap();

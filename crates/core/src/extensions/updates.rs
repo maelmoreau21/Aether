@@ -178,33 +178,8 @@ pub(super) async fn rollback(
 /// Run the candidate before any mutation, with no HTTP hosts and no storage
 /// broker. A health check must be self-contained and cannot alter live data.
 pub(super) async fn verify_candidate(package: &Package) -> Result<(), Error> {
-    let exe = std::env::current_exe()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    let mut dir = exe
-        .parent()
+    let mut child = worker::spawn()
         .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    if dir.file_name().is_some_and(|name| name == "deps") {
-        dir = dir
-            .parent()
-            .ok_or_else(|| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
-    }
-    let worker = dir.join(if cfg!(windows) {
-        "media-extension-worker.exe"
-    } else {
-        "media-extension-worker"
-    });
-    let mut command = tokio::process::Command::new(worker);
-    command
-        .env_clear()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x08000000);
-    let mut child = command
-        .spawn()
-        .map_err(|_| err(StatusCode::SERVICE_UNAVAILABLE, "worker_unavailable"))?;
     let invocation = crate::extensions::runtime::Invocation::new(
         package.wasm.clone(),
         ExtensionRequest {
@@ -220,12 +195,7 @@ pub(super) async fn verify_candidate(package: &Package) -> Result<(), Error> {
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         let bytes = serde_json::to_vec(&invocation)
             .map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_input"))?;
-        stdin
-            .write_all(&(bytes.len() as u32).to_be_bytes())
-            .await
-            .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        stdin
-            .write_all(&bytes)
+        worker::write_frame(&mut stdin, &bytes)
             .await
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
         drop(stdin);
@@ -233,22 +203,8 @@ pub(super) async fn verify_candidate(package: &Package) -> Result<(), Error> {
             .stdout
             .take()
             .ok_or_else(|| err(StatusCode::INTERNAL_SERVER_ERROR, "worker_io"))?;
-        let mut header = [0; 4];
-        stdout.read_exact(&mut header).await.map_err(|_| {
-            err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "extension_health_check_failed",
-            )
-        })?;
-        let size = u32::from_be_bytes(header) as usize;
-        if size > media_extension_sdk::MAX_JSON + 4096 {
-            return Err(err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "extension_health_check_failed",
-            ));
-        }
-        let mut bytes = vec![0; size];
-        stdout.read_exact(&mut bytes).await.map_err(|_| {
+        // Oversized and truncated frames are the same failed health check.
+        let bytes = worker::read_frame(&mut stdout).await.map_err(|_| {
             err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "extension_health_check_failed",

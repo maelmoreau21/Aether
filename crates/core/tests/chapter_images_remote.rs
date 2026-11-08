@@ -170,7 +170,7 @@ async fn chapter_preview_direct_and_outbound_preserve_head_range_and_permissions
     let library_id = library["id"].as_str().unwrap();
     query("UPDATE libraries SET options_json=? WHERE id=?")
         .bind(
-            json!({"chapterImagesEnabled":true,"trickplayWidth":320,"trickplayQuality":7})
+            json!({"chapterImagesEnabled":true,"trickplayEnabled":true,"trickplayDuringScan":false,"trickplayIntervalSeconds":2,"trickplayWidth":410,"trickplayQuality":12})
                 .to_string(),
         )
         .bind(library_id)
@@ -250,7 +250,51 @@ async fn chapter_preview_direct_and_outbound_preserve_head_range_and_permissions
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     };
-    assert_eq!(image::load_from_memory(&jpeg).unwrap().width(), 320);
+    assert_eq!(image::load_from_memory(&jpeg).unwrap().width(), 410);
+    let preview_path = format!("/api/v1/assets/{asset}/trickplay");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let response = call(
+            &client,
+            &origin,
+            Method::GET,
+            &preview_path,
+            &cookie,
+            "",
+            None,
+        )
+        .await;
+        assert!(matches!(
+            response.status(),
+            StatusCode::OK | StatusCode::ACCEPTED
+        ));
+        let manifest: Value = response.json().await.unwrap();
+        if manifest["status"] == "ready" {
+            assert_eq!(manifest["width"], 410);
+            assert_eq!(manifest["intervalMs"], 2000);
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "custom preview generation timed out: {manifest}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let preview_tile = format!("{preview_path}/0");
+    let direct = call(
+        &client,
+        &origin,
+        Method::GET,
+        &preview_tile,
+        &cookie,
+        "",
+        None,
+    )
+    .await;
+    assert_eq!(direct.status(), StatusCode::OK);
+    let preview_bytes = direct.bytes().await.unwrap();
+    assert!(image::load_from_memory(&preview_bytes).unwrap().width() >= 410);
+
     for outbound in [false, true] {
         let channel = if outbound {
             query("UPDATE media_nodes SET base_url=NULL WHERE id=?")
@@ -281,6 +325,41 @@ async fn chapter_preview_direct_and_outbound_preserve_head_range_and_permissions
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
         }
+        let response = call(
+            &client,
+            &origin,
+            Method::GET,
+            &preview_path,
+            &cookie,
+            "",
+            None,
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "preview manifest outbound={outbound}"
+        );
+        let preview: Value = response.json().await.unwrap();
+        assert_eq!(preview["status"], "ready");
+        assert_eq!(preview["width"], 410);
+        assert_eq!(preview["intervalMs"], 2000);
+        let response = call(
+            &client,
+            &origin,
+            Method::GET,
+            &preview_tile,
+            &cookie,
+            "",
+            None,
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::OK,
+            "preview tile outbound={outbound}"
+        );
+        assert_eq!(response.bytes().await.unwrap(), preview_bytes);
         let response = call(
             &client,
             &origin,

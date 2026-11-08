@@ -48,6 +48,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('#library-name').fill('Séries Navigateur');
     await page.locator('#library-kind').selectOption('series');
     await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.locator('#library-root').fill(process.env.MEDIA_TEST_LIBRARY_ROOT || '');
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
     await page.getByRole('button', {name:'Enregistrer', exact:true}).click();
     const libraryRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Gérer Séries Navigateur',exact:true})});
@@ -68,9 +69,9 @@ fs.mkdirSync(out, {recursive: true});
 
     if (await page.locator('.mobile-menu-toggle').isVisible() && await page.locator('.mobile-menu-toggle').getAttribute('aria-expanded') === 'false') await page.locator('.mobile-menu-toggle').click();
     await page.locator('.admin-sidebar a[href$="#libraries-section"]').click();
-    await page.getByLabel('Actions Séries Navigateur', {exact:true}).click();
-    await page.getByRole('button', {name:'Actualiser la bibliothèque', exact:true}).click();
-    await page.getByRole('dialog').getByRole('button', {name:'Actualiser', exact:true}).click();
+    await page.getByLabel('Paramètres de Séries Navigateur', {exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+    await page.getByRole('dialog').waitFor({state:'hidden'});
     await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});
     report.results.scan = true;
     await page.screenshot({path:`${out}/admin-scan.png`});
@@ -107,7 +108,7 @@ fs.mkdirSync(out, {recursive: true});
     const mediaCallsBeforeDetail = requestedMediaUrls.length;
 
     // 4. Click Series Card -> open Detail
-    await card.click();
+    await card.click({position:{x:12,y:12}});
     await page.getByRole('heading', {name:'Browser Series', exact:true}).waitFor();
 
     // Verify: Opening series detail did NOT trigger batch /api/v1/media/ requests!
@@ -164,7 +165,12 @@ fs.mkdirSync(out, {recursive: true});
     assert.ok((await listRead.json()).items.length>0);
     await page.locator('summary[aria-label="Ajouter à une playlist"]').first().click();
     report.results.quickFeedbackAndListMenu=true;
+    // The title page groups its sections in tabs: the cast lives under « Distribution ».
+    const seriesSections = page.getByRole('tablist',{name:'Sections de la fiche',exact:true});
+    await seriesSections.getByRole('tab',{name:'Distribution',exact:true}).click();
     await page.getByText('Synthetic Actor',{exact:true}).waitFor();
+    await seriesSections.getByRole('tab',{name:'Épisodes',exact:true}).click();
+    await seasons.waitFor();
     const seasonImage = seasons.getByRole('tab',{selected:true}).locator('img');
     await seasonImage.scrollIntoViewIfNeeded();
     await seasonImage.evaluate(image=>image.decode());
@@ -370,10 +376,16 @@ fs.mkdirSync(out, {recursive: true});
     await page.goto(origin+'/app/films/');
     const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
     await filmCard.waitFor();
-    await filmCard.click();
+    await filmCard.click({position:{x:12,y:12}});
+    // Audio languages are in the masthead's quick facts; the cast is behind its tab.
+    // The quick facts show up with the ratings first; quality and languages join them once
+    // the file's descriptor has loaded, so wait for them before reading the text.
+    const filmFacts = page.getByRole('complementary',{name:'En bref',exact:true});
+    await filmFacts.filter({hasText:/français/}).filter({hasText:/anglais/}).waitFor();
+    assert.match(await filmFacts.innerText(),/français/);
+    assert.match(await filmFacts.innerText(),/anglais/);
+    await page.getByRole('tablist',{name:'Sections de la fiche',exact:true}).getByRole('tab',{name:'Distribution',exact:true}).click();
     await page.getByText('Film Actor',{exact:true}).waitFor();
-    assert.match(await page.locator('.media-experience-strip').innerText(),/français/);
-    assert.match(await page.locator('.media-experience-strip').innerText(),/anglais/);
     for (const theme of ['light','dark']) {
       await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
       for (const width of [390,1440]) {
@@ -444,7 +456,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.waitForURL('**/app/series/**');
     await card.waitFor();
     const mediaCallsBeforeDetailB = requestedMediaUrls.length;
-    await card.click();
+    await card.click({position:{x:12,y:12}});
     await page.getByRole('heading', {name: 'Browser Series', exact: true}).waitFor();
 
     // Verify opening series detail in Session B still makes 0 eager media calls

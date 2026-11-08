@@ -3,7 +3,7 @@
   import { preferences, ensurePreferences, savePreferences } from '../preferences';
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
-  import { session } from '../auth/session';
+  import { session, onSessionGenerationChange } from '../auth/session';
   import { features } from '../applications/api';
   import ProfileAvatar from '../ui/ProfileAvatar.svelte';
   import AppearanceCustomization from './AppearanceCustomization.svelte';
@@ -16,6 +16,7 @@
   import Reports from '../applications/Reports.svelte';
   import Statistics from '../statistics/Statistics.svelte';
   import DownloadsPanel from './DownloadsPanel.svelte';
+  import LanguagePreferences from './LanguagePreferences.svelte';
   import Icon from '../ui/Icon.svelte';
   import type { IconName } from '../ui/Icon.svelte';
   import { t, locale, localeOptions, setLocale, type TranslationKey, type SupportedLocale } from '../i18n';
@@ -27,6 +28,16 @@
   import { invalidateLatestCatalog } from './page-cache';
 
   let serverConfig = $state<AppServerConfig | null>(null);
+  let statisticsVisible = $state(false);
+  onMount(() => {
+    let revision=0,disposed=false;
+    const refresh=async()=>{const request=++revision;if(!$session){statisticsVisible=false;return;}try{const response=await fetch('/api/v1/playback/statistics',{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(5000)});if(!response.ok)return;const value=await response.json();if(!disposed&&request===revision){statisticsVisible=value.canView===true;if(!statisticsVisible&&current==='statistics')current='account';}}catch{/* Optional feature stays hidden. */}};
+    void refresh();const off=onSessionGenerationChange(()=>{statisticsVisible=false;void refresh();});
+    window.addEventListener('statistics-settings-changed',refresh);
+    const timer=setInterval(()=>void refresh(),60000);
+    return()=>{disposed=true;revision++;off();clearInterval(timer);window.removeEventListener('statistics-settings-changed',refresh);};
+  });
+
 
   let {
     prefAudio = $bindable('fr'),
@@ -50,6 +61,8 @@
   let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
   let autoSkipIntro = $state(preferences().autoSkipIntro === true);
   let autoSkipCredits = $state(preferences().autoSkipCredits === true);
+  let skipRecapEnabled = $state(preferences().skipRecapEnabled !== false);
+  let autoSkipRecap = $state(preferences().autoSkipRecap === true);
   let offsetsEdited = false;
   let playbackDefaults = $state(playbackPreferences(preferences()));
   let playbackEdited = false;
@@ -96,6 +109,7 @@
     { id: 'downloads', labelKey: 'downloads', icon: 'download', groupKey: 'settings_group_me' },
     { id: 'playback', labelKey: 'settings_nav_playback', icon: 'play', groupKey: 'settings_group_experience' },
     { id: 'display', labelKey: 'settings_nav_display', icon: 'image', groupKey: 'settings_group_experience' },
+    { id: 'languages', labelKey: 'lang_nav', icon: 'globe', groupKey: 'settings_group_experience' },
     { id: 'security', labelKey: 'settings_nav_security', icon: 'shield', groupKey: 'settings_group_security' },
     { id: 'devices', labelKey: 'settings_nav_devices', icon: 'server', groupKey: 'settings_group_security' },
     { id: 'about', labelKey: 'settings_nav_about', icon: 'info', groupKey: 'settings_group_security' }
@@ -127,6 +141,8 @@
       skipCreditsEnabled = saved.skipCreditsEnabled !== false;
       autoSkipIntro = saved.autoSkipIntro === true;
       autoSkipCredits = saved.autoSkipCredits === true;
+      skipRecapEnabled = saved.skipRecapEnabled !== false;
+      autoSkipRecap = saved.autoSkipRecap === true;
       if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
     const sync = () => {
@@ -164,7 +180,7 @@
     <nav class="settings-nav" aria-label={$t('settings_title')}>
       {#each pageGroups as group (group)}
         <p class="nav-group">{$t(group)}</p>
-        {#each pages.filter(page => page.groupKey === group && (!page.feature || $features[page.feature])) as page (page.id)}
+        {#each pages.filter(page => page.groupKey === group && (page.id !== 'statistics' || statisticsVisible) && (!page.feature || $features[page.feature])) as page (page.id)}
           <a href={resolve(`settings/#${page.id}`)} onclick={() => current = page.id} class:active={current === page.id} aria-current={current === page.id ? 'page' : undefined}><Icon name={page.icon} size={18} />{$t(page.labelKey)}</a>
         {/each}
       {/each}
@@ -226,7 +242,7 @@
       </div>
 </section>
 
-      <section class="card profile-card" aria-label="Informations du compte">
+      <section class="card profile-card" aria-label={$t('account_information')}>
         <div class="profile-info-list">
           <div class="info-row">
             <span class="label">{$t('settings_unique_id')}</span>
@@ -255,8 +271,8 @@
 
           <label>{$t('artwork_language')}
             <select bind:value={artworkRotation.languageMode} onchange={() => artworkEdited = true}>
-              <option value="interface">{$t('interface_language')}</option>
-              <option value="original">{$t('original_work_language')}</option>
+              <option value="interface">{$t('artwork_priority_interface')}</option>
+              <option value="original">{$t('artwork_priority_original')}</option>
             </select>
           </label>
           <p class="muted">{$t('artwork_fallback_note')}</p>
@@ -264,27 +280,16 @@
           {#if artworkError}<p role="alert">{artworkError}</p>{/if}
         </form>
       </div>
+      <div hidden={current !== 'languages'}><LanguagePreferences /></div>
       <!-- Data panels mount only while shown: nothing is fetched for hidden pages. -->
       <div class="embedded-panel" hidden={current !== 'requests'}>{#if current === 'requests'}<h2>{$t('settings_requests')}</h2><Requests embedded />{/if}</div>
       <div class="embedded-panel" hidden={current !== 'reports'}>{#if current === 'reports'}<h2>{$t('settings_reports')}</h2><Reports embedded />{/if}</div>
-      <div class="embedded-panel" hidden={current !== 'statistics'}>{#if current === 'statistics'}<Statistics embedded />{/if}</div>
+      <div class="embedded-panel" hidden={current !== 'statistics'}>{#if current === 'statistics' && statisticsVisible}<Statistics embedded />{/if}</div>
       <div hidden={current !== 'downloads'}>{#if current === 'downloads'}<section class="card"><DownloadsPanel embedded /></section>{/if}</div>
       <div hidden={current !== 'security'}><section class="card"><h2>{$t('security')}</h2><AccountSecurity mode="security" /><h3>{$t('sso_connection')}</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
       <div hidden={current !== 'devices'}><section class="card"><h2>{$t('settings_nav_devices')}</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">{$t('playback')}</h2><p class="muted">{$t('playback_account_note')}</p>
       <div class="pref-fields">
-        <label>
-          <span>{$t('settings_pref_audio')}</span>
-          <select
-            bind:value={prefAudio}
-            onchange={() => onSavePreference('media_pref_audio', prefAudio)}
-          >
-            <option value="fr">{$t('audio_default')}</option>
-            <option value="original">{$t('original_version')}</option>
-            <option value="en">{$t('language_en')}</option>
-          </select>
-        </label>
-
         <label>
           <span>{$t('settings_pref_subtitles')}</span>
           <select
@@ -292,6 +297,7 @@
             onchange={() => onSavePreference('media_pref_subtitles', prefSubtitles)}
           >
             <option value="forced">{$t('settings_sub_forced')}</option>
+            <option value="foreign">{$t('settings_sub_foreign')}</option>
             <option value="always">{$t('settings_sub_all')}</option>
             <option value="off">{$t('settings_sub_none')}</option>
           </select>
@@ -323,6 +329,8 @@
           <label class="checkbox-row"><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> {$t('suggest_skip_credits')}</label>
           <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> {$t('auto_skip_intro')}</label>
           <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> {$t('auto_skip_credits')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={skipRecapEnabled} onchange={() => savePreferences({ skipRecapEnabled })} /> {$t('suggest_skip_recap')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipRecap} onchange={() => savePreferences({ autoSkipRecap })} /> {$t('auto_skip_recap')}</label>
         </section>
 
         <form class="offsets" onsubmit={saveOffsets}>
@@ -431,10 +439,10 @@
       </section></div>
       <div hidden={current !== 'about'}>
         <section class="card" aria-labelledby="about-heading">
-          <h2 id="about-heading" class="card-title">À propos de {serverConfig?.name || 'Aether'}</h2>
+          <h2 id="about-heading" class="card-title">{$t('about_server', { name: serverConfig?.name || 'Aether' })}</h2>
           <div class="profile-info-list">
             <div class="info-row">
-              <span class="label">Version</span>
+              <span class="label">{$t('version')}</span>
               <span class="val">
                 <strong>{serverConfig?.version || '0.1.0'}</strong>
                 {#if serverConfig?.channel}
@@ -446,29 +454,29 @@
             </div>
             {#if serverConfig?.commit}
               <div class="info-row">
-                <span class="label">Commit Git</span>
+                <span class="label">{$t('git_commit')}</span>
                 <span class="val"><code>{serverConfig.commit}</code></span>
               </div>
             {/if}
             {#if serverConfig?.build_date}
               <div class="info-row">
-                <span class="label">Date de compilation</span>
+                <span class="label">{$t('build_date')}</span>
                 <span class="val">{serverConfig.build_date}</span>
               </div>
             {/if}
             {#if serverConfig?.release_url}
               <div class="info-row">
-                <span class="label">Notes de version</span>
+                <span class="label">{$t('release_notes')}</span>
                 <span class="val">
                   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
                   <a href={serverConfig.release_url} target="_blank" rel="noopener noreferrer">
-                    Consulter la release {serverConfig.version} sur GitHub
+                    {$t('view_release_on_github', { version: serverConfig.version })}
                   </a>
                 </span>
               </div>
             {/if}
             <div class="info-row">
-              <span class="label">Mode d'exécution</span>
+              <span class="label">{$t('runtime_mode')}</span>
               <span class="val"><code>{serverConfig?.mode || 'standalone'}</code></span>
             </div>
           </div>

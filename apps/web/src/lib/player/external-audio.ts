@@ -1,10 +1,17 @@
-import { waitForStartupBuffer } from './startup-buffer';
+import { INDEPENDENT_AUDIO_RESERVE, waitForStartupBuffer } from './startup-buffer';
 
+import { tr } from '../i18n';
 // Preserve encoded audio and channels; never route production audio through a stereo WebAudio graph.
 // Independent clocks remain client-dependent; seeks and buffering are coordinated explicitly.
 export class ExternalAudio {
   // One maximum-duration Opus packet (120 ms) plus container rounding.
   private static readonly END_TOLERANCE = .15;
+  // Rate correction starts beyond 60 ms of drift (well under lip-sync perception) and stays on
+  // until the clocks are within 15 ms.
+  private static readonly DRIFT_ENGAGE = .06;
+  private static readonly DRIFT_RELEASE = .015;
+  /** -1: audio slowed down, 1: audio sped up, 0: same rate as the video. */
+  private correction: -1 | 0 | 1 = 0;
   protected audio = new Audio();
   private timer?: ReturnType<typeof setInterval>;
   private stallTimer?: ReturnType<typeof setTimeout>;
@@ -37,7 +44,7 @@ export class ExternalAudio {
     if (this.stopped || this.failed || !this.active) return;
     this.failed = true; this.holdingVideo = false; this.clearStall();
     this.video.pause(); this.audio.pause();
-    this.onError('Audio externe interrompu : source indisponible, incompatible ou bloquée pendant 10 secondes.');
+    this.onError(tr('external_audio_interrupted_source'));
   };
   private videoPause = () => { this.audio.pause(); if (!this.holdingVideo) this.clearStall(); };
   pause() { this.startup?.abort(); this.playbackWait?.abort(); this.resumeEpoch++; this.holdingVideo = false; this.clearStall(); this.audio.pause(); }
@@ -110,9 +117,18 @@ export class ExternalAudio {
     if (!this.video.paused && !this.video.seeking && !this.audio.seeking && !this.audio.paused && target >= 0 && target < this.audio.duration) {
       // Small independent-clock drift must not pause the video every 100 ms.
       // A bounded, pitch-preserving correction converges without extra seeks.
-      this.audio.playbackRate = this.video.playbackRate * (Math.abs(drift) > .04 ? (drift > 0 ? .98 : 1.02) : 1);
+      // Every playbackRate change restarts the browser's time-stretcher, which is audible as a
+      // click: hysteresis keeps one rate for a whole correction instead of toggling around a
+      // threshold every tick.
+      if (this.correction === 0 && Math.abs(drift) > ExternalAudio.DRIFT_ENGAGE) this.correction = drift > 0 ? -1 : 1;
+      else if (this.correction !== 0 && (Math.abs(drift) < ExternalAudio.DRIFT_RELEASE || Math.sign(drift) === this.correction)) {
+        this.correction = Math.abs(drift) > ExternalAudio.DRIFT_ENGAGE ? (drift > 0 ? -1 : 1) : 0;
+      }
+      const rate = this.video.playbackRate * (this.correction === 0 ? 1 : this.correction > 0 ? 1.02 : .98);
+      if (this.audio.playbackRate !== rate) this.audio.playbackRate = rate;
       return;
     }
+    this.correction = 0;
     if (!this.align() || this.video.paused || this.video.seeking || this.audio.seeking || !this.audio.paused || this.starting) return;
     this.starting = true;
     void this.audio.play().catch(() => { if (!this.video.paused && !this.waiting) this.error(); }).finally(() => { this.starting = false; });
@@ -121,7 +137,7 @@ export class ExternalAudio {
     if (Number.isFinite(seconds) && Math.abs(seconds) <= 30) { this.offset = seconds; this.afterSeek(); }
   }
   private async ready(signal?: AbortSignal) {
-    if (signal?.aborted) throw new Error('Démarrage annulé.');
+    if (signal?.aborted) throw new Error(tr('start_cancelled'));
     if (!this.audio.seeking && this.audio.readyState >= 2) return;
     await new Promise<void>((resolve, reject) => {
       const finish = (error?: Error) => {
@@ -132,18 +148,18 @@ export class ExternalAudio {
         if (error) reject(error); else resolve();
       };
       const check = () => { if (!this.audio.seeking && this.audio.readyState >= 2) finish(); };
-      const failed = () => finish(new Error('Audio externe Ogg/Opus illisible.'));
-      const aborted = () => finish(new Error('Démarrage annulé.'));
-      const timeout = setTimeout(() => finish(new Error('Chargement ou seek audio expiré après 10 secondes.')), 10000);
-      const cancel = () => finish(new Error('Lecteur fermé.')); this.cancellations.add(cancel);
+      const failed = () => finish(new Error(tr('external_ogg_opus_audio_unreadable')));
+      const aborted = () => finish(new Error(tr('start_cancelled')));
+      const timeout = setTimeout(() => finish(new Error(tr('audio_loading_or_seek_timed_out'))), 10000);
+      const cancel = () => finish(new Error(tr('player_closed'))); this.cancellations.add(cancel);
       this.audio.addEventListener('seeked', check); this.audio.addEventListener('canplay', check); this.audio.addEventListener('error', failed);
       signal?.addEventListener('abort', aborted, {once:true});
       check();
     });
   }
   async load(url: string, activate = true, mime = 'audio/ogg; codecs="opus"', initialPosition?: number | Promise<number>) {
-    const format = mime.startsWith('audio/mp4') ? 'MP4/Opus segmenté' : 'Ogg/Opus';
-    if (!this.audio.canPlayType(mime)) throw new Error(`Ce navigateur ne déclare pas la lecture audio ${mime}.`);
+    const format = mime.startsWith('audio/mp4') ? tr('segmented_mp4_opus') : 'Ogg/Opus';
+    if (!this.audio.canPlayType(mime)) throw new Error(tr('this_browser_does_not_declare_support', { mime }));
     let cancelMetadata: (() => void) | undefined;
     let cancelPosition: (() => void) | undefined;
     const metadata = new Promise<void>((resolve, reject) => {
@@ -154,8 +170,8 @@ export class ExternalAudio {
       };
       const ready = () => finish();
       const failed = () => finish(new Error(`Audio externe ${format} illisible (MediaError ${this.audio.error?.code ?? '?'}).`));
-      const timeout = setTimeout(() => finish(new Error('Chargement audio externe expiré après 10 secondes.')), 10000);
-      const cancel = () => finish(new Error('Lecteur fermé.')); this.cancellations.add(cancel);
+      const timeout = setTimeout(() => finish(new Error(tr('external_audio_loading_timed_out_after'))), 10000);
+      const cancel = () => finish(new Error(tr('player_closed'))); this.cancellations.add(cancel);
       cancelMetadata = cancel;
       this.audio.addEventListener('loadedmetadata', ready); this.audio.addEventListener('error', failed);
       this.audio.src = url; this.audio.load();
@@ -167,15 +183,15 @@ export class ExternalAudio {
         settled = true; clearTimeout(timeout); this.cancellations.delete(cancel); cancelPosition = undefined;
         if (error) reject(error); else resolve(value!);
       };
-      const cancel = () => finish(undefined, new Error('Lecteur fermé.'));
-      const timeout = setTimeout(() => finish(undefined, new Error('Position audio indisponible après 10 secondes.')), 10000);
+      const cancel = () => finish(undefined, new Error(tr('player_closed')));
+      const timeout = setTimeout(() => finish(undefined, new Error(tr('audio_position_unavailable_after_10_seconds'))), 10000);
       cancelPosition = cancel; this.cancellations.add(cancel);
       Promise.resolve(initialPosition).then(value => finish(value), error => finish(undefined, error instanceof Error ? error : new Error(String(error))));
     });
     let saved: number | undefined;
     try { [, saved] = await Promise.all([metadata, positionReady]); }
     catch (error) { cancelMetadata?.(); cancelPosition?.(); throw error; }
-    if (this.stopped) throw new Error('Lecteur fermé.');
+    if (this.stopped) throw new Error(tr('player_closed'));
     this.settings();
     const requested = saved ?? this.video.currentTime;
     let position = Number.isFinite(requested) ? Math.max(0, requested) : 0;
@@ -183,9 +199,9 @@ export class ExternalAudio {
     // Audio metadata can arrive before video metadata. Defer the ambiguous
     // short-tail case until the video duration is known during playback.
     if (!Number.isFinite(this.video.duration) && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration) position = this.video.currentTime;
-    if (position >= this.offset && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration && !this.naturalTail(position)) throw new Error('La piste audio externe se termine avant cette position.');
+    if (position >= this.offset && Number.isFinite(this.audio.duration) && position - this.offset >= this.audio.duration && !this.naturalTail(position)) throw new Error(tr('the_external_audio_track_ends_before'));
     this.align(true, position); if (!this.naturalTail(position)) await this.ready();
-    if (this.stopped) throw new Error('Lecteur fermé.');
+    if (this.stopped) throw new Error(tr('player_closed'));
     if (activate) this.activate();
   }
   activate() {
@@ -198,7 +214,7 @@ export class ExternalAudio {
     this.timer = setInterval(this.resync, 100);
   }
   assertReady() {
-    if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+    if (this.stopped || this.failed) throw new Error(tr('audio_track_interrupted'));
   }
   async bufferForPlayback() {
     if (this.naturalTail()) return;
@@ -207,24 +223,24 @@ export class ExternalAudio {
     const startup = new AbortController(); this.startup = startup;
     try {
       await this.ready(startup.signal);
-      if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
-      await waitForStartupBuffer(this.audio, startup.signal);
+      if (this.stopped || this.failed) throw new Error(tr('audio_track_interrupted'));
+      await waitForStartupBuffer(this.audio, startup.signal, INDEPENDENT_AUDIO_RESERVE);
     }
     finally { if (this.startup === startup) this.startup = undefined; }
   }
   async play() {
-    if (this.failed || this.stopped) throw new Error('Piste audio interrompue. Rechargez explicitement la source.');
+    if (this.failed || this.stopped) throw new Error(tr('audio_track_interrupted_reload_the_source'));
     this.settings();
     if (this.naturalTail()) { this.audio.pause(); return; }
     if (this.video.currentTime < this.offset) { this.audio.pause(); return; }
     const target = this.video.currentTime - this.offset;
-    if (Number.isFinite(this.audio.duration) && target >= this.audio.duration) throw new Error('La piste audio externe se termine avant cette position.');
+    if (Number.isFinite(this.audio.duration) && target >= this.audio.duration) throw new Error(tr('the_external_audio_track_ends_before'));
     this.playbackWait?.abort();
     const waiting = new AbortController(); this.playbackWait = waiting;
     const epoch = this.resumeEpoch;
     try {
       this.align(); await this.ready(waiting.signal);
-      if (this.stopped || this.failed) throw new Error('Piste audio interrompue.');
+      if (this.stopped || this.failed) throw new Error(tr('audio_track_interrupted'));
       if (epoch === this.resumeEpoch && !this.video.paused && !this.video.seeking) await this.audio.play();
     } finally { if (this.playbackWait === waiting) this.playbackWait = undefined; }
   }

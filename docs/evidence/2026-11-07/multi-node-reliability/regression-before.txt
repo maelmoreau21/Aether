@@ -1,0 +1,77 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.59s
+     Running tests/distributed_multi_node.rs (target/debug/deps/distributed_multi_node-6573073f9b0d7bc8)
+
+running 1 test
+REAL_TWO_NODE_AUTOMATION nodes=2 assets=3 elapsed_ms=6427.355; real TCP scans, signed Wasm subprocesses, common durable results; browser decoding latency not measured
+{"asset":"78fb05e8-ab34-48c0-9526-cbe42f2b9a56","component":"audio-1","event":"prepared_http_start","method":"GET","node":"node-2b338642-41f3-4494-a8fb-b5ab0024e91f","range":true}
+{"asset":"78fb05e8-ab34-48c0-9526-cbe42f2b9a56","component":"audio-1","event":"node_prepared_start","method":"GET","range":true}
+{"attempt":"dd206553-26db-4c3d-b497-86c2afcaa1f7","component":"Audio(1)","event":"preparation_requested","source_bytes":247674}
+{"attempt":"dd206553-26db-4c3d-b497-86c2afcaa1f7","code":"unsupported_preparation","component":"Audio(1)","elapsed_ms":63,"event":"preparation_ffmpeg_error","stderr":"Unrecognized option 'fd'.\nError splitting the argument list: Option not found\n"}
+{"attempt":"dd206553-26db-4c3d-b497-86c2afcaa1f7","component":"Audio(1)","elapsed_ms":63,"event":"preparation_cancelled_or_failed"}
+{"asset":"78fb05e8-ab34-48c0-9526-cbe42f2b9a56","component":"audio-1","elapsed_ms":63,"event":"node_prepared_response","status":503}
+{"asset":"78fb05e8-ab34-48c0-9526-cbe42f2b9a56","component":"audio-1","elapsed_ms":65,"event":"prepared_remote_response","node":"node-2b338642-41f3-4494-a8fb-b5ab0024e91f","status":503}
+
+thread 'distributed_core_and_two_remote_nodes_end_to_end' (18) panicked at crates/core/tests/distributed_multi_node.rs:923:9:
+assertion `left == right` failed: remote audio preparation: {"error":"unsupported_preparation"}
+  left: 503
+ right: 206
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    distributed_core_and_two_remote_nodes_end_to_end
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.44s
+
+error: test failed, to rerun pass `-p media-poc --test distributed_multi_node`
+     Running tests/multi_node_scale_and_failover.rs (target/debug/deps/multi_node_scale_and_failover-d2b287675e4ed358)
+
+running 2 tests
+[Concurrency] 50 sélections de descripteurs + 50 flux Range simultanés terminés en 632.79ms
+ok
+
+==================== SIMULATED MULTI-NODE SCALE BENCHMARK (1 / 10 / 100 NODES) ====================
+Note: Measures Core warm-cache selection across simulated registered Nodes (no physical NAS claimed).
+[  1 Nodes simulés] Sélection Descriptor (50 itér.) -> p50:  2.251 ms | p95:  3.160 ms | max:  3.217 ms | Pure Score Pass:  0.95 µs | Fallbacks prêts:  0 | CPU:   0.0 ms | RSS: 59.7 MiB
+[ 10 Nodes simulés] Sélection Descriptor (50 itér.) -> p50:  2.417 ms | p95:  2.584 ms | max:  2.656 ms | Pure Score Pass:  9.61 µs | Fallbacks prêts:  9 | CPU:   0.0 ms | RSS: 61.9 MiB
+[100 Nodes simulés] Sélection Descriptor (50 itér.) -> p50:  3.884 ms | p95:  4.425 ms | max:  4.829 ms | Pure Score Pass: 96.47 µs | Fallbacks prêts: 89 | CPU:   0.0 ms | RSS: 65.8 MiB
+[100 Nodes Failover] Basculement automatique sim-node-001 (down) -> "sim-node-002" en 4.931 ms (score=12298)
+[100 Nodes Load-Aware] Après surcharge de sim-node-002 (25 flux), nouveau Node sélectionné : "sim-node-004" (score=12286)
+====================================================================================================
+
+ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.87s
+
+     Running tests/node_enrollment_and_relay.rs (target/debug/deps/node_enrollment_and_relay-21690f9fe91ebe15)
+
+running 1 test
+{"asset":"5fdd53dd-2b84-4278-96c6-70370af9e8e6","component":"audio-1","event":"prepared_http_start","method":"HEAD","node":"node-8d7a68ab-b706-4c65-a630-6eab09ddbb5d","range":false}
+{"asset":"5fdd53dd-2b84-4278-96c6-70370af9e8e6","component":"audio-1","event":"node_prepared_start","method":"HEAD","range":false}
+{"attempt":"be435d52-ea1c-4f40-8694-0f2b63d89d4e","component":"Audio(1)","event":"preparation_requested","source_bytes":247674}
+{"attempt":"be435d52-ea1c-4f40-8694-0f2b63d89d4e","code":"unsupported_preparation","component":"Audio(1)","elapsed_ms":66,"event":"preparation_ffmpeg_error","stderr":"Unrecognized option 'fd'.\nError splitting the argument list: Option not found\n"}
+{"attempt":"be435d52-ea1c-4f40-8694-0f2b63d89d4e","component":"Audio(1)","elapsed_ms":66,"event":"preparation_cancelled_or_failed"}
+{"asset":"5fdd53dd-2b84-4278-96c6-70370af9e8e6","component":"audio-1","elapsed_ms":66,"event":"node_prepared_response","status":503}
+{"asset":"5fdd53dd-2b84-4278-96c6-70370af9e8e6","component":"audio-1","elapsed_ms":126,"event":"prepared_remote_response","node":"node-8d7a68ab-b706-4c65-a630-6eab09ddbb5d","status":503}
+
+thread 'test_node_enrollment_outbound_channel_and_streaming_relay' (85) panicked at crates/core/tests/node_enrollment_and_relay.rs:484:9:
+assertion `left == right` failed: HEAD /api/v1/assets/5fdd53dd-2b84-4278-96c6-70370af9e8e6/prepared/audio-1
+  left: 503
+ right: 200
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    test_node_enrollment_outbound_channel_and_streaming_relay
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.50s
+
+error: test failed, to rerun pass `-p media-poc --test node_enrollment_and_relay`
+error: 2 targets failed:
+    `-p media-poc --test distributed_multi_node`
+    `-p media-poc --test node_enrollment_and_relay`
+exit=101

@@ -199,6 +199,7 @@ impl Scheduler {
         let notification_jobs = jobs.clone();
         let notifications = tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(15));
+            let mut ticks: u32 = 0;
             loop {
                 interval.tick().await;
                 if notification_jobs.is_cancelled() {
@@ -210,6 +211,15 @@ impl Scheduler {
                 {
                     eprintln!("Notification worker pass failed; retrying on next tick");
                 }
+                // Every ten minutes: end idle "Watch together" parties, drop old invitations.
+                if ticks.is_multiple_of(40)
+                    && crate::parties::clean_expired_parties(&notification_auth.store)
+                        .await
+                        .is_err()
+                {
+                    eprintln!("Watch party expiry pass failed; retrying later");
+                }
+                ticks = ticks.wrapping_add(1);
             }
         });
         let artwork_auth = auth.clone();
@@ -257,7 +267,7 @@ impl Scheduler {
         Self(
             tokio::spawn(async move {
                 // "At server startup" triggers fire once per process start.
-                match crate::task_triggers::fire_startup(&auth, now()).await {
+                match crate::task_scheduler::fire_startup(&auth, now()).await {
                     Ok(0) => {}
                     Ok(count) => eprintln!("Startup triggers queued {count} task(s)"),
                     Err(error) => eprintln!("Startup triggers failed: {error}"),
@@ -323,52 +333,27 @@ pub async fn run_due(
         return Ok(());
     }
     run_library_automation(auth, timestamp).await?;
-    let due:Option<(String,i64,i64)>=crate::database::query_as("SELECT s.library_id,s.interval_minutes,s.next_run_at FROM scheduled_scans s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.enabled=1 AND s.next_run_at<=? AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM scan_jobs j WHERE j.library_id=l.id AND j.status IN ('queued','running')) ORDER BY s.next_run_at,s.library_id LIMIT 1")
-        .bind(timestamp).fetch_optional(&auth.store.pool).await?;
-    let Some((id, minutes, previous)) = due else {
-        let due: Option<(String,String,i64)> = crate::database::query_as("SELECT l.id,l.options_json,l.next_metadata_refresh_at FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND l.enabled=1 AND l.id NOT IN ('fixture-films','fixture-series') AND l.kind!='music' AND n.status!='revoked' AND l.next_metadata_refresh_at<=? AND CAST(COALESCE(json_extract(l.options_json,'$.automaticRefreshIntervalDays'),'0') AS BIGINT)>0 ORDER BY l.next_metadata_refresh_at,l.id LIMIT 1")
-            .bind(timestamp).fetch_optional(&auth.store.pool).await?;
-        if let Some((id, encoded, previous)) = due {
-            let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
-                .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
-            queue_scopes(auth, &id, &format!("metadata:{id}:{previous}"), timestamp).await?;
-            let _claimed = crate::database::query("UPDATE libraries SET next_metadata_refresh_at=? WHERE id=? AND next_metadata_refresh_at=?")
-                .bind(timestamp+i64::from(options.automatic_refresh_interval_days)*86400).bind(&id).bind(previous).execute(&auth.store.pool).await?;
-        }
-        return Ok(());
-    };
-    // Commit idempotent jobs first: if the Core stops before advancing the deadline,
-    // the next pass finds the same request key instead of silently skipping a run.
-    let request_key = format!("schedule:{id}:{previous}");
-    queue_scopes(auth, &id, &request_key, timestamp).await?;
-    {
-        // Claim and advance every trigger in one write: the next run is the earliest next
-        // firing of the library's daily, weekly or interval triggers.
-        let _writer = auth.store.task_writes.lock().await;
-        let mut conn = auth.store.pool().acquire().await?;
-        let mut tx = crate::database::begin_write(&mut conn).await?;
-        let claim=crate::database::query("UPDATE scheduled_scans SET last_run_at=?,last_request_key=?,last_outcome='dispatching' WHERE library_id=? AND enabled=1 AND next_run_at=?")
-            .bind(timestamp).bind(&request_key).bind(&id).bind(previous).execute(&mut *tx).await?;
-        if claim.rows_affected() == 0 {
-            return Ok(());
-        }
-        let advance =
-            crate::task_triggers::advance(&mut tx, "scan", &id, timestamp, minutes).await?;
-        crate::database::query(
-            "UPDATE scheduled_scans SET next_run_at=?,enabled=? WHERE library_id=?",
-        )
-        .bind(advance.next.unwrap_or(timestamp + minutes * 60))
-        .bind(i64::from(advance.next.is_some()))
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
-        crate::database::commit(tx).await?;
+    // Every scheduled task (scans, maintenance, backup) fires from its triggers here.
+    let fired = crate::task_scheduler::fire_due(auth, timestamp).await?;
+    run_metadata_refresh(auth, timestamp).await?;
+    if fired > 0 {
+        // Keep the public deterministic pass useful without requiring a background timer.
+        dispatch_once(auth, root, jobs, timestamp).await?;
     }
-    let outcome = "queued";
-    // Keep the public deterministic pass useful without requiring a background timer.
-    dispatch_once(auth, root, jobs, timestamp).await?;
-    crate::database::query("UPDATE scheduled_scans SET last_outcome=? WHERE library_id=? AND last_run_at=? AND last_outcome='dispatching'")
-        .bind(outcome).bind(id).bind(timestamp).execute(&auth.store.pool).await?;
+    Ok(())
+}
+
+/// Periodic metadata refresh of one library (library option `automaticRefreshIntervalDays`).
+async fn run_metadata_refresh(auth: &AuthState, timestamp: i64) -> Result<(), sqlx::Error> {
+    let due: Option<(String,String,i64)> = crate::database::query_as("SELECT l.id,l.options_json,l.next_metadata_refresh_at FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND l.enabled=1 AND l.id NOT IN ('fixture-films','fixture-series') AND l.kind!='music' AND n.status!='revoked' AND l.next_metadata_refresh_at<=? AND CAST(COALESCE(json_extract(l.options_json,'$.automaticRefreshIntervalDays'),'0') AS BIGINT)>0 ORDER BY l.next_metadata_refresh_at,l.id LIMIT 1")
+        .bind(timestamp).fetch_optional(&auth.store.pool).await?;
+    if let Some((id, encoded, previous)) = due {
+        let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
+            .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
+        queue_scopes(auth, &id, &format!("metadata:{id}:{previous}"), timestamp).await?;
+        let _claimed = crate::database::query("UPDATE libraries SET next_metadata_refresh_at=? WHERE id=? AND next_metadata_refresh_at=?")
+            .bind(timestamp+i64::from(options.automatic_refresh_interval_days)*86400).bind(&id).bind(previous).execute(&auth.store.pool).await?;
+    }
     Ok(())
 }
 
@@ -484,7 +469,7 @@ pub async fn dispatch_once(
     jobs.engine_busy
         .store(!leased.is_empty(), std::sync::atomic::Ordering::Relaxed);
     let statuses: Vec<(String,String,String)> = crate::database::query_as(
-        "SELECT r.scan_id,s.status,s.errors_json FROM active_scan_runs r JOIN scan_jobs s ON s.library_id=r.library_id WHERE EXISTS(SELECT 1 FROM durable_tasks j WHERE j.library_id=r.library_id AND j.lease_until IS NOT NULL)")
+        "SELECT r.scan_id,s.status,s.errors_json FROM active_scan_runs r JOIN scan_jobs s ON s.library_id=r.library_id WHERE EXISTS(SELECT 1 FROM durable_tasks j WHERE j.library_id=r.library_id AND j.lease_until IS NOT NULL) UNION ALL SELECT t.run_id,t.status,t.error FROM active_task_runs t")
         .fetch_all(&auth.store.pool).await?;
     let registry = auth.store.node_registry.snapshot_all();
     let expired: Vec<_> = leased
@@ -614,6 +599,9 @@ pub async fn dispatch_once(
         }
     }
     crate::task_engine::recover_expired(&auth.store, timestamp).await?;
+    // Task fences end with their lease: finished, recovered or cancelled runs.
+    crate::database::query("DELETE FROM active_task_runs WHERE NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE active_task_runs.run_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NOT NULL)")
+        .execute(&auth.store.pool).await?;
     for scan in expired {
         let _ = crate::inventory::clean_staging(&auth.store, &scan).await;
     }

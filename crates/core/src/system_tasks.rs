@@ -395,6 +395,8 @@ fn default_owned_dirs(media_root: &std::path::Path) -> Vec<OwnedDir> {
 
 pub async fn router(auth: AuthState, media_root: PathBuf) -> Result<Router, sqlx::Error> {
     ensure_activity_cleanup(&auth.store).await?;
+    // Tasks seeded after the trigger migration ran get their default trigger now.
+    crate::task_scheduler::adopt_legacy_system_tasks(&auth.store, now()).await?;
     let state = Arc::new(execution_state(auth, media_root));
 
     Ok(Router::new()

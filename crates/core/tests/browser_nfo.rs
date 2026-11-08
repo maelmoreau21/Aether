@@ -83,6 +83,8 @@ async fn browser_nfo_persists_refreshes_and_plays_after_core_restart() {
         let result = tokio::process::Command::new("node")
             .arg("scripts/browser-nfo.cjs")
             .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
+            // The editor no longer pre-fills a folder: the scenario types the real root.
+            .env("MEDIA_TEST_LIBRARY_ROOT", &library)
             .env("MEDIA_TEST_PHASE", phase)
             .current_dir(&root)
             .status()

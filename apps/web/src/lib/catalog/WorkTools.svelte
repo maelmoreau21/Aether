@@ -2,16 +2,19 @@
   import ImageManager from './ImageManager.svelte';
   import ReportButton from '../applications/ReportButton.svelte';
   import IdentifyModal from './IdentifyModal.svelte';
+  import MetadataEditorModal from './MetadataEditorModal.svelte';
   import SubtitleDownloads from './SubtitleDownloads.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
+  import SegmentsDialog from './SegmentsDialog.svelte';
   import { session } from '../auth/session';
   import { playbackIds, type Work } from './api';
   import type { Media } from '../player/types';
   import Icon from '../ui/Icon.svelte';
+  import { dismissibleDetails } from '../ui/dismissible-details';
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
-  import { metadataFormFromWork, metadataPayloadFromForm } from './work-metadata';
-  import { t } from '../i18n';
+  import { t, fmt } from '../i18n';
+  import { startWatchParty } from '../syncplay/launch';
   import {
     audioSummary,
     codecLabel,
@@ -45,6 +48,7 @@
   let listOpen = $state(false);
   let menuOpen = $state(false);
   let watchPartyOpen = $state(false);
+  let segmentsOpen = $state(false);
 
   let lists = $state<{ id: string; name: string; owned?: boolean }[]>([]);
   let listName = $state('');
@@ -54,39 +58,6 @@
   let copiedKey = $state('');
   let detailsById = $state<Record<string, { status: 'loading' | 'ready' | 'error'; data?: AssetDetails; error?: string }>>({});
   let detailsController: AbortController | null = null;
-
-  // Form metadata states
-  let title = $state('');
-  let plot = $state('');
-  let year = $state<number | undefined>();
-  let genres = $state('');
-  let tags = $state('');
-  let ids = $state('{}');
-  let age = $state<number | undefined>();
-  let copyId = $state('');
-
-  let candidates = $state<{
-    id: string;
-    leftWorkId: string;
-    leftTitle: string;
-    rightWorkId: string;
-    rightTitle: string;
-    score: number;
-    reason: string;
-    status: string;
-  }[]>([]);
-  let merges = $state<{ id: string; groupId: string; origin: string }[]>([]);
-
-  $effect(() => {
-    const form = metadataFormFromWork(work);
-    title = form.title;
-    plot = form.plot;
-    year = form.year;
-    genres = form.genres;
-    tags = form.tags;
-    ids = form.ids;
-    age = form.age;
-  });
 
   const isAdmin = $derived($session?.user.role === 'administrator');
 
@@ -118,7 +89,7 @@
         const data = await fetchAssetDetails(id, controller.signal);
         if (!controller.signal.aborted) detailsById[id] = { status: 'ready', data };
       } catch (cause) {
-        if (!controller.signal.aborted) detailsById[id] = { status: 'error', error: cause instanceof Error ? cause.message : 'Informations indisponibles.' };
+        if (!controller.signal.aborted) detailsById[id] = { status: 'error', error: cause instanceof Error ? cause.message : $t('information_unavailable') };
       }
     }));
   }
@@ -126,25 +97,11 @@
   async function loadLists() {
     try {
       const response = await fetch('/api/v1/lists');
-      if (!response.ok) throw new Error('Listes indisponibles.');
+      if (!response.ok) throw new Error($t('lists_unavailable'));
       lists = (await response.json()).lists.filter((list: { owned?: boolean }) => list.owned !== false);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Listes indisponibles.';
+      error = cause instanceof Error ? cause.message : $t('lists_unavailable');
     }
-  }
-
-  async function loadCandidates() {
-    try {
-      const response = await fetch('/api/v1/admin/media-groups/candidates?status=pending');
-      if (!response.ok) return;
-      const data = await response.json();
-      candidates = (data.candidates ?? []).filter(
-        (c: { leftWorkId: string; rightWorkId: string }) => c.leftWorkId === work.id || c.rightWorkId === work.id
-      );
-      merges = (data.merges ?? []).filter(
-        (m: { groupId: string }) => m.groupId === work.id || m.groupId === work.globalMediaId
-      );
-    } catch {}
   }
 
   async function mutate(path: string, method: string, body?: unknown, contentType = 'application/json') {
@@ -160,27 +117,14 @@
         },
         body: body instanceof File ? body : body === undefined ? undefined : JSON.stringify(body)
       });
-      if (!response.ok) throw new Error(`Enregistrement impossible (HTTP ${response.status}).`);
-      message = 'Enregistré avec succès.';
+      if (!response.ok) throw new Error($t('catalog_saving_failed_http', { status: response.status }));
+      message = $t('saved_successfully');
       return response.status === 204 ? true : await response.json();
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Enregistrement impossible.';
+      error = cause instanceof Error ? cause.message : $t('saving_failed');
       return false;
     } finally {
       busy = false;
-    }
-  }
-
-  async function saveMetadata(event: SubmitEvent) {
-    event.preventDefault();
-    const payload = metadataPayloadFromForm({ title, plot, year, genres, tags, ids, age });
-    if (!payload) {
-      error = 'Les identifiants doivent être un objet JSON valide.';
-      return;
-    }
-    const success = await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'PUT', payload);
-    if (success) {
-      window.location.reload();
     }
   }
 
@@ -191,7 +135,7 @@
       if (await mutate(`/api/v1/lists/${encodeURIComponent(result.id)}/items/${encodeURIComponent(work.id)}`, 'PUT')) {
         listName = '';
         await loadLists();
-        message = 'Liste créée et média ajouté.';
+        message = $t('list_created_and_media_added');
       }
     }
   }
@@ -223,7 +167,7 @@
     onClose={() => (watchPartyOpen = false)}
     onJoinParty={(partyId) => {
       watchPartyOpen = false;
-      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, workId: work.id } }));
+      startWatchParty({ partyId, workId: work.id });
     }}
   />
 {/if}
@@ -254,6 +198,10 @@
   />
 {/if}
 
+{#if segmentsOpen && isAdmin}
+  <SegmentsDialog {work} assetId={selectedMedia?.id ?? null} onclose={() => (segmentsOpen = false)} />
+{/if}
+
 {#if subtitlesOpen && isAdmin}
   <SubtitleDownloads {work} {selectedMedia} onclose={() => (subtitlesOpen = false)} />
 {/if}
@@ -264,6 +212,7 @@
   <!-- Quick Playlist Dropdown -->
   <details
     class="list-picker"
+    use:dismissibleDetails
     bind:open={listOpen}
     ontoggle={event => {
       if (event.currentTarget.open) {
@@ -315,11 +264,24 @@
       >
         <label>{$t('new_playlist')}<input required bind:value={listName} maxlength="100" placeholder={$t('new_playlist')} /></label>
         <button type="submit" class="btn primary-btn" disabled={busy || !listName.trim()}>
-          Créer et ajouter
+          {$t('create_and_add')}
         </button>
       </form>
     </div>
   </details>
+
+  {#if isAdmin}
+    <button
+      type="button"
+      class="tool-btn icon-btn edit-meta-btn"
+      class:active={metadataOpen}
+      aria-label={$t('edit_metadata')}
+      title={$t('edit_metadata')}
+      onclick={() => (metadataOpen = true)}
+    >
+      <Icon name="edit" size={18} />
+    </button>
+  {/if}
 
   <!-- Three dots menu trigger -->
   <div class="menu-dropdown-wrapper">
@@ -340,7 +302,7 @@
       <button
         type="button"
         class="backdrop-dismiss"
-        aria-label="Fermer le menu"
+        aria-label={$t('close_menu')}
         tabindex="-1"
         onclick={() => (menuOpen = false)}
       ></button>
@@ -356,7 +318,7 @@
           }}
         >
           <Icon name="users" size={16} />
-          <span>{$t('watch_party')}</span>
+          <span>{$t('watch_together')}</span>
         </button>
 
         <button
@@ -383,7 +345,7 @@
           }}
         >
           <Icon name="sparkles" size={16} />
-          <span>Ajouter à une playlist…</span>
+          <span>{$t('add_to_a_playlist')}</span>
         </button>
 
         {#if isAdmin}
@@ -402,6 +364,21 @@
             >
               <Icon name="search" size={16} />
               <span>{$t('search_subtitles')}</span>
+            </button>
+          {/if}
+
+          {#if !work.synthetic && (work.kind === 'series' ? (work.seasons?.length ?? 0) > 0 : assetIds.length > 0)}
+            <button
+              type="button"
+              class="menu-item"
+              role="menuitem"
+              onclick={() => {
+                menuOpen = false;
+                segmentsOpen = true;
+              }}
+            >
+              <Icon name="film" size={16} />
+              <span>{$t('segments_tab')}</span>
             </button>
           {/if}
 
@@ -438,7 +415,6 @@
             onclick={() => {
               menuOpen = false;
               metadataOpen = true;
-              void loadCandidates();
             }}
           >
             <Icon name="edit" size={16} />
@@ -459,7 +435,7 @@
     <button
       type="button"
       class="modal-backdrop-click"
-      aria-label="Fermer la fenêtre"
+      aria-label={$t('close_the_window')}
       tabindex="-1"
       onclick={closeInfo}
     ></button>
@@ -472,7 +448,7 @@
         <button
           type="button"
           class="close-modal-btn"
-          aria-label="Fermer"
+          aria-label={$t('close')}
           onclick={closeInfo}
         >
           <Icon name="close" size={18} />
@@ -483,11 +459,11 @@
         {#if assetIds.length === 0}
           <p class="info-note">
             {work.kind === 'series'
-              ? 'Les fichiers sont décrits épisode par épisode : ouvrez « Informations média » depuis un épisode.'
-              : 'Aucun fichier indexé n’est disponible pour ce média.'}
+              ? $t('files_are_described_episode_by_episode')
+              : $t('no_indexed_file_is_available_for')}
           </p>
         {:else if assetIds.length > 1}
-          <p class="info-note">{assetIds.length} fichiers disponibles pour ce média (versions ou copies sur plusieurs Media Nodes).</p>
+          <p class="info-note">{$t('files_available_for_this_media_item', { count: assetIds.length })}</p>
         {/if}
 
         {#each assetIds as id, position (id)}
@@ -508,7 +484,7 @@
             {:else if entry.status === 'error'}
               <div class="info-error-row" role="alert">
                 <span>{entry.error}</span>
-                <button type="button" class="btn small outline-btn" onclick={() => void loadDetails(id)}>Réessayer</button>
+                <button type="button" class="btn small outline-btn" onclick={() => void loadDetails(id)}>{$t('request_retry')}</button>
               </div>
             {:else if info}
               {@const status = nodeStatusLabel(info.node.status)}
@@ -518,7 +494,7 @@
                   <h4>{$t('file_location')}</h4>
                   <dl class="info-grid">
                     <div class="info-item">
-                      <dt class="info-label">Media Node</dt>
+                      <dt class="info-label">{$t('media_node')}</dt>
                       <dd class="info-value">
                         {info.node.name}
                         <span class="tag-status {status.tone}">{status.label}</span>
@@ -526,12 +502,12 @@
                       </dd>
                     </div>
                     <div class="info-item">
-                      <dt class="info-label">Bibliothèque</dt>
+                      <dt class="info-label">{$t('library')}</dt>
                       <dd class="info-value">{info.library.name}</dd>
                     </div>
                     {#if info.pathsVisible && info.file.absolutePath}
                       <div class="info-item full">
-                        <dt class="info-label">Chemin sur le Media Node</dt>
+                        <dt class="info-label">{$t('path_on_the_media_node')}</dt>
                         <dd class="info-value path-row">
                           <code class="path">{info.file.absolutePath}</code>
                           <button type="button" class="copy-btn" aria-label={$t('copy_full_path')} onclick={() => copyText(`abs-${id}`, info.file.absolutePath ?? '')}>
@@ -541,7 +517,7 @@
                         </dd>
                       </div>
                       <div class="info-item full">
-                        <dt class="info-label">Chemin dans la bibliothèque</dt>
+                        <dt class="info-label">{$t('path_in_the_library')}</dt>
                         <dd class="info-value path-row">
                           <code class="path">{info.file.relativePath}</code>
                           <button type="button" class="copy-btn" aria-label={$t('copy_relative_path')} onclick={() => copyText(`rel-${id}`, info.file.relativePath ?? '')}>
@@ -549,11 +525,11 @@
                             <span>{copiedKey === `rel-${id}` ? 'Copié' : 'Copier'}</span>
                           </button>
                         </dd>
-                        <span class="info-sub">Racine de la bibliothèque : <code>{info.file.libraryRoot}</code></span>
+                        <span class="info-sub">{$t('library_root')} <code>{info.file.libraryRoot}</code></span>
                       </div>
                     {:else}
                       <div class="info-item full">
-                        <dt class="info-label">Chemin</dt>
+                        <dt class="info-label">{$t('path')}</dt>
                         <dd class="info-value muted">{$t('admin_only_path')}</dd>
                       </div>
                     {/if}
@@ -564,7 +540,7 @@
                 </section>
 
                 <section class="info-section" aria-label={$t('video_tracks')}>
-                  <h4>Vidéo ({groups.video.length})</h4>
+                  <h4>{$t('catalog_video', { count: groups.video.length })}</h4>
                   <ul class="track-list">
                     {#each groups.video as track (track.index)}
                       <li class="track-row">
@@ -579,13 +555,13 @@
                         </div>
                       </li>
                     {:else}
-                      <li class="track-row muted">Aucune piste vidéo analysée.</li>
+                      <li class="track-row muted">{$t('no_video_track_analysed')}</li>
                     {/each}
                   </ul>
                 </section>
 
                 <section class="info-section" aria-label={$t('audio_tracks')}>
-                  <h4>Audio ({groups.audio.length + info.externalAudio.length})</h4>
+                  <h4>{$t('catalog_audio', { value: groups.audio.length + info.externalAudio.length })}</h4>
                   <ul class="track-list">
                     {#each groups.audio as track (track.index)}
                       <li class="track-row">
@@ -604,26 +580,26 @@
                     {#each info.externalAudio as audio, index (index)}
                       <li class="track-row">
                         <div class="track-head">
-                          <span class="track-index">Externe</span>
+                          <span class="track-index">{$t('external')}</span>
                           <LanguageLabel language={audio.language} />
                           {#if audio.track}<strong>{codecLabel(audio.track)}</strong>{/if}
                         </div>
                         <div class="track-chips">
                           {#if audio.track}{#each audioSummary(audio.track) as part (part)}<span class="track-chip">{part}</span>{/each}{/if}
                           <span class="track-chip">{formatBytes(audio.size)}</span>
-                          {#if audio.offsetSeconds}<span class="track-chip">Décalage {audio.offsetSeconds.toLocaleString('fr-FR')} s</span>{/if}
+                          {#if audio.offsetSeconds}<span class="track-chip">{$t('audio_offset_chip', { value: $fmt.number(audio.offsetSeconds) })}</span>{/if}
                         </div>
                         {#if audio.absolutePath}<code class="path small">{audio.absolutePath}</code>{/if}
                       </li>
                     {/each}
                     {#if groups.audio.length + info.externalAudio.length === 0}
-                      <li class="track-row muted">Aucune piste audio analysée.</li>
+                      <li class="track-row muted">{$t('no_audio_track_analysed')}</li>
                     {/if}
                   </ul>
                 </section>
 
                 <section class="info-section" aria-label={$t('subtitle_tracks_info')}>
-                  <h4>Sous-titres ({groups.subtitle.length + info.externalSubtitles.length})</h4>
+                  <h4>{$t('catalog_subtitles', { value: groups.subtitle.length + info.externalSubtitles.length })}</h4>
                   <ul class="track-list">
                     {#each groups.subtitle as track (track.index)}
                       <li class="track-row">
@@ -650,21 +626,21 @@
                         </div>
                         {#if subtitle.forced || subtitle.sdh}
                           <div class="track-chips">
-                            {#if subtitle.forced}<span class="track-chip role">Forcés</span>{/if}
-                            {#if subtitle.sdh}<span class="track-chip role">Malentendants (SDH)</span>{/if}
+                            {#if subtitle.forced}<span class="track-chip role">{$t('forced')}</span>{/if}
+                            {#if subtitle.sdh}<span class="track-chip role">{$t('hard_of_hearing_sdh')}</span>{/if}
                           </div>
                         {/if}
                       </li>
                     {/each}
                     {#if groups.subtitle.length + info.externalSubtitles.length === 0}
-                      <li class="track-row muted">Aucun sous-titre.</li>
+                      <li class="track-row muted">{$t('no_subtitles')}</li>
                     {/if}
                   </ul>
                 </section>
 
                 {#if groups.other.length}
                   <section class="info-section" aria-label={$t('other_streams')}>
-                    <h4>Autres flux ({groups.other.length})</h4>
+                    <h4>{$t('catalog_other_streams', { count: groups.other.length })}</h4>
                     <ul class="track-list">
                       {#each groups.other as track (track.index)}
                         <li class="track-row">
@@ -679,47 +655,47 @@
                   </section>
                 {/if}
 
-                <section class="info-section" aria-label="Conteneur et détails techniques">
-                  <h4>Conteneur et détails techniques</h4>
+                <section class="info-section" aria-label={$t('container_and_technical_details')}>
+                  <h4>{$t('container_and_technical_details')}</h4>
                   <dl class="info-grid">
                     <div class="info-item">
-                      <dt class="info-label">Conteneur</dt>
+                      <dt class="info-label">{$t('container')}</dt>
                       <dd class="info-value">
                         {containerLabel(info.file.mime)}
                         {#if info.container.formatLongName}<span class="info-sub">{info.container.formatLongName}{info.container.formatName ? ` (${info.container.formatName})` : ''}</span>{/if}
                       </dd>
                     </div>
                     <div class="info-item">
-                      <dt class="info-label">Taille</dt>
+                      <dt class="info-label">{$t('size')}</dt>
                       <dd class="info-value">{formatBytes(info.file.size)}</dd>
                     </div>
                     <div class="info-item">
-                      <dt class="info-label">Durée</dt>
+                      <dt class="info-label">{$t('sched_duration')}</dt>
                       <dd class="info-value">{formatDuration(info.container.durationSeconds) ?? '—'}</dd>
                     </div>
                     <div class="info-item">
-                      <dt class="info-label">Débit global</dt>
+                      <dt class="info-label">{$t('overall_bitrate')}</dt>
                       <dd class="info-value">{formatBitrate(info.container.bitRate) ?? '—'}</dd>
                     </div>
                     <div class="info-item">
-                      <dt class="info-label">Chapitres</dt>
+                      <dt class="info-label">{$t('chapters')}</dt>
                       <dd class="info-value">{info.chapterCount || 'Aucun'}</dd>
                     </div>
                     {#if info.file.modifiedAt}
                       <div class="info-item">
-                        <dt class="info-label">Modifié le</dt>
-                        <dd class="info-value">{new Date(info.file.modifiedAt * 1000).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })}</dd>
+                        <dt class="info-label">{$t('modified_on')}</dt>
+                        <dd class="info-value">{$fmt.dateTime(info.file.modifiedAt)}</dd>
                       </div>
                     {/if}
                     <div class="info-item">
-                      <dt class="info-label">Type MIME</dt>
+                      <dt class="info-label">{$t('mime_type')}</dt>
                       <dd class="info-value"><code>{info.file.mime}</code></dd>
                     </div>
                     <div class="info-item full">
-                      <dt class="info-label">Identifiant du fichier</dt>
+                      <dt class="info-label">{$t('file_identifier')}</dt>
                       <dd class="info-value path-row">
                         <code class="path">{info.assetId}</code>
-                        <button type="button" class="copy-btn" aria-label="Copier l'identifiant du fichier" onclick={() => copyText(`asset-${id}`, info.assetId)}>
+                        <button type="button" class="copy-btn" aria-label={$t('copy_the_file_identifier')} onclick={() => copyText(`asset-${id}`, info.assetId)}>
                           <Icon name={copiedKey === `asset-${id}` ? 'check' : 'copy'} size={14} />
                           <span>{copiedKey === `asset-${id}` ? 'Copié' : 'Copier'}</span>
                         </button>
@@ -732,42 +708,42 @@
           </details>
         {/each}
 
-        <section class="info-section" aria-label="Catalogue et provenance">
-          <h4>Catalogue et provenance</h4>
+        <section class="info-section" aria-label={$t('catalogue_and_provenance')}>
+          <h4>{$t('catalogue_and_provenance')}</h4>
           <dl class="info-grid">
             <div class="info-item">
-              <dt class="info-label">Provenance des métadonnées</dt>
-              <dd class="info-value">{work.metadataProvenance === 'nfo' ? 'Fichier NFO local' : 'Indexation automatique'}</dd>
+              <dt class="info-label">{$t('metadata_provenance')}</dt>
+              <dd class="info-value">{work.metadataProvenance === 'nfo' ? $t('local_nfo_file') : $t('automatic_indexing')}</dd>
             </div>
             {#if work.addedAt}
               <div class="info-item">
-                <dt class="info-label">Ajouté le</dt>
-                <dd class="info-value">{new Date(work.addedAt * 1000).toLocaleDateString('fr-FR')}</dd>
+                <dt class="info-label">{$t('added_on')}</dt>
+                <dd class="info-value">{$fmt.date(work.addedAt)}</dd>
               </div>
             {/if}
             {#if work.premiered}
               <div class="info-item">
-                <dt class="info-label">Première diffusion</dt>
+                <dt class="info-label">{$t('first_aired')}</dt>
                 <dd class="info-value">{work.premiered}</dd>
               </div>
             {/if}
             {#if work.rating}
               <div class="info-item">
-                <dt class="info-label">Note</dt>
+                <dt class="info-label">{$t('rating')}</dt>
                 <dd class="info-value">{work.rating.toFixed(1)} / 10</dd>
               </div>
             {/if}
             {#if work.mpaa}
               <div class="info-item">
-                <dt class="info-label">Classification</dt>
+                <dt class="info-label">{$t('classification')}</dt>
                 <dd class="info-value">{work.mpaa}</dd>
               </div>
             {/if}
             <div class="info-item full">
-              <dt class="info-label">Identifiant de l’œuvre</dt>
+              <dt class="info-label">{$t('work_identifier')}</dt>
               <dd class="info-value path-row">
                 <code class="path">{work.id}</code>
-                <button type="button" class="copy-btn" aria-label="Copier l'identifiant de l'œuvre" onclick={() => copyText('work', work.id)}>
+                <button type="button" class="copy-btn" aria-label={$t('copy_the_work_identifier')} onclick={() => copyText('work', work.id)}>
                   <Icon name={copiedKey === 'work' ? 'check' : 'copy'} size={14} />
                   <span>{copiedKey === 'work' ? 'Copié' : 'Copier'}</span>
                 </button>
@@ -775,7 +751,7 @@
             </div>
             {#if work.globalMediaId}
               <div class="info-item full">
-                <dt class="info-label">Identité globale</dt>
+                <dt class="info-label">{$t('global_identity')}</dt>
                 <dd class="info-value"><code class="path">{work.globalMediaId}</code></dd>
               </div>
             {/if}
@@ -784,7 +760,7 @@
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn primary-btn" onclick={closeInfo}>Fermer</button>
+        <button type="button" class="btn primary-btn" onclick={closeInfo}>{$t('close')}</button>
       </div>
     </div>
   </div>
@@ -792,185 +768,13 @@
 
 <!-- Modal: Modifier les métadonnées (Admin) -->
 {#if metadataOpen && isAdmin}
-  <div class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="metadata-edit-title">
-    <button
-      type="button"
-      class="modal-backdrop-click"
-      aria-label="Fermer la fenêtre"
-      tabindex="-1"
-      onclick={() => (metadataOpen = false)}
-    ></button>
-    <div class="modal-card wide">
-      <div class="modal-header">
-        <div class="modal-title-group">
-          <Icon name="edit" size={20} />
-          <h3 id="metadata-edit-title">Modifier les métadonnées</h3>
-        </div>
-        <button
-          type="button"
-          class="close-modal-btn"
-          aria-label="Fermer"
-          onclick={() => (metadataOpen = false)}
-        >
-          <Icon name="close" size={18} />
-        </button>
-      </div>
-
-      <form onsubmit={saveMetadata} class="modal-body form-body">
-        <fieldset disabled={busy} class="form-fieldset">
-          <legend class="sr-only">Formulaire métadonnées</legend>
-
-          <div class="form-grid">
-            <label class="form-field col-8">
-              <span class="field-label">Titre</span>
-              <input required maxlength="512" bind:value={title} />
-            </label>
-
-            <label class="form-field col-4">
-              <span class="field-label">Année</span>
-              <input type="number" min="1800" max="2200" bind:value={year} />
-            </label>
-
-            <label class="form-field col-12">
-              <span class="field-label">Description / Synopsis</span>
-              <textarea bind:value={plot} maxlength="20000" rows="4"></textarea>
-            </label>
-
-            <label class="form-field col-6">
-              <span class="field-label">Genres (séparés par des virgules)</span>
-              <input bind:value={genres} placeholder="Action, Aventure, Drame" />
-            </label>
-
-            <label class="form-field col-6">
-              <span class="field-label">Tags (séparés par des virgules)</span>
-              <input bind:value={tags} maxlength="6400" />
-            </label>
-
-            <label class="form-field col-8">
-              <span class="field-label">Identifiants externes (JSON : tmdb, imdb…)</span>
-              <textarea bind:value={ids} rows="3" class="code-area"></textarea>
-            </label>
-
-            <label class="form-field col-4">
-              <span class="field-label">Âge minimum (vide = non classé)</span>
-              <input type="number" min="0" max="21" bind:value={age} />
-            </label>
-          </div>
-
-          {#if work.kind === 'film' || work.kind === 'series'}
-            <hr class="form-divider" />
-            <h4 class="subhead">Regrouper des copies multi-nœuds</h4>
-            <div class="copy-group-row">
-              <label class="form-field flex-grow">
-                <span class="field-label">Identifiant exact de la même œuvre sur un autre nœud ou bibliothèque</span>
-                <input bind:value={copyId} placeholder="Identifiant Work ID" />
-              </label>
-              <button
-                type="button"
-                class="btn secondary-btn self-end"
-                disabled={!copyId || copyId === work.id || busy}
-                onclick={async () => {
-                  if (await mutate('/api/v1/admin/media-groups', 'POST', { workIds: [work.id, copyId], label: work.title })) {
-                    window.location.reload();
-                  }
-                }}
-              >
-                Associer les deux œuvres
-              </button>
-              <button
-                type="button"
-                class="btn danger-btn self-end"
-                disabled={busy}
-                onclick={async () => {
-                  if (await mutate(`/api/v1/admin/media-groups/${work.id}`, 'DELETE')) {
-                    window.location.reload();
-                  }
-                }}
-              >
-                Dissocier cette copie
-              </button>
-            </div>
-
-            {#if merges.length > 0}
-              <div class="merges-list">
-                {#each merges as merge (merge.id)}
-                  <button
-                    type="button"
-                    class="btn outline-btn"
-                    onclick={async () => {
-                      if (await mutate(`/api/v1/admin/media-groups/merges/${encodeURIComponent(merge.id)}/undo`, 'POST')) {
-                        window.location.reload();
-                      }
-                    }}
-                  >
-                    Annuler la fusion ({merge.origin})
-                  </button>
-                {/each}
-              </div>
-            {/if}
-
-            {#if candidates.length > 0}
-              <div class="candidates-box">
-                <strong>Correspondances probables trouvées :</strong>
-                {#each candidates as candidate (candidate.id)}
-                  <div class="candidate-row">
-                    <span><code>{candidate.leftWorkId === work.id ? candidate.rightTitle : candidate.leftTitle}</code> ({candidate.score}% · {candidate.reason})</span>
-                    <div class="candidate-actions">
-                      <button
-                        type="button"
-                        class="btn small primary-btn"
-                        onclick={async () => {
-                          if (await mutate(`/api/v1/admin/media-groups/candidates/${encodeURIComponent(candidate.id)}/confirm`, 'POST')) {
-                            window.location.reload();
-                          }
-                        }}
-                      >
-                        Confirmer
-                      </button>
-                      <button
-                        type="button"
-                        class="btn small outline-btn"
-                        onclick={async () => {
-                          if (await mutate(`/api/v1/admin/media-groups/candidates/${encodeURIComponent(candidate.id)}/reject`, 'POST')) {
-                            await loadCandidates();
-                          }
-                        }}
-                      >
-                        Rejeter
-                      </button>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          {/if}
-        </fieldset>
-
-        <div class="modal-footer">
-          <button
-            type="button"
-            class="btn outline-btn"
-            disabled={busy}
-            onclick={async () => {
-              if (await mutate(`/api/v1/admin/works/${work.id}/metadata`, 'DELETE')) {
-                window.location.reload();
-              }
-            }}
-          >
-            Revenir aux métadonnées du scan
-          </button>
-          <div class="modal-footer-right">
-            <button type="button" class="btn secondary-btn" onclick={() => (metadataOpen = false)}>
-              Annuler
-            </button>
-            <button type="submit" class="btn primary-btn" disabled={busy}>
-              {busy ? 'Enregistrement…' : 'Enregistrer'}
-            </button>
-          </div>
-        </div>
-      </form>
-    </div>
-  </div>
+  <MetadataEditorModal
+    {work}
+    onclose={() => (metadataOpen = false)}
+    onsaved={() => {
+      window.location.reload();
+    }}
+  />
 {/if}
 
 

@@ -7,7 +7,10 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "build": "vite build && node scripts/externalize-bootstrap.mjs",
     "lint": "eslint src",
-    "test": "vitest run"
+    "test": "vitest run",
+    "i18n:check": "vitest run src/lib/i18n",
+    "i18n:baseline": "node scripts/i18n/baseline.mjs",
+    "test:i18n-ui": "node scripts/test-i18n-ui.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^4.0.1",

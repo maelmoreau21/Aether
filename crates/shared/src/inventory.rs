@@ -10,6 +10,10 @@ pub struct CachedFile {
     pub size: u64,
     pub modified_ns: String,
     pub probe: Probe,
+    /// Sampled content fingerprint recorded by an earlier scan (see `ScannedFile`). Lets the Node
+    /// skip re-reading unchanged files after a restart with empty local caches.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_fingerprint: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -33,6 +37,10 @@ pub struct ScannedFile {
     pub external_ids: BTreeMap<String, String>,
     pub probe: Probe,
     pub mime: String,
+    /// Fast, *partial* fingerprint (size + sampled BLAKE3). A hint for move/rename detection only:
+    /// never a cryptographic identity, and never sufficient on its own to merge anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_fingerprint: Option<String>,
     #[serde(default)]
     pub reused: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

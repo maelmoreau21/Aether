@@ -110,10 +110,10 @@ async fn activity(
     if actor.user.role != Role::Administrator {
         return Err(StatusCode::FORBIDDEN);
     }
-    let rows=crate::database::query("SELECT u.id AS user_id,COALESCE(u.display_name,u.sso_username,c.login,'Utilisateur') AS name,s.device_label,s.last_seen_at,a.id AS playback_id,w.title,a.position_seconds,a.duration_seconds,a.paused FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN local_credentials c ON c.user_id=u.id LEFT JOIN active_playbacks a ON a.session_hash=s.token_hash AND a.updated_at>unixepoch()-45 LEFT JOIN inventory_works w ON w.id=a.work_id WHERE s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-120 AND u.disabled_at IS NULL ORDER BY s.last_seen_at DESC LIMIT 200")
+    let rows=crate::database::query("SELECT u.id AS user_id,COALESCE(u.display_name,u.sso_username,c.login,'Utilisateur') AS name,s.device_label,s.last_seen_at,a.id AS playback_id,a.work_id AS work_id,w.kind AS work_kind,COALESCE(w.effective_year,w.year) AS work_year,w.title,ep_s.series_id AS series_id,sw.title AS series_title,ep_s.season_number AS season_number,ep.episode_number AS episode_number,a.position_seconds,a.duration_seconds,a.paused FROM sessions s JOIN users u ON u.id=s.user_id LEFT JOIN local_credentials c ON c.user_id=u.id LEFT JOIN active_playbacks a ON a.session_hash=s.token_hash AND a.updated_at>unixepoch()-45 LEFT JOIN inventory_works w ON w.id=a.work_id LEFT JOIN inventory_episodes ep ON ep.work_id=a.work_id LEFT JOIN inventory_seasons ep_s ON ep_s.id=ep.season_id LEFT JOIN inventory_works sw ON sw.id=ep_s.series_id WHERE s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-120 AND u.disabled_at IS NULL ORDER BY s.last_seen_at DESC LIMIT 200")
         .fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(
-        json!({"sessions":rows.iter().map(|r|json!({"userId":r.get::<String,_>("user_id"),"name":r.get::<String,_>("name"),"device":r.get::<String,_>("device_label"),"lastSeenAt":r.get::<i64,_>("last_seen_at"),"playbackId":r.get::<Option<String>,_>("playback_id"),"title":r.get::<Option<String>,_>("title"),"position":r.get::<Option<f64>,_>("position_seconds"),"duration":r.get::<Option<f64>,_>("duration_seconds"),"paused":r.get::<Option<i64>,_>("paused").map(|v|v==1)})).collect::<Vec<_>>(),"activeWindowSeconds":120}),
+        json!({"sessions":rows.iter().map(|r|json!({"userId":r.get::<String,_>("user_id"),"name":r.get::<String,_>("name"),"device":r.get::<String,_>("device_label"),"lastSeenAt":r.get::<i64,_>("last_seen_at"),"playbackId":r.get::<Option<String>,_>("playback_id"),"title":r.get::<Option<String>,_>("title"),"workId":r.get::<Option<String>,_>("work_id"),"workKind":r.get::<Option<String>,_>("work_kind"),"year":r.get::<Option<i64>,_>("work_year"),"seriesId":r.get::<Option<String>,_>("series_id"),"seriesTitle":r.get::<Option<String>,_>("series_title"),"seasonNumber":r.get::<Option<i64>,_>("season_number"),"episodeNumber":r.get::<Option<i64>,_>("episode_number"),"position":r.get::<Option<f64>,_>("position_seconds"),"duration":r.get::<Option<f64>,_>("duration_seconds"),"paused":r.get::<Option<i64>,_>("paused").map(|v|v==1)})).collect::<Vec<_>>(),"activeWindowSeconds":120}),
     ))
 }
 
@@ -131,11 +131,11 @@ async fn authorized(
         "SELECT COALESCE( \
            (SELECT w.id FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id \
             WHERE w.id=? AND w.kind IN ('film','episode') AND l.enabled=1 AND n.status != 'revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))), \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))), \
            (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
             WHERE (gm.group_id=? OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=?)) \
               AND gw.kind IN ('film','episode') AND gl.enabled=1 AND gn.status != 'revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
             ORDER BY gw.id LIMIT 1) \
          )",
     )
@@ -294,11 +294,11 @@ async fn list(
          JOIN inventory_works w ON w.id = COALESCE( \
            (SELECT dw.id FROM inventory_works dw JOIN libraries dl ON dl.id=dw.library_id JOIN media_nodes dn ON dn.id=dl.node_id \
             WHERE dw.id=p.work_id AND dl.enabled=1 AND dn.status != 'revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=dl.id AND lp.user_id=?))), \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=dl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=dl.id AND lp.user_id=?))), \
            (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
             WHERE (gm.group_id=p.work_id OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=p.work_id)) \
               AND gl.enabled=1 AND gn.status != 'revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=gl.id AND lp.user_id=?)) \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=gl.id AND lp.user_id=?)) \
             ORDER BY gw.id LIMIT 1) \
          ) \
          LEFT JOIN inventory_episodes ep ON ep.work_id=w.id \

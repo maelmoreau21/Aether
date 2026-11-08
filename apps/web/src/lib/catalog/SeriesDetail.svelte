@@ -5,19 +5,24 @@
   import ChapterImages from './ChapterImages.svelte';
   import { imagePreviewUrl } from './image-url';
   import { request, type Work, localizedTitle, localizedPlot } from './api';
-  import { locale } from '../i18n';
+  import { locale, t } from '../i18n';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
   import SimilarWorks from './SimilarWorks.svelte';
   import type { Media } from '../player/types';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import DetailHero from './DetailHero.svelte';
+  import DetailTabs from './DetailTabs.svelte';
+  import WorkDetails from './WorkDetails.svelte';
+  import { creditPeople } from './credits';
+  import { resumeTarget } from './detail-facts';
   import { history } from './watch-state';
   import { isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
   import WatchStatus from './WatchStatus.svelte';
   import EpisodePlayer from './EpisodePlayer.svelte';
   import Icon from '../ui/Icon.svelte';
+  import SegmentsDialog from './SegmentsDialog.svelte';
   import { fitArtwork } from '../ui/fit-artwork';
 
   let {
@@ -68,12 +73,12 @@
       });
       if (res.ok) {
         const body = await res.json().catch(() => ({}));
-        analyzeFeedback = body.message || 'Analyse des marqueurs lancée.';
+        analyzeFeedback = body.message || $t('marker_analysis_started');
       } else {
-        analyzeFeedback = `Erreur (${res.status})`;
+        analyzeFeedback = $t('catalog_error', { status: res.status });
       }
     } catch {
-      analyzeFeedback = 'Analyse indisponible.';
+      analyzeFeedback = $t('analysis_unavailable');
     } finally {
       analyzingSeason = false;
     }
@@ -98,22 +103,68 @@
       episodesLoading = true;
       void request<Work>(`/api/v1/catalog/${encodeURIComponent(currentWork.id)}?` + new URLSearchParams({ season: String(selectedSeason), episodeOffset: String(offset), episodeLimit: String(episodePageSize) }), controller.signal)
         .then(result => { if (!controller.signal.aborted) pageEpisodes = result.seasons?.find(item => item.number === selectedSeason)?.episodes ?? []; })
-        .catch(cause => { if (!controller.signal.aborted) episodesError = cause instanceof Error ? cause.message : 'Épisodes indisponibles.'; })
+        .catch(cause => { if (!controller.signal.aborted) episodesError = cause instanceof Error ? cause.message : $t('episodes_unavailable'); })
         .finally(() => { if (!controller.signal.aborted) episodesLoading = false; });
     }
     return () => controller.abort();
   });
+
+  // Onglets sous l'en-tête : Épisodes (par défaut), Détails, Distribution.
+  const hasCast = $derived(creditPeople(work).length > 0);
+  const tabs = $derived([
+    { id: 'episodes', label: $t('episodes') },
+    { id: 'details', label: $t('detail_tab_details') },
+    ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : [])
+  ]);
+  let tab = $state('episodes');
+  $effect(() => { void work.id; tab = 'episodes'; });
+  // An episode's « Intro & générique » action opens the season's segment editor on that episode
+  // (the file played, too, for an episode the season list does not include). The whole series
+  // is also reachable from the options menu (⋯).
+  let segmentFocus = $state<{ work: string; asset: string | null; title: string } | null>(null);
+  function editSegments(episode: Work, assetId: string | null) {
+    segmentFocus = { work: episode.id, asset: assetId, title: localizedTitle(episode, $locale) };
+  }
+
+  // « Reprendre S2 · É4 » : l'épisode en cours le plus récent de cette série.
+  const resume = $derived(work.synthetic ? null : resumeTarget(work, $history, item => isResumable(item, $serverPresentation), pageEpisodes, season));
+  const resumeRatio = $derived(resume && resume.progress.duration > 0 ? Math.min(100, (resume.progress.position / resume.progress.duration) * 100) : 0);
+
+  function scrollToSections() {
+    const sections = document.getElementById('series-sections');
+    sections?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
+  }
+
+  function showEpisodes() {
+    tab = 'episodes';
+    scrollToSections();
+    document.getElementById('series-detail-tab-episodes')?.focus({ preventScroll: true });
+  }
 </script>
+{#if segmentFocus && $session?.user.role === 'administrator'}
+  <SegmentsDialog {work} season={activeSeason?.number ?? null} focus={segmentFocus} onclose={() => (segmentFocus = null)} />
+{/if}
 <div class="series-detail-view">
   <DetailHero {work}>
     <div class="series-hero-actions">
-      <button type="button" class="hero-cta" onclick={() => {
-        const heading = document.getElementById('episodes-shelf-title');
-        heading?.focus({ preventScroll: true });
-        heading?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth', block: 'start' });
-      }}><Icon name="play" size={20} />Voir les épisodes</button>
+      {#if resume}
+        {@const episodeTitle = localizedTitle(resume.episode, $locale)}
+        <button
+          type="button"
+          class="hero-cta resume"
+          disabled={launchingEpisodeId === resume.episode.id}
+          aria-label={$t('detail_resume_episode_label', { title: episodeTitle, season: resume.season, episode: resume.episode.number ?? '' })}
+          onclick={() => onLaunchEpisode(resume.episode, 'auto')}
+        >
+          <Icon name="play" size={20} />{$t('detail_resume_episode', { season: resume.season, episode: resume.episode.number ?? '' })}
+          <span class="cta-progress" aria-hidden="true" style:width="{resumeRatio}%"></span>
+        </button>
+        <button type="button" class="secondary-cta" onclick={showEpisodes}>{$t('view_episodes')}</button>
+      {:else}
+        <button type="button" class="hero-cta" onclick={showEpisodes}><Icon name="play" size={20} />{$t('view_episodes')}</button>
+      {/if}
       {#if !work.synthetic}
-        <div class="personal-actions" aria-label="Mon suivi">
+        <div class="personal-actions" aria-label={$t('my_tracking')}>
           <WatchStatus workId={work.id} compact />
           <PersonalFeedback workId={work.id} compact />
         </div>
@@ -124,16 +175,23 @@
     {#if mediaError}<p class="error-banner" role="alert">{mediaError}</p>{/if}
   </DetailHero>
 
-  <section class="series-shelf" aria-labelledby="episodes-shelf-title">
+  <section class="detail-sections" id="series-sections" aria-label={$t('detail_sections')}>
+  <DetailTabs {tabs} bind:active={tab} label={$t('detail_sections')} id="series-detail" />
+  {#if tab === 'details'}
+    <div class="panel" role="tabpanel" id="series-detail-panel-details" aria-labelledby="series-detail-tab-details"><WorkDetails {work} /></div>
+  {:else if tab === 'cast' && hasCast}
+    <div class="panel" role="tabpanel" id="series-detail-panel-cast" aria-labelledby="series-detail-tab-cast"><EditorialCredits {work} /></div>
+  {:else}
+  <div class="panel series-shelf" role="tabpanel" id="series-detail-panel-episodes" aria-labelledby="series-detail-tab-episodes">
     <div class="section-heading">
-      <h2 id="episodes-shelf-title" tabindex="-1">Épisodes</h2>
+      <h2 id="episodes-shelf-title" class="h-sr" tabindex="-1">{$t('request_episodes')}</h2>
       {#if work.seasons?.length}
         <div class="season-heading">
           <span class="episode-count">{seasonLabel(activeSeason)} · {episodeCount} {episodeCount > 1 ? 'épisodes' : 'épisode'}</span>
           {#if $session?.user.role === 'administrator' && activeSeason}
-            <button type="button" class="analyze-markers-btn" disabled={analyzingSeason} onclick={triggerAnalyzeSeason} title="Analyser les intros et génériques de cette saison">
+            <button type="button" class="analyze-markers-btn" disabled={analyzingSeason} onclick={triggerAnalyzeSeason} title={$t('analyse_the_intros_and_credits_of')}>
               <Icon name="search" size={15} />
-              <span>{analyzingSeason ? 'Analyse...' : 'Analyser intros & génériques'}</span>
+              <span>{analyzingSeason ? 'Analyse...' : $t('analyse_intros_credits')}</span>
             </button>
             {#if analyzeFeedback}<span class="analyze-feedback" role="status">{analyzeFeedback}</span>{/if}
           {/if}
@@ -142,7 +200,7 @@
     </div>
     {#if work.seasons?.length}
       <!-- seasonNN-poster.jpg : chaque saison est choisie par son affiche (repli : affiche de la série) -->
-      <div class="season-cards" role="tablist" aria-label="Saisons">
+      <div class="season-cards" role="tablist" aria-label={$t('catalog_seasons')}>
         {#each work.seasons as item (item.id)}
           {@const seasonImage = imagePreviewUrl(artwork[`season${item.number}`] || artwork.poster, 320)}
           {@const count = item.episodeCount ?? item.episodes.length}
@@ -160,8 +218,8 @@
         {/each}
       </div>
     {/if}
-    {#if episodesLoading}<p role="status">Chargement des épisodes…</p>{/if}
-    {#if episodesError}<p class="error-banner" role="alert">{episodesError}</p><button class="retry" onclick={() => { episodeOffset = 0; season = work.seasons?.[0]?.number ?? 1; }}>Revenir à la première saison</button>{/if}
+    {#if episodesLoading}<p role="status">{$t('loading_episodes')}</p>{/if}
+    {#if episodesError}<p class="error-banner" role="alert">{episodesError}</p><button class="retry" onclick={() => { episodeOffset = 0; season = work.seasons?.[0]?.number ?? 1; }}>{$t('back_to_the_first_season')}</button>{/if}
     <div class="episodes-list" aria-busy={episodesLoading}>
       {#each visibleEpisodes as episode (episode.id)}
         {@const epTitle = localizedTitle(episode, $locale)}
@@ -171,35 +229,39 @@
         {@const progress = $history.find(item => item.workId === episode.id)}
         {@const descriptor = media.find(item => item.workId === episode.id)}
         {@const duration = descriptor?.sources[0]?.durationSeconds}
-        <article class="episode" aria-label={`Épisode ${episode.number ?? ''} — ${epTitle}`}>
+        <article class="episode" aria-label={$t('episode_aria', { number: episode.number ?? '', title: epTitle })}>
           <div class="episode-artwork">
             {#if thumbnail && !failedImages.includes(thumbnail)}<img class="episode-thumb" src={thumbnail} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => failedImages = [...failedImages, thumbnail]} />{:else}<Icon name="tv" size={32} />{/if}
-            {#if progress && isResumable(progress, $serverPresentation) && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={`Progression de ${epTitle}`}></progress>{/if}
+            {#if progress && isResumable(progress, $serverPresentation) && progress.duration > 0}<progress value={progress.position} max={progress.duration} aria-label={$t('progress_of_3', { epTitle })}></progress>{/if}
           </div>
           <div class="episode-content">
-            <p class="episode-meta">Épisode {episode.number ?? '—'}{duration && duration > 0 ? ` · ${Math.ceil(duration / 60)} min` : ''}{progress?.watched ? ' · Vu' : progress && isResumable(progress, $serverPresentation) ? ' · En cours' : ''}</p>
+            <p class="episode-meta">{$t('episode_meta', { number: episode.number ?? '—', duration: duration && duration > 0 ? ` · ${$t('minutes_short', { count: Math.ceil(duration / 60) })}` : '', state: progress?.watched ? ` · ${$t('seen_short')}` : progress && isResumable(progress, $serverPresentation) ? ` · ${$t('stats_kpi_active')}` : '' })}</p>
             <h3>{epTitle}</h3>
             {#if epDesc}<p class="episode-desc">{epDesc}</p>{/if}
             <div class="episode-actions-row">
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
               {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} compact />{/if}
-              {#if !episode.synthetic && $session?.user.role === 'administrator'}<WorkTools work={episode} selectedMedia={descriptor} />{/if}
+              {#if !episode.synthetic && $session?.user.role === 'administrator'}
+                <WorkTools work={episode} selectedMedia={descriptor} />
+                <button type="button" class="segment-shortcut" onclick={() => editSegments(episode, descriptor?.id ?? null)} title={$t('segment_edit_episode_hint')}><Icon name="edit" size={15} /><span>{$t('segment_edit_episode')}</span></button>
+              {/if}
               {#if descriptor && !episode.synthetic}<ChapterImages assetId={descriptor.id} />{/if}
             </div>
           </div>
         </article>
-      {:else}{#if !episodesLoading && !episodesError}<p class="empty-episodes-box">Aucun épisode disponible pour cette saison.</p>{/if}{/each}
+      {:else}{#if !episodesLoading && !episodesError}<p class="empty-episodes-box">{$t('no_episodes_available_for_this_season')}</p>{/if}{/each}
     </div>
     {#if episodeCount > episodePageSize}
-      <nav class="episode-pagination" aria-label="Pagination des épisodes">
-        <button disabled={episodesLoading || episodeOffset === 0} onclick={() => { episodeOffset = Math.max(0, episodeOffset - episodePageSize); document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>Précédents</button>
-        <span role="status">{episodeOffset + 1}–{Math.min(episodeOffset + episodePageSize, episodeCount)} sur {episodeCount}</span>
-        <button disabled={episodesLoading || episodeOffset + episodePageSize >= episodeCount} onclick={() => { episodeOffset += episodePageSize; document.getElementById('episodes-shelf-title')?.scrollIntoView({ block: 'start' }); }}>Suivants</button>
+      <nav class="episode-pagination" aria-label={$t('episode_pagination')}>
+        <button disabled={episodesLoading || episodeOffset === 0} onclick={() => { episodeOffset = Math.max(0, episodeOffset - episodePageSize); document.getElementById('series-sections')?.scrollIntoView({ block: 'start' }); }}>{$t('previous_page')}</button>
+        <span role="status">{$t('range_of_total', { from: episodeOffset + 1, to: Math.min(episodeOffset + episodePageSize, episodeCount), total: episodeCount })}</span>
+        <button disabled={episodesLoading || episodeOffset + episodePageSize >= episodeCount} onclick={() => { episodeOffset += episodePageSize; document.getElementById('series-sections')?.scrollIntoView({ block: 'start' }); }}>{$t('next_page')}</button>
       </nav>
     {/if}
+  </div>
+  {/if}
   </section>
 
-  <EditorialCredits {work} />
   <SimilarWorks {work} candidates={similarCandidates} />
 </div>
 
@@ -212,29 +274,37 @@
   .hero-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 56px; padding: 0 26px; border: 0; border-radius: 18px; background: var(--btn); color: var(--btn-tx); font-size: 15px; font-weight: 700; transition: transform var(--t-fast) var(--ease), opacity var(--t-fast) ease; }
   .hero-cta:hover:not(:disabled) { opacity: 0.9; }
   .hero-cta:active { transform: scale(0.98); }
-  .series-shelf { margin-top: 40px; }
+  .hero-cta:disabled { opacity: 0.7; cursor: wait; }
+  .hero-cta.resume { position: relative; overflow: hidden; }
+  .cta-progress { position: absolute; left: 0; bottom: 0; height: 4px; background: var(--ac); }
+  .secondary-cta { display: inline-flex; align-items: center; height: 48px; padding: 0 18px; border: 1px solid var(--line-2); border-radius: var(--r-pill); background: var(--pn-2); color: inherit; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; transition: background-color var(--t-fast) ease; }
+  .secondary-cta:hover { background: var(--pn-3); }
+  .detail-sections { display: flex; flex-direction: column; gap: 24px; margin-top: 28px; scroll-margin-top: 88px; }
+  .panel { min-width: 0; }
   .section-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
   h2 { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
-  #episodes-shelf-title { scroll-margin-top: 96px; }
   .season-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-width: 0; }
   .episode-count { font-size: 14px; font-weight: 600; color: var(--mu); white-space: nowrap; }
-  .season-cards { display: grid; grid-auto-flow: column; grid-auto-columns: 150px; gap: 14px; overflow-x: auto; scrollbar-width: none; padding: 4px 3px 12px; margin-bottom: 8px; }
-  .season-card { display: flex; flex-direction: column; gap: 4px; padding: 0; border: 0; background: none; color: var(--tx); text-align: left; }
-  .season-art { position: relative; display: grid; place-items: center; aspect-ratio: 2 / 3; overflow: hidden; border-radius: var(--r-md); background: var(--pn-2); margin-bottom: 6px; transition: transform var(--t-med) var(--ease), box-shadow var(--t-med) ease; }
-  .season-art img { width: 100%; height: 100%; object-fit: cover; }
-  .season-fallback { font-size: 40px; font-weight: 800; color: var(--mu); }
-  .season-card:hover .season-art { transform: translateY(-3px); }
-  .season-card[aria-selected='true'] .season-art { box-shadow: 0 0 0 3px var(--ac); }
-  .season-name { font-size: 14px; font-weight: 800; }
-  .season-sub { font-size: 12px; color: var(--mu); }
+  /* Saisons : pastilles compactes avec leur affiche (seasonNN-poster.jpg). */
+  .season-cards { display: flex; gap: 12px; overflow-x: auto; scrollbar-width: none; padding: 4px 3px 12px; margin-bottom: 8px; }
+  .season-card { flex: 0 0 auto; display: grid; grid-template-columns: 44px auto; grid-template-rows: auto auto; column-gap: 12px; align-items: center; align-content: center; padding: 6px 16px 6px 6px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--pn); color: var(--tx); text-align: left; cursor: pointer; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .season-card:hover { background: var(--pn-2); }
+  .season-card[aria-selected='true'] { border-color: var(--ac); background: var(--ac-soft); }
+  .season-art { grid-row: 1 / 3; position: relative; display: grid; place-items: center; width: 44px; aspect-ratio: 2 / 3; overflow: hidden; border-radius: var(--r-xs); background: var(--pn-2); }
+  .season-art img { width: 100%; height: 100%; object-fit: contain; }
+  .season-fallback { font-size: 16px; font-weight: 800; color: var(--mu); }
+  .season-name { font-size: 14px; font-weight: 800; white-space: nowrap; }
+  .season-sub { font-size: 12px; color: var(--mu); white-space: nowrap; }
   .analyze-markers-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; font-size: 13px; font-weight: 700; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); border: 0; cursor: pointer; transition: background-color var(--t-fast) ease; }
   .analyze-markers-btn:hover:not(:disabled) { background: var(--pn-3); }
   .analyze-markers-btn:disabled { opacity: 0.6; cursor: wait; }
+  .segment-shortcut { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 12px; font: inherit; font-size: 13px; font-weight: 700; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); border: 0; cursor: pointer; }
+  .segment-shortcut:hover { background: var(--pn-3); }
   .analyze-feedback { font-size: 13px; color: var(--ac); font-weight: 600; }
-  .episodes-list { display: grid; gap: 4px; }
-  .episode { display: grid; grid-template-columns: minmax(180px, 240px) minmax(0, 1fr); align-items: start; gap: 20px; padding: 14px 12px; border-radius: var(--r-lg); transition: background-color var(--t-fast) ease; }
+  .episodes-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 560px), 1fr)); gap: 4px 24px; }
+  .episode { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); align-items: start; gap: 20px; padding: 14px 12px; border-radius: var(--r-lg); transition: background-color var(--t-fast) ease; }
   .episode:hover { background: var(--pn); }
-  .episode-artwork { aspect-ratio: 16 / 9; position: relative; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .episode-artwork { aspect-ratio: var(--artwork-ratio, 16 / 9); position: relative; display: grid; place-items: center; overflow: hidden; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
   .episode-thumb { display: block; width: 100%; height: 100%; object-fit: cover; }
   .episode-artwork progress { position: absolute; left: 8px; right: 8px; bottom: 8px; width: calc(100% - 16px); height: 4px; border: 0; border-radius: 4px; accent-color: var(--ac); }
   .episode-content { min-width: 0; display: flex; flex-direction: column; align-items: start; gap: 8px; overflow-wrap: anywhere; }
@@ -247,6 +317,6 @@
   .episode-pagination button:hover:not(:disabled), .retry:hover:not(:disabled) { background: var(--pn-3); }
   .error-banner { color: var(--err); line-height: 1.6; }
   .empty-episodes-box { padding: 36px 24px; border-radius: var(--r-lg); background: var(--bg-2); color: var(--mu); text-align: center; }
-  @media (max-width: 760px) { .episode { grid-template-columns: 128px minmax(0, 1fr); gap: 12px; padding: 10px 4px; } .episode-actions-row { grid-column: 1 / -1; } .season-cards { grid-auto-columns: 112px; } .hero-cta { width: 100%; height: 50px; } }
+  @media (max-width: 760px) { .episode { grid-template-columns: 128px minmax(0, 1fr); gap: 12px; padding: 10px 4px; } .episode-actions-row { grid-column: 1 / -1; } .hero-cta { width: 100%; height: 50px; } .secondary-cta { width: 100%; justify-content: center; } .detail-sections { margin-top: 20px; gap: 18px; } }
 
 </style>

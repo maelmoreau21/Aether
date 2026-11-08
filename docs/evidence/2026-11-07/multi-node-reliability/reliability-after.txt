@@ -1,0 +1,20 @@
+   Compiling media-contracts v0.1.0 (/work/crates/shared)
+   Compiling media-node v0.1.0 (/work/crates/node)
+   Compiling media-poc v0.1.0 (/work/crates/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.04s
+     Running tests/multi_node_reliability.rs (target/debug/deps/multi_node_reliability-7fa943da9f866fc5)
+
+running 8 tests
+ok
+scan_after_node_kill: terminal="error" after 58.155671662s (before kill: "running")
+ok
+ok
+ok
+measure: {"build":"debug, loopback, Core and Nodes in one process","direct":{"core_relays_peak":0,"mib_s":320.39855016452066,"total_ms":49,"ttfb_ms":7},"relay":{"core_relays_peak":1,"mib_s":356.5161685653009,"total_ms":44,"ttfb_ms":9},"window_mib":16}
+ok
+ok
+ok
+ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 113.95s
+

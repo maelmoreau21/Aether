@@ -51,3 +51,9 @@ INSERT INTO statistics_wrapped_settings(singleton) VALUES(1) ON CONFLICT(singlet
 INSERT INTO system_task_schedules(id,name,description,category,interval_minutes,enabled,next_due_at)
 VALUES('clean-statistics','Nettoyer les statistiques expirées','Purge bornée des événements et bilans expirés ; ferme les lecteurs sans nouvelles.','Maintenance',5,1,unixepoch()+300)
 ON CONFLICT(id) DO NOTHING;
+
+-- Personal visibility is separate from collection, disabled until explicitly allowed.
+CREATE TABLE IF NOT EXISTS statistics_visibility (
+ singleton BIGINT PRIMARY KEY CHECK(singleton=1), users_can_view BIGINT NOT NULL DEFAULT 0 CHECK(users_can_view IN (0,1))
+);
+INSERT INTO statistics_visibility(singleton) VALUES(1) ON CONFLICT(singleton) DO NOTHING;

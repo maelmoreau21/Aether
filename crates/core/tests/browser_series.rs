@@ -142,7 +142,6 @@ async fn browser_series_flow_and_playback() {
     let store = IdentityStore::open(&db).await.unwrap();
     // These synthetic fixtures exercise local scanning/playback, not providers.
     // Keep their deliberately synthetic external IDs without resolving real films.
-    media_poc::extensions::bootstrap_essential_plugins(&store).await;
     media_poc::database::query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await
@@ -192,6 +191,8 @@ async fn browser_series_flow_and_playback() {
     cmd.arg("scripts/browser-series.cjs")
         .env("MEDIA_TEST_FILM_ROOT", &film_root)
         .env("MEDIA_TEST_ORIGIN", format!("http://127.0.0.1:{port}"))
+        // The editor no longer pre-fills a folder: the scenario types the real root.
+        .env("MEDIA_TEST_LIBRARY_ROOT", &library)
         .current_dir(&root);
     if let Ok(dir) = std::env::var("MEDIA_REPORT_DIR") {
         cmd.env("MEDIA_REPORT_DIR", dir);

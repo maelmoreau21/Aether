@@ -150,7 +150,6 @@ async fn two_real_cores_fence_an_inflight_extension_after_owner_crash() {
         .bootstrap("failover-admin", password.clone())
         .await
         .unwrap();
-    media_poc::extensions::bootstrap_essential_plugins(&store).await;
     query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await

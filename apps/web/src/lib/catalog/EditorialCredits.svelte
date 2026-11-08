@@ -4,6 +4,7 @@
   import { creditPeople, initials } from './credits';
   import Icon from '../ui/Icon.svelte';
   import { resolve } from '$app/paths';
+  import { t } from '../i18n';
 
   let { work }: { work: Work } = $props();
 
@@ -45,16 +46,16 @@
 </script>
 
 {#if people.length > 0}
-  <section aria-label="Distribution et équipe" class="credits-section">
+  <section aria-label={$t('cast_and_crew')} class="credits-section">
     <div class="credits-header">
-      <h2>Distribution &amp; équipe</h2>
+      <h2>{$t('cast_crew')}</h2>
       <div class="carousel-nav">
         <button
           type="button"
           class="nav-arrow"
           disabled={!canScrollLeft}
           onclick={() => scroll('left')}
-          aria-label="Faire défiler la distribution vers la gauche"
+          aria-label={$t('scroll_the_cast_left')}
         >
           <Icon name="chevron-left" size={18} />
         </button>
@@ -63,7 +64,7 @@
           class="nav-arrow"
           disabled={!canScrollRight}
           onclick={() => scroll('right')}
-          aria-label="Faire défiler la distribution vers la droite"
+          aria-label={$t('scroll_the_cast_right')}
         >
           <Icon name="chevron-right" size={18} />
         </button>
@@ -72,7 +73,7 @@
 
     <div class="cast-carousel" bind:this={track} onscroll={updateScrollState}>
       {#each people as person (person.key)}
-        <a class="cast-card" href={resolve(`people/?name=${encodeURIComponent(person.name)}&work=${encodeURIComponent(work.id)}&credit=${encodeURIComponent(person.key)}` as 'people/')} aria-label={`Voir les œuvres de ${person.name}`}>
+        <a class="cast-card" href={resolve(`people/?name=${encodeURIComponent(person.name)}&work=${encodeURIComponent(work.id)}&credit=${encodeURIComponent(person.key)}` as 'people/')} aria-label={$t('see_works_by', { name: person.name })}>
           <div class="portrait-card">
             <!-- Initials stay underneath: visible while the portrait loads, if it is missing or fails. -->
             <div class="portrait-fallback" aria-hidden="true">

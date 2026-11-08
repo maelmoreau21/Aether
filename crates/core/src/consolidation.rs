@@ -238,7 +238,10 @@ pub fn extract_external_ids_from_json(
         serde_json::from_str(external_ids_json).unwrap_or_default();
     if let Some(manual) = manual_json
         && let Ok(val) = serde_json::from_str::<Value>(manual)
-        && let Some(ext) = val.get("externalIds").and_then(Value::as_object)
+        && let Some(ext) = val
+            .get("externalIds")
+            .or_else(|| val.get("external_ids"))
+            .and_then(Value::as_object)
     {
         map.clear();
         for (k, v) in ext {
@@ -300,7 +303,18 @@ pub async fn sync_work_summary_tx(
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
         .unwrap_or(&title);
-    let display_title_sort = if manual_val.get("title").is_some() {
+    let display_title_sort = if let Some(sort) = manual_val
+        .get("sort_title")
+        .or_else(|| editorial_val.get("sort_title"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+    {
+        sort.trim().to_lowercase()
+    } else if manual_val
+        .get("title")
+        .and_then(Value::as_str)
+        .is_some_and(|s| !s.trim().is_empty())
+    {
         display_title.to_lowercase()
     } else if !title_sort.is_empty() {
         title_sort.clone()
@@ -464,6 +478,9 @@ pub async fn sync_work_summary_tx(
     .bind(work_id)
     .execute(&mut *tx)
     .await?;
+
+    // Original titles feed the search index next to the translated ones.
+    crate::translations::search::refresh(&mut *tx, work_id).await?;
 
     // Sync normalized external IDs table
     query("DELETE FROM media_work_external_ids WHERE work_id = ?")
@@ -1226,7 +1243,7 @@ pub async fn authorized_group_members(
                 JOIN libraries l ON l.id = w.library_id \
                 JOIN media_nodes n ON n.id = l.node_id \
                 WHERE w.id = ? AND l.enabled = 1 AND n.status != 'revoked' \
-                  AND (? = 1 OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id = l.id AND p.user_id = ?)) \
+                  AND ((? = 1 AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id = l.id AND p.user_id = ?)) \
             ) THEN 1 ELSE 0 END",
         )
         .bind(&cid)

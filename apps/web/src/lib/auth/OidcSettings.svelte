@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { session } from './session';
+  import { t } from '../i18n';
   let { embedded = false }: { embedded?: boolean } = $props();
   let enabled = $state(false);
   let message = $state('');
@@ -8,29 +9,29 @@
   let busy = $state(false);
   onMount(() => {
     const controller = new AbortController();
-    fetch('/api/v1/auth/oidc/status', { signal: controller.signal }).then(r => r.json()).then(s => { enabled = s.enabled === true; }).catch(() => { message = 'État SSO indisponible.'; });
+    fetch('/api/v1/auth/oidc/status', { signal: controller.signal }).then(r => r.json()).then(s => { enabled = s.enabled === true; }).catch(() => { message = $t('sso_status_unavailable'); });
     return () => controller.abort();
   });
   async function link(event: SubmitEvent) {
     event.preventDefault(); busy = true; message = '';
     try {
       const response = await fetch('/api/v1/auth/oidc/link', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' }, body: JSON.stringify({ password }) });
-      if (!response.ok) throw new Error('Liaison refusée. Vérifiez votre mot de passe local et la configuration SSO.');
+      if (!response.ok) throw new Error($t('link_refused_check_your_local_password'));
       const data: { url: string } = await response.json();
       window.location.assign(data.url);
-    } catch (failure) { message = failure instanceof Error ? failure.message : 'Liaison indisponible.'; busy = false; }
+    } catch (failure) { message = failure instanceof Error ? failure.message : $t('link_unavailable'); busy = false; }
     finally { password = ''; }
   }
 </script>
-<section class:embedded aria-label={embedded ? 'Liaison SSO' : undefined} aria-labelledby={embedded ? undefined : 'oidc-title'}>
-  {#if !embedded}<h2 id="oidc-title">Connexion SSO</h2>{/if}
-  <p>{enabled ? 'Connexion SSO activée.' : 'SSO désactivé.'}</p>
-  {#if enabled && $session?.user.sso}<p>Votre compte utilise la connexion SSO.</p>{/if}
+<section class:embedded aria-label={embedded ? $t('sso_link') : undefined} aria-labelledby={embedded ? undefined : 'oidc-title'}>
+  {#if !embedded}<h2 id="oidc-title">{$t('sso_connection')}</h2>{/if}
+  <p>{enabled ? $t('sso_sign_in_enabled') : $t('sso_disabled')}</p>
+  {#if enabled && $session?.user.sso}<p>{$t('your_account_uses_sso_sign_in')}</p>{/if}
   {#if enabled && !$session?.user.sso}
     <form onsubmit={link}>
-      <p>Pour lier votre compte local à votre identité SSO, confirmez votre mot de passe local puis authentifiez-vous chez le fournisseur.</p>
-      <label>Mot de passe local <input type="password" autocomplete="current-password" required maxlength="512" bind:value={password} disabled={busy} /></label>
-      <button type="submit" disabled={busy}>{busy ? 'Connexion…' : 'Lier mon compte local au SSO'}</button>
+      <p>{$t('to_link_your_local_account_to')}</p>
+      <label>{$t('local_password')} <input type="password" autocomplete="current-password" required maxlength="512" bind:value={password} disabled={busy} /></label>
+      <button type="submit" disabled={busy}>{busy ? 'Connexion…' : $t('link_my_local_account_to_sso')}</button>
     </form>
   {/if}
   {#if message}<p role="alert">{message}</p>{/if}

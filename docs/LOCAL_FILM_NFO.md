@@ -34,7 +34,7 @@ techniques d'un NFO sont ignorés : codec, durée, langues et pistes viennent
 exclusivement du probe. Les identifiants contradictoires entre NFO et repli local,
 ou entre versions, sont signalés ; le fournisseur contradictoire est retiré des
 identifiants publics. Aucun rapprochement automatique supplémentaire n'est fait.
-Une contradiction à l'intérieur d'un NFO rend ce NFO invalide.
+Une contradiction à l'intérieur d'un NFO (ou avec le nom du dossier) retire le fournisseur concerné et le signale, sans invalider le reste du NFO ; voir [STORAGE_AND_CACHES.md](STORAGE_AND_CACHES.md).
 
 Compatibilité des identifiants avec Jellyfin : les attributs `TMDB`, `IMDB` et
 `TVDB` de `<id ...>` sont acceptés, y compris sur une balise vide ; les balises

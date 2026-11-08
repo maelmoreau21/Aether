@@ -43,6 +43,7 @@ describe('user helpers', () => {
       { id: 'g1', name: 'A', userIds: ['u1'], libraryIds: [] },
       { id: 'g2', name: 'B', userIds: [], libraryIds: [] },
       { id: 'g3', name: 'C', userIds: ['u1'], libraryIds: [] },
+      { id: 'role', name: 'Role', systemRole: 'user' as const, userIds: ['u1'], libraryIds: [] },
       { id: 'def', name: 'Default', isDefault: true, userIds: [], libraryIds: [] }
     ];
     const updates = groupMembershipUpdates(groups, 'u1', ['g2', 'g3', 'def']);

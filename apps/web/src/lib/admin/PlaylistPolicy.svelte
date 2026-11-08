@@ -1,11 +1,12 @@
 <script lang="ts">
   import {onMount} from 'svelte';
   import {adminRequest} from './request';
+  import { t } from '../i18n';
   let allowPublic=$state(false),allowSharing=$state(false),busy=$state(true),error=$state(''),notice=$state('');
   onMount(()=>{void adminRequest<{allowPublic:boolean;allowSharing:boolean}>('/api/v1/admin/playlists/policy').then(policy=>{allowPublic=policy.allowPublic;allowSharing=policy.allowSharing;}).catch(cause=>error=cause.message).finally(()=>busy=false);});
-  async function save(event:SubmitEvent){event.preventDefault();busy=true;error='';notice='';try{await adminRequest('/api/v1/admin/playlists/policy',{method:'PUT',body:JSON.stringify({allowPublic,allowSharing})});notice='Autorisations des playlists enregistrées.';}catch(cause){error=(cause as Error).message;}finally{busy=false;}}
+  async function save(event:SubmitEvent){event.preventDefault();busy=true;error='';notice='';try{await adminRequest('/api/v1/admin/playlists/policy',{method:'PUT',body:JSON.stringify({allowPublic,allowSharing})});notice=$t('playlist_permissions_saved');}catch(cause){error=(cause as Error).message;}finally{busy=false;}}
 </script>
-<section aria-labelledby="playlist-policy-heading"><h2 id="playlist-policy-heading">Partage des playlists</h2><p>Les playlists restent réservées aux utilisateurs connectés. Les permissions des bibliothèques continuent de s’appliquer à chaque média.</p><form onsubmit={save}><fieldset disabled={busy}><label><input type="checkbox" bind:checked={allowSharing} /> Autoriser le partage avec des personnes</label><label><input type="checkbox" bind:checked={allowPublic} /> Autoriser les playlists publiques sur le serveur</label><p>Désactiver une option rend les playlists concernées inaccessibles aux autres utilisateurs, sans supprimer leur contenu.</p><button>Enregistrer les autorisations des playlists</button></fieldset></form>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</section>
+<section aria-labelledby="playlist-policy-heading"><h2 id="playlist-policy-heading">{$t('playlist_sharing')}</h2><p>{$t('playlists_remain_reserved_for_signed_in')}</p><form onsubmit={save}><fieldset disabled={busy}><label><input type="checkbox" bind:checked={allowSharing} /> {$t('allow_sharing_with_people')}</label><label><input type="checkbox" bind:checked={allowPublic} /> {$t('allow_public_playlists_on_the_server')}</label><p>{$t('disabling_an_option_makes_the_affected')}</p><button>{$t('save_playlist_permissions')}</button></fieldset></form>{#if error}<p role="alert">{error}</p>{/if}{#if notice}<p role="status">{notice}</p>{/if}</section>
 <style>
 section { margin-top: 24px; padding: 24px; border-radius: var(--radius-md); background: var(--color-surface); font-family: var(--font-sans); color: var(--color-text); }
   h2 { margin: 0 0 8px; font-size: 17px; font-weight: 700; letter-spacing: 0; }

@@ -25,7 +25,7 @@ pub fn router(auth: AuthState) -> Router {
         )
         .route(
             "/api/v1/admin/works/{work}/metadata",
-            axum::routing::put(metadata).delete(reset_metadata),
+            get(get_metadata).put(metadata).delete(reset_metadata),
         )
         .route(
             "/api/v1/works/{work}/poster",
@@ -99,7 +99,7 @@ async fn automatic_collections(
     auth: &AuthState,
     actor: &Authenticated,
 ) -> Result<std::collections::BTreeMap<String, (String, Vec<Value>)>, Error> {
-    let rows: Vec<(String, String, String, Option<String>)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.kind='film' AND w.has_available_asset=1 AND l.enabled=1 AND n.status!='revoked' AND CAST(COALESCE(json_extract(l.options_json,'$.automaticCollections'),'0') AS TEXT) IN ('1','true') AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (json_extract(w.editorial_json,'$.collection') IS NOT NULL OR json_extract(COALESCE(w.manual_json,'{}'),'$.collection') IS NOT NULL) ORDER BY w.effective_year,w.title_sort,w.id LIMIT 10000")
+    let rows: Vec<(String, String, String, Option<String>)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE w.kind='film' AND w.has_available_asset=1 AND l.enabled=1 AND n.status!='revoked' AND CAST(COALESCE(json_extract(l.options_json,'$.automaticCollections'),'0') AS TEXT) IN ('1','true') AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (json_extract(w.editorial_json,'$.collection') IS NOT NULL OR json_extract(COALESCE(w.manual_json,'{}'),'$.collection') IS NOT NULL) ORDER BY w.effective_year,w.title_sort,w.id LIMIT 10000")
         .bind(actor.user.role.as_str()).bind(&actor.user.id)
         .fetch_all(auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut collections = std::collections::BTreeMap::<String, (String, Vec<Value>)>::new();
@@ -237,11 +237,11 @@ async fn list(
          JOIN inventory_works w ON w.id = COALESCE( \
            (SELECT dw.id FROM inventory_works dw JOIN libraries dl ON dl.id=dw.library_id JOIN media_nodes dn ON dn.id=dl.node_id \
             WHERE dw.id=i.work_id AND dl.enabled=1 AND dn.status!='revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=dl.id AND p.user_id=?))), \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=dl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=dl.id AND p.user_id=?))), \
            (SELECT gw.id FROM media_group_members gm JOIN inventory_works gw ON gw.id=gm.work_id JOIN libraries gl ON gl.id=gw.library_id JOIN media_nodes gn ON gn.id=gl.node_id \
             WHERE (gm.group_id=i.work_id OR gm.group_id=(SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id=i.work_id)) \
               AND gl.enabled=1 AND gn.status!='revoked' \
-              AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
+              AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=gl.id AND p.user_id=?)) \
             ORDER BY gw.id LIMIT 1) \
          ) \
          WHERE i.list_id=? AND w.kind IN ('film','series','episode') \
@@ -349,21 +349,60 @@ async fn remove_item(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CollectionInput {
+    id: String,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalizedEditorialInput {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    sort_title: Option<String>,
+    #[serde(default)]
+    tagline: Option<String>,
+    #[serde(default)]
+    plot: Option<String>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Editorial {
     title: String,
     year: Option<i64>,
     #[serde(default)]
+    sort_title: Option<String>,
+    #[serde(default)]
     original_title: Option<String>,
+    #[serde(default)]
+    original_language: Option<String>,
     #[serde(default)]
     tagline: Option<String>,
     #[serde(default)]
     plot: String,
     #[serde(default)]
+    premiered: Option<String>,
+    #[serde(default)]
+    added_at: Option<i64>,
+    #[serde(default)]
+    rating: Option<f64>,
+    #[serde(default)]
+    critic_rating: Option<f64>,
+    #[serde(default)]
+    mpaa: Option<String>,
+    #[serde(default)]
     genres: Vec<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    studios: Vec<String>,
+    #[serde(default)]
+    countries: Vec<String>,
     #[serde(default)]
     directors: Vec<String>,
     #[serde(default)]
@@ -371,16 +410,202 @@ struct Editorial {
     #[serde(default)]
     actors: Vec<Value>,
     #[serde(default)]
+    crew_credits: Vec<Value>,
+    #[serde(default)]
     ratings: Vec<Value>,
     #[serde(default)]
     external_ids: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    collection: Option<CollectionInput>,
     #[serde(default)]
     poster_url: Option<String>,
     #[serde(default)]
     backdrop_url: Option<String>,
     #[serde(default)]
     minimum_age: Option<i64>,
+    #[serde(default)]
+    locked: Option<bool>,
+    #[serde(default)]
+    locked_fields: Vec<String>,
+    /// Language of `title`, `tagline` and `plot`. Omitted: the correction is
+    /// language-neutral and shown to everyone, as before translations existed.
+    #[serde(default)]
+    locale: Option<String>,
+    /// Optional map of per-locale translations (`{ "fr": { title, sortTitle, tagline, plot }, ... }`).
+    #[serde(default)]
+    translations: std::collections::BTreeMap<String, LocalizedEditorialInput>,
 }
+
+async fn get_metadata(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(work): Path<String>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, false).await?;
+    type WorkMetaRow = (
+        String,
+        String,
+        String,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        String,
+        String,
+        String,
+        Option<String>,
+        String,
+    );
+    let row: Option<WorkMetaRow> = query_as(
+        "SELECT w.library_id, w.kind, w.title, w.year, w.minimum_age, w.added_at, \
+                w.display_title_sort, w.external_ids_json, w.editorial_json, w.manual_json, l.options_json \
+         FROM inventory_works w \
+         JOIN libraries l ON l.id = w.library_id \
+         WHERE w.id = ?",
+    )
+    .bind(&work)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((
+        library_id,
+        kind,
+        base_title,
+        base_year,
+        minimum_age,
+        base_added_at,
+        display_title_sort,
+        ext_ids_raw,
+        editorial_raw,
+        manual_raw,
+        lib_options_raw,
+    )) = row
+    else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let lib_options = crate::library_options::LibraryOptions::from_json(&lib_options_raw);
+    let mut merged: Value = serde_json::from_str(&editorial_raw).unwrap_or_else(|_| json!({}));
+    if let Some(manual_str) = manual_raw
+        && let Ok(Value::Object(manual_map)) = serde_json::from_str::<Value>(&manual_str)
+        && let Some(obj) = merged.as_object_mut()
+    {
+        for (k, v) in manual_map {
+            if !v.is_null() {
+                obj.insert(k, v);
+            }
+        }
+    }
+
+    let mut ext_ids: std::collections::BTreeMap<String, String> =
+        serde_json::from_str(&ext_ids_raw).unwrap_or_default();
+    if let Some(obj) = merged.get("external_ids").and_then(Value::as_object) {
+        for (k, v) in obj {
+            if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
+                ext_ids.insert(k.clone(), s.to_owned());
+            }
+        }
+    }
+
+    /// locale, language, source, title, sort title, overview, tagline.
+    type TranslationRow = (
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let tr_rows: Vec<TranslationRow> = query_as(
+        "SELECT locale, language, source, title, sort_title, overview, tagline \
+         FROM work_translations WHERE work_id = ? \
+         ORDER BY priority DESC, CASE WHEN locale = language THEN 0 ELSE 1 END, locale ASC",
+    )
+    .bind(&work)
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut translations_map = serde_json::Map::new();
+    for (locale, language, source, t_title, t_sort, t_overview, t_tagline) in tr_rows {
+        let loc_key = locale.to_ascii_lowercase();
+        let keys = if loc_key != language && loc_key != crate::metadata_locale::NEUTRAL {
+            vec![loc_key, language]
+        } else {
+            vec![language]
+        };
+        for key in keys {
+            let entry = translations_map.entry(key).or_insert_with(|| {
+                json!({
+                    "locale": locale,
+                    "source": source,
+                    "title": Value::Null,
+                    "sortTitle": Value::Null,
+                    "plot": Value::Null,
+                    "tagline": Value::Null,
+                })
+            });
+            if let Some(obj) = entry.as_object_mut() {
+                if obj.get("title").is_none_or(Value::is_null)
+                    && let Some(v) = t_title.as_ref().filter(|s| !s.is_empty())
+                {
+                    obj.insert("title".into(), json!(v));
+                }
+                if obj.get("sortTitle").is_none_or(Value::is_null)
+                    && let Some(v) = t_sort.as_ref().filter(|s| !s.is_empty())
+                {
+                    obj.insert("sortTitle".into(), json!(v));
+                }
+                if obj.get("plot").is_none_or(Value::is_null)
+                    && let Some(v) = t_overview.as_ref().filter(|s| !s.is_empty())
+                {
+                    obj.insert("plot".into(), json!(v));
+                }
+                if obj.get("tagline").is_none_or(Value::is_null)
+                    && let Some(v) = t_tagline.as_ref().filter(|s| !s.is_empty())
+                {
+                    obj.insert("tagline".into(), json!(v));
+                }
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "workId": work,
+        "libraryId": library_id,
+        "kind": kind,
+        "preferredMetadataLanguage": lib_options.preferred_metadata_language,
+        "metadataCountryCode": lib_options.metadata_country_code,
+        "title": merged["title"].as_str().unwrap_or(&base_title),
+        "sortTitle": merged["sort_title"].as_str().unwrap_or(&display_title_sort),
+        "originalTitle": merged["original_title"],
+        "originalLanguage": merged["original_language"],
+        "tagline": merged["tagline"].as_str().or_else(|| merged["outline"].as_str()),
+        "plot": merged["plot"].as_str().unwrap_or(""),
+        "year": merged["year"].as_i64().or(base_year),
+        "premiered": merged["premiered"],
+        "addedAt": merged["added_at"].as_i64().or(base_added_at),
+        "rating": merged["rating"],
+        "criticRating": merged["critic_rating"],
+        "mpaa": merged["mpaa"],
+        "minimumAge": minimum_age,
+        "genres": merged["genres"].as_array().cloned().unwrap_or_default(),
+        "tags": merged["tags"].as_array().cloned().unwrap_or_default(),
+        "studios": merged["studios"].as_array().cloned().unwrap_or_default(),
+        "countries": merged["countries"].as_array().cloned().unwrap_or_default(),
+        "directors": merged["directors"].as_array().cloned().unwrap_or_default(),
+        "writers": merged["writers"].as_array().cloned().unwrap_or_default(),
+        "actors": merged["actors"].as_array().cloned().unwrap_or_default(),
+        "crewCredits": merged["crewCredits"].as_array().cloned().unwrap_or_default(),
+        "ratings": merged["ratings"].as_array().cloned().unwrap_or_default(),
+        "externalIds": ext_ids,
+        "collection": merged["collection"],
+        "locked": merged["locked"].as_bool().unwrap_or(false),
+        "lockedFields": merged["locked_fields"].as_array().cloned().unwrap_or_default(),
+        "translations": translations_map,
+    })))
+}
+
 async fn metadata(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -390,9 +615,28 @@ async fn metadata(
     admin(&auth, &headers, true).await?;
     if input.title.trim().is_empty()
         || input.title.len() > 512
+        || input.sort_title.as_ref().is_some_and(|v| v.len() > 512)
+        || input.original_title.as_ref().is_some_and(|v| v.len() > 512)
+        || input.original_language.as_ref().is_some_and(|v| {
+            v.len() > 35 || !v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        })
+        || input.premiered.as_ref().is_some_and(|v| v.len() > 32)
+        || input.mpaa.as_ref().is_some_and(|v| v.len() > 32)
+        || input
+            .rating
+            .is_some_and(|v| !v.is_finite() || !(0.0..=10.0).contains(&v))
+        || input
+            .critic_rating
+            .is_some_and(|v| !v.is_finite() || !(0.0..=100.0).contains(&v))
         || input.plot.len() > 20000
         || input.genres.len() > 32
         || input.genres.iter().any(|v| v.len() > 100)
+        || input.studios.len() > 32
+        || input.studios.iter().any(|v| v.len() > 100)
+        || input.countries.len() > 32
+        || input.countries.iter().any(|v| v.len() > 100)
+        || input.locked_fields.len() > 32
+        || input.locked_fields.iter().any(|v| v.len() > 64)
         || input.tags.len() > 64
         || input
             .tags
@@ -405,22 +649,95 @@ async fn metadata(
             .any(|(k, v)| k.len() > 64 || v.len() > 256)
         || input.year.is_some_and(|v| !(1800..=2200).contains(&v))
         || input.minimum_age.is_some_and(|v| !(0..=21).contains(&v))
+        || input.translations.len() > 32
     {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let scoped = match input.locale.as_deref() {
+        Some(locale) => {
+            Some(crate::metadata_locale::normalize(locale).ok_or(StatusCode::BAD_REQUEST)?)
+                .filter(|locale| locale != crate::metadata_locale::NEUTRAL)
+        }
+        None => None,
+    };
+    let mut normalized_translations = Vec::new();
+    for (loc_key, tr_val) in &input.translations {
+        let norm = crate::metadata_locale::normalize(loc_key).ok_or(StatusCode::BAD_REQUEST)?;
+        if tr_val.title.as_ref().is_some_and(|s| s.len() > 512)
+            || tr_val.sort_title.as_ref().is_some_and(|s| s.len() > 512)
+            || tr_val.tagline.as_ref().is_some_and(|s| s.len() > 1024)
+            || tr_val.plot.as_ref().is_some_and(|s| s.len() > 20000)
+        {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        normalized_translations.push((norm, tr_val.clone()));
+    }
+    // A correction scoped to one language must not turn the neutral texts into that language.
+    let previous: Option<Value> =
+        query_scalar::<_, Option<String>>("SELECT manual_json FROM inventory_works WHERE id=?")
+            .bind(&work)
+            .fetch_optional(&auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .flatten()
+            .and_then(|text| serde_json::from_str(&text).ok());
+    let kept = |key: &str| {
+        previous
+            .as_ref()
+            .and_then(|p| p.get(key))
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let (title, tagline, plot) = if scoped.is_some() {
+        (kept("title"), kept("tagline"), kept("plot"))
+    } else {
+        (json!(input.title), json!(input.tagline), json!(input.plot))
+    };
+    let sort_title = input
+        .sort_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| json!(s))
+        .unwrap_or_else(|| kept("sort_title"));
+    let collection_val = match &input.collection {
+        Some(col) if !col.id.trim().is_empty() => {
+            let name = if col.name.trim().is_empty() {
+                format!("Collection {}", col.id.trim())
+            } else {
+                col.name.trim().to_owned()
+            };
+            json!({ "id": col.id.trim(), "name": name })
+        }
+        _ => Value::Null,
+    };
     let value = json!({
-        "title": input.title,
+        "title": title,
+        "sort_title": sort_title,
         "original_title": input.original_title,
-        "tagline": input.tagline,
+        "original_language": input.original_language.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        "tagline": tagline,
+        "outline": tagline,
         "year": input.year,
-        "plot": input.plot,
-        "genres": input.genres,
+        "premiered": input.premiered.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        "added_at": input.added_at,
+        "rating": input.rating,
+        "critic_rating": input.critic_rating,
+        "mpaa": input.mpaa.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+        "plot": plot,
+        "genres": input.genres.iter().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
         "tags": input.tags.iter().map(|v| v.trim().to_lowercase()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
-        "directors": input.directors,
-        "writers": input.writers,
+        "studios": input.studios.iter().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
+        "countries": input.countries.iter().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
+        "directors": input.directors.iter().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
+        "writers": input.writers.iter().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty()).collect::<Vec<_>>(),
         "actors": input.actors,
+        "crewCredits": input.crew_credits,
         "ratings": input.ratings,
         "external_ids": input.external_ids,
+        "collection": collection_val,
+        "locked": input.locked.unwrap_or(false),
+        "locked_fields": input.locked_fields,
         "poster_url": input.poster_url,
         "backdrop_url": input.backdrop_url,
         "provenance": "extension"
@@ -434,15 +751,52 @@ async fn metadata(
     let mut tx = crate::database::begin_write(&mut conn)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let result = query("UPDATE inventory_works SET manual_json=?,minimum_age=? WHERE id=?")
-        .bind(value.to_string())
-        .bind(input.minimum_age)
-        .bind(&work)
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = query(
+        "UPDATE inventory_works SET manual_json=?, minimum_age=?, added_at=COALESCE(?, added_at) WHERE id=?",
+    )
+    .bind(value.to_string())
+    .bind(input.minimum_age)
+    .bind(input.added_at)
+    .bind(&work)
+    .execute(&mut *tx)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::NOT_FOUND);
+    }
+    if let Some(locale) = scoped {
+        crate::translations::upsert_work(
+            &mut tx,
+            &work,
+            &crate::translations::Translation {
+                locale,
+                source: crate::metadata_locale::SOURCE_MANUAL.into(),
+                title: Some(input.title.clone()),
+                sort_title: input.sort_title.clone(),
+                overview: Some(input.plot.clone()),
+                tagline: input.tagline.clone(),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
+    for (norm_locale, tr_val) in normalized_translations {
+        crate::translations::upsert_work(
+            &mut tx,
+            &work,
+            &crate::translations::Translation {
+                locale: norm_locale,
+                source: crate::metadata_locale::SOURCE_MANUAL.into(),
+                title: tr_val.title.filter(|s| !s.trim().is_empty()),
+                sort_title: tr_val.sort_title.filter(|s| !s.trim().is_empty()),
+                overview: tr_val.plot.filter(|s| !s.trim().is_empty()),
+                tagline: tr_val.tagline.filter(|s| !s.trim().is_empty()),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
     crate::consolidation::consolidate_work_tx(&mut tx, &work)
         .await
@@ -471,6 +825,14 @@ async fn reset_metadata(
     query("UPDATE inventory_works SET manual_json=NULL,minimum_age=NULL WHERE id=?")
         .bind(&work)
         .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("DELETE FROM work_translations WHERE work_id=? AND source='manual'")
+        .bind(&work)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    crate::translations::bump_generation(&mut tx)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let _ = crate::consolidation::consolidate_work_tx(&mut tx, &work).await;
@@ -691,8 +1053,41 @@ async fn reset_parental(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Normalizes a provider/NFO classification (TMDb, TVDB, IMDb, OMDb, Kodi NFO)
+/// into a comparable minimum age: `FR:-16`, `-16 ans`, `FSK 16`, `GB:15`,
+/// `US:PG-13`, `Rated R`, `TV-MA`, `Tous publics`, `U`... Unknown labels stay NULL
+/// and follow the policy's `allow_unrated` choice.
+macro_rules! rating_age_sql {
+    ($expr:literal) => {
+        concat!(
+            "CASE replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(replace(upper(trim(",
+            $expr,
+            ")),'FR:',''),'FR-',''),'US:',''),'GB:',''),'UK:',''),'DE:',''),'CA:',''),'BE:',''),'CH:',''),'FSK ',''),'FSK',''),'BBFC ',''),'RATED ',''),' ANS',''),'ANS',''),' ','') ",
+            "WHEN 'G' THEN 0 WHEN 'TV-G' THEN 0 WHEN 'TV-Y' THEN 0 WHEN 'U' THEN 0 WHEN 'TOUSPUBLICS' THEN 0 WHEN 'TP' THEN 0 WHEN 'ALL' THEN 0 WHEN 'AL' THEN 0 WHEN '0' THEN 0 ",
+            "WHEN '6' THEN 6 WHEN 'TV-Y7' THEN 7 WHEN '7' THEN 7 ",
+            "WHEN 'PG' THEN 10 WHEN 'TV-PG' THEN 10 WHEN '10' THEN 10 WHEN '-10' THEN 10 ",
+            "WHEN '12' THEN 12 WHEN '-12' THEN 12 WHEN '12A' THEN 12 WHEN 'PG-12' THEN 12 ",
+            "WHEN 'PG-13' THEN 13 WHEN 'TV-14' THEN 14 WHEN '14' THEN 14 WHEN '15' THEN 15 WHEN 'MA15+' THEN 15 ",
+            "WHEN '16' THEN 16 WHEN '-16' THEN 16 WHEN 'R' THEN 17 ",
+            "WHEN '18' THEN 18 WHEN '-18' THEN 18 WHEN 'NC-17' THEN 18 WHEN 'TV-MA' THEN 18 WHEN 'R18' THEN 18 WHEN 'X' THEN 18 ELSE NULL END"
+        )
+    };
+}
+
 // The same expression is used before catalogue pagination and on every derived resource.
-pub const AGE_SQL: &str = "COALESCE(w.minimum_age,(SELECT parent.minimum_age FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id),CASE upper(COALESCE(json_extract(w.manual_json,'$.mpaa'),json_extract(w.editorial_json,'$.mpaa'))) WHEN 'G' THEN 0 WHEN 'TV-G' THEN 0 WHEN 'PG' THEN 10 WHEN 'PG-13' THEN 13 WHEN 'TV-14' THEN 14 WHEN 'R' THEN 17 WHEN 'NC-17' THEN 18 WHEN 'TV-MA' THEN 18 WHEN '-10' THEN 10 WHEN 'FR-10' THEN 10 WHEN '-12' THEN 12 WHEN 'FR-12' THEN 12 WHEN '-16' THEN 16 WHEN 'FR-16' THEN 16 WHEN '-18' THEN 18 WHEN 'FR-18' THEN 18 WHEN 'TOUS PUBLICS' THEN 0 ELSE NULL END)";
+// Episodes inherit their series' manual age and provider classification, since
+// providers and NFO files classify the series rather than each episode.
+pub const AGE_SQL: &str = concat!(
+    "COALESCE(w.minimum_age,(SELECT parent.minimum_age FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id),",
+    rating_age_sql!(
+        "COALESCE(json_extract(w.manual_json,'$.mpaa'),json_extract(w.editorial_json,'$.mpaa'))"
+    ),
+    ",(SELECT ",
+    rating_age_sql!(
+        "COALESCE(json_extract(parent.manual_json,'$.mpaa'),json_extract(parent.editorial_json,'$.mpaa'))"
+    ),
+    " FROM inventory_episodes ep JOIN inventory_seasons season ON season.id=ep.season_id JOIN inventory_works parent ON parent.id=season.series_id WHERE ep.work_id=w.id))"
+);
 pub fn policy_sql() -> String {
     format!(
         "NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND (({AGE_SQL})>policy.maximum_age OR (({AGE_SQL}) IS NULL AND policy.allow_unrated=0) OR {BLOCKED_TAGS_SQL}))"
@@ -759,7 +1154,7 @@ pub async fn target_allowed(
              JOIN media_nodes n ON n.id = l.node_id \
              WHERE (gm.group_id = ? OR gm.group_id = (SELECT m2.group_id FROM media_group_members m2 WHERE m2.work_id = ?)) \
                AND l.enabled = 1 AND n.status != 'revoked' \
-               AND (? = 'administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id = l.id AND lp.user_id = ?))",
+               AND ((? = 'administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.library_id=l.id AND lp.user_id = ?))",
         )
         .bind(&work)
         .bind(&work)

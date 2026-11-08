@@ -12,7 +12,7 @@
     users: Account[];
     libraries: Library[];
     currentUserId?: string;
-    groups?: { id: string; name: string; isDefault?: boolean; userIds: string[]; libraryIds: string[] }[];
+    groups?: { id: string; name: string; isDefault?: boolean; systemRole?: 'user' | 'administrator' | null; userIds: string[]; libraryIds: string[] }[];
     onchanged?: () => void | Promise<void>;
   }
 
@@ -62,7 +62,7 @@
 
   async function refresh() {
     const response = await fetch('/api/v1/admin/users', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
-    if (!response.ok) throw new Error('Chargement des comptes impossible.');
+    if (!response.ok) throw new Error($t('unable_to_load_the_accounts'));
     accounts = (await response.json()).users;
     failedAvatars = [];
   }
@@ -78,13 +78,13 @@
     password = '';
     newPassword = '';
     libraryIds = user ? libraries.filter(l => l.userIds.includes(user.id)).map(l => l.id) : [];
-    assignedGroupIds = user ? groups.filter(g => !g.isDefault && g.userIds.includes(user.id)).map(g => g.id) : [];
+    assignedGroupIds = user ? groups.filter(g => !g.isDefault && !g.systemRole && g.userIds.includes(user.id)).map(g => g.id) : [];
     message = '';
     failed = false;
   }
 
   async function mutate(path: string, method: string, body: object) {
-    if (!$session) throw new Error('Session expirée. Reconnectez-vous.');
+    if (!$session) throw new Error($t('session_expired_sign_in_again'));
     const response = await fetch(path, {
       method,
       credentials: 'same-origin',
@@ -126,7 +126,7 @@
       if (resetPassword && editing) {
         await mutate(`/api/v1/admin/users/${encodeURIComponent(editing.id)}/password`, 'PUT', { password: newPassword });
         newPassword = '';
-        message = 'Mot de passe remplacé. Toutes les sessions du compte ont été révoquées.';
+        message = $t('password_replaced_all_sessions_of_the');
         if (editing.id === currentUserId) {
           await readSession();
           return;
@@ -139,7 +139,7 @@
           libraryIds: role === 'administrator' ? [] : libraryIds
         });
         await syncUserGroups(editing.id, assignedGroupIds);
-        message = 'Compte enregistré avec succès.';
+        message = $t('account_saved_successfully');
       } else {
         await mutate('/api/v1/admin/users', 'POST', {
           login,
@@ -149,7 +149,7 @@
           libraryIds: role === 'administrator' ? [] : libraryIds
         });
         password = '';
-        message = 'Compte créé avec succès.';
+        message = $t('account_created_successfully');
       }
       await refresh();
       await onchanged?.();
@@ -157,7 +157,7 @@
       editing = null;
     } catch (err) {
       failed = true;
-      message = err instanceof Error ? err.message : 'Opération impossible.';
+      message = err instanceof Error ? err.message : $t('operation_failed');
     } finally {
       busy = false;
     }
@@ -179,13 +179,13 @@
           libraryIds: libraries.filter(l => l.userIds.includes(u.id)).map(l => l.id)
         });
       }
-      message = disableTarget ? 'Comptes sélectionnés désactivés.' : 'Comptes sélectionnés activés.';
+      message = disableTarget ? $t('selected_accounts_disabled') : $t('selected_accounts_enabled');
       selectedUserIds = [];
       await refresh();
       await onchanged?.();
     } catch (err) {
       failed = true;
-      message = err instanceof Error ? err.message : 'Erreur lors de la mise à jour des comptes.';
+      message = err instanceof Error ? err.message : $t('error_while_updating_the_accounts');
     } finally {
       busy = false;
     }
@@ -278,7 +278,7 @@
                   <label class="form-row">
                     <span class="row-label">{$t('username')} <abbr title={$t('required')} class="required">*</abbr></span>
                     <div class="row-field">
-                      <input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" bind:value={login} placeholder="ex: jean.dupont" autocomplete="off" />
+                      <input required minlength="3" maxlength="64" pattern="[a-z0-9._-]+" bind:value={login} placeholder={$t('e_g_john_doe')} autocomplete="off" />
                       <span class="field-hint">{$t('username_hint')}</span>
                     </div>
                   </label>
@@ -297,7 +297,7 @@
                 <label class="form-row">
                   <span class="row-label">{$t('description_display_name')}</span>
                   <div class="row-field">
-                    <input maxlength="128" bind:value={displayName} placeholder="ex: Jean Dupont" />
+                    <input maxlength="128" bind:value={displayName} placeholder={$t('admin_e_g_john_doe')} />
                   </div>
                 </label>
 
@@ -356,14 +356,15 @@
                   <tbody>
                     {#each groups as group (group.id)}
                       {@const isDefault = !!group.isDefault}
+                      {@const automatic = isDefault || !!group.systemRole}
                       <tr>
                         <td>
                           <input
                             type="checkbox"
-                            disabled={isDefault}
-                            checked={isDefault || assignedGroupIds.includes(group.id)}
+                            disabled={automatic}
+                            checked={isDefault || (group.systemRole ? group.systemRole === role : assignedGroupIds.includes(group.id))}
                             onchange={(e) => {
-                              if (isDefault) return;
+                              if (automatic) return;
                               if (e.currentTarget.checked) {
                                 assignedGroupIds = [...assignedGroupIds, group.id];
                               } else {
@@ -376,19 +377,21 @@
                           <strong>{group.name}</strong>
                         </td>
                         <td>
-                          {#if isDefault}
-                            <span class="dsm-pill pill-default">Automatique (tous)</span>
+                          {#if group.systemRole}
+                            <span class="dsm-pill pill-default">{$t('automatic_role')}</span>
+                          {:else if isDefault}
+                            <span class="dsm-pill pill-default">{$t('automatic_all')}</span>
                           {:else}
-                            <span class="dsm-pill">Personnalisé</span>
+                            <span class="dsm-pill">{$t('custom')}</span>
                           {/if}
                         </td>
                         <td>
-                          {group.libraryIds.length} bibliothèque(s)
+                          {$t('admin_text', { count: group.libraryIds.length })}
                         </td>
                       </tr>
                     {:else}
                       <tr>
-                        <td colspan="4" class="empty-cell">Aucun groupe configuré</td>
+                        <td colspan="4" class="empty-cell">{$t('no_group_configured')}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -397,14 +400,14 @@
             </div>
           {:else if activeTab === 'permissions'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Permissions sur les bibliothèques</h4>
+              <h4 class="form-section-title">{$t('library_permissions')}</h4>
               {#if role === 'administrator'}
                 <div class="dsm-info-box">
                   <Icon name="shield" size={18} />
-                  <span>En tant qu'<strong>Administrateur</strong>, ce compte a automatiquement accès à toutes les bibliothèques multimédias.</span>
+                  <span>{$t('as_an')}<strong>{$t('administrator')}</strong>{$t('this_account_automatically_has_access_to')}</span>
                 </div>
               {:else}
-                <p class="section-desc">Cochez les bibliothèques autorisées individuellement pour ce compte :</p>
+                <p class="section-desc">{$t('tick_the_libraries_allowed_individually_for')}</p>
                 <div class="dsm-table-container">
                   <table class="dsm-table">
                     <thead>
@@ -416,9 +419,9 @@
                             onchange={(e) => libraryIds = e.currentTarget.checked ? libraries.map(l => l.id) : []}
                           />
                         </th>
-                        <th>Nom de la bibliothèque</th>
-                        <th>Type</th>
-                        <th>Statut héritage</th>
+                        <th>{$t('library_name')}</th>
+                        <th>{$t('request_type')}</th>
+                        <th>{$t('inheritance_status')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -434,7 +437,7 @@
                           </td>
                           <td>
                             <strong>{lib.name}</strong>
-                            {#if !lib.enabled}<span class="dsm-tag-muted">(Désactivée)</span>{/if}
+                            {#if !lib.enabled}<span class="dsm-tag-muted">{$t('admin_disabled')}</span>{/if}
                           </td>
                           <td>
                             <span class="lib-kind-pill">{lib.kind}</span>
@@ -442,16 +445,16 @@
                           <td>
                             {#if inherited.length > 0}
                               <span class="inherited-badge">
-                                Inclus par : {inherited.map(g => g.name).join(', ')}
+                                {$t('included_by', { names: inherited.map(g => g.name).join(', ') })}
                               </span>
                             {:else}
-                              <span class="direct-badge">Droit direct uniquement</span>
+                              <span class="direct-badge">{$t('direct_right_only')}</span>
                             {/if}
                           </td>
                         </tr>
                       {:else}
                         <tr>
-                          <td colspan="4" class="empty-cell">Aucune bibliothèque disponible</td>
+                          <td colspan="4" class="empty-cell">{$t('no_libraries_available')}</td>
                         </tr>
                       {/each}
                     </tbody>
@@ -465,21 +468,21 @@
             <UserMediaPolicy userId={editing.id} />
           {:else if editing && activeTab === 'password'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Sécurité du compte & Mot de passe</h4>
+              <h4 class="form-section-title">{$t('account_security_password')}</h4>
               {#if editing.sso}
                 <div class="dsm-info-box">
                   <Icon name="info" size={18} />
-                  <span>Ce compte s'authentifie via le fournisseur OpenID Connect. Le mot de passe ne peut pas être modifié localement.</span>
+                  <span>{$t('this_account_signs_in_through_the')}</span>
                 </div>
               {:else}
-                <p class="section-desc">Changer le mot de passe local. Toutes les sessions actives de cet utilisateur seront immédiatement révoquées.</p>
+                <p class="section-desc">{$t('change_the_local_password_all_active')}</p>
                 <div class="dsm-grid-form">
                   <label class="form-row">
-                    <span class="row-label">Nouveau mot de passe</span>
+                    <span class="row-label">{$t('new_password')}</span>
                     <div class="row-field">
-                      <input type="password" required minlength="15" maxlength="128" bind:value={newPassword} placeholder="15 caractères minimum" />
+                      <input type="password" required minlength="15" maxlength="128" bind:value={newPassword} placeholder={$t('n_15_characters_minimum')} />
                       <button type="button" class="btn btn-warning mt-10" disabled={busy || newPassword.length < 15} onclick={() => save(true)}>
-                        Appliquer et révoquer les sessions
+                        {$t('apply_and_revoke_sessions')}
                       </button>
                     </div>
                   </label>
@@ -491,7 +494,7 @@
 
         <div class="dsm-modal-footer">
           <button type="button" class="btn btn-default" disabled={busy} onclick={() => { editorOpen = false; }}>
-            Annuler
+            {$t('sched_cancel')}
           </button>
           {#if activeTab !== 'password'}
             <button type="button" class="btn btn-primary" disabled={busy} onclick={() => save(false)}>
@@ -508,7 +511,7 @@
     <div class="toolbar-left">
       <button type="button" class="btn btn-primary" disabled={busy} onclick={() => edit(null)}>
         <Icon name="profile" size={16} />
-        <span>Créer</span>
+        <span>{$t('create')}</span>
       </button>
 
       <button
@@ -521,7 +524,7 @@
         }}
       >
         <Icon name="edit" size={16} />
-        <span>Modifier</span>
+        <span>{$t('edit')}</span>
       </button>
 
       <div class="btn-group">
@@ -529,44 +532,44 @@
           type="button"
           class="btn btn-default"
           disabled={busy || selectedUserIds.length === 0}
-          title="Activer les comptes sélectionnés"
+          title={$t('enable_selected_accounts')}
           onclick={() => toggleDisableSelected(false)}
         >
-          <span>Activer</span>
+          <span>{$t('admin_enable')}</span>
         </button>
         <button
           type="button"
           class="btn btn-default"
           disabled={busy || selectedUserIds.length === 0}
-          title="Désactiver les comptes sélectionnés"
+          title={$t('disable_selected_accounts')}
           onclick={() => toggleDisableSelected(true)}
         >
-          <span>Désactiver</span>
+          <span>{$t('disable')}</span>
         </button>
       </div>
 
       <button type="button" class="btn btn-default" disabled={busy} onclick={() => refresh().catch(() => {})}>
         <Icon name="refresh" size={16} />
-        <span>Actualiser</span>
+        <span>{$t('refresh')}</span>
       </button>
     </div>
 
     <div class="toolbar-right">
       <div class="search-box">
         <Icon name="search" size={16} />
-        <input type="search" bind:value={search} placeholder="Rechercher…" aria-label="Rechercher un utilisateur" />
+        <input type="search" bind:value={search} placeholder={$t('admin_search')} aria-label={$t('search_for_a_user')} />
       </div>
 
-      <select bind:value={roleFilter} class="filter-select" aria-label="Filtrer par rôle">
-        <option value="all">Tous les rôles</option>
-        <option value="administrator">Administrateurs</option>
-        <option value="user">Utilisateurs</option>
+      <select bind:value={roleFilter} class="filter-select" aria-label={$t('filter_by_role')}>
+        <option value="all">{$t('all_roles')}</option>
+        <option value="administrator">{$t('administrators')}</option>
+        <option value="user">{$t('admin_nav_users')}</option>
       </select>
 
-      <select bind:value={statusFilter} class="filter-select" aria-label="Filtrer par statut">
-        <option value="all">Tous les statuts</option>
-        <option value="active">Actifs</option>
-        <option value="disabled">Désactivés</option>
+      <select bind:value={statusFilter} class="filter-select" aria-label={$t('filter_by_status')}>
+        <option value="all">{$t('admin_all_statuses')}</option>
+        <option value="active">{$t('active_2')}</option>
+        <option value="disabled">{$t('subtitles_off')}</option>
       </select>
     </div>
   </div>
@@ -577,21 +580,21 @@
       <thead>
         <tr>
           <th class="col-check-center">
-            <input type="checkbox" checked={allSelected} onchange={toggleSelectAll} aria-label="Sélectionner tous les utilisateurs" />
+            <input type="checkbox" checked={allSelected} onchange={toggleSelectAll} aria-label={$t('select_all_users')} />
           </th>
           <th class="sortable" onclick={() => handleSort('name')}>
-            Nom d'utilisateur {sortField === 'name' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('username_header')} {sortField === 'name' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
-          <th>Description</th>
+          <th>{$t('description')}</th>
           <th class="sortable" onclick={() => handleSort('role')}>
-            Rôle {sortField === 'role' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('col_role')} {sortField === 'role' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
           <th class="sortable" onclick={() => handleSort('status')}>
-            Statut {sortField === 'status' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('status')} {sortField === 'status' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
-          <th>Groupes</th>
+          <th>{$t('groups')}</th>
           <th class="sortable" onclick={() => handleSort('lastSeen')}>
-            Dernière activité {sortField === 'lastSeen' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('auth_last_activity')} {sortField === 'lastSeen' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
         </tr>
       </thead>
@@ -609,7 +612,7 @@
                 type="checkbox"
                 checked={isSelected}
                 onchange={() => toggleSelectUser(user.id)}
-                aria-label={`Sélectionner ${user.login}`}
+                aria-label={$t('admin_select', { login: user.login })}
               />
             </td>
             <td>
@@ -634,19 +637,19 @@
             </td>
             <td>
               {#if user.role === 'administrator'}
-                <span class="dsm-pill pill-admin">Administrateur</span>
+                <span class="dsm-pill pill-admin">{$t('administrator')}</span>
               {:else}
-                <span class="dsm-pill pill-user">Utilisateur</span>
+                <span class="dsm-pill pill-user">{$t('user')}</span>
               {/if}
             </td>
             <td>
               {#if user.disabledAt != null}
                 <span class="status-indicator status-off">
-                  <span class="dot"></span> Désactivé
+                  <span class="dot"></span> {$t('tv_mode_off')}
                 </span>
               {:else}
                 <span class="status-indicator status-on">
-                  <span class="dot"></span> Normal
+                  <span class="dot"></span> {$t('normal')}
                 </span>
               {/if}
             </td>
@@ -666,7 +669,7 @@
         {:else}
           <tr>
             <td colspan="7" class="empty-cell">
-              Aucun utilisateur ne correspond aux critères de recherche.
+              {$t('no_user_matches_the_search_criteria')}
             </td>
           </tr>
         {/each}
@@ -675,8 +678,8 @@
   </div>
 
   <div class="dsm-statusbar">
-    <span>Total : <strong>{filteredUsers.length}</strong> utilisateur(s) sur {allUsers.length}</span>
-    <span>{selectedUserIds.length} sélectionné(s)</span>
+    <span>{$t('total')} <strong>{filteredUsers.length}</strong> {$t('user_s_out_of', { count: allUsers.length })}</span>
+    <span>{$t('admin_selected', { count: selectedUserIds.length })}</span>
   </div>
 </section>
 

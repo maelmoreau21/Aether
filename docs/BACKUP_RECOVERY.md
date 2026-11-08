@@ -7,10 +7,20 @@ opération seulement ; il ne modifie ni l'environnement du Core ni sa base activ
 
 ## Préparer la récupération
 
-Le format courant `MDBK0002` est non chiffré : protéger strictement l'archive
-et ses copies. `media-recover` ne prend aucune clé et refuse les anciennes
-archives `MDBK0001`. Leur récupération exige un ancien binaire et la clé
-d'origine ; cette suppression ne convertit ni n'efface les archives existantes.
+Le format courant `MDBK0003` est chiffré et authentifié : `media-recover` lit la
+clé dans `MEDIA_BACKUP_KEY_FILE` (ou `MEDIA_BACKUP_KEY`), jamais en argument de
+ligne de commande. Une mauvaise clé et une archive modifiée donnent la même erreur
+et ne laissent rien sur disque. Les archives historiques `MDBK0002` (non chiffrées)
+restent lisibles sans clé. Les archives `MDBK0001` exigent la version d'Aether qui
+les a créées et leur clé d'origine ; `media-recover` ne convertit, ne modifie ni
+n'efface aucune archive.
+
+```powershell
+$env:MEDIA_BACKUP_KEY_FILE = 'D:\Secrets\aether-backup.key'
+```
+
+Le dossier extrait n'est **pas** chiffré : le supprimer de façon sûre (selon la
+politique de l'opérateur) une fois la restauration vérifiée.
 
 Utiliser un poste et un dossier contrôlés par l'opérateur. L'archive contient la
 base applicative et une configuration pouvant inclure des secrets : sessions,
@@ -96,7 +106,7 @@ le serveur restauré avant remise en service.
 ## Limites et validation
 
 `media-recover` ne démarre pas de service, ne remplace pas un volume Docker et ne
-relance pas les Nodes. La vérification du checksum ne prouve pas à elle seule que
+relance pas les Nodes. La vérification d'authenticité ne prouve pas à elle seule que
 la configuration convient à la nouvelle infrastructure. Les paramètres externes
 du reverse proxy, de l'IdP, du gestionnaire de secrets et les médias demeurent
 sous responsabilité opérateur.

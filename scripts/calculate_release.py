@@ -3,7 +3,9 @@
 calculate_release.py
 Automated SemVer release calculation for Aether:
 - Stable versions: MAJOR.MINOR.PATCH (e.g. 0.1.0, 0.2.0, 0.2.1)
-- Development versions: MAJOR.MINOR.PATCH-beta.N (e.g. 0.2.0-beta.0, 0.2.0-beta.1)
+- Development versions: MAJOR.MINOR.PATCH-beta.N, the next patch after the latest
+  stable (main 1.5.0 -> develop 1.5.1-beta.0, 1.5.1-beta.1, ...)
+- Merging develop into main publishes the prepared cycle (1.5.1) automatically
 - Git tag prefix: 'v' (e.g. v0.1.0, v0.2.0-beta.1)
 
 Supports:
@@ -102,8 +104,8 @@ get_latest_tag = get_latest_stable_tag
 
 def get_active_beta_cycle(latest_stable_tag, tags):
     """
-    Determines the current active development cycle (e.g. '0.2.0').
-    Finds the latest beta tags or increments minor from latest stable.
+    Determines the current active development cycle (e.g. '1.5.1').
+    Finds the latest beta tags or increments the patch of the latest stable.
     """
     beta_pattern = re.compile(r"^v(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$")
     betas_by_cycle = {}
@@ -124,16 +126,16 @@ def get_active_beta_cycle(latest_stable_tag, tags):
         if latest_stable_tag:
             stable_ver = latest_stable_tag.lstrip("v")
             if cycle_key(latest_cycle) <= cycle_key(stable_ver):
-                # Cycle was released, start next minor cycle
-                maj, min_, _ = parse_semver(latest_stable_tag)
-                return f"{maj}.{min_ + 1}.0", []
+                # Cycle was released, start the next patch cycle
+                maj, min_, pat = parse_semver(latest_stable_tag)
+                return f"{maj}.{min_}.{pat + 1}", []
         betas = betas_by_cycle[latest_cycle]
         betas.sort(key=lambda x: x[0])
         return latest_cycle, betas
 
     if latest_stable_tag:
-        maj, min_, _ = parse_semver(latest_stable_tag)
-        return f"{maj}.{min_ + 1}.0", []
+        maj, min_, pat = parse_semver(latest_stable_tag)
+        return f"{maj}.{min_}.{pat + 1}", []
 
     # Initial default cycle when no tags exist
     return "0.2.0", []
@@ -206,6 +208,11 @@ def generate_changelog(rev_range, next_tag, cwd=None):
 
     return "\n".join(changelog_parts).strip(), has_major, has_minor, has_patch
 
+def prepared_cycle(latest_stable, tags):
+    """Beta cycle above the latest stable, i.e. the version develop prepared."""
+    cycle, betas = get_active_beta_cycle(latest_stable, tags)
+    return cycle if betas else None
+
 def main():
     parser = argparse.ArgumentParser(description="SemVer release calculation for Aether")
     parser.add_argument("--json", action="store_true", help="Output JSON format")
@@ -238,12 +245,12 @@ def main():
     # 1. Mode: Next development cycle calculation
     if args.next_cycle:
         ref_stable = args.target_version or (latest_stable.lstrip("v") if latest_stable else "0.1.0")
-        maj, min_, _ = parse_semver(ref_stable)
-        next_cycle_ver = f"{maj}.{min_ + 1}.0-beta.0"
+        maj, min_, pat = parse_semver(ref_stable)
+        next_cycle_ver = f"{maj}.{min_}.{pat + 1}-beta.0"
         next_cycle_tag = f"v{next_cycle_ver}"
         res = {
             "channel": "develop",
-            "cycle_base": f"{maj}.{min_ + 1}.0",
+            "cycle_base": f"{maj}.{min_}.{pat + 1}",
             "next_tag": next_cycle_tag,
             "version": next_cycle_ver,
             "has_release": True
@@ -343,7 +350,19 @@ def main():
         return
 
     # 3. Mode: Main branch (stable releases)
-    # Check if a release PR is required
+    try:
+        last_msg = run_git(["log", "-1", "--pretty=%B"])
+    except Exception:
+        last_msg = ""
+    if "[skip release]" in (last_msg or ""):
+        res = {"channel": "main", "has_release": False, "already_tagged": False,
+               "reason": "Commit message requested skip release"}
+        if args.json:
+            print(json.dumps(res, indent=2))
+        else:
+            print("HAS_RELEASE=false")
+        return
+    # Optional legacy gate: only release pull requests (manual opt-in).
     if args.check_release_pr:
         title = (args.pr_title or "").lower()
         labels = [l.strip().lower() for l in args.pr_labels.split(",") if l.strip()]
@@ -384,6 +403,9 @@ def main():
         next_ver = f"{major}.{minor + 1}.0"
     elif args.bump == "PATCH":
         next_ver = f"{major}.{minor}.{patch + 1}"
+    elif args.bump == "AUTO" and (prepared := prepared_cycle(latest_stable, tags)):
+        # Promotion: main publishes the version develop has been preparing.
+        next_ver = prepared
     elif not latest_stable:
         # First stable initialization
         next_ver = "0.1.0"

@@ -902,6 +902,12 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
         &range.into_body().collect().await.unwrap().to_bytes()[..],
         b"synt"
     );
+    // A "watch together" session points at the work: its descriptor is the first file's.
+    let by_work = request(&app, "/api/v1/media/film", "GET", &b, "", Value::Null).await;
+    assert_eq!(by_work.status(), StatusCode::OK);
+    let by_work = value(by_work).await;
+    assert_eq!(by_work["id"], "asset");
+    assert_eq!(by_work["requestedId"], "film");
     let parental = "/api/v1/admin/users/reader/parental";
     assert_eq!(
         request(
@@ -950,6 +956,7 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
     for path in [
         "/api/v1/catalog/film",
         "/api/v1/media/asset",
+        "/api/v1/media/film",
         "/api/v1/assets/asset/content",
         "/api/v1/assets/asset/download",
         "/api/v1/assets/asset/prepared/video",

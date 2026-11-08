@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cachedCatalog, catalogCacheStats, invalidateCatalog, invalidateLatestCatalog, loadCatalog, preloadCatalog } from './page-cache';
 import { session } from '../auth/session';
+import { locale } from '../i18n';
+import { preferenceState } from '../preferences';
 const page = (id = 'a', libraryId = 'lib') => ({items:[{id,libraryId,title:id}], total:1,offset:0,limit:24,notice:''});
 afterEach(() => { invalidateCatalog(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('session catalogue SWR cache', () => {
@@ -35,6 +37,22 @@ describe('session catalogue SWR cache', () => {
     preloadCatalog('home');
     await Promise.resolve();
     expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+  it('drops pages rendered in the previous language once the new language is stored', async () => {
+    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(Response.json(page())));
+    vi.stubGlobal('fetch', fetcher);
+    // The module registers its listener on `window` at import time: provide one first.
+    const browser = new EventTarget();
+    vi.stubGlobal('window', browser);
+    vi.resetModules();
+    const fresh = await import('./page-cache');
+    await fresh.loadCatalog('home', '/api/v1/catalog');
+    expect(fresh.cachedCatalog('home')).toBeDefined();
+    browser.dispatchEvent(new Event('media-locale-saved'));
+    expect(fresh.cachedCatalog('home')).toBeUndefined();
+    await fresh.loadCatalog('home', '/api/v1/catalog');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    fresh.invalidateCatalog();
   });
   it('deduplicates and serves ten fresh returns with zero extra requests', async () => {
     const fetcher=vi.fn().mockResolvedValue(Response.json(page())); vi.stubGlobal('fetch',fetcher);
@@ -87,4 +105,54 @@ describe('session catalogue SWR cache', () => {
     session.set({user,csrfToken:'third'});expect(cachedCatalog('home')).toBeUndefined();
   });
 
+});
+
+describe('catalogue cache isolation', () => {
+  const user = (id: string) => ({ user: { id, login: id, displayName: id, role: 'user' as const }, csrfToken: `csrf-${id}` }) as never;
+
+  it('never serves a page rendered for another account or another language chain', async () => {
+    const fetcher = vi.fn().mockImplementation((url: string) => Promise.resolve(Response.json(page(new URL(url, 'http://local').searchParams.get('locale') ?? 'none'))));
+    vi.stubGlobal('fetch', fetcher);
+    const key = '/api/v1/catalog?kind=film';
+
+    session.set(user('ana'));
+    locale.set('fr');
+    preferenceState.set({});
+    expect((await loadCatalog(key, key)).items[0].id).toBe('fr');
+    expect(cachedCatalog(key)?.items[0].id).toBe('fr');
+
+    // Same account, other language: the French page is not found under the English key.
+    locale.set('en');
+    expect(cachedCatalog(key)).toBeUndefined();
+    expect((await loadCatalog(key, key)).items[0].id).toBe('en');
+
+    // A metadata language chosen apart from the interface language is a different scope again.
+    preferenceState.set({ metadataLocale: 'ja' });
+    expect(cachedCatalog(key)).toBeUndefined();
+    expect((await loadCatalog(key, key)).items[0].id).toBe('ja');
+
+    // Another account with the same languages does not see ana's page.
+    session.set(user('bob'));
+    expect(cachedCatalog(key)).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    session.set(null);
+    locale.set('fr');
+    preferenceState.set({});
+  });
+
+  it('drops a response that finishes after the language changed', async () => {
+    let finish!: (response: Response) => void;
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => new Promise<Response>(resolve => finish = resolve)));
+    const key = '/api/v1/catalog?kind=series';
+    session.set(user('ana'));
+    locale.set('fr');
+    const late = loadCatalog(key, key);
+    const rejected = expect(late).rejects.toThrow();
+    locale.set('en');
+    finish(Response.json(page('fr-page')));
+    await rejected;
+    expect(cachedCatalog(key)).toBeUndefined();
+    session.set(null);
+    locale.set('fr');
+  });
 });

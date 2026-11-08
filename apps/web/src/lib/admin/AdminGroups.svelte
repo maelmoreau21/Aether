@@ -4,6 +4,7 @@
   import type { Library } from './types';
   import Icon from '../ui/Icon.svelte';
   import { modalFocus } from './modal-focus';
+  import { t, fmt } from '../i18n';
 
   let {
     groups,
@@ -25,7 +26,10 @@
   let isDefault = $state(false);
   let userIds = $state<string[]>([]);
   let libraryIds = $state<string[]>([]);
+  const kindOptions = [{ id: 'films', get label() { return $t('films'); } }, { id: 'series', get label() { return $t('series'); } }, { id: 'music', get label() { return $t('music'); } }] as const;
+  let allowedKinds = $state<string[]>(['films', 'series', 'music']);
   let editing = $state<string | null>(null);
+  const systemRole = $derived(groups.find(group => group.id === editing)?.systemRole);
 
   let busy = $state(false);
   let error = $state('');
@@ -41,6 +45,7 @@
     editorOpen = false;
     name = '';
     isDefault = false;
+    allowedKinds = ['films', 'series', 'music'];
     userIds = [];
     libraryIds = [];
     activeTab = 'info';
@@ -57,6 +62,7 @@
     isDefault = !!group.isDefault;
     userIds = [...group.userIds];
     libraryIds = [...group.libraryIds];
+    allowedKinds = [...(group.allowedKinds ?? ['films', 'series', 'music'])];
     editorOpen = true;
     activeTab = 'info';
   }
@@ -75,23 +81,24 @@
           body: JSON.stringify({
             name: name.trim(),
             isDefault,
-            userIds,
-            libraryIds
+            userIds: systemRole ? [] : userIds,
+            libraryIds,
+            allowedKinds: kindOptions.map(option => option.id).filter(kind => allowedKinds.includes(kind))
           })
         }
       );
       reset();
       await onchanged();
-      notice = 'Groupe enregistré avec succès.';
+      notice = $t('group_saved_successfully');
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Enregistrement impossible.';
+      error = e instanceof Error ? e.message : $t('saving_failed');
     } finally {
       busy = false;
     }
   }
 
   async function remove(group: UserGroup) {
-    if (busy) return;
+    if (busy || group.systemRole) return;
     if (!window.confirm(`Supprimer le groupe « ${group.name} » ? Les comptes utilisateurs seront conservés.`)) return;
     busy = true;
     error = '';
@@ -101,9 +108,9 @@
       if (editing === group.id) reset();
       selectedGroupIds = selectedGroupIds.filter(id => id !== group.id);
       await onchanged();
-      notice = 'Groupe supprimé avec succès.';
+      notice = $t('group_deleted_successfully');
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Suppression impossible.';
+      error = e instanceof Error ? e.message : $t('deletion_failed');
     } finally {
       busy = false;
     }
@@ -116,7 +123,7 @@
     }).sort((a, b) => {
       let cmp = 0;
       if (sortField === 'name') {
-        cmp = a.name.localeCompare(b.name);
+        cmp = $fmt.compare(a.name, b.name);
       } else if (sortField === 'type') {
         cmp = (a.isDefault ? 1 : 0) - (b.isDefault ? 1 : 0);
       } else if (sortField === 'members') {
@@ -156,7 +163,7 @@
   }
 </script>
 
-<section id="groups-section" class="dsm-container" aria-label="Groupes d’utilisateurs">
+<section id="groups-section" class="dsm-container" aria-label={$t('user_groups')}>
 
   {#if error || notice}
     <div class="dsm-alert" class:alert-error={error} class:alert-success={!error && notice} role="status">
@@ -172,60 +179,70 @@
         <div class="dsm-modal-header">
           <div class="modal-title-wrap">
             <Icon name="users" size={20} />
-            <h3 id="modal-group-title">{editing ? `Modifier le groupe — ${name}` : 'Créer un groupe d’utilisateurs'}</h3>
+            <h3 id="modal-group-title">{editing ? $t('edit_the_group', { name }) : $t('create_a_user_group')}</h3>
           </div>
-          <button type="button" class="btn-close" aria-label="Fermer" onclick={() => { editorOpen = false; }}>
+          <button type="button" class="btn-close" aria-label={$t('close')} onclick={() => { editorOpen = false; }}>
             <Icon name="close" size={18} />
           </button>
         </div>
 
         <div class="dsm-tabs" role="tablist">
           <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'info'} onclick={() => activeTab = 'info'}>
-            <Icon name="info" size={15} /> Informations
+            <Icon name="info" size={15} /> {$t('report_category_metadata')}
           </button>
           <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'members'} onclick={() => activeTab = 'members'}>
-            <Icon name="users" size={15} /> Membres
+            <Icon name="users" size={15} /> {$t('members')}
           </button>
           <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'permissions'} onclick={() => activeTab = 'permissions'}>
-            <Icon name="film" size={15} /> Permissions
+            <Icon name="film" size={15} /> {$t('permissions')}
           </button>
         </div>
 
         <div class="dsm-modal-body">
           {#if activeTab === 'info'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Propriétés du groupe</h4>
+              <h4 class="form-section-title">{$t('group_properties')}</h4>
               <div class="dsm-grid-form">
                 <label class="form-row">
-                  <span class="row-label">Nom du groupe <abbr title="requis" class="required">*</abbr></span>
+                  <span class="row-label">{$t('group_name')} <abbr title={$t('required')} class="required">*</abbr></span>
                   <div class="row-field">
-                    <input required maxlength="80" bind:value={name} disabled={busy} placeholder="ex: Famille, Amis, Enfants" />
-                    <span class="field-hint">Nom explicite pour identifier ce groupe d'accès.</span>
+                    <input required maxlength="80" bind:value={name} disabled={busy} placeholder={$t('e_g_family_friends_kids')} />
+                    <span class="field-hint">{$t('a_clear_name_to_identify_this')}</span>
                   </div>
                 </label>
 
                 <div class="form-row">
-                  <span class="row-label">Type d'affectation</span>
+                  <span class="row-label">{$t('assignment_type')}</span>
                   <div class="row-field">
+                    {#if systemRole}
+                      <strong>{$t('automatic_by_role')}</strong>
+                    {:else}
                     <label class="dsm-checkbox-label">
                       <input type="checkbox" bind:checked={isDefault} disabled={busy} />
-                      <span><strong>Groupe par défaut</strong></span>
+                      <span><strong>{$t('default_group')}</strong></span>
                     </label>
-                    <span class="field-hint">Tous les utilisateurs actuels et futurs font automatiquement partie de ce groupe et accèdent à ses bibliothèques.</span>
+                    {/if}
+                    <span class="field-hint">{systemRole ? $t('the_members_of_this_group_are') : $t('all_current_and_future_users_are')}</span>
                   </div>
                 </div>
               </div>
             </div>
           {:else if activeTab === 'members'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Membres du groupe</h4>
-              {#if isDefault}
+              <h4 class="form-section-title">{$t('group_members')}</h4>
+              {#if systemRole}
                 <div class="dsm-info-box">
                   <Icon name="info" size={18} />
-                  <span>Ce groupe est configuré comme <strong>Groupe par défaut</strong>. Tous les utilisateurs sont membres automatiquement.</span>
+                  <span>{$t('accounts_with_the_role')} <strong>{systemRole === 'administrator' ? 'Administrateur' : 'Utilisateur'}</strong> {$t('are_members_automatically_change_the_role')}</span>
+                </div>
+                <p class="section-desc">{$t('members_list', { count: userIds.length, names: users.filter(user => userIds.includes(user.id)).map(user => user.displayName || user.login).join(', ') || $t('none_lower') })}</p>
+              {:else if isDefault}
+                <div class="dsm-info-box">
+                  <Icon name="info" size={18} />
+                  <span>{$t('this_group_is_configured_as')} <strong>{$t('default_group')}</strong>{$t('all_users_are_members_automatically')}</span>
                 </div>
               {:else}
-                <p class="section-desc">Cochez les utilisateurs à intégrer dans ce groupe :</p>
+                <p class="section-desc">{$t('tick_the_users_to_include_in')}</p>
                 <div class="dsm-table-container">
                   <table class="dsm-table">
                     <thead>
@@ -237,8 +254,8 @@
                             onchange={(e) => userIds = e.currentTarget.checked ? users.map(u => u.id) : []}
                           />
                         </th>
-                        <th>Utilisateur</th>
-                        <th>Rôle</th>
+                        <th>{$t('user')}</th>
+                        <th>{$t('col_role')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -257,15 +274,15 @@
                           </td>
                           <td>
                             {#if user.role === 'administrator'}
-                              <span class="dsm-pill pill-admin">Administrateur</span>
+                              <span class="dsm-pill pill-admin">{$t('administrator')}</span>
                             {:else}
-                              <span class="dsm-pill pill-user">Utilisateur</span>
+                              <span class="dsm-pill pill-user">{$t('user')}</span>
                             {/if}
                           </td>
                         </tr>
                       {:else}
                         <tr>
-                          <td colspan="3" class="empty-cell">Aucun utilisateur disponible</td>
+                          <td colspan="3" class="empty-cell">{$t('no_users_available')}</td>
                         </tr>
                       {/each}
                     </tbody>
@@ -275,8 +292,17 @@
             </div>
           {:else if activeTab === 'permissions'}
             <div class="dsm-form-section">
-              <h4 class="form-section-title">Permissions sur les bibliothèques</h4>
-              <p class="section-desc">Cochez les bibliothèques accessibles par tous les membres de ce groupe :</p>
+              <h4 class="form-section-title">{$t('allowed_media_types')}</h4>
+              <p class="section-desc">{$t('an_unticked_type_is_hidden_and')}</p>
+              <div class="kind-options">
+                {#each kindOptions as option (option.id)}
+                  <label><input type="checkbox" value={option.id} bind:group={allowedKinds} disabled={busy} /> {option.label}</label>
+                {/each}
+              </div>
+            </div>
+            <div class="dsm-form-section">
+              <h4 class="form-section-title">{$t('library_permissions')}</h4>
+              <p class="section-desc">{$t('tick_the_libraries_every_member_of')}</p>
               <div class="dsm-table-container">
                 <table class="dsm-table">
                   <thead>
@@ -288,9 +314,9 @@
                           onchange={(e) => libraryIds = e.currentTarget.checked ? libraries.map(l => l.id) : []}
                         />
                       </th>
-                      <th>Médiathèque</th>
-                      <th>Type</th>
-                      <th>État</th>
+                      <th>{$t('library')}</th>
+                      <th>{$t('request_type')}</th>
+                      <th>{$t('state')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -311,15 +337,15 @@
                         </td>
                         <td>
                           {#if lib.enabled}
-                            <span class="status-indicator status-on"><span class="dot"></span> Active</span>
+                            <span class="status-indicator status-on"><span class="dot"></span> {$t('active_state')}</span>
                           {:else}
-                            <span class="status-indicator status-off"><span class="dot"></span> Désactivée</span>
+                            <span class="status-indicator status-off"><span class="dot"></span> {$t('disabled_state')}</span>
                           {/if}
                         </td>
                       </tr>
                     {:else}
                       <tr>
-                        <td colspan="4" class="empty-cell">Aucune bibliothèque disponible</td>
+                        <td colspan="4" class="empty-cell">{$t('no_libraries_available')}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -331,7 +357,7 @@
 
         <div class="dsm-modal-footer">
           <button type="button" class="btn btn-default" disabled={busy} onclick={() => { editorOpen = false; }}>
-            Annuler
+            {$t('sched_cancel')}
           </button>
           <button type="button" class="btn btn-primary" disabled={busy || !name.trim()} onclick={() => save()}>
             {busy ? 'Enregistrement…' : 'Appliquer'}
@@ -346,7 +372,7 @@
     <div class="toolbar-left">
       <button type="button" class="btn btn-primary" disabled={busy} onclick={() => edit(null)}>
         <Icon name="users" size={16} />
-        <span>Créer</span>
+        <span>{$t('create')}</span>
       </button>
 
       <button
@@ -359,32 +385,32 @@
         }}
       >
         <Icon name="edit" size={16} />
-        <span>Modifier</span>
+        <span>{$t('edit')}</span>
       </button>
 
       <button
         type="button"
         class="btn btn-default"
-        disabled={busy || selectedGroupIds.length !== 1}
+        disabled={busy || selectedGroupIds.length !== 1 || !!groups.find(group => group.id === selectedGroupIds[0])?.systemRole}
         onclick={() => {
           const g = groups.find(item => item.id === selectedGroupIds[0]);
           if (g) remove(g);
         }}
       >
         <Icon name="trash" size={16} />
-        <span>Supprimer</span>
+        <span>{$t('delete')}</span>
       </button>
 
       <button type="button" class="btn btn-default" disabled={busy} onclick={() => onchanged()}>
         <Icon name="refresh" size={16} />
-        <span>Actualiser</span>
+        <span>{$t('refresh')}</span>
       </button>
     </div>
 
     <div class="toolbar-right">
       <div class="search-box">
         <Icon name="search" size={16} />
-        <input type="search" bind:value={search} placeholder="Rechercher…" />
+        <input type="search" bind:value={search} placeholder={$t('admin_search')} />
       </div>
     </div>
   </div>
@@ -395,19 +421,19 @@
       <thead>
         <tr>
           <th class="col-check-center">
-            <input type="checkbox" checked={allSelected} onchange={toggleSelectAll} aria-label="Sélectionner tous les groupes" />
+            <input type="checkbox" checked={allSelected} onchange={toggleSelectAll} aria-label={$t('select_all_groups')} />
           </th>
           <th class="sortable" onclick={() => handleSort('name')}>
-            Nom du groupe {sortField === 'name' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('group_name')} {sortField === 'name' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
           <th class="sortable" onclick={() => handleSort('type')}>
-            Type {sortField === 'type' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('request_type')} {sortField === 'type' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
           <th class="sortable" onclick={() => handleSort('members')}>
-            Membres {sortField === 'members' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('members')} {sortField === 'members' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
           <th class="sortable" onclick={() => handleSort('libraries')}>
-            Bibliothèques accordées {sortField === 'libraries' ? (sortAsc ? '▲' : '▼') : ''}
+            {$t('granted_libraries')} {sortField === 'libraries' ? (sortAsc ? '▲' : '▼') : ''}
           </th>
         </tr>
       </thead>
@@ -423,7 +449,7 @@
                 type="checkbox"
                 checked={isSelected}
                 onchange={() => toggleSelectGroup(group.id)}
-                aria-label={`Sélectionner ${group.name}`}
+                aria-label={$t('select', { name: group.name })}
               />
             </td>
             <td>
@@ -435,31 +461,33 @@
               </div>
             </td>
             <td>
-              {#if group.isDefault}
-                <span class="dsm-pill pill-default">Par défaut (automatique)</span>
+              {#if group.systemRole}
+                <span class="dsm-pill pill-default">{$t('automatic_role')}</span>
+              {:else if group.isDefault}
+                <span class="dsm-pill pill-default">{$t('default_automatic')}</span>
               {:else}
-                <span class="dsm-pill pill-custom">Personnalisé</span>
+                <span class="dsm-pill pill-custom">{$t('custom')}</span>
               {/if}
             </td>
             <td>
               {#if group.isDefault}
-                <span class="text-accent">Tous les utilisateurs</span>
+                <span class="text-accent">{$t('all_users')}</span>
               {:else}
-                <span>{group.userIds.length} utilisateur(s)</span>
+                <span>{$t('text', { count: group.userIds.length })}</span>
               {/if}
             </td>
             <td>
               {#if group.libraryIds.length > 0}
-                <span class="lib-count-badge">{group.libraryIds.length} bibliothèque(s)</span>
+                <span class="lib-count-badge">{$t('admin_text', { count: group.libraryIds.length })}</span>
               {:else}
-                <span class="text-muted">Aucune</span>
+                <span class="text-muted">{$t('admin_none')}</span>
               {/if}
             </td>
           </tr>
         {:else}
           <tr>
             <td colspan="5" class="empty-cell">
-              Aucun groupe d’utilisateurs trouvé.
+              {$t('no_user_groups_found')}
             </td>
           </tr>
         {/each}
@@ -468,8 +496,8 @@
   </div>
 
   <div class="dsm-statusbar">
-    <span>Total : <strong>{filteredGroups.length}</strong> groupe(s)</span>
-    <span>{selectedGroupIds.length} sélectionné(s)</span>
+    <span>{$t('total')} <strong>{filteredGroups.length}</strong> {$t('groups_2')}</span>
+    <span>{$t('admin_selected', { count: selectedGroupIds.length })}</span>
   </div>
 </section>
 
@@ -710,4 +738,6 @@
   @media (prefers-reduced-motion: reduce) {
     .btn, .dsm-tab, .btn-close, .dsm-table tbody tr, .search-box { transition: none; }
   }
+  .kind-options { display: flex; flex-wrap: wrap; gap: 8px 20px; }
+  .kind-options label { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; }
 </style>

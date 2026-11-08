@@ -1,5 +1,6 @@
 import type { Media, Source } from './types';
 
+import { tr } from '../i18n';
 export function audioLanguage(language: string): string {
   const primary = language.trim().toLowerCase().replaceAll('_', '-').split('-')[0];
   return ({ fra: 'fr', fre: 'fr', eng: 'en', deu: 'de', ger: 'de' } as Record<string, string>)[primary] ?? primary;
@@ -41,8 +42,8 @@ export function chooseSource(media: Media, trackId?: string, language = 'fr', pl
 export function audioSelectionNotice(media: Media, source: Source, language: string): string {
   const wanted = audioLanguage(language);
   if (audioLanguage(source.language) === wanted || media.sources.some(item => audioLanguage(item.language) === wanted)) return '';
-  if (audioLanguage(source.language) === 'und') return 'La langue de la piste choisie par le navigateur ne peut pas être confirmée.';
-  return 'Votre langue précédente est indisponible. Première source disponible sélectionnée.';
+  if (audioLanguage(source.language) === 'und') return tr('the_language_of_the_track_chosen');
+  return tr('your_previous_language_is_unavailable_first');
 }
 
 // This is only a capability hint. Successful metadata, decoding and seek remain mandatory.

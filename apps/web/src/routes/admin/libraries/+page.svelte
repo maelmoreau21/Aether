@@ -5,7 +5,9 @@
 <script lang="ts">
   import { invalidateCatalog } from '../../../lib/catalog/page-cache';
   import { onMount } from 'svelte';
-  import { asset } from '$app/paths';
+  import { asset, resolve } from '$app/paths';
+  import { replaceState } from '$app/navigation';
+  import { page } from '$app/state';
 
   import { session, type AuthUser } from '../../../lib/auth/session';
   import AdminShell from '../../../lib/admin/AdminShell.svelte';
@@ -23,7 +25,8 @@
   import AdminUsers from '../../../lib/admin/AdminUsers.svelte';
   import AdminTasks from '../../../lib/admin/AdminTasks.svelte';
   import AdminMaintenance from '../../../lib/admin/AdminMaintenance.svelte';
-  import DistributedTasks from '../../../lib/admin/DistributedTasks.svelte';
+  import AdminServerLogs from '../../../lib/admin/AdminServerLogs.svelte';
+  import AdminLogFiles from '../../../lib/admin/AdminLogFiles.svelte';
   import AutomationTasks from '../../../lib/admin/AutomationTasks.svelte';
   import AdminCapabilities from '../../../lib/admin/AdminCapabilities.svelte';
   import Requests from '../../../lib/applications/Requests.svelte';
@@ -32,7 +35,6 @@
   import AdminGroups from '../../../lib/admin/AdminGroups.svelte';
   import AdminApiKeys from '../../../lib/admin/AdminApiKeys.svelte';
   import AvatarCollections from '../../../lib/admin/AvatarCollections.svelte';
-  import AdminArtwork from '../../../lib/admin/AdminArtwork.svelte';
   import type { UserGroup } from '../../../lib/admin/request';
   import { t } from '../../../lib/i18n';
 
@@ -71,14 +73,6 @@
   let pairToken = $state('');
 
   const administrator = $derived($session?.user.role === 'administrator');
-  const selectedNode = $derived(nodes.find(n => n.id === nodeId));
-  const availableRootsForNode = $derived.by(() => {
-    if (nodeId === 'local') {
-      const localNode = nodes.find(n => n.id === 'local');
-      return [...new Set([...(localNode?.roots ?? []), ...roots])];
-    }
-    return selectedNode?.roots ?? [];
-  });
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(path, {
@@ -87,15 +81,15 @@
       cache: 'no-store',
       signal: AbortSignal.timeout(10000)
     });
-    if (response.status === 401) throw new Error('Votre session a expiré. Reconnectez-vous.');
-    if (response.status === 403) throw new Error('Accès refusé. Vérifiez votre session et vos droits.');
+    if (response.status === 401) throw new Error($t('your_session_has_expired_sign_in'));
+    if (response.status === 403) throw new Error($t('access_denied_check_your_session_and'));
     if (response.status === 400 || response.status === 409) {
-      throw new Error('Configuration refusée. Vérifiez le nom, la racine et les utilisateurs.');
+      throw new Error($t('configuration_refused_check_the_name_the'));
     }
     if (response.status === 502) {
-      throw new Error('Le Media Node distant est injoignable ou le jeton d’appairage est invalide.');
+      throw new Error($t('the_remote_media_node_is_unreachable'));
     }
-    if (!response.ok) throw new Error('Le serveur est indisponible. Réessayez.');
+    if (!response.ok) throw new Error($t('admin_the_server_is_unavailable_try_again'));
     if (init.method && init.method !== 'GET') {
       const library = path.match(/\/libraries\/([^/]+)/)?.[1];
       invalidateCatalog(library ? decodeURIComponent(library) : undefined);
@@ -108,7 +102,9 @@
     name = '';
     kind = 'films';
     nodeId = 'local';
-    root = roots[0] ?? '';
+    // A new folder is an explicit choice. The Core's empty inventory root is
+    // an internal startup detail, not the starting point of the file picker.
+    root = '';
     folders = [];
     enabled = true;
     excludedPatterns = '';
@@ -117,10 +113,8 @@
   }
 
   function handleNodeChange() {
-    const candidateRoots = availableRootsForNode;
-    if (!root && candidateRoots.length > 0) {
-      root = candidateRoots[0] ?? '';
-    }
+    // A path from another server must not be reused on the newly selected Node.
+    root = '';
   }
 
   function edit(library: Library) {
@@ -128,7 +122,7 @@
     name = library.name;
     kind = library.kind;
     nodeId = library.nodeId;
-    root = library.root;
+    root = '';
     folders = (library.folders ?? [{ nodeId: library.nodeId, root: library.root }]).map(folder => ({ ...folder }));
     enabled = library.enabled;
     excludedPatterns = library.excludedPatterns ?? '';
@@ -164,7 +158,7 @@
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
         request<{ users: AuthUser[] }>('/api/v1/admin/users'),
         request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots'),
-        request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => { nodesError = 'État des Media Nodes indisponible. Réessayez pour vérifier les serveurs.'; return { nodes: [] as AdminNode[] }; }),
+        request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => { nodesError = $t('media_node_status_unavailable_try_again'); return { nodes: [] as AdminNode[] }; }),
         request<{ groups: UserGroup[] }>('/api/v1/admin/groups')
       ]);
       libraries = data.libraries;
@@ -176,7 +170,7 @@
       // Scan status fills in after the forms are usable, without repeating access queries.
       void refreshScans();
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Chargement impossible.';
+      error = failure instanceof Error ? failure.message : $t('loading_impossible');
     } finally {
       loading = false;
     }
@@ -201,10 +195,10 @@
       libraries = data.libraries;
       nodes = nodeList.nodes;
       reset();
-      notice = 'Bibliothèque enregistrée. Les autorisations d’accès se gèrent dans Utilisateurs ou Groupes.';
+      notice = $t('library_saved_access_permissions_are_managed');
       return true;
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Enregistrement impossible.';
+      error = failure instanceof Error ? failure.message : $t('saving_failed');
       return false;
     } finally {
       saving = false;
@@ -239,17 +233,17 @@
       pairPublicUrl = '';
       pairToken = '';
       nodeId = created.id;
-      root = created.roots[0] ?? root;
-      notice = `Media Node « ${created.name} » (${created.id}) appairé avec succès.`;
+      root = '';
+      notice = $t('media_node_paired_successfully', { name: created.name, id: created.id });
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Appairage du Media Node impossible.';
+      error = failure instanceof Error ? failure.message : $t('unable_to_pair_the_media_node');
     } finally {
       pairing = false;
     }
   }
 
   async function generateEnrollmentToken(): Promise<EnrollmentToken> {
-    if (!$session || !administrator) throw new Error('Action non autorisée.');
+    if (!$session || !administrator) throw new Error($t('action_not_allowed'));
     return await request<EnrollmentToken>('/api/v1/admin/nodes/enrollment-tokens', {
       method: 'POST',
       headers: {
@@ -277,12 +271,12 @@
       nodes = nodeList.nodes;
       roots = configured.roots;
       notice = action === 'revoke'
-        ? `Media Node « ${targetNode.name} » révoqué.`
+        ? $t('admin_media_node_revoked', { name: targetNode.name })
         : action === 'rotate-secret'
-          ? `Secret du Media Node « ${targetNode.name} » renouvelé.`
-          : `Media Node « ${targetNode.name} » reconnecté.`;
+          ? $t('secret_of_media_node_renewed', { name: targetNode.name })
+          : $t('media_node_reconnected', { name: targetNode.name });
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Action sur le Media Node impossible.';
+      error = failure instanceof Error ? failure.message : $t('media_node_action_failed');
     } finally {
       nodeActionBusy = null;
     }
@@ -306,7 +300,7 @@
         scans[id] = scan;
       }
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'État du scan indisponible.';
+      error = failure instanceof Error ? failure.message : $t('scan_status_unavailable');
     } finally {
       polling = false;
     }
@@ -333,7 +327,7 @@
       };
       await refreshScans();
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Lancement du scan impossible.';
+      error = failure instanceof Error ? failure.message : $t('unable_to_start_the_scan');
     } finally {
       pending = pending.filter(id => id !== library.id);
     }
@@ -345,6 +339,9 @@
   function chooseSection(hash: string) { currentHash = hash; selectedTaskId = null; }
   function syncSection() {
     const selected = parseAdminHash(window.location.hash);
+    if (window.location.hash.split('?', 1)[0] === '#trickplay-section') {
+      replaceState(resolve('admin/libraries/#libraries-section'), page.state);
+    }
     currentHash = selected.section;
     selectedTaskId = selected.task;
   }
@@ -371,7 +368,7 @@
 </script>
 
 <svelte:head>
-  <title>{sectionTitle} — Administration — {DEFAULT_NAME}</title>
+  <title>{$t('administration_2', { sectionTitle, DEFAULT_NAME })}</title>
 </svelte:head>
 
 <AdminShell title={sectionTitle} {currentHash} {administrator} onnavigate={chooseSection}>
@@ -380,8 +377,8 @@
       <div class="banner-content">
         <Icon name="shield" size={18} />
         <div>
-          <strong>Accès refusé</strong>
-          <p>Cette console est strictement réservée aux comptes disposant du rôle <code>administrator</code>.</p>
+          <strong>{$t('access_denied')}</strong>
+          <p>{$t('this_console_is_strictly_reserved_for')} <code>administrator</code>.</p>
         </div>
       </div>
     </div>
@@ -392,7 +389,7 @@
           <Icon name="info" size={18} />
           <p>{error}</p>
         </div>
-        <button class="small-btn" disabled={saving} onclick={load}>Réessayer</button>
+        <button class="small-btn" disabled={saving} onclick={load}>{$t('request_retry')}</button>
       </div>
     {/if}
 
@@ -414,13 +411,13 @@
           width="48"
           height="48"
         />
-        <p>Chargement des données administratives…</p>
+        <p>{$t('loading_administrative_data')}</p>
       </div>
     {:else}
           <AdminSettings section={currentHash} />
 
           <!-- Section 1: Dashboard Overview -->
-          <div hidden={currentHash !== '#statistics-section'}><Statistics administrator active={currentHash === '#statistics-section'} /></div>
+          <div hidden={currentHash !== '#statistics-section'}><Statistics administrator embedded active={currentHash === '#statistics-section'} /></div>
           <div hidden={currentHash !== "#overview"}>
           <AdminOverview active={currentHash === "#overview"}
             {coreHealth}
@@ -441,6 +438,7 @@
             {saving}
             {editing}
             {error}
+            {groups}
             bind:name
             bind:kind
             bind:nodeId
@@ -460,7 +458,7 @@
 
           <!-- Section 3: Media Nodes -->
           <div hidden={currentHash !== "#nodes-section"}>
-          {#if nodesError}<div class="error-banner" role="alert"><p>{nodesError}</p><button class="small-btn" onclick={load}>Réessayer</button></div>{/if}
+          {#if nodesError}<div class="error-banner" role="alert"><p>{nodesError}</p><button class="small-btn" onclick={load}>{$t('request_retry')}</button></div>{/if}
           <AdminNodes
             {nodes}
             {pairing}
@@ -489,8 +487,11 @@
           <div hidden={currentHash !== '#tasks-section'}>
             <AdminTasks {libraries} {nodes} {scans} {pending} onscan={scan} selectedId={selectedTaskId} active={currentHash === '#tasks-section'} />
           </div>
-          {#if currentHash === '#operations-section'}
-            <DistributedTasks active={true} {libraries} {nodes} />
+          {#if currentHash === '#logs-section'}
+            <AdminLogFiles active={true} />
+          {/if}
+          {#if currentHash === '#logs-live-section'}
+            <AdminServerLogs active={true} />
           {/if}
           {#if currentHash === '#automation-section'}
             <AutomationTasks active={true} {libraries} />
@@ -509,9 +510,6 @@
               <AvatarCollections />
             </div>
           {/if}
-          <div hidden={currentHash !== '#artwork-section'}>
-            <AdminArtwork {libraries} />
-          </div>
           <AdminCapabilities section={currentHash.slice(1)} />
           {#if currentHash === '#requests-section'}<div class="extension-application"><Requests embedded /></div>{/if}
           {#if currentHash === '#reports-section'}<div class="extension-application"><Reports embedded /></div>{/if}

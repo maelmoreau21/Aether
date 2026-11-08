@@ -176,7 +176,8 @@ Les tags `latest` et `develop` correspondent respectivement aux branches `main` 
 | `MEDIA_LIBRARY_DIR` | Dossier de médias monté en lecture seule en mode autonome |
 | `MEDIA_DB_ENGINE` | `sqlite` (défaut) ou `postgres` |
 | `MEDIA_DB_URL` | URL PostgreSQL, uniquement si ce moteur est activé |
-| `MEDIA_BACKUP_DIR` | Dossier privé des archives non chiffrées ; voir `docs/BACKUP_BUNDLE.md` |
+| `MEDIA_BACKUP_DIR` | Dossier privé des archives de sauvegarde ; voir `docs/BACKUP_BUNDLE.md` |
+| `MEDIA_BACKUP_KEY_FILE` | Fichier contenant la clé de sauvegarde (64 hex, `openssl rand -hex 32`), hors dépôt et hors archives. **Requise** pour créer des sauvegardes (`MEDIA_BACKUP_KEY` accepté, déconseillé) |
 | `MEDIA_OIDC_ENABLED` | Activation optionnelle de l'authentification OIDC |
 | `MEDIA_NODE_PAIRING_TOKEN` | Secret d'appairage pour le mode distribué |
 

@@ -1,20 +1,22 @@
 <script lang="ts">
   import { tick } from 'svelte';
-  import { resolve } from '$app/paths';
   import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
-  import LibraryOptionsForm from './LibraryOptions.svelte';
+  import LibraryOptionsForm, { type LibraryOptionsSection } from './LibraryOptions.svelte';
+  import LibraryAccess from './LibraryAccess.svelte';
   import LibraryImages from './LibraryImages.svelte';
   import PathPickerModal from './PathPickerModal.svelte';
-  import { scanLabels } from './types';
+  import { recommendedLibraryOptions, scanLabels } from './types';
+  import type { UserGroup } from './request';
   import Icon from '../ui/Icon.svelte';
+  import { adminRequest } from './request';
   import { t } from '../i18n';
-  let { libraries, nodes, scans, pending, saving, editing, error,
+  let { libraries, nodes, scans, pending, saving, editing, error, groups = [],
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
     options = $bindable(), onchanged,
     onsave, onscan, onedit, onreset, onnodechange }: {
       libraries: Library[]; nodes: AdminNode[]; scans: Record<string, Scan>; pending: string[];
-      saving: boolean; editing: string | null; error: string;
+      saving: boolean; editing: string | null; error: string; groups?: UserGroup[];
       name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; folders: { nodeId: string; root: string }[]; enabled: boolean;
       excludedPatterns: string;
       options: LibraryOptions; onchanged: () => Promise<void>;
@@ -22,19 +24,28 @@
       onedit: (library: Library) => void; onreset: () => void; onnodechange: () => void;
   } = $props();
   let editor = $state<HTMLDialogElement>(), refresher = $state<HTMLDialogElement>();
+  let access = $state<{ saveGroups: () => Promise<boolean> }>();
   let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   let showPathPicker = $state(false);
-  const editorSections = [
-    { id: 'general', label: 'Général' },
-    { id: 'sources', label: 'Sources et dossiers' },
-    { id: 'metadata', label: 'Métadonnées et images' },
-    { id: 'indexing', label: 'Indexation' },
-    { id: 'access', label: 'Accès' },
-    { id: 'advanced', label: 'Avancé' }
+  const allSections = [
+    { id: 'general', get label() { return $t('admin_general'); } },
+    { id: 'sources', get label() { return $t('sources_folders'); } },
+    { id: 'metadata', get label() { return $t('metadata'); } },
+    { id: 'images', get label() { return $t('admin_artwork_tab'); } },
+    { id: 'playback', get label() { return $t('play'); } },
+    { id: 'subtitles', get label() { return $t('report_category_subtitles'); } },
+    { id: 'providers', get label() { return $t('providers'); } },
+    { id: 'access', get label() { return $t('admin_group_access'); } }
   ] as const;
-  type EditorSection = typeof editorSections[number]['id'];
+  type EditorSection = typeof allSections[number]['id'];
+  const optionSections: LibraryOptionsSection[] = ['metadata', 'images', 'playback', 'subtitles', 'providers'];
+  // Music has no artwork collection, video playback, subtitles nor video providers.
+  const editorSections = $derived(allSections.filter(section => kind !== 'music' || !['images', 'playback', 'subtitles', 'providers'].includes(section.id)));
   let activeSection = $state<EditorSection>('general');
+  let presetApplied = $state(false);
+  const editedLibrary = $derived(editing ? libraries.find(library => library.id === editing) ?? null : null);
+  $effect(() => { if (!editorSections.some(section => section.id === activeSection)) activeSection = 'general'; });
   let formError = $state('');
   let editorContent: HTMLDivElement;
   function chooseEditorSection(section: EditorSection) {
@@ -50,33 +61,60 @@
     editor?.querySelector<HTMLButtonElement>(`#library-tab-${editorSections[next].id}`)?.focus();
   }
   const activeNodes = $derived(nodes.filter(n => n.status !== 'revoked'));
-  function closeMenu(event: MouseEvent) { const details = (event.currentTarget as HTMLElement).closest('details'); details?.removeAttribute('open'); details?.querySelector('summary')?.focus(); }
-  function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? 'Node local' : id); }
-  // The table scrolls horizontally, so an open "⋮" menu is placed in the viewport instead of being clipped by it.
-  let menuOpen = $state(false);
-  function placeMenu(event: Event) {
-    const details = event.currentTarget as HTMLDetailsElement;
-    if (!details.open) { menuOpen = Boolean(document.querySelector('.library-menu[open]')); return; }
-    for (const other of document.querySelectorAll<HTMLDetailsElement>('.library-menu[open]')) if (other !== details) other.open = false;
-    const summary = details.querySelector('summary'), menu = details.querySelector<HTMLElement>('.menu-actions');
-    if (!summary || !menu) return;
-    const zoom = (details as HTMLElement & { currentCSSZoom?: number }).currentCSSZoom || 1;
-    const anchor = summary.getBoundingClientRect(), height = menu.getBoundingClientRect().height;
-    const above = anchor.bottom + 6 + height > innerHeight && anchor.top - 6 - height > 0;
-    menu.style.right = `${Math.max(8, innerWidth - anchor.right) / zoom}px`;
-    menu.style.top = above ? 'auto' : `${(anchor.bottom + 6) / zoom}px`;
-    menu.style.bottom = above ? `${(innerHeight - anchor.top + 6) / zoom}px` : 'auto';
-    menuOpen = true;
+  function scanWaitingText(scan: Scan): string {
+    switch (scan.waitingReason) {
+      case 'node_busy': {
+        const tasks: Record<string, string> = { scan: $t('task_kind_scan'), analyze: $t('task_kind_analyze'), prepare: $t('task_kind_prepare'), image: $t('task_kind_image'), trickplay: $t('task_kind_trickplay'), system: $t('task_kind_system') };
+        return $t('scan_waiting_node_busy', { task: tasks[scan.waitingDetail ?? ''] ?? $t('task_kind_system') });
+      }
+      case 'node_offline': return $t('scan_waiting_node_offline');
+      case 'retry': return scan.waitingDetail ? $t('scan_waiting_retry_after', { error: scan.waitingDetail }) : $t('scan_waiting_retry');
+      case 'prerequisite': return $t('scan_waiting_prerequisite');
+      default: return $t('scan_waiting_dispatching');
+    }
   }
-  $effect(() => {
-    if (!menuOpen) return;
-    const closeAll = () => { for (const open of document.querySelectorAll<HTMLDetailsElement>('.library-menu[open]')) open.open = false; };
-    const outside = (event: PointerEvent) => { if (!(event.target instanceof Element && event.target.closest('.library-menu[open]'))) closeAll(); };
-    const scrolled = (event: Event) => { if (!(event.target instanceof Element && event.target.closest('.menu-actions'))) closeAll(); };
-    addEventListener('resize', closeAll); addEventListener('scroll', scrolled, true); document.addEventListener('pointerdown', outside);
-    return () => { removeEventListener('resize', closeAll); removeEventListener('scroll', scrolled, true); document.removeEventListener('pointerdown', outside); };
-  });
-  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; formError = ''; editor?.showModal(); }
+  // Every refresh mode is a direct action of the library editor (no intermediate dialog).
+  const refreshModes = $derived([
+    { mode: 'incremental' as RefreshMode, label: $t('quick_refresh'), hint: $t('unchanged_technical_analyses_are_reused') },
+    { mode: 'new_only' as RefreshMode, label: $t('refresh_keep_descriptions'), hint: $t('metadata_of_already_known_media_is') },
+    { mode: 'missing_metadata' as RefreshMode, label: $t('fill_missing_metadata'), hint: $t('local_metadata_already_validated_is_kept') },
+    { mode: 'full' as RefreshMode, label: $t('full_rescan'), hint: $t('all_files_are_re_analysed_local') }
+  ]);
+  // Once started, the editor closes: progress shows at once in the library list.
+  async function startRefresh(library: Library, chosen: RefreshMode) {
+    await onscan(library, chosen);
+    if (!error) editor?.close();
+  }
+  // "Animés" is a series library shown under another name: same scan, same player.
+  const contentKind = $derived(kind === 'series' && options.anime ? 'anime' : kind);
+  function chooseContentKind(value: string) {
+    kind = value === 'anime' ? 'series' : value as 'films' | 'series' | 'music';
+    options = { ...options, anime: value === 'anime' };
+  }
+  function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? $t('local_node') : id); }
+  let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
+  // Intro/credits analysis of a whole series library (fingerprints queued again where they failed).
+  let markersBusy = $state(false), markersNotice = $state(''), markersError = $state('');
+  async function analyzeLibraryMarkers(library: Library) {
+    if (markersBusy) return;
+    markersBusy = true; markersNotice = ''; markersError = '';
+    try {
+      const result = await adminRequest<{ episodesCount: number; tasksQueued: number }>(`/api/v1/admin/libraries/${encodeURIComponent(library.id)}/analyze-markers`, { method: 'POST' });
+      markersNotice = $t('intro_analysis_queued', { episodes: result.episodesCount, queued: result.tasksQueued });
+    } catch (cause) { markersError = cause instanceof Error ? cause.message : $t('operation_not_possible_try_again'); }
+    finally { markersBusy = false; }
+  }
+  async function deleteLibrary() {
+    if (!editedLibrary || deleting) return;
+    deleting = true; deleteError = '';
+    try {
+      await adminRequest(`/api/v1/admin/libraries/${encodeURIComponent(editedLibrary.id)}`, { method: 'DELETE' });
+      editor?.close(); onreset(); await onchanged();
+    } catch (cause) {
+      deleteError = cause instanceof Error && !cause.message.startsWith('Ce nom') ? cause.message : $t('deletion_is_not_possible_during_a');
+    } finally { deleting = false; confirmDelete = false; }
+  }
+  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; presetApplied = false; formError = ''; confirmDelete = false; deleteError = ''; editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -100,6 +138,8 @@
       await tick(); editor?.querySelector<HTMLInputElement>('#library-root')?.focus();
       return;
     }
+    // Group grants are saved first: a failure keeps the editor open on the access tab.
+    if (access && !(await access.saveGroups())) { chooseEditorSection('access'); return; }
     if (await onsave(event)) editor?.close();
   }
   async function refresh(event: SubmitEvent) {
@@ -113,7 +153,7 @@
 </script>
 <section id="libraries-section" aria-labelledby="libraries-heading">
   <h2 id="libraries-heading">{$t('libraries')}</h2>
-  <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> Ajouter une bibliothèque</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> Actualiser toutes les bibliothèques</button></div>
+  <div class="toolbar"><button class="primary" onclick={() => manage()}><span aria-hidden="true">+</span> {$t('add_a_library')}</button><button onclick={() => refreshLibrary(null)} disabled={libraries.length === 0 || refreshing}><Icon name="refresh" size={18} /> {$t('refresh_all_libraries')}</button></div>
   {#if libraries.length}
   <div class="library-table-panel">
     <table class="library-table">
@@ -123,16 +163,16 @@
     {#each libraries as library (library.id)}
       {@const folderCount = library.folders?.length ?? 1}
       {@const serverNames = [...new Set((library.folders ?? [{ nodeId: library.nodeId }]).map(folder => folder.nodeId))].map(nodeName)}
-      {@const kindLabel = library.kind === 'music' ? 'Musique' : library.kind === 'films' ? 'Films' : 'Séries'}
+      {@const kindLabel = library.kind === 'music' ? $t('music') : library.kind === 'films' ? $t('films') : library.options?.anime ? $t('anime') : $t('series')}
       {@const scan = scans[library.id]}
       {@const scanning = ['queued','running'].includes(scan?.status)}
       {@const unavailable = !library.enabled || pending.includes(library.id) || scanning}
       {@const scanErrors = scan ? scan.errorsCount ?? scan.errors.length : 0}
       <tr class="library-row" class:disabled-library={!library.enabled}>
         <th scope="row" class="name-cell">
-          <button class="library-name" onclick={() => manage(library)} aria-label={`Gérer ${library.name}`}>
+          <button class="library-name" onclick={() => manage(library)} aria-label={$t('manage', { name: library.name })}>
             <span class="kind-icon"><Icon name={library.kind === 'films' ? 'film' : library.kind === 'music' ? 'playlist' : 'tv'} size={20} /></span>
-            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : ' · Désactivée'} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
+            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : $t('disabled_2')} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
           </button>
         </th>
         <td class="type-cell">{kindLabel}{#if !library.enabled}<span class="badge">{$t('disabled')}</span>{/if}</td>
@@ -141,24 +181,17 @@
         <td class="status-cell">
           {#if scan}
             <div class="scan-status scan-counters" role="status">
-              <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">Scan : </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
-              <span class="counters">{scan.discovered} fichier(s) découvert(s) · {scan.probed} analysé(s) · {scan.reused} réutilisé(s)</span>
+              <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">{$t('admin_scan')} </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
+              {#if scan.waitingReason}<span class="counters waiting-reason">{scanWaitingText(scan)}</span>{/if}
+              <span class="counters">{scan.waitingReason ? $t('previous_scan_counters', { counters: $t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused }) }) : $t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused })}</span>
             </div>
-            {#if scanning}<progress aria-label={`Scan de ${library.name} en cours`}></progress>{/if}
+            {#if scanning}<progress aria-label={$t('scanning', { name: library.name })}></progress>{/if}
           {:else}<span class="no-scan">—</span>{/if}
         </td>
         <td class="actions-cell">
           <div class="row-actions">
-            <button class="icon-action" disabled={unavailable} aria-label={`Scanner ${library.name}`} title="Scanner la bibliothèque" onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
-            <details class="library-menu" ontoggle={placeMenu}><summary aria-label={`Actions ${library.name}`}>⋮</summary><div class="menu-actions">
-              <button onclick={(event) => { closeMenu(event); manage(library); }}>Gérer la bibliothèque</button>
-              <button onclick={(event) => { closeMenu(event); manage(library); }}>Renommer</button>
-              <button disabled={unavailable} onclick={(event) => { closeMenu(event); void onscan(library); }}>Scanner la bibliothèque</button>
-              <button onclick={(event) => { closeMenu(event); imageTarget = library; }}>Modifier les images</button>
-              <button disabled={unavailable} onclick={(event) => { closeMenu(event); target = library; mode = 'missing_metadata'; refresher?.showModal(); }}>Rechercher les métadonnées manquantes</button>
-              <button disabled={unavailable} onclick={(event) => { closeMenu(event); refreshLibrary(library); }}>Actualiser la bibliothèque</button>
-              <a href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}>{$t('schedule_refresh')}</a>
-            </div></details>
+            <button class="icon-action" disabled={unavailable} aria-label={$t('scan_2', { name: library.name })} title={$t('scan_the_library')} onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
+            <button class="icon-action" aria-label={$t('extension_settings_for', { name: library.name })} title={$t('manage_the_library')} onclick={() => manage(library)}><Icon name="settings" size={18} /></button>
           </div>
         </td>
       </tr>
@@ -169,11 +202,11 @@
   {:else}<p class="empty-libraries">{$t('first_library_hint')}</p>{/if}
 </section>
 <dialog class="library-editor" bind:this={editor} aria-labelledby="library-form" oncancel={event => { if (saving) event.preventDefault(); }}>
-  <header class="editor-header"><div><p class="eyebrow">{editing ? name : 'Nouvelle bibliothèque'}</p><h2 id="library-form">{editing ? 'Modifier la bibliothèque' : 'Ajouter une bibliothèque'}</h2></div><button type="button" disabled={saving} aria-label="Fermer les réglages de la bibliothèque" onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
+  <header class="editor-header"><div><p class="eyebrow">{editing ? name : $t('new_library')}</p><h2 id="library-form">{editing ? $t('edit_the_library') : $t('add_a_library')}</h2></div><button type="button" disabled={saving} aria-label={$t('close_library_settings')} onclick={() => editor?.close()}><Icon name="close" size={20} /></button></header>
   <form onsubmit={submit} novalidate><fieldset disabled={saving}>
     <div class="editor-workspace">
       <div class="editor-navigation">
-        <div class="editor-tabs" role="tablist" aria-label="Réglages de la bibliothèque" aria-orientation="vertical">
+        <div class="editor-tabs" role="tablist" aria-label={$t('library_settings')} aria-orientation="vertical">
           {#each editorSections as section, index (section.id)}<button type="button" id={`library-tab-${section.id}`} role="tab" aria-selected={activeSection === section.id} aria-controls={`library-panel-${section.id}`} tabindex={activeSection === section.id ? 0 : -1} onclick={() => chooseEditorSection(section.id)} onkeydown={event => tabKeydown(event, index)}>{section.label}</button>{/each}
         </div>
         <label class="editor-select">{$t('settings_section')}<select aria-label={$t('settings_section')} value={activeSection} onchange={event => chooseEditorSection(event.currentTarget.value as EditorSection)}>{#each editorSections as section (section.id)}<option value={section.id}>{section.label}</option>{/each}</select></label>
@@ -181,47 +214,82 @@
       <div class="editor-content" bind:this={editorContent}>
         <div id="library-panel-general" role="tabpanel" aria-labelledby="library-tab-general" data-editor-panel="general" hidden={activeSection !== 'general'} tabindex="0">
           <h3>{$t('library_general')}</h3><p class="panel-description">{$t('library_general_note')}</p>
-          <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" bind:value={kind}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="music">{$t('music')}</option></select></div></div>
+          <div class="identity-fields"><div><label for="library-name">{$t('library_name')}</label><input id="library-name" bind:value={name} required maxlength="100" autocomplete="off" /></div><div><label for="library-kind">{$t('content_kind')}</label><select id="library-kind" value={contentKind} onchange={event => chooseContentKind(event.currentTarget.value)}><option value="films">{$t('films')}</option><option value="series">{$t('series')}</option><option value="anime">{$t('anime')}</option><option value="music">{$t('music')}</option></select></div></div>
           <label class="check"><input type="checkbox" bind:checked={enabled} /> {$t('active_library')}</label><p class="field-hint">{$t('disabled_library_hint')}</p>
-          <div class="source-summary"><strong>{folders.length} {folders.length > 1 ? 'dossiers configurés' : 'dossier configuré'}</strong><p>{folders.length ? 'Les médias restent en lecture seule.' : 'Ajoutez un dossier pour pouvoir enregistrer cette bibliothèque.'}</p><button type="button" onclick={() => chooseEditorSection('sources')}>{folders.length ? 'Consulter les dossiers' : 'Configurer les dossiers'}</button></div>
+          {#if !folders.length}<p class="field-hint">{$t('add_a_folder_in')} <button type="button" class="inline-link" onclick={() => chooseEditorSection('sources')}>{$t('sources_folders')}</button> {$t('to_be_able_to_save')}</p>{/if}
+          <div class="preset-row"><p>{$t('reset_settings_to_the_values_recommended')}</p><button type="button" onclick={() => { options = recommendedLibraryOptions(options); presetApplied = true; }}>{$t('apply_recommended_settings')}</button></div>
+          {#if presetApplied}<p role="status" class="field-hint">{$t('recommended_settings_applied_save_the')}</p>{/if}
+          <LibraryOptionsForm bind:options bind:excludedPatterns {kind} section="scan" />
+          {#if editedLibrary}
+            {@const busyLibrary = !editedLibrary.enabled || pending.includes(editedLibrary.id) || ['queued', 'running'].includes(scans[editedLibrary.id]?.status)}
+            <div class="library-actions">
+              <h4>{$t('actions')}</h4>
+              <ul class="action-list">
+                {#each refreshModes as item (item.mode)}
+                  <li>
+                    <button type="button" disabled={busyLibrary} onclick={() => { if (editedLibrary) void startRefresh(editedLibrary, item.mode); }}><Icon name="refresh" size={16} /> {item.label}</button>
+                    <p>{item.hint}</p>
+                  </li>
+                {/each}
+                <li>
+                  <button type="button" onclick={() => { imageTarget = editedLibrary; editor?.close(); }}><Icon name="image" size={16} /> {$t('edit_artwork')}</button>
+                  <p>{$t('library_action_artwork_hint')}</p>
+                </li>
+                {#if editedLibrary.kind === 'series'}
+                  <li>
+                    <button type="button" disabled={busyLibrary || markersBusy} onclick={() => { if (editedLibrary) void analyzeLibraryMarkers(editedLibrary); }}><Icon name="play" size={16} /> {markersBusy ? $t('analysing') : $t('analyse_library_intros')}</button>
+                    <p>{$t('intro_analysis_hint')}</p>
+                  </li>
+                {/if}
+              </ul>
+              {#if markersNotice}<p role="status" class="field-hint">{markersNotice}</p>{/if}
+              {#if markersError}<p role="alert" class="editor-error">{markersError}</p>{/if}
+            </div>
+            <div class="danger-zone">
+              <h4>{$t('delete_the_library')}</h4>
+              <p>{$t('the_library_disappears_from_aether_for')}</p>
+              {#if confirmDelete}
+                <div class="action-buttons"><button type="button" class="danger" disabled={deleting} onclick={() => void deleteLibrary()}>{deleting ? 'Suppression…' : $t('permanently_delete', { name: editedLibrary.name })}</button><button type="button" disabled={deleting} onclick={() => confirmDelete = false}>{$t('sched_cancel')}</button></div>
+              {:else}<button type="button" class="danger" onclick={() => confirmDelete = true}><Icon name="trash" size={16} /> {$t('delete_the_library')}</button>{/if}
+              {#if deleteError}<p role="alert" class="editor-error">{deleteError}</p>{/if}
+            </div>
+          {/if}
         </div>
         <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
           <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / 32</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
-          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={`${$t('remove')} ${folder.root}`} onclick={() => folders = folders.filter(item => item !== folder)}>{$t('remove')}</button></li>{:else}<li class="empty-folders">{$t('no_folder_added')}</li>{/each}</ul>
+          <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={$t('remove_value', { value: folder.root })} onclick={() => folders = folders.filter(item => item !== folder)}>{$t('remove')}</button></li>{:else}<li class="empty-folders">{$t('no_folder_added')}</li>{/each}</ul>
           <label for="library-node">{$t('folder_server')}</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">{$t('local_node')}</option>{#each activeNodes.filter(node => node.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
-          <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder="ex: /media/films ou C:\Films" autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
+          <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder={$t('e_g_media_films_or_c')} autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
           <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
         </div>
-        <div id="library-panel-metadata" role="tabpanel" aria-labelledby="library-tab-metadata" data-editor-panel="metadata" hidden={activeSection !== 'metadata'} tabindex="0"><LibraryOptionsForm bind:options {kind} section="metadata" /></div>
-        <div id="library-panel-indexing" role="tabpanel" aria-labelledby="library-tab-indexing" data-editor-panel="indexing" hidden={activeSection !== 'indexing'} tabindex="0">
-          <h3>{$t('indexing')}</h3><p class="panel-description">{$t('indexing_note')}</p>
-          <label for="library-excluded">Dossiers ou motifs à exclure</label><input id="library-excluded" bind:value={excludedPatterns} placeholder="ex: bonus, trailers, #recycle" autocomplete="off" /><p class="field-hint">Séparez les motifs par des virgules. Les dossiers système (#recycle, @eaDir, dossiers cachés), .nomedia et .ignore sont déjà exclus automatiquement.</p>
-          <LibraryOptionsForm bind:options {kind} section="indexing" />
-        </div>
-        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><h3>Accès à la bibliothèque</h3><p>Les autorisations se gèrent dans les rubriques <strong>Utilisateurs</strong> et <strong>Groupes</strong> de l’administration.</p><p>Ce formulaire configure les sources et l’import. Ajouter un dossier n’accorde aucun droit supplémentaire à un compte.</p><p>Les médias et les fichiers utilisés par Jellyfin restent en lecture seule.</p></div>
-        <div id="library-panel-advanced" role="tabpanel" aria-labelledby="library-tab-advanced" data-editor-panel="advanced" hidden={activeSection !== 'advanced'} tabindex="0"><h3>Options avancées</h3><p class="panel-description">Les indications de chaque groupe distinguent les réglages disponibles des préférences préparées pour de futurs moteurs.</p><LibraryOptionsForm bind:options {kind} section="advanced" /></div>
+        {#each optionSections as section (section)}
+          {#if editorSections.some(item => item.id === section)}
+            <div id={`library-panel-${section}`} role="tabpanel" aria-labelledby={`library-tab-${section}`} data-editor-panel={section} hidden={activeSection !== section} tabindex="0"><LibraryOptionsForm bind:options bind:excludedPatterns {kind} {section} /></div>
+          {/if}
+        {/each}
+        <div id="library-panel-access" role="tabpanel" aria-labelledby="library-tab-access" data-editor-panel="access" hidden={activeSection !== 'access'} tabindex="0"><LibraryAccess bind:this={access} bind:options library={editedLibrary} {groups} {onchanged} /></div>
       </div>
     </div>
     <footer class="editor-actions">
       {#if formError || error}<p class="editor-error" role="alert">{formError || error}</p>{/if}
-      <p class="save-hint">{folders.length ? 'Les réglages locaux s’appliquent au prochain scan ; les réglages des fournisseurs aux prochaines collectes.' : 'Ajoutez un dossier dans Sources et dossiers.'}</p>
-      <div class="footer-buttons"><button type="button" onclick={() => editor?.close()}>Annuler</button><button class="primary" type="submit" disabled={!folders.length}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
+      <p class="save-hint">{folders.length ? $t('local_settings_apply_at_the_next') : $t('add_a_folder_in_sources_and')}</p>
+      <div class="footer-buttons"><button type="button" onclick={() => editor?.close()}>{$t('sched_cancel')}</button><button class="primary" type="submit" disabled={!folders.length}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button></div>
     </footer>
   </fieldset></form>
 </dialog>
 <dialog bind:this={refresher} aria-labelledby="refresh-heading" oncancel={(event) => { if (refreshing) event.preventDefault(); }}>
   <form onsubmit={refresh}>
-    <h2 id="refresh-heading">Actualiser {target?.name ?? 'toutes les bibliothèques'}</h2>
-    <label for="refresh-mode">Mode d’actualisation</label><select id="refresh-mode" bind:value={mode} disabled={refreshing}>
-      <option value="incremental">Actualisation rapide (recommandée)</option>
-      <option value="new_only">Actualiser en gardant les descriptions existantes</option>
-      <option value="missing_metadata">Compléter les descriptions manquantes</option>
-      <option value="full">Tout réanalyser (plus lent)</option>
+    <h2 id="refresh-heading">{$t('refresh_target', { name: target?.name ?? $t('all_libraries') })}</h2>
+    <label for="refresh-mode">{$t('refresh_mode')}</label><select id="refresh-mode" bind:value={mode} disabled={refreshing}>
+      <option value="incremental">{$t('quick_refresh')}</option>
+      <option value="new_only">{$t('refresh_keep_descriptions')}</option>
+      <option value="missing_metadata">{$t('fill_missing_metadata')}</option>
+      <option value="full">{$t('full_rescan')}</option>
     </select>
-    <p>{mode === 'new_only' ? 'Les métadonnées des médias déjà connus sont conservées. Les fichiers modifiés et les pistes restent vérifiés.' : mode === 'missing_metadata' ? 'Les métadonnées locales déjà validées sont conservées. Les médias sans métadonnées ou sans affiches sont complétés depuis les fournisseurs en ligne configurés et les fichiers NFO.' : mode === 'full' ? 'Tous les fichiers sont réanalysés. Les métadonnées locales sont relues, y compris celles des médias connus.' : 'Les analyses techniques inchangées sont réutilisées. Les fichiers et leurs pistes externes sont vérifiés.'}</p>
+    <p>{mode === 'new_only' ? $t('metadata_of_already_known_media_is') : mode === 'missing_metadata' ? $t('local_metadata_already_validated_is_kept') : mode === 'full' ? $t('all_files_are_re_analysed_local') : $t('unchanged_technical_analyses_are_reused')}</p>
 
     {#if error}<p role="alert">{error}</p>{/if}
-    <div class="actions"><button type="button" disabled={refreshing} onclick={() => refresher?.close()}>Annuler</button><button class="primary" type="submit" disabled={refreshing}>{refreshing ? 'Lancement…' : 'Actualiser'}</button></div>
+    <div class="actions"><button type="button" disabled={refreshing} onclick={() => refresher?.close()}>{$t('sched_cancel')}</button><button class="primary" type="submit" disabled={refreshing}>{refreshing ? 'Lancement…' : 'Actualiser'}</button></div>
   </form>
 </dialog>
 {#if imageTarget}<LibraryImages library={imageTarget} onclose={() => imageTarget = null} {onchanged} />{/if}
@@ -246,7 +314,20 @@
   button:disabled { opacity: 0.45; cursor: not-allowed; }
   .primary { min-height: 44px; border-color: transparent; background: var(--btn); color: var(--btn-tx); font-weight: 700; box-shadow: none; }
   .primary:hover:not(:disabled) { background: var(--btn); opacity: 0.9; }
-  button:focus-visible, summary:focus-visible, a:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .library-actions, .danger-zone { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--color-line-subtle); }
+  .library-actions h4, .danger-zone h4 { margin: 0 0 10px; font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--mu); }
+  .action-buttons { display: flex; flex-wrap: wrap; gap: 10px; }
+  .action-list { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+  .action-list li { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); align-items: center; gap: 6px 16px; padding: 10px 0; border-top: 1px solid var(--color-line-subtle); }
+  .action-list li:first-child { border-top: 0; padding-top: 0; }
+  .action-list button { justify-content: flex-start; width: 100%; text-align: left; }
+  .action-list button :global(svg) { flex: none; }
+  .action-list p { margin: 0; font-size: 13px; line-height: 1.45; }
+  @media (max-width: 800px) { .action-list li { grid-template-columns: minmax(0, 1fr); } }
+  .danger { border-color: color-mix(in srgb, var(--err, #e5484d) 55%, transparent); color: var(--err, #e5484d); }
+  .danger:hover:not(:disabled) { background: color-mix(in srgb, var(--err, #e5484d) 12%, transparent); }
+  @media (max-width: 640px) { .action-buttons > * { width: 100%; justify-content: center; } }
+  button:focus-visible, [role='tabpanel']:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   .library-table-panel { overflow-x: auto; background: var(--color-surface); border-radius: var(--r-md); }
   .library-table { width: 100%; border-collapse: collapse; font-size: 14px; }
   .library-table thead th { padding: 14px 16px; border-bottom: 1px solid var(--color-line-subtle); color: var(--mu); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-align: left; text-transform: uppercase; white-space: nowrap; }
@@ -282,13 +363,6 @@
   progress::-webkit-progress-bar { background: var(--pn-2); border-radius: var(--r-pill); }
   progress::-webkit-progress-value { background: var(--ac); border-radius: var(--r-pill); }
   progress::-moz-progress-bar { background: var(--ac); border-radius: var(--r-pill); }
-  .library-menu { position: relative; flex-shrink: 0; }
-  summary { display: grid; place-items: center; width: 44px; height: 44px; border: 1px solid var(--color-line); border-radius: var(--r-sm); background: transparent; color: var(--tx); font-size: 22px; font-weight: 800; line-height: 1; list-style: none; cursor: pointer; transition: background-color var(--t-fast) ease; }
-  summary:hover, .library-menu[open] summary { background: var(--color-surface-hover); }
-  summary::-webkit-details-marker { display: none; }
-  .menu-actions { position: fixed; z-index: 120; width: min(290px, calc(100vw - 48px)); padding: 6px; background: var(--color-surface-elevated); border: 1px solid var(--color-line-subtle); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
-  .menu-actions button, .menu-actions a { display: flex; justify-content: flex-start; align-items: center; width: 100%; min-height: 44px; padding: 0 12px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--tx); font-size: 14px; font-weight: 600; text-align: left; transition: background-color var(--t-fast) ease; }
-  .menu-actions button:hover:not(:disabled), .menu-actions a:hover { background: var(--color-surface-hover); }
 
   /* Dialogues */
   dialog { width: min(640px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); overflow-y: auto; padding: 28px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-lg); background: var(--color-surface-elevated); color: var(--tx); font-family: var(--font); box-shadow: var(--shadow-md); }
@@ -326,9 +400,9 @@
   .panel-description { margin: 6px 0 20px; }
   .identity-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 20px; }
   .identity-fields label { margin-top: 0; }
-  .source-summary { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-line-subtle); }
-  .source-summary strong { font-size: 15px; font-weight: 700; }
-  .source-summary p { margin: 6px 0 16px; }
+  .preset-row { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--color-line-subtle); }
+  .preset-row p { margin: 0 0 12px; }
+  .inline-link { display: inline; min-height: 0; padding: 0; border: 0; background: none; color: var(--ac); font-size: inherit; text-decoration: underline; }
   .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .section-heading span { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--color-raised); color: var(--tx); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
   .folders { display: grid; margin: 16px 0 20px; padding: 0; list-style: none; border-top: 1px solid var(--color-line-subtle); }
@@ -396,6 +470,6 @@
     .editor-content { padding: 16px; }
   }
   @media (prefers-reduced-motion: reduce) {
-    button, summary, .library-table td, .library-table tbody th { transition: none; }
+    button, .library-table td, .library-table tbody th { transition: none; }
   }
 </style>

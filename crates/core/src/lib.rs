@@ -1,4 +1,17 @@
 //! Local Core: persistent authentication and isolated synthetic media inventory.
+
+/// Every diagnostic the Core prints to stderr is also kept for the administration
+/// log viewer (`server_log`). Defined before the modules so it shadows the standard
+/// macro throughout the crate; output on stderr is unchanged.
+macro_rules! eprintln {
+    () => {
+        $crate::server_log::record(String::new())
+    };
+    ($($arg:tt)*) => {
+        $crate::server_log::record(format!($($arg)*))
+    };
+}
+
 pub mod account;
 pub mod acquisition;
 pub mod admin_backups;
@@ -20,10 +33,12 @@ pub mod oidc;
 pub mod postgres_backup;
 pub mod reports;
 pub mod scheduler;
+pub mod server_log;
 pub mod server_settings;
 pub mod system_memory;
 pub mod system_task_queue;
 pub mod system_tasks;
+pub mod task_scheduler;
 pub mod task_triggers;
 use media_contracts::brand;
 pub mod artwork;
@@ -39,6 +54,7 @@ pub mod libraries;
 pub mod library_options;
 mod local_mounts;
 pub mod media;
+pub mod metadata_locale;
 pub mod music;
 pub mod node;
 pub mod nodes;
@@ -53,6 +69,7 @@ mod provider_download;
 pub mod recommendations;
 pub mod scans;
 pub mod statistics;
+pub mod translations;
 pub mod trickplay;
 pub mod user_media_policy;
 
@@ -274,10 +291,14 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(scheduler::router(auth.clone()).await?)
             .merge(system_tasks::router(auth.clone(), root.clone()).await?)
             .merge(task_triggers::router(auth.clone()))
+            // Operations queue (`/api/v1/admin/tasks/jobs`): without it the path fell through to
+            // `/api/v1/admin/tasks/{id}` and the operations page answered 404.
+            .merge(task_engine::router(auth.clone()))
             .merge(system_memory::router(auth.clone()))
             .merge(groups::router(auth.clone()))
             .merge(api_keys::router(auth.clone()))
             .merge(automation_http::router(auth.clone()))
+            .merge(server_log::router(auth.clone()))
             .merge(timeline_markers::router(auth.clone()))
             .merge(extensions::router(auth.clone()))
             .merge(auth::router(auth))
@@ -286,7 +307,9 @@ async fn secure_app_with_jobs_and_web_dist(
         Some(store_for_csp),
         allowed_origins,
     );
-    Ok(health_routes(mode).merge(protected))
+    Ok(health_routes(mode)
+        .merge(protected)
+        .layer(middleware::from_fn(server_log::trace_requests)))
 }
 
 async fn local_stream_priority(

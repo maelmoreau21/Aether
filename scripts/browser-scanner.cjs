@@ -42,6 +42,7 @@ fs.mkdirSync(out, {recursive: true});
       await page.getByRole('button',{name:'Ajouter une bibliothèque',exact:true}).click();
       await page.getByLabel('Nom de la bibliothèque',{exact:true}).fill('Films scanner navigateur');
       await page.getByRole('tab', {name:'Sources et dossiers', exact:true}).click();
+        await page.locator('#library-root').fill(process.env.MEDIA_TEST_LIBRARY_ROOT || '');
         await page.getByRole('button', {name:'Ajouter ce dossier', exact:true}).click();
       await page.getByRole('dialog').screenshot({path:`${out}/library-editor.png`});
       await page.setViewportSize({width:390,height:844});
@@ -51,16 +52,16 @@ fs.mkdirSync(out, {recursive: true});
       await page.getByRole('dialog').getByRole('button',{name:'Enregistrer',exact:true}).click();
       const libraryRow = page.getByRole('row').filter({has:page.getByRole('button',{name:'Gérer Films scanner navigateur',exact:true})});
       await libraryRow.waitFor();
-      await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+      await page.getByLabel('Paramètres de Films scanner navigateur',{exact:true}).click();
+      await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+      await page.getByRole('dialog').waitFor({state:'hidden'});
       await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});
       assert.match(await libraryRow.locator('.scan-counters').textContent(), /2 (?:fichier\(s\) )?découvert/);
       report.results.scan = true;
       await page.screenshot({path:`${out}/scan.png`});
-      await page.getByLabel('Actions Films scanner navigateur',{exact:true}).click();
-      await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-      await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+      await page.getByLabel('Paramètres de Films scanner navigateur',{exact:true}).click();
+      await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+      await page.getByRole('dialog').waitFor({state:'hidden'});
       await libraryRow.locator('.scan-counters').filter({hasText:/0 analysé\(s\).*2 réutilisé\(s\)/}).waitFor({timeout:60000});
       await libraryRow.getByText(/Terminé/).waitFor({timeout:60000});
       report.results.incremental = true;
@@ -69,7 +70,7 @@ fs.mkdirSync(out, {recursive: true});
     const card=page.locator('.media-card').filter({hasText:'Scanner Film'});
     await card.waitFor();
     assert.equal(await page.locator('.media-card').count(), 1);
-    await card.click();
+    await card.click({position:{x:12,y:12}});
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';
     await page.getByRole('button',{name:`Sélectionner la version ${container}`,exact:true}).click();
@@ -104,7 +105,8 @@ fs.mkdirSync(out, {recursive: true});
     if (restart) {
       // The previous process ended with subtitles explicitly disabled. That
       // account choice now survives restart; verify it before choosing SRT.
-      assert.equal(await page.evaluate(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled),false);
+      // A choice made while the audio is in another language (VO) is remembered on its own.
+      assert.equal(await page.evaluate(async()=>{ const p=await(await fetch('/api/v1/preferences')).json(); return p.subtitlePreference?.enabled===false || p.subtitlePreferenceForeign?.enabled===false; }),true);
       await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
       report.results.rememberedSubtitlesOffAfterRestart=true;
       await openMenu('subtitles');
@@ -405,7 +407,7 @@ fs.mkdirSync(out, {recursive: true});
     }
     await openMenu('subtitles'); await page.locator('[data-subtitle-id="off"]').click();
     await page.waitForFunction(()=>[...document.querySelector('video').textTracks].every(t=>t.mode!=='showing'));
-    await page.waitForFunction(async()=>(await(await fetch('/api/v1/preferences')).json()).subtitlePreference?.enabled===false);
+    await page.waitForFunction(async()=>{ const p=await(await fetch('/api/v1/preferences')).json(); return p.subtitlePreference?.enabled===false || p.subtitlePreferenceForeign?.enabled===false; });
     report.results.externalTracks={container,srtRendered:true,webvttRendered:true,externalOpusPcm:pcm,audioVideoSync:true,pausedSeek:true,subtitlesOff:true};
     await page.screenshot({path:`${out}/playback${restart?'-restart':''}.png`});
     await page.keyboard.press('Shift'); await page.locator('button.return').click();

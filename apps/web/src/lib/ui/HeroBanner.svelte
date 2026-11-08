@@ -3,7 +3,7 @@
   import { selectArtwork } from '../catalog/artwork-selection';
   import { resolve } from '$app/paths';
   import { type Work, localizedTitle, localizedPlot } from '../catalog/api';
-  import { locale } from '../i18n';
+  import { locale, t } from '../i18n';
   import Icon from './Icon.svelte';
   import { imagePreviewUrl } from '../catalog/image-url';
   import { history } from '../catalog/watch-state';
@@ -106,7 +106,7 @@
   }
 </script>
 
-<section class="stage" class:has-switcher={switcher} aria-label="À l’affiche dans votre médiathèque">
+<section class="stage" class:has-switcher={switcher} aria-label={$t('now_showing_in_your_library')}>
   <div class="main" class:has-clearart={hasClearart}>
     <div
       class="hero"
@@ -130,7 +130,7 @@
             fetchpriority={index === 0 ? 'high' : 'low'}
             decoding="async"
             use:sampleTint={url}
-            use:fitArtwork={{ threshold: isAmbient(work) ? 1 : 0.3 }}
+            use:fitArtwork={{ adapt: false }}
             onerror={() => fail(url)}
           />
         {/if}
@@ -154,21 +154,21 @@
               {:else}{displayTitle}{/if}
             </h1>
             {#if displayPlot}<p class="synopsis">{displayPlot}</p>{/if}
-            {#if active.available === false}<p class="availability" role="status">Ce contenu est temporairement indisponible.</p>{/if}
+            {#if active.available === false}<p class="availability" role="status">{$t('this_content_is_temporarily_unavailable')}</p>{/if}
             <div class="acts">
               {#if onPlay}
                 {@const work = active}
                 <button class="play" onclick={() => onPlay(work)} disabled={work.available === false}>
-                  <Icon name="play" size={20} /><span>{work.kind === 'series' ? 'Voir les épisodes' : continuing ? 'Reprendre' : 'Lecture'}</span>
+                  <Icon name="play" size={20} /><span>{work.kind === 'series' ? $t('view_episodes') : continuing ? 'Reprendre' : 'Lecture'}</span>
                 </button>
               {/if}
               <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved above. -->
-              <a class="more" href={detailUrl}><Icon name="info" size={20} /><span>Plus d’infos</span></a>
+              <a class="more" href={detailUrl}><Icon name="info" size={20} /><span>{$t('more_info')}</span></a>
             </div>
           {:else}
-            <h1>Vos histoires commencent ici.</h1>
-            <p class="synopsis">Les films et séries de vos bibliothèques apparaîtront ici une fois ajoutés au catalogue.</p>
-            <div class="acts"><a class="more" href={resolve('films/')}><Icon name="film" size={20} /><span>Explorer les films</span></a></div>
+            <h1>{$t('your_stories_start_here')}</h1>
+            <p class="synopsis">{$t('the_films_and_series_in_your')}</p>
+            <div class="acts"><a class="more" href={resolve('films/')}><Icon name="film" size={20} /><span>{$t('explore_films')}</span></a></div>
           {/if}
         </div>
       {/key}
@@ -181,7 +181,7 @@
   </div>
 
   {#if switcher}
-    <div class="queue" role="tablist" aria-label="Choisir l’œuvre à l’affiche" bind:this={tablist}>
+    <div class="queue" role="tablist" aria-label={$t('choose_the_featured_work')} bind:this={tablist}>
       {#each list as work, index (work.id)}
         {@const thumb = tabImage(work)}
         {@const selected = work.id === active?.id}
@@ -200,7 +200,7 @@
           onkeydown={event => onTabKeydown(event, index)}
         >
           {#if usable(thumb)}
-            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork onerror={() => fail(thumb)} />
+            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => fail(thumb)} />
             <span class="qi-shade" aria-hidden="true"></span>
           {/if}
           <span class="qi-title">{localizedTitle(work, $locale)}</span>

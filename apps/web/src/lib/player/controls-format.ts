@@ -1,3 +1,4 @@
+import { tr, currentFormat } from '../i18n';
 /** Formatage et libellés purs de la barre de contrôle du lecteur. */
 
 export type ControlsMenu = 'audio' | 'subtitles' | 'video' | 'speed' | 'settings' | null;
@@ -23,11 +24,11 @@ export function projectedEndTime(nowMs: number, remaining: number, duration: num
 }
 
 export function menuTitle(menu: ControlsMenu): string {
-  return menu === 'audio' ? 'Langue audio'
+  return menu === 'audio' ? tr('audio_language')
     : menu === 'subtitles' ? 'Sous-titres'
-    : menu === 'video' ? 'Vidéo et sources'
+    : menu === 'video' ? tr('video_and_sources')
     : menu === 'settings' ? 'Paramètres'
-    : 'Vitesse de lecture';
+    : tr('playback_speed');
 }
 
 export function nextAspectRatio(current: AspectRatio): AspectRatio {
@@ -35,17 +36,17 @@ export function nextAspectRatio(current: AspectRatio): AspectRatio {
 }
 
 export function aspectRatioLabel(ratio: AspectRatio): string {
-  return ratio === 'cover' ? 'Remplir' : ratio === 'fill' ? 'Étirer' : 'Normal';
+  return ratio === 'cover' ? tr('aspect_fill') : ratio === 'fill' ? tr('aspect_stretch') : tr('normal');
 }
 
 /** Libellé de vitesse du menu Paramètres (`1x`, `1,5x`). */
 export function speedSettingLabel(speed: number): string {
-  return speed === 1 ? '1x' : `${speed.toLocaleString('fr')}x`;
+  return speed === 1 ? '1x' : `${currentFormat().number(speed)}x`;
 }
 
 /** Libellé de vitesse du menu Vitesse (`Normale · 1×`, `1,5×`). */
 export function speedOptionLabel(speed: number): string {
-  return speed === 1 ? 'Normale · 1×' : `${speed.toLocaleString('fr')}×`;
+  return speed === 1 ? tr('normal_1') : `${currentFormat().number(speed)}×`;
 }
 
 /** Pourcentage (0–100) borné de `value / total`, 0 si `total` est nul. */

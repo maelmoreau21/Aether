@@ -1,23 +1,23 @@
 import type { Source, CodecTrack, Media } from './types';
 
-const displayNames = typeof Intl !== 'undefined' && Intl.DisplayNames ? new Intl.DisplayNames(['fr'], { type: 'language' }) : null;
+import { tr, currentFormat } from '../i18n';
 
 export function languageLabel(language: string) {
   const normalized = ({ fra:'fr', fre:'fr', eng:'en', spa:'es', ger:'de', deu:'de', ita:'it', jpn:'ja', zho:'zh', chi:'zh', nld:'nl', dut:'nl', hin:'hi', por:'pt', rus:'ru', und:'' } as Record<string,string>)[language?.toLowerCase()] ?? language;
-  if (!normalized) return 'Langue non renseignée';
-  try { return displayNames?.of(normalized) ?? normalized; }
+  if (!normalized) return tr('language_not_specified');
+  try { return currentFormat().language(normalized) ?? normalized; }
   catch { return language; }
 }
 
 export function audioLabel(source: Source) {
-  if (source.audioTrackId === 'internal-default' && (source.tracks?.filter(track => track.codec_type === 'audio').length ?? 0) > 1) return 'Original · piste choisie par le navigateur';
+  if (source.audioTrackId === 'internal-default' && (source.tracks?.filter(track => track.codec_type === 'audio').length ?? 0) > 1) return tr('original_track_chosen_by_the_browser');
   const track = source.tracks?.find(track => track.codec_type === 'audio');
-  const channels = track?.channel_layout ?? (track?.channels === 2 ? 'stéréo' : track?.channels === 1 ? 'mono' : track?.channels ? `${track.channels} canaux` : '');
-  return [languageLabel(source.language), track?.tags?.title, track?.codec_name?.toUpperCase(), channels, source.externalAudioUrl && !source.prepare ? 'externe' : source.label].filter(Boolean).join(' · ');
+  const channels = track?.channel_layout ?? (track?.channels === 2 ? tr('channels_stereo') : track?.channels === 1 ? tr('channels_mono') : track?.channels ? tr('channels_count', { count: track.channels }) : '');
+  return [languageLabel(source.language), track?.tags?.title, track?.codec_name?.toUpperCase(), channels, source.externalAudioUrl && !source.prepare ? tr('track_external') : source.label].filter(Boolean).join(' · ');
 }
 
 export function videoLabel(track: CodecTrack) {
-  return [track.codec_name?.toUpperCase(), track.width && track.height ? `${track.width} × ${track.height}` : '', track.pix_fmt?.includes('10') ? '10 bits' : ''].filter(Boolean).join(' · ') || 'Informations indisponibles';
+  return [track.codec_name?.toUpperCase(), track.width && track.height ? `${track.width} × ${track.height}` : '', track.pix_fmt?.includes('10') ? '10 bits' : ''].filter(Boolean).join(' · ') || tr('player_information_unavailable');
 }
 
 export function videoResolutionBadge(width?: number, height?: number): string | null {
@@ -31,10 +31,10 @@ export function videoResolutionBadge(width?: number, height?: number): string | 
 }
 
 export function containerLabel(mime?: string): string {
-  if (mime === 'video/mp4') return 'MPEG-4 (.mp4)';
-  if (mime === 'video/x-matroska') return 'Matroska (.mkv)';
-  if (mime === 'video/webm') return 'WebM (.webm)';
-  return mime || 'Conteneur vidéo';
+  if (mime === 'video/mp4') return tr('mpeg_4_mp4');
+  if (mime === 'video/x-matroska') return tr('matroska_mkv');
+  if (mime === 'video/webm') return tr('webm_webm');
+  return mime || tr('video_container');
 }
 
 export function colorProfileLabel(pix_fmt?: string): string | null {

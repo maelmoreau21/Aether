@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 import type { Work } from './api';
 
 export interface CreditPerson {
@@ -25,7 +26,7 @@ export function creditPeople(work: Pick<Work, 'actors' | 'directors' | 'writers'
     const key = `actor:${name.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    list.push({ key, name, role: actor.role?.trim() || 'Distribution', photoUrl });
+    list.push({ key, name, role: actor.role?.trim() || tr('cast'), photoUrl });
   }
 
   const crew = (names: string[] | undefined, kind: string, role: string) => {
@@ -45,8 +46,8 @@ export function creditPeople(work: Pick<Work, 'actors' | 'directors' | 'writers'
       list.push({ key, name, role, photoUrl });
     }
   };
-  crew(work.directors, 'director', 'Réalisateur');
-  crew(work.writers, 'writer', 'Scénario');
+  crew(work.directors, 'director', tr('director'));
+  crew(work.writers, 'writer', tr('screenplay'));
   return list;
 }
 

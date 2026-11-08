@@ -1,3 +1,4 @@
+import { tr } from '../i18n';
 // Let canplay start with the first decoded frames. A large reserve while paused
 // can delay startup or time out even though the browser already has playable data.
 export function bufferedAhead(media: HTMLMediaElement): number {
@@ -10,9 +11,28 @@ export function bufferedAhead(media: HTMLMediaElement): number {
   return 0;
 }
 
-export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSignal): Promise<void> {
+export interface StartupReserve {
+  /** Seconds that must be buffered ahead before starting. */
+  seconds: number;
+  /** After this delay the minimal reserve is accepted again: a slow server delays, never fails. */
+  softDeadlineMs: number;
+}
+
+/**
+ * An independent audio element must not start on a few milliseconds of data: on a slow source (NAS,
+ * remote node) it runs dry at once, pauses the video, resumes, runs dry again — heard as clicks
+ * during the first seconds. Video keeps the minimal reserve (see above).
+ */
+export const INDEPENDENT_AUDIO_RESERVE: StartupReserve = { seconds: 1.5, softDeadlineMs: 3000 };
+
+export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSignal, reserve?: StartupReserve): Promise<void> {
+  const started = Date.now();
   const enough = () => {
     if (media.seeking || media.readyState < 3) return false;
+    if (reserve && Date.now() - started < reserve.softDeadlineMs) {
+      const remaining = Number.isFinite(media.duration) ? Math.max(0, media.duration - media.currentTime) : Infinity;
+      return bufferedAhead(media) >= Math.min(reserve.seconds, Math.max(0, remaining - .05));
+    }
     // Chrome can retain the previous buffered TimeRanges after reloading the
     // same URL, even while decoding the new position. HAVE_ENOUGH_DATA is the
     // browser's stronger playback readiness signal; do not deadlock a paused
@@ -21,7 +41,7 @@ export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSigna
     const remaining = Number.isFinite(media.duration) ? Math.max(0, media.duration - media.currentTime) : Infinity;
     return bufferedAhead(media) >= Math.min(.05, Math.max(0, remaining - .05));
   };
-  if (signal.aborted) return Promise.reject(new Error('Démarrage annulé.'));
+  if (signal.aborted) return Promise.reject(new Error(tr('start_cancelled')));
   if (enough()) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const events = ['progress', 'canplay', 'canplaythrough', 'loadeddata', 'seeked', 'durationchange'];
@@ -32,9 +52,9 @@ export function waitForStartupBuffer(media: HTMLMediaElement, signal: AbortSigna
       if (error) reject(error); else resolve();
     };
     const check = () => { if (enough()) finish(); };
-    const failed = () => finish(new Error('Le flux ne peut pas être mis en mémoire tampon.'));
-    const cancelled = () => finish(new Error('Démarrage annulé.'));
-    const timeout = setTimeout(() => finish(new Error('Réserve de lecture insuffisante après 8 secondes. Vérifiez le débit du stockage ou du réseau.')), 8000);
+    const failed = () => finish(new Error(tr('the_stream_cannot_be_buffered')));
+    const cancelled = () => finish(new Error(tr('start_cancelled')));
+    const timeout = setTimeout(() => finish(new Error(tr('insufficient_playback_reserve_after_8'))), 8000);
     const poll = setInterval(check, 100);
     for (const event of events) media.addEventListener(event, check);
     media.addEventListener('error', failed); signal.addEventListener('abort', cancelled, {once:true});

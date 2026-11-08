@@ -6,6 +6,15 @@ use zeroize::Zeroizing;
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires built Web assets and installed Chrome/Playwright"]
 async fn browser_administration_real_api() {
+    // Synthetic key for this disposable Core; backups fail closed without one.
+    // SAFETY: set before the Core router reads it, in an opt-in test run on its own
+    // (`--ignored browser_administration_real_api`); no other thread reads the environment yet.
+    unsafe {
+        std::env::set_var(
+            "MEDIA_BACKUP_KEY",
+            "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12",
+        );
+    }
     run_browser("scripts/test-admin-live.mjs", false).await;
 }
 

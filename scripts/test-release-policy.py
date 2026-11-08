@@ -3,7 +3,7 @@
 test-release-policy.py
 Comprehensive test suite validating SemVer versioning and release policies for Aether:
 1. Initialisation de la première release 0.1.0
-2. Démarrage du cycle 0.2.0-beta.0
+2. Cycle de bêtas : patch suivant la stable (1.5.0 -> 1.5.1-beta.N)
 3. Incrément beta.0 -> beta.1
 4. Plusieurs PR fusionnées successivement (beta.1 -> beta.2 -> beta.3)
 5. Nouvelle version stable 0.2.0
@@ -56,16 +56,39 @@ class AetherReleasePolicyTests(unittest.TestCase):
             self.assertEqual(res["series"], "0.1")
             self.assertTrue(res["has_release"])
 
-    # 2. Démarrage du cycle 0.2.0-beta.0
-    def test_02_development_cycle_starts_at_0_2_0_beta_0(self):
-        with patch.object(release, "get_all_tags", return_value=["v0.1.0"]), \
+    # 2. Après la stable 1.5.0, develop prépare 1.5.1-beta.0
+    def test_02_development_cycle_is_next_patch_beta(self):
+        with patch.object(release, "get_all_tags", return_value=["v1.5.0"]), \
              patch.object(release, "get_tags_at_head", return_value=[]), \
              patch.object(release, "run_git", return_value="feat: start next feature\x00\x1e"):
             res = self.run_calc(["--channel", "develop"])
-            self.assertEqual(res["version"], "0.2.0-beta.0")
-            self.assertEqual(res["next_tag"], "v0.2.0-beta.0")
-            self.assertEqual(res["series"], "0.2")
+            self.assertEqual(res["version"], "1.5.1-beta.0")
+            self.assertEqual(res["next_tag"], "v1.5.1-beta.0")
+            self.assertEqual(res["series"], "1.5")
             self.assertTrue(res["has_release"])
+
+    # 2b. La fusion dans main publie la version préparée, puis develop repart en 1.5.2-beta.0
+    def test_02b_main_promotes_prepared_cycle_then_develop_moves_on(self):
+        tags = ["v1.5.0", "v1.5.1-beta.0", "v1.5.1-beta.1", "v1.5.1-beta.2"]
+        with patch.object(release, "get_all_tags", return_value=tags), \
+             patch.object(release, "get_tags_at_head", return_value=[]), \
+             patch.object(release, "get_tag_commit", return_value=None), \
+             patch.object(release, "get_head_commit", return_value="ab" * 20), \
+             patch.object(release, "run_git", return_value="abc\x00feat: big feature\x00\x1e"):
+            res = self.run_calc(["--channel", "main"])
+            self.assertEqual(res["version"], "1.5.1")
+            self.assertTrue(res["has_release"])
+        with patch.object(release, "get_all_tags", return_value=[*tags, "v1.5.1"]), \
+             patch.object(release, "get_tags_at_head", return_value=[]), \
+             patch.object(release, "run_git", return_value="fix: x\x00\x1e"):
+            self.assertEqual(self.run_calc(["--channel", "develop"])["version"], "1.5.2-beta.0")
+
+    # 2c. [skip release] dans le commit de fusion ne publie rien sur main
+    def test_02c_main_skip_release(self):
+        with patch.object(release, "get_all_tags", return_value=["v1.5.0"]), \
+             patch.object(release, "get_tags_at_head", return_value=[]), \
+             patch.object(release, "run_git", return_value="docs: typo [skip release]"):
+            self.assertFalse(self.run_calc(["--channel", "main"])["has_release"])
 
     # 3. Incrément beta.0 -> beta.1
     def test_03_increment_beta_0_to_beta_1(self):
@@ -106,13 +129,13 @@ class AetherReleasePolicyTests(unittest.TestCase):
             self.assertEqual(res["series"], "0.2")
             self.assertTrue(res["has_release"])
 
-    # 6. Préparation de 0.3.0-beta.0
-    def test_06_preparation_of_next_cycle_0_3_0_beta_0(self):
+    # 6. Après la stable 0.2.0, le cycle suivant est 0.2.1-beta.0
+    def test_06_preparation_of_next_cycle_is_next_patch(self):
         with patch.object(release, "get_all_tags", return_value=["v0.1.0", "v0.2.0"]):
             res = self.run_calc(["--next-cycle", "--target-version", "0.2.0"])
-            self.assertEqual(res["version"], "0.3.0-beta.0")
-            self.assertEqual(res["next_tag"], "v0.3.0-beta.0")
-            self.assertEqual(res["cycle_base"], "0.3.0")
+            self.assertEqual(res["version"], "0.2.1-beta.0")
+            self.assertEqual(res["next_tag"], "v0.2.1-beta.0")
+            self.assertEqual(res["cycle_base"], "0.2.1")
 
     # 7. Correctif stable 0.2.1
     def test_07_hotfix_stable_0_2_1(self):

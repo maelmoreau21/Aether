@@ -23,7 +23,7 @@ const fs = require('node:fs');
       for (const kind of ['films', 'series']) {
         await page.goto(origin + '/app/' + kind + '/');
         await page.locator('.media-card').first().waitFor();
-        await page.locator('.media-card').first().click();
+        await page.locator('.media-card').first().click({position:{x:12,y:12}});
         const play = kind === 'series'
           ? page.getByRole('button', { name: /^Lire / }).first()
           : page.getByRole('button', { name: 'Lancer le film', exact: true });

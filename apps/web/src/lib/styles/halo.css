@@ -1,5 +1,5 @@
 /* Halo — jetons du design system d'Aether (source de vérité).
-   Référence complète : .agents/skills/aether-halo/SKILL.md
+   Référence suivie par Git : docs/UI_DIRECTION.md et .claude/skills/aether-halo/SKILL.md
    Les composants consomment ces jetons dans leurs styles scopés ; tokens.css
    ne contient plus que des alias pour les anciens noms de variables. */
 
@@ -88,10 +88,13 @@
 
 /* Accent choisi par l'utilisateur (Compte › Apparence). Braise par défaut. */
 :root[data-accent='blue'],
+:root[data-accent='blue'] .halo.dark,
 :root[data-accent='blue'] .immersive-dialog { --ac: #7aa8ff; --ac-soft: rgb(122 168 255 / 0.16); }
 :root[data-accent='violet'],
+:root[data-accent='violet'] .halo.dark,
 :root[data-accent='violet'] .immersive-dialog { --ac: #b39dff; --ac-soft: rgb(179 157 255 / 0.16); }
 :root[data-accent='green'],
+:root[data-accent='green'] .halo.dark,
 :root[data-accent='green'] .immersive-dialog { --ac: #4ade9b; --ac-soft: rgb(74 222 155 / 0.16); }
 :root[data-theme='light'][data-accent='blue'] { --ac: #1d4ed8; --ac-soft: rgb(29 78 216 / 0.1); }
 :root[data-theme='light'][data-accent='violet'] { --ac: #6d28d9; --ac-soft: rgb(109 40 217 / 0.1); }

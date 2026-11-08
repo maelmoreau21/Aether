@@ -6,10 +6,10 @@
   let { section }: { section: string } = $props();
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let blockSsoLocalAccounts=$state(true);
-  let trickplayEnabled = $state(true), trickplayQuality = $state(7), trickplayWidth = $state(320);
-  let trickplayIntervalSeconds = $state(10), trickplayAutoGenerate = $state(false), trickplayMaxCacheMb = $state(5120);
+  let trickplayEnabled = $state(true), trickplayAutoGenerate = $state(true);
+  let trickplayQuality = $state(7), trickplayWidth = $state(320), trickplayIntervalSeconds = $state(10);
+  let trickplayColumns = $state(10), trickplayRows = $state(10), trickplayMaxCacheMb = $state(5120);
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
-  let metadataLanguage = $state('fr'), metadataCountry = $state('FR');
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
@@ -32,26 +32,29 @@
   async function load(target: string) {
     loading = true; error = ''; notice = '';
     try {
-      if (['#general-section', '#trickplay-section'].includes(target)) {
+      if (target === '#general-section') {
         const data = await adminRequest<{
           serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
-          trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
-          trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number; minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number; preferredMetadataLanguage?: string; metadataCountryCode?: string;
+          trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
+          trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
+          trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
+          minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
         }>('/api/v1/admin/settings');
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
         welcome = data.welcomeMessage;
-        ssoLabel = data.ssoButtonLabel ?? 'Se connecter avec SSO';
+        ssoLabel = data.ssoButtonLabel ?? $t('sign_in_with_sso');
         trickplayEnabled = data.trickplayEnabled ?? true;
+        trickplayAutoGenerate = data.trickplayAutoGenerate ?? true;
         trickplayQuality = data.trickplayQuality ?? 7;
         trickplayWidth = data.trickplayWidth ?? 320;
         trickplayIntervalSeconds = data.trickplayIntervalSeconds ?? 10;
-        trickplayAutoGenerate = data.trickplayAutoGenerate ?? false;
+        trickplayColumns = data.trickplayColumns ?? 10;
+        trickplayRows = data.trickplayRows ?? 10;
         trickplayMaxCacheMb = data.trickplayMaxCacheMb ?? 5120;
         minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
-        metadataLanguage = data.preferredMetadataLanguage ?? 'fr'; metadataCountry = data.metadataCountryCode ?? 'FR';
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
         corsHosts = (data.corsHosts ?? []).join(', ');
       }
@@ -59,28 +62,28 @@
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
     finally { loading = false; }
   }
-  $effect(() => { if (['#general-section', '#trickplay-section', '#network-section'].includes(section)) void load(section); });
+  $effect(() => { if (['#general-section', '#network-section'].includes(section)) void load(section); });
   async function save(event: SubmitEvent) {
     event.preventDefault(); if (saving) return; saving = true; error = ''; notice = '';
     try {
       await adminRequest('/api/v1/admin/settings', {
         method: 'PUT',
-        body: JSON.stringify(section === '#trickplay-section' ? {
-          serverName: name, welcomeMessage: welcome,
-          trickplayEnabled, trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
-          trickplayAutoGenerate, trickplayMaxCacheMb
-        } : {
+        body: JSON.stringify({
           serverName: name, welcomeMessage: welcome, ssoButtonLabel: ssoLabel, blockSsoLocalAccounts,
+          trickplayEnabled, trickplayAutoGenerate,
+          trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
+          trickplayColumns, trickplayRows, trickplayMaxCacheMb,
           minResumePct, maxResumePct, minResumeDurationSeconds,
-          preferredMetadataLanguage: metadataLanguage, metadataCountryCode: metadataCountry,
           activityLogRetentionDays,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
         })
       });
       const saved = await adminRequest<{
         serverName: string; welcomeMessage: string; ssoButtonLabel: string; blockSsoLocalAccounts: boolean;
-        trickplayEnabled?: boolean; trickplayQuality?: number; trickplayWidth?: number;
-        trickplayIntervalSeconds?: number; trickplayAutoGenerate?: boolean; trickplayMaxCacheMb?: number; minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number; preferredMetadataLanguage?: string; metadataCountryCode?: string;
+        trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
+        trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
+        trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
+        minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
       }>('/api/v1/admin/settings');
       blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
@@ -88,14 +91,15 @@
       welcome = saved.welcomeMessage;
       ssoLabel = saved.ssoButtonLabel;
       trickplayEnabled = saved.trickplayEnabled ?? true;
+      trickplayAutoGenerate = saved.trickplayAutoGenerate ?? true;
       trickplayQuality = saved.trickplayQuality ?? 7;
       trickplayWidth = saved.trickplayWidth ?? 320;
       trickplayIntervalSeconds = saved.trickplayIntervalSeconds ?? 10;
-      trickplayAutoGenerate = saved.trickplayAutoGenerate ?? false;
+      trickplayColumns = saved.trickplayColumns ?? 10;
+      trickplayRows = saved.trickplayRows ?? 10;
       trickplayMaxCacheMb = saved.trickplayMaxCacheMb ?? 5120;
       minResumePct = saved.minResumePct ?? 0; maxResumePct = saved.maxResumePct ?? 90;
       minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
-      metadataLanguage = saved.preferredMetadataLanguage ?? 'fr'; metadataCountry = saved.metadataCountryCode ?? 'FR';
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
       corsHosts = (saved.corsHosts ?? []).join(', ');
       serverPresentation.set(saved);
@@ -111,15 +115,33 @@
     <div class="settings-panel">
     <label>{$t('server_name')}<input bind:value={name} required maxlength="80" autocomplete="off" /></label>
     <label>{$t('welcome_message')}<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
-    <label>{$t('sso_button_label')}<input bind:value={ssoLabel} required maxlength="80" placeholder="Se connecter avec Authentik" /></label>
+    <label>{$t('sso_button_label')}<input bind:value={ssoLabel} required maxlength="80" placeholder={$t('sign_in_with_authentik')} /></label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />{$t('block_sso_local')}</label>
     </div>
 
     <details class="adv">
+      <summary>{$t('previews_in_the_playback_bar')}</summary>
+      <fieldset class="settings-fieldset">
+        <p>{$t('trickplay_server_note')}</p>
+        <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />{$t('previews_in_the_playback_bar')}</label>
+        {#if trickplayEnabled}
+          <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />{$t('prepare_thumbnails_after_media_analysis')}</label>
+          <div class="settings-grid">
+            <label>{$t('interval_s')}<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
+            <label>{$t('width_px')}<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
+            <label>{$t('jpeg_quality')}<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
+            <label>{$t('trickplay_columns')}<input type="number" min="1" max="20" step="1" required bind:value={trickplayColumns} /></label>
+            <label>{$t('trickplay_rows')}<input type="number" min="1" max="20" step="1" required bind:value={trickplayRows} /></label>
+            <label>{$t('trickplay_max_cache_mb')}<input type="number" min="128" max="1048576" step="1" required bind:value={trickplayMaxCacheMb} /></label>
+          </div>
+        {/if}
+      </fieldset>
+    </details>
+    <details class="adv">
       <summary>{$t('playback_resume')}</summary>
-      <fieldset class="trickplay-fieldset">
+      <fieldset class="settings-fieldset">
         <p>{$t('playback_resume_note')}</p>
-        <div class="trickplay-grid">
+        <div class="settings-grid">
           <label>{$t('resume_at')}<input type="number" min="0" max="49" step="1" required bind:value={minResumePct} /></label>
           <label>{$t('watched_at')}<input type="number" min="50" max="100" step="1" required bind:value={maxResumePct} /></label>
           <label>{$t('minimum_resume_duration')}<input type="number" min="0" max="86400" step="1" required bind:value={minResumeDurationSeconds} /></label>
@@ -127,17 +149,8 @@
       </fieldset>
     </details>
     <details class="adv">
-      <summary>{$t('metadata')}</summary>
-      <fieldset class="trickplay-fieldset">
-        <div class="trickplay-grid">
-          <label>{$t('preferred_language_example')}<input bind:value={metadataLanguage} required maxlength="6" pattern={'[a-z]{2,3}(-[A-Z]{2})?'} /></label>
-          <label>{$t('country_example')}<input bind:value={metadataCountry} required maxlength="2" pattern={'[A-Z]{2}'} /></label>
-        </div>
-      </fieldset>
-    </details>
-    <details class="adv">
       <summary>{$t('audio_fingerprints')}</summary>
-      <fieldset class="trickplay-fieldset">
+      <fieldset class="settings-fieldset">
         <p>{$t('audio_fingerprints_note')}</p>
         <button type="button" class="maintenance-btn" disabled={clearingFingerprints} onclick={clearFingerprintCache}>
           {clearingFingerprints ? $t('clearing') : $t('clear_fingerprint_cache')}
@@ -147,11 +160,11 @@
     </details>
     <details class="adv">
       <summary>{$t('extension_log_cors')}</summary>
-      <fieldset class="trickplay-fieldset">
+      <fieldset class="settings-fieldset">
         <p>{$t('extension_log_note')}</p>
-        <div class="trickplay-grid">
+        <div class="settings-grid">
           <label>{$t('log_retention')}<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
-          <label>{$t('allowed_cors')}<input bind:value={corsHosts} placeholder="https://app.example.com, http://localhost:3000" /></label>
+          <label>{$t('allowed_cors')}<input bind:value={corsHosts} placeholder={$t('https_app_example_com_http_localhost')} /></label>
         </div>
       </fieldset>
     </details>
@@ -159,33 +172,14 @@
   </fieldset></form>
   <PlaylistPolicy />
 </section>
-{:else if section === '#trickplay-section'}
-<section id="trickplay-section" aria-labelledby="trickplay-heading">
-  <h2 id="trickplay-heading">{$t('trickplay')}</h2>
-  <p>{$t('trickplay_intro')}</p>
-  <form onsubmit={save}><fieldset disabled={loading || saving}>
-    <fieldset class="trickplay-fieldset">
-      <legend>{$t('trickplay')}</legend>
-      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayEnabled} />{$t('enable_trickplay')}</label>
-      <label class="policy-toggle"><input type="checkbox" bind:checked={trickplayAutoGenerate} />{$t('trickplay_auto')}</label>
-      <div class="trickplay-grid">
-        <label>{$t('jpeg_quality')}<input type="number" min="1" max="31" step="1" required bind:value={trickplayQuality} /></label>
-        <label>{$t('thumbnail_width')}<input type="number" min="160" max="1920" step="1" required bind:value={trickplayWidth} /></label>
-        <label>{$t('thumbnail_interval')}<input type="number" min="1" max="60" step="1" required bind:value={trickplayIntervalSeconds} /></label>
-        <label>{$t('cache_quota')}<input type="number" min="128" max="1048576" step="128" required bind:value={trickplayMaxCacheMb} /></label>
-      </div>
-    </fieldset>
-    <div class="actions"><button type="submit">{saving ? $t('loading') : $t('save')}</button></div>
-  </fieldset></form>
-</section>
 {:else if section === '#network-section'}
 <section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">{$t('network')}</h2>
   {#if network}<dl><div><dt>{$t('public_address')}</dt><dd>{network.publicUrl}</dd></div><div><dt>{$t('web_interface')}</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>{$t('secure_session_cookies')}</dt><dd>{network.secureCookies ? $t('enabled') : $t('disabled_local_http')}</dd></div></dl>{/if}
   <details><summary>{$t('edit_connection')}</summary><p>{$t('network_note')}</p>
-  <p>Les adresses des Media Nodes se gèrent dans Nœuds de stockage.</p></details>
+  <p>{$t('media_node_addresses_are_managed_under')}</p></details>
 </section>
 {/if}
-{#if ['#general-section','#trickplay-section','#network-section'].includes(section)}
+{#if ['#general-section','#network-section'].includes(section)}
   {#if loading}<p role="status">{$t('loading_settings_short')}</p>{/if}{#if error}<p role="alert">{error}</p><button class="maintenance-btn" disabled={loading} onclick={() => void load(section)}>{$t('retry_action')}</button>{/if}{#if notice}<p role="status">{notice}</p>{/if}
 {/if}
 <style>
@@ -211,12 +205,8 @@
   .adv { padding: 0 20px; border-radius: var(--radius-md); background: var(--color-surface); }
   .adv > summary { display: flex; align-items: center; min-height: 52px; font-size: 14px; font-weight: 600; cursor: pointer; }
   .adv[open] > summary { border-bottom: 1px solid var(--color-line-subtle); }
-  .trickplay-fieldset { gap: 12px; padding: 16px 0; }
-  .trickplay-fieldset legend { float: left; width: 100%; margin: 0 0 4px; padding: 0; font-size: 15px; font-weight: 600; color: var(--color-text); }
-  .trickplay-fieldset legend + * { clear: both; }
-  .trickplay-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; }
-  /* Section Trickplay autonome : surface plate */
-  #trickplay-section .trickplay-fieldset { padding: 20px; border-radius: var(--radius-md); background: var(--color-surface); }
+  .settings-fieldset { gap: 12px; padding: 16px 0; }
+  .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 20px; }
   /* Boutons : un seul primaire, le reste en ghost */
   button { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 8px 20px; border: 0; border-radius: var(--radius-sm); background: var(--color-play); color: var(--color-on-play); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; transition: background-color var(--transition-fast); }
   button:hover:not(:disabled) { background: var(--color-play-hover); }

@@ -1,5 +1,49 @@
 > Le moteur persistant décrit dans [DISTRIBUTED_TASKS.md](DISTRIBUTED_TASKS.md) remplace le dispatch globalement sériel historique : leases par Node, reprises bornées, priorités, états persistants et suivi collectif des dossiers. Les routes des plans ci-dessous sont conservées.
 
+# Planificateur de tâches — refonte du 8 novembre 2026
+
+**Une seule source de vérité.** Les déclencheurs (`task_triggers` : quotidien, hebdomadaire,
+intervalle, démarrage) sont la seule configuration. Un passage unique,
+`task_scheduler::fire_due`, exécuté toutes les 15 secondes, lit les déclencheurs échus, met
+une exécution en file par tâche (clé idempotente), puis avance par compare-and-set uniquement
+les déclencheurs qui ont tiré. Les trois pompes séparées (tâches système, scans, sauvegarde)
+qui lisaient les colonnes historiques `next_due_at` / `next_run_at` ont disparu ; ces colonnes
+ne sont plus qu'un miroir pour les anciennes routes `PUT .../schedule`.
+
+Règles d'exécution :
+- une tâche déjà en attente ou en cours quand son déclencheur tombe est sautée (comme
+  Jellyfin) ; un instant manqué pendant un arrêt ne tire qu'une fois, jamais en rafale ;
+- les déclencheurs de bibliothèques supprimées ou de tâches retirées sont nettoyés ;
+- la maintenance légère (sessions, statistiques, journaux, caches, catalogues) démarre dès
+  qu'aucune autre maintenance ne tourne, même si des scans ou des lectures sont en cours, et
+  n'occupe plus l'emplacement de scan du Media Node local ;
+- l'optimisation de la base et la sauvegarde attendent un serveur calme (aucun scan local,
+  aucune lecture) au plus une heure, puis démarrent quand même ;
+- les sondages de surveillance temps réel ne comptent plus comme des analyses de
+  bibliothèque : ils ne bloquent plus le bouton Lancer et ne remplacent plus la dernière
+  exécution affichée ; celle-ci couvre aussi les bibliothèques à plusieurs dossiers ;
+- mettre une tâche en file n'efface plus son dernier résultat ; un marqueur « en cours »
+  laissé par un arrêt brutal s'affiche « Interrompue » et n'empêche plus de relancer ;
+- la sauvegarde ne passe « en cours » qu'au démarrage effectif, plus à la mise en file.
+
+L'API unifiée renvoie des codes explicites (`task_already_active`, `task_unavailable`,
+`task_not_active`, `task_not_found`, `trigger_invalid`, `trigger_duplicate`,
+`trigger_limit`, `trigger_not_found`) traduits par l'interface. La liste affiche la prochaine
+exécution de chaque tâche.
+
+La file des opérations (`/api/v1/admin/tasks/jobs`) reste montée dans l'API, mais l'onglet
+« Suivi des opérations » a été retiré de l'administration (2026-11-08) : il doublait les tâches
+planifiées. À sa place, l'onglet « Journaux du serveur » lit `GET /api/v1/admin/logs` : les
+dernières lignes écrites par le Core sur stderr (2 000 au plus, en mémoire, perdues au
+redémarrage), classées info / avertissement / erreur, les secrets des URL masqués.
+
+Une tâche qui échoue faute de clé API (`extension_error:missing_api_key`) ou parce que le
+fournisseur la refuse (`extension_error:unauthorized`) passe directement en erreur, sans les
+nouvelles tentatives : seul un changement des paramètres de l'extension peut la débloquer.
+
+Tests : `crates/core/tests/task_scheduler.rs` (montage des routes, instant manqué, tâche
+occupée, famine, surveillance, marqueurs périmés) et `crates/core/tests/scheduler.rs`.
+
 # Scans planifiés — 19 octobre 2026
 
 ## Parcours du planificateur corrigé — 2 novembre 2026

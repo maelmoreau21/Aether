@@ -13,14 +13,17 @@
   import { PlaybackPresence } from './presence';
   import { session, getSessionGeneration } from '../auth/session';
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
-  import { playbackPreferences, trackPreferences } from './playback-preferences';
+  import { isForeignAudio, languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
   import { AudioSelectionRetainedError } from './errors';
+  import { failoverHelps, failureKindOf, type PlaybackFailureKind } from './diagnostics';
   import { revalidateMediaDescriptor } from '../catalog/api';
   import { bufferedAhead } from './startup-buffer';
   import { SyncPartyClient } from '../syncplay/sync-client.svelte';
   import { applyPartyPlayback } from '../syncplay/player-sync';
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
+  import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
+  import { t } from '../i18n';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
     /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
@@ -63,11 +66,13 @@
   let active = $state<Media | undefined>();
   let busy = $state(false);
   let error = $state('');
+  let errorKind = $state<PlaybackFailureKind | ''>('');
   let notice = $state('');
   let statistics = $state(false);
   let markerEditor = $state(false);
   let markerKind = $state<'intro' | 'credits' | 'recap' | 'preview'>('intro');
   let hasAutoSkippedIntro = false;
+  let hasAutoSkippedRecap = false;
   let hasAutoSkippedCredits = false;
   let markerEnabled = $state(true);
   let markerStart = $state(0);
@@ -79,6 +84,7 @@
   let loadStage = $state('Chargement de votre séance…');
   let audio = $state('');
   let preferredLanguage = 'fr';
+  let subtitleLanguage = 'fr';
   let preferredAudio: { mediaId: string; trackId: string } | undefined;
   let manualAudio: { mediaId: string; trackId: string; language?: string } | undefined;
   let manualSubtitle: SubtitlePreference | undefined;
@@ -87,9 +93,16 @@
   let subtitleOffset = $state(0);
   let subtitle = $state<string | null>(null);
   let subtitlePreference: SubtitlePreference | undefined;
+  /** Subtitles for an original-version audio (another language than the subtitle language). */
+  let foreignSubtitlePreference: SubtitlePreference | undefined;
+  let manualForeignSubtitle: SubtitlePreference | undefined;
+  /** Whether the audio being played is an original version, for remembering subtitle choices. */
+  let foreignAudio = false;
   let subtitleStyle = $state<SubtitleStyle | undefined>();
   const activeSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
   let menu = $state<Menu>(null);
+  /** "Watch together" started from the player on the item being watched. */
+  let partyModal = $state(false);
   let fullscreen = $state(false);
   let visible = $state(true);
   let keyboardPinned = $state(false);
@@ -108,6 +121,7 @@
   let scrollPosition = 0;
   let previousVolume = 1;
   let triedMediaIds = new SvelteSet<string>();
+  let resumeTarget = 0;
   let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;
@@ -175,11 +189,22 @@
     const dur = playback.duration;
     if (!opened || busy || paused || dur <= 0 || syncClient) return;
     const prefs = preferences();
+    if (prefs.autoSkipRecap && active?.recap && !hasAutoSkippedRecap) {
+      if (pos >= active.recap.start && pos < active.recap.end - 1.0) {
+        hasAutoSkippedRecap = true;
+        // Récap suivi d'une intro elle aussi sautée : un seul saut, sans double seek.
+        const chained = prefs.autoSkipIntro && active.intro && Math.abs(active.intro.start - active.recap.end) <= 1.0;
+        if (chained) hasAutoSkippedIntro = true;
+        measuredSeek(chained && active.intro ? active.intro.end : active.recap.end, 'skip_recap', 'automatic');
+        notice = chained ? $t('recap_and_intro_skipped_automatically') : $t('recap_skipped_automatically');
+        return;
+      }
+    }
     if (prefs.autoSkipIntro && active?.intro && !hasAutoSkippedIntro) {
       if (pos >= active.intro.start && pos < active.intro.end - 1.0) {
         hasAutoSkippedIntro = true;
         measuredSeek(active.intro.end, 'skip_intro', 'automatic');
-        notice = "Introduction sautée automatiquement";
+        notice = $t('intro_skipped_automatically');
       }
     }
     if (prefs.autoSkipCredits && active?.credits && !hasAutoSkippedCredits) {
@@ -187,7 +212,7 @@
         hasAutoSkippedCredits = true;
         if (active.credits.end < dur - 10) {
           measuredSeek(active.credits.end, 'skip_credits', 'automatic');
-          notice = "Générique sauté automatiquement";
+          notice = $t('credits_skipped_automatically');
         }
       }
     }
@@ -198,28 +223,30 @@
     triedMediaIds.add(active.id);
     if (active.requestedId) triedMediaIds.add(active.requestedId);
     if (active.failoverFrom) triedMediaIds.add(active.failoverFrom);
-    const candidates = [
-      ...(active.fallbackMediaIds ?? []),
-      ...catalogue
-        .filter(item => item.available !== false && item.nodeStatus !== 'disconnected' && item.nodeStatus !== 'revoked' && (!active?.workId || !item.workId || item.workId === active.workId))
-        .map(item => item.id)
-    ];
+    // Only copies the Core vetted for this viewer: same content (identical file or same
+    // runtime), readable with this account's libraries and parental policy, on a Node it
+    // considers connected. A catalogue entry for the same work is not enough: it may be
+    // another cut whose timeline does not match the position being restored.
+    const candidates = active.fallbackMediaIds ?? [];
     const nextId = candidates.find(id => !triedMediaIds.has(id));
     if (!nextId) return false;
     triedMediaIds.add(nextId);
     failoverInProgress = true;
     try {
       const snapshot = engine.state();
-      const savedPosition = Math.max(playback.position, snapshot.position || 0, video?.currentTime || 0);
+      const observed = Math.max(playback.position, snapshot.position || 0, video?.currentTime || 0);
+      // A failure before the resume seek must not restart at 0 nor overwrite the
+      // saved progress: fall back to the loaded resume point.
+      const savedPosition = Number.isFinite(observed) && observed > 0 ? observed : resumeTarget;
       const restoreState: PlaybackState = {
-        position: Number.isFinite(savedPosition) ? savedPosition : 0,
+        position: savedPosition,
         duration: playback.duration,
         paused: false,
         volume: playback.volume,
         speed: playback.speed
       };
-      progressTracker?.save(restoreState, true);
-      loadStage = 'Basculement automatique vers un nœud disponible…';
+      if (observed > 0) progressTracker?.save(restoreState, true);
+      loadStage = $t('automatically_switching_to_an_available_node');
       let fallbackMedia: Media | undefined;
       try {
         fallbackMedia = await revalidateMediaDescriptor(nextId);
@@ -228,20 +255,22 @@
       }
       if (!fallbackMedia || current !== generation || !opened) return false;
       triedMediaIds.add(fallbackMedia.id);
-      await prepare(fallbackMedia, restoreState, 'Basculement automatique sur un nœud disponible.');
+      await prepare(fallbackMedia, restoreState, $t('automatically_switched_to_an_available_node'));
       return current === generation && !error;
     } finally {
       failoverInProgress = false;
     }
   }
-  function fail(message: string) {
+  function fail(message: string, kind?: PlaybackFailureKind) {
     if (!opened) return;
     collector?.event('error', { errorCode: 'playback' });
     engine?.pause();
+    // An equivalent copy is the same file or the same runtime: a codec, container or
+    // permission refusal would only repeat on it, so skip the detour and say why.
+    const show = () => { errorKind = kind ?? ''; error = message; busy = false; sync(); wake(); };
+    if (!failoverHelps(kind)) { show(); return; }
     void tryAutomaticFailover().then(recovered => {
-      if (!recovered && opened) {
-        error = message; busy = false; sync(); wake();
-      }
+      if (!recovered && opened) show();
     });
   }
   async function action(operation: (player: Player) => void | Promise<void>) {
@@ -250,8 +279,8 @@
     try { await operation(engine); }
     catch (e) {
       if (current === generation) {
-        if (e instanceof AudioSelectionRetainedError) { loadStage = e.message; notice = 'Cette piste est indisponible. La piste précédente a été conservée.'; }
-        else fail(e instanceof Error ? e.message : String(e));
+        if (e instanceof AudioSelectionRetainedError) { loadStage = e.message; notice = $t('this_track_is_unavailable_the_previous'); }
+        else fail(e instanceof Error ? e.message : String(e), failureKindOf(e));
       }
     }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
@@ -275,25 +304,27 @@
       if (tracker) progressTracker = tracker;
       else progressTracker?.setCreditsStart(detectedCreditsStart);
       const resume = tracker?.load();
+      if (tracker) { resumeTarget = 0; void resume?.then(position => { if (current === generation && Number.isFinite(position)) resumeTarget = position; }, () => undefined); }
       // Preferences are optional: an outage must not prevent authorized playback.
       // preferences() is cleared by session generation changes.
       let preferenceNotice = '';
       try { await ensurePreferences(); }
-      catch { preferenceNotice = 'Préférences indisponibles : réglages locaux à cette séance.'; }
+      catch { preferenceNotice = $t('preferences_unavailable_settings_are_local'); }
       if (current !== generation) return;
       readPlaybackPreferences();
       const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))), playDefaultAudio);
-      if (!source) throw new Error('Aucune source audio utilisable pour ce média.');
+      if (!source) throw new Error($t('no_usable_audio_source_for_this'));
       if (syncClient) await resume; // Load the progress revision before collective playback saves it.
       if (current !== generation) return;
       await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
       if (current !== generation) return;
-      const autoFailoverMsg = failoverNotice || (media.failoverFrom ? 'Basculement automatique sur un nœud disponible.' : '');
+      const autoFailoverMsg = failoverNotice || (media.failoverFrom ? $t('automatically_switched_to_an_available_node') : '');
       notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
-      const usableSubtitle = preferredSubtitle(media.subtitles, subtitlePreference);
+      foreignAudio = isForeignAudio(source.language, subtitleLanguage);
+      const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -302,7 +333,7 @@
       void subtitleLoading.catch(error => {
         if (current === generation && subtitle === usableSubtitle) {
           subtitle = null;
-          notice = error instanceof Error ? error.message : 'Sous-titres indisponibles.';
+          notice = error instanceof Error ? error.message : $t('subtitles_unavailable');
         }
       });
       // Legacy audio windows share the Node's single FFmpeg worker with
@@ -312,13 +343,14 @@
       if (restore) { engine.setVolume(restore.volume); engine.setSpeed(restore.speed); }
       if (current !== generation) return;
       hasAutoSkippedIntro = false;
+      hasAutoSkippedRecap = false;
       hasAutoSkippedCredits = false;
       const skipPreferences = preferences();
       active = {
         ...media,
         intro: skipPreferences.skipIntroEnabled === false ? undefined : media.intro,
         credits: skipPreferences.skipCreditsEnabled === false ? undefined : media.credits,
-        recap: media.recap,
+        recap: skipPreferences.skipRecapEnabled === false ? undefined : media.recap,
         preview: media.preview
       };
       presence?.stop();presence=undefined;
@@ -330,11 +362,12 @@
         syncClient.setReady(true);
         syncClient.setBuffering(false, engine.state().position);
       } else if (!restore || !restore.paused) await engine.play();
-    } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { if (current === generation) fail(e instanceof Error ? e.message : String(e), failureKindOf(e)); }
     finally { if (current === generation) { busy = false; sync(); wake(); } }
   }
   function readPlaybackPreferences() {
-    preferredLanguage = 'fr'; subtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
+    const languages = languageDefaults(preferences());
+    preferredLanguage = languages.audio; subtitleLanguage = languages.subtitle; subtitlePreference = undefined; foreignSubtitlePreference = undefined; preferredAudio = undefined; audioOffset = 0; subtitleOffset = 0;
     try {
       const account = preferences();
       const defaults = playbackPreferences(account);
@@ -348,13 +381,36 @@
       if (offsets && Number.isFinite(offsets.audio) && Math.abs(offsets.audio) <= 30) audioOffset = offsets.audio;
       if (offsets && Number.isFinite(offsets.subtitle) && Math.abs(offsets.subtitle) <= 30) subtitleOffset = offsets.subtitle;
       const language = audioLanguage(manualAudio?.language ?? policy.audioLanguage);
-      preferredLanguage = language && language !== 'und' ? language : 'fr';
+      preferredLanguage = language && language !== 'und' ? language : languages.audio;
       playDefaultAudio = policy.playDefaultAudioTrack && !manualAudio;
       subtitlePreference = manualSubtitle ?? policy.subtitlePreference;
+      foreignSubtitlePreference = manualForeignSubtitle ?? policy.foreignSubtitlePreference;
       subtitleStyle = account.subtitleStyle;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
+  // What the automatic detection stored for this file, shown beside the manual correction.
+  type StoredMarker = { type: string; start: number | null; end: number | null; confidence?: number; extensionId?: string; enabled?: boolean };
+  let markerDetections = $state<{ assetId: string; automatic: StoredMarker[]; manual: StoredMarker[] } | null>(null);
+  let markerDetectionsLoading = $state(false);
+  async function loadMarkerDetections(assetId: string) {
+    if (markerDetections?.assetId === assetId || markerDetectionsLoading) return;
+    markerDetectionsLoading = true;
+    try {
+      const response = await fetch(`/api/v1/admin/assets/${encodeURIComponent(assetId)}/markers`, { credentials: 'same-origin', cache: 'no-store' });
+      if (response.ok) {
+        const body = await response.json() as { automatic?: StoredMarker[]; manual?: StoredMarker[] };
+        if (active?.id === assetId) markerDetections = { assetId, automatic: body.automatic ?? [], manual: body.manual ?? [] };
+      }
+    } catch { /* The correction form stays usable without the detection summary. */ }
+    finally { markerDetectionsLoading = false; }
+  }
+  const markerClock = (seconds: number | null) => {
+    if (seconds === null || !Number.isFinite(seconds)) return '—';
+    const whole = Math.round(seconds), hours = Math.floor(whole / 3600), minutes = Math.floor(whole % 3600 / 60), rest = String(whole % 60).padStart(2, '0');
+    return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+  };
   function editMarker(kind: 'intro' | 'credits' | 'recap' | 'preview') {
+    if (active) void loadMarkerDetections(active.id);
     markerKind = kind;
     const value = active?.[kind];
     markerEnabled = Boolean(value);
@@ -375,7 +431,7 @@
         headers: { 'x-csrf-token': account.csrfToken, 'content-type': 'application/json' },
         body: remove ? undefined : JSON.stringify(markerEnabled ? { enabled: true, start: markerStart, end: markerEnd } : { enabled: false })
       });
-      if (!response.ok) throw new Error(`Correction refusée (${response.status}).`);
+      if (!response.ok) throw new Error($t('correction_refused', { status: response.status }));
       if (active?.id !== assetId) return;
       if (remove) {
         const fresh = await revalidateMediaDescriptor(assetId);
@@ -383,35 +439,35 @@
           ...fresh,
           intro: preferences().skipIntroEnabled === false ? undefined : fresh.intro,
           credits: preferences().skipCreditsEnabled === false ? undefined : fresh.credits,
-          recap: fresh.recap,
+          recap: preferences().skipRecapEnabled === false ? undefined : fresh.recap,
           preview: fresh.preview
         };
       } else {
         active = { ...active, [markerKind]: markerEnabled ? { start: markerStart, end: markerEnd } : undefined };
       }
-      markerEditor = false;
-    } catch (error) { markerError = error instanceof Error ? error.message : 'Correction indisponible.'; }
+      markerEditor = false; markerDetections = null;
+    } catch (error) { markerError = error instanceof Error ? error.message : $t('correction_unavailable'); }
     finally { markerSaving = false; }
   }
   export function open(media: Media | Promise<Media>) {
     if (opened) return false;
     generation++; const current = generation;
-    manualAudio = undefined; manualSubtitle = undefined;
+    manualAudio = undefined; manualSubtitle = undefined; manualForeignSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
     opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     scrollPosition = window.scrollY;
-    statistics = false; loadStage = 'Chargement de votre séance…'; audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
+    statistics = false; loadStage = $t('loading_your_session'); audio = ''; active = media instanceof Promise ? undefined : media; opened = true; busy = true; error = ''; notice = ''; menu = null;
     keyboardPinned = false; visible = true; document.body.classList.add('immersive-open');
     dialog.showModal();
     surface?.focus();
     // Requested synchronously from the opening user gesture, before any network await.
     requestFullscreen();
-    engine = createPlayer(video, message => { if (current === generation) fail(message); });
+    engine = createPlayer(video, (message, kind) => { if (current === generation) fail(message, kind); });
     engine.setStatusListener?.(message=>{if(current===generation)loadStage=message;});
     if (media instanceof Promise) {
       void media.then(item => { if (current === generation && opened) { active = item; void prepare(item); } })
-        .catch(cause => { if (current === generation) fail(cause instanceof Error ? cause.message : String(cause)); });
+        .catch(cause => { if (current === generation) fail(cause instanceof Error ? cause.message : String(cause), failureKindOf(cause)); });
     } else void prepare(media);
     return true;
   }
@@ -445,7 +501,7 @@
     if (!opened) { if (!requireOpen) open(media); return; }
     if (!engine || busy) return;
     collector?.stop(); collector = undefined; collectorWork = '';
-    manualAudio = undefined; manualSubtitle = undefined;
+    manualAudio = undefined; manualSubtitle = undefined; manualForeignSubtitle = undefined;
     triedMediaIds.clear();
     failoverInProgress = false;
     progressTracker?.save(engine.state(), true);
@@ -456,6 +512,20 @@
     void prepare(media);
   }
   export function reportError(message: string) { fail(message); }
+  /** The host keeps the scene: once the new session is connected, it starts where playback was. */
+  function startPartyFromPlayer(partyId: string) {
+    partyModal = false;
+    const current = active;
+    if (!current) return;
+    const position = playback.position;
+    joinParty(partyId, current);
+    const client = syncClient;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (syncClient !== client || !client || Date.now() - started > 15000) { clearInterval(timer); return; }
+      if (client.connected) { clearInterval(timer); if (position > 1) client.seek(position); }
+    }, 250);
+  }
   export function joinParty(partyId: string, media: Media | Promise<Media>) {
     if (syncClient) {
       syncClient.leave();
@@ -467,7 +537,7 @@
     else if (media instanceof Promise) {
       const client = syncClient;
       void media.then(item => { if (syncClient === client && opened) changeMedia(item); })
-        .catch(cause => { if (syncClient === client) fail(cause instanceof Error ? cause.message : String(cause)); });
+        .catch(cause => { if (syncClient === client) fail(cause instanceof Error ? cause.message : String(cause), failureKindOf(cause)); });
     } else changeMedia(media);
   }
   function setupSyncClientHooks() {
@@ -483,7 +553,7 @@
       void applyPartyPlayback(engine, state, position).then(() => {
         if (engine && Math.abs(engine.state().position - before) > 1) collector?.seek(engine.state().position, before, 'seek', 'sync');
       }).catch(cause => {
-        notice = cause instanceof Error ? cause.message : 'Lecture collective indisponible.';
+        notice = cause instanceof Error ? cause.message : $t('group_playback_unavailable');
       });
     };
     syncClient.onMediaChanged = (newMediaId) => {
@@ -491,7 +561,7 @@
       if (found) changeMedia(found);
       else void revalidateMediaDescriptor(newMediaId).then(media => {
         if (syncClient === client && opened) changeMedia(media);
-      }).catch(cause => { notice = cause instanceof Error ? cause.message : 'Média indisponible.'; });
+      }).catch(cause => { notice = cause instanceof Error ? cause.message : $t('media_unavailable'); });
     };
   }
   function reportBuffering(buffering: boolean) {
@@ -501,10 +571,10 @@
   }
 
   function requestFullscreen() {
-    if (!surface.requestFullscreen) { notice = 'Plein écran indisponible. Le mode immersif reste actif.'; return; }
+    if (!surface.requestFullscreen) { notice = $t('full_screen_unavailable_immersive_mode'); return; }
     void surface.requestFullscreen().then(() => {
       if (!opened && document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
-    }).catch(() => { if (opened) notice = 'Plein écran refusé. Le mode immersif reste actif.'; });
+    }).catch(() => { if (opened) notice = $t('full_screen_refused_immersive_mode_remains'); });
   }
   function toggleFullscreen() {
     if (document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
@@ -513,7 +583,7 @@
   }
   function togglePlayback() {
     if (syncClient && !syncClient.canControl) {
-      notice = 'Contrôles réservés à l’organisateur';
+      notice = $t('controls_reserved_for_the_organiser');
       wake();
       return;
     }
@@ -529,7 +599,7 @@
   function mute() { volume(playback.volume === 0 ? previousVolume || 1 : 0); }
   function seek(value: number, kind: EventKind = 'seek') {
     if (syncClient && !syncClient.canControl) {
-      notice = 'Contrôles réservés à l’organisateur';
+      notice = $t('controls_reserved_for_the_organiser');
       wake();
       return;
     }
@@ -549,6 +619,7 @@
       if (info?.audio) collector?.track('audio', info.audio, 'manual');
       const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
+      foreignAudio = isForeignAudio(language, subtitleLanguage);
       manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
       preferredAudio = manualAudio;
       if (preferences().rememberAudioSelections !== false) savePreferences({ audioTrack: manualAudio });
@@ -558,14 +629,26 @@
     const current = generation;
     const accountGeneration = getSessionGeneration();
     void action(async player => {
-    await player.selectSubtitle(id);
+    // Un sous-titre indisponible (préparation occupée, WebVTT illisible) ne doit
+    // jamais interrompre ni basculer la lecture : on prévient et on continue.
+    try { await player.selectSubtitle(id); }
+    catch {
+      if (current === generation) notice = $t('subtitles_temporarily_unavailable_playback');
+      return;
+    }
     if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
     subtitle = id;
     trackSubtitle(id, 'manual');
     const track = active?.subtitles.find(track => track.id === id);
-    subtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
-    manualSubtitle = subtitlePreference;
-    if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreference });
+    const chosen: SubtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
+    // A choice made in VO applies to every VO; one made in the person's language, to the others.
+    if (foreignAudio) {
+      foreignSubtitlePreference = chosen; manualForeignSubtitle = chosen;
+      if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreferenceForeign: chosen });
+    } else {
+      subtitlePreference = chosen; manualSubtitle = chosen;
+      if (preferences().rememberSubtitleSelections !== false) savePreferences({ subtitlePreference: chosen });
+    }
   }); }
   function offset(kind: 'audio' | 'subtitle', value: number) {
     if (!Number.isFinite(value) || Math.abs(value) > 30) return;
@@ -639,7 +722,7 @@
 
 <svelte:window onkeydown={windowKeyboard} />
 
-<dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label="Lecteur immersif" oncancel={cancel} onclose={close}>
+<dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label={$t('immersive_player')} oncancel={cancel} onclose={close}>
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
@@ -665,57 +748,70 @@
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}
     ><track kind="captions" /></video>
-    <button class="video-interaction" tabindex="-1" aria-label="Afficher ou masquer les commandes" onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
+    <button class="video-interaction" tabindex="-1" aria-label={$t('show_or_hide_controls')} onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
-      <button class="return" aria-label="Retour à l’accueil" onclick={close}><Icon name="back" size={24} /></button>
-      <div class="title"><span>{active?.title ?? 'Votre séance'}</span></div>
+      <button class="return" aria-label={$t('back_to_home')} onclick={close}><Icon name="back" size={24} /></button>
+      <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
-      {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> Enchaîner automatiquement</label></div>{/if}
-      {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>Corriger les marqueurs</button>{/if}
+      {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
+      {#if active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
+      {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>{$t('fix_markers')}</button>{/if}
     </div>
     {#if markerEditor && active?.episode}
-      <section class="marker-editor" aria-label="Correction des marqueurs">
-        <h2>Marqueur manuel</h2>
-        <label>Type<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">Introduction</option><option value="credits">Générique de fin</option><option value="recap">Résumé</option><option value="preview">Aperçu</option></select></label>
-        <label><input type="checkbox" bind:checked={markerEnabled} /> Activer ce marqueur</label>
+      <section class="marker-editor" aria-label={$t('marker_correction')}>
+        <h2>{$t('manual_marker')}</h2>
+        <label>{$t('request_type')}<select bind:value={markerKind} onchange={() => editMarker(markerKind)}><option value="intro">{$t('intro')}</option><option value="credits">{$t('credits')}</option><option value="recap">{$t('recap')}</option><option value="preview">{$t('player_preview')}</option></select></label>
+        {#if markerDetections?.assetId === active.id}
+          {@const detected = markerDetections.automatic.filter(item => item.type === markerKind)}
+          <div class="marker-detection" role="status">
+            {#each detected as item, index (index)}
+              <p>{$t('marker_detected', { start: markerClock(item.start), end: markerClock(item.end), confidence: Math.round((item.confidence ?? 0) * 100), source: item.extensionId ?? '—' })}</p>
+            {:else}<p>{$t('marker_not_detected')}</p>{/each}
+            {#if markerDetections.manual.some(item => item.type === markerKind)}<p>{$t('marker_manual_active')}</p>{/if}
+          </div>
+        {:else if markerDetectionsLoading}<p class="marker-detection" role="status">{$t('marker_detection_loading')}</p>{/if}
+        <label><input type="checkbox" bind:checked={markerEnabled} /> {$t('enable_this_marker')}</label>
         {#if markerEnabled}
-          <label>Début (secondes)<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
-          <label>Fin (secondes)<input type="number" min="0" max={playback.duration} step="0.1" bind:value={markerEnd} /></label>
+          <label>{$t('report_time_start')}<input type="number" min="0" step="0.1" bind:value={markerStart} /></label>
+          <label>{$t('end_seconds')}<input type="number" min="0" max={playback.duration} step="0.1" bind:value={markerEnd} /></label>
         {/if}
         {#if markerError}<p role="alert">{markerError}</p>{/if}
-        <button type="button" disabled={markerSaving} onclick={() => void saveMarker()}>Enregistrer</button>
-        <button type="button" disabled={markerSaving} onclick={() => void saveMarker(true)}>Revenir à la détection</button>
-        <button type="button" onclick={() => markerEditor = false}>Fermer</button>
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker()}>{$t('save')}</button>
+        <button type="button" disabled={markerSaving} onclick={() => void saveMarker(true)}>{$t('revert_to_detection')}</button>
+        <button type="button" onclick={() => markerEditor = false}>{$t('close')}</button>
       </section>
     {/if}
-    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>Chargement de la vidéo…</span><button onclick={close}>Annuler</button></div>{/if}
-    {#if error}<div class="player-error" role="alert"><Icon name="alert" size={24} /><strong>Lecture interrompue</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>Réessayer</button></div>{/if}
-    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label="Données de lecture">
-      <header><strong>Données de lecture</strong><button onclick={() => { statistics = false; wake(); }}>Fermer</button></header>
-      <p>Mesures vidéo du navigateur · actualisation chaque seconde</p>
+    {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>{$t('loading_the_video')}</span><button onclick={close}>{$t('sched_cancel')}</button></div>{/if}
+    {#if error}<div class="player-error" role="alert" data-failure-kind={errorKind || undefined}><Icon name="alert" size={24} /><strong>{$t('playback_interrupted')}</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>{$t('request_retry')}</button></div>{/if}
+    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label={$t('playback_data')}>
+      <header><strong>{$t('playback_data')}</strong><button onclick={() => { statistics = false; wake(); }}>{$t('close')}</button></header>
+      <p>{$t('browser_video_metrics_refreshed_every_second')}</p>
       <dl>
-        <dt>État</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? 'En pause' : 'Lecture'}</dd>
-        <dt>Vidéo décodée</dt><dd>{metrics.width} × {metrics.height}</dd>
-        <dt>Images / perdues</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
-        <dt>Vidéo en mémoire tampon</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
-        <dt>Audio séparé en mémoire tampon</dt><dd>{metrics.audioBuffered === null ? 'Non utilisé' : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
-        <dt>Position / durée</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
-        <dt>Vitesse</dt><dd>{playback.speed}×</dd>
-        <dt>readyState / networkState</dt><dd>{metrics.ready} / {metrics.network}</dd>
-        <dt>Nœud serveur</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Local'}</dd>
-        <dt>Mode de transport</dt><dd>{selectedSource?.directUrl ? 'Direct Node' : selectedSource?.relayUrl ? 'Relais Core' : 'Local'}</dd>
-        <dt>Source / piste audio</dt><dd>{selectedSource?.id ?? 'En attente'} / {audio || 'En attente'}</dd>
-        <dt>Conteneur / langue</dt><dd>{selectedSource?.mime ?? 'Non renseigné'} / {selectedSource?.language ?? 'Non renseignée'}</dd>
-        <dt>Mode audio déclaré</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
-        <dt>Sous-titres</dt><dd>{subtitle ?? 'Désactivés'}</dd>
+        <dt>{$t('state')}</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? $t('paused') : 'Lecture'}</dd>
+        <dt>{$t('decoded_video')}</dt><dd>{metrics.width} × {metrics.height}</dd>
+        <dt>{$t('frames_dropped')}</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
+        <dt>{$t('buffered_video')}</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
+        <dt>{$t('buffered_separate_audio')}</dt><dd>{metrics.audioBuffered === null ? $t('not_used') : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
+        <dt>{$t('position_duration')}</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
+        <dt>{$t('speed')}</dt><dd>{playback.speed}×</dd>
+        <dt>{$t('readystate_networkstate')}</dt><dd>{metrics.ready} / {metrics.network}</dd>
+        <dt>{$t('server_node')}</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Local'}</dd>
+        <dt>{$t('transport_mode')}</dt><dd>{selectedSource?.directUrl ? $t('direct_node') : selectedSource?.relayUrl ? $t('core_relay') : 'Local'}</dd>
+        <dt>{$t('source_audio_track')}</dt><dd>{selectedSource?.id ?? $t('waiting')} / {audio || $t('waiting')}</dd>
+        <dt>{$t('container_language')}</dt><dd>{selectedSource?.mime ?? $t('stats_not_set')} / {selectedSource?.language ?? $t('not_specified')}</dd>
+        <dt>{$t('declared_audio_mode')}</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
+        <dt>{$t('report_category_subtitles')}</dt><dd>{subtitle ?? 'Désactivés'}</dd>
       </dl>
-      {#each selectedSource?.tracks ?? [] as track, i (i)}<p>Piste {track.index ?? i} · {track.codec_type} · {track.codec_name} {track.profile ?? ''} {track.channels ? `· ${track.channels} canaux` : ''}</p>{/each}
-      <p>Diagnostic technique : {error || loadStage}</p>
-      <p>Les pistes déclarées ne prouvent pas la sortie audio physique. Débit réseau non mesuré.</p>
+      {#each selectedSource?.tracks ?? [] as track, i (i)}<p>{$t('track_diagnostic', { index: track.index ?? i, type: track.codec_type, codec: track.codec_name, profile: track.profile ?? '', channels: track.channels ? `· ${$t('channels_count', { count: track.channels })}` : '' })}</p>{/each}
+      <p>{$t('technical_diagnostic', { detail: error || loadStage })}</p>
+      <p>{$t('declared_tracks_do_not_prove_physical')}</p>
     </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if syncClient}
       <WatchPartyOverlay client={syncClient} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
+    {/if}
+    {#if partyModal && active}
+      <WatchPartyModal mediaId={active.workId ?? active.id} mediaTitle={active.title} onClose={() => partyModal = false} onJoinParty={partyId => startPartyFromPlayer(partyId)} />
     {/if}
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       {skipBackSeconds} {skipForwardSeconds}
@@ -724,7 +820,7 @@
       onSpeed={speed => action(player => { player.setSpeed(speed); collector?.event('speed_change'); })} onFullscreen={toggleFullscreen} onWake={wake}
       buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
     {#if showNextCard}
-      <aside class="next-card" class:raised={visible} aria-label="Épisode suivant">
+      <aside class="next-card" class:raised={visible} aria-label={$t('next_episode')}>
         <div class="next-thumb">
           {#if nextImage && nextImageFailed !== nextImage}
             <img src={nextImage} alt="" width="640" height="360" decoding="async" onerror={() => nextImageFailed = nextImage} />
@@ -733,18 +829,18 @@
           {/if}
         </div>
         <div class="next-info">
-          <span class="next-kicker">À suivre{nextLabel ? ` · ${nextLabel}` : ''}</span>
+          <span class="next-kicker">{$t('up_next_label')}{nextLabel ? ` · ${nextLabel}` : ''}</span>
           <strong title={nextTitle}>{nextTitle}</strong>
-          {#if autoplayNext}<small>Lecture automatique à la fin</small>{/if}
+          {#if autoplayNext}<small>{$t('autoplay_at_the_end')}</small>{/if}
           <div class="next-actions">
-            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>Lire maintenant</span></button>
+            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>{$t('play_now')}</span></button>
             {#if postCreditsScene && active?.credits}
               {@const creditsEnd = active.credits.end}
-              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>Passer le générique</button>
+              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>{$t('skip_credits')}</button>
             {/if}
           </div>
         </div>
-        <button type="button" class="next-dismiss" aria-label="Masquer l’épisode suivant" title="Masquer" onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
+        <button type="button" class="next-dismiss" aria-label={$t('hide_the_next_episode')} title={$t('hide')} onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
       </aside>
     {/if}
   </div>
@@ -753,6 +849,9 @@
 <style>
   .marker-editor { position:absolute;z-index:10;top:90px;right:24px;display:grid;gap:10px;width:min(340px,calc(100% - 48px));padding:16px;background:#171923;color:white;border:1px solid #ffffff50;border-radius:10px; }
   .marker-editor label { display:grid;gap:4px; }
+  .marker-detection { margin:0;padding:8px 10px;border-radius:8px;background:#ffffff14;font-size:13px;line-height:1.45; }
+  .marker-detection p { margin:0; }
+  .marker-detection p + p { margin-top:4px; }
   .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
   .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
   .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
@@ -928,6 +1027,10 @@
   .return:hover { background: rgb(255 255 255 / 0.14); border-color: transparent; transform: none; box-shadow: none; }
   .title > span { font-weight: 800; }
   .next-episode label { font-size: 13px; font-weight: 700; }
+  .watch-together { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 16px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  .watch-together:hover { background: rgb(255 255 255 / 0.22); }
+  .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  @media (max-width: 640px) { .watch-together span { display: none; } .watch-together { padding: 0 10px; } }
   .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
   .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
   .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }

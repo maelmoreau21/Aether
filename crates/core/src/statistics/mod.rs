@@ -108,6 +108,13 @@ async fn settings(store: &IdentityStore) -> Outcome<Settings> {
     query_as("SELECT enabled,event_retention_days,summary_retention_days,first_enabled_at,generation FROM statistics_settings WHERE singleton=1")
         .fetch_one(&store.pool).await.map_err(db)
 }
+async fn users_can_view(store: &IdentityStore) -> Outcome<bool> {
+    query_scalar::<_, i64>("SELECT users_can_view FROM statistics_visibility WHERE singleton=1")
+        .fetch_one(&store.pool)
+        .await
+        .map(|value| value != 0)
+        .map_err(db)
+}
 async fn administrator(
     auth: &AuthState,
     headers: &HeaderMap,
@@ -123,10 +130,11 @@ async fn administrator(
     Ok(actor)
 }
 async fn collection(State(auth): State<AuthState>, headers: HeaderMap) -> Outcome<Json<Value>> {
-    auth.authenticate(&headers).await?;
+    let actor = auth.authenticate(&headers).await?;
     let s = settings(&auth.store).await?;
+    let visible = users_can_view(&auth.store).await?;
     Ok(Json(
-        json!({"enabled":s.enabled!=0,"firstEnabledAt":s.first_enabled_at,
+        json!({"enabled":s.enabled!=0,"usersCanView":visible,"canView":s.enabled!=0 && (visible || actor.user.role==Role::Administrator),"firstEnabledAt":s.first_enabled_at,
         "eventRetentionDays":s.event_retention_days,"summaryRetentionDays":s.summary_retention_days,
         "heartbeatSeconds":15,"timeoutSeconds":90}),
     ))
@@ -135,7 +143,7 @@ async fn read_settings(State(auth): State<AuthState>, headers: HeaderMap) -> Out
     administrator(&auth, &headers, false).await?;
     let s = settings(&auth.store).await?;
     Ok(Json(
-        json!({"enabled":s.enabled!=0,"eventRetentionDays":s.event_retention_days,
+        json!({"enabled":s.enabled!=0,"usersCanView":users_can_view(&auth.store).await?,"eventRetentionDays":s.event_retention_days,
         "summaryRetentionDays":s.summary_retention_days,"firstEnabledAt":s.first_enabled_at}),
     ))
 }
@@ -143,6 +151,8 @@ async fn read_settings(State(auth): State<AuthState>, headers: HeaderMap) -> Out
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SettingsInput {
     enabled: bool,
+    #[serde(default)]
+    users_can_view: bool,
     event_retention_days: i64,
     summary_retention_days: i64,
 }
@@ -187,6 +197,11 @@ async fn save_settings(
         .bind(i64::from(input.enabled)).bind(input.event_retention_days).bind(input.summary_retention_days)
         .bind(if input.enabled {Some(epoch)} else {None}).bind(i64::from((was!=0)!=input.enabled))
         .execute(&mut *tx).await.map_err(db)?;
+    query("UPDATE statistics_visibility SET users_can_view=? WHERE singleton=1")
+        .bind(i64::from(input.users_can_view))
+        .execute(&mut *tx)
+        .await
+        .map_err(db)?;
     tx.commit().await.map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }

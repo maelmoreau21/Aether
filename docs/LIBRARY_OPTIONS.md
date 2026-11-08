@@ -106,6 +106,13 @@ chapitres, la détection d'intro, l'activation du téléchargement de sous-titre
 les langues et conditions de recherche de sous-titres et les préférences
 de sauvegarde NFO/images/aperçus/sous-titres dans les médias.
 
+Depuis le 5 novembre 2026, les aperçus Trickplay se configurent dans
+**Administration → Bibliothèques → Modifier → options avancées**. L'ancien
+onglet global « Miniatures Trickplay » de Métadonnées et images est retiré ;
+la recherche des réglages Trickplay conduit aux bibliothèques. Les anciens
+liens `#trickplay-section` ouvrent aussi les bibliothèques. Le formulaire
+général du serveur ne lit ni ne transmet de paramètres Trickplay.
+
 Ces préférences préparatoires survivent à la réouverture de l'éditeur et au
 redémarrage grâce au stockage JSON existant. Elles n'installent aucun service,
 ne lancent aucun téléchargement ou extraction et n'accordent aucun accès

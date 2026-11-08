@@ -15,6 +15,9 @@ use std::{
 };
 
 const CACHE_BYTES: usize = 64 * 1024 * 1024;
+/// On-disk preview cache quota (`MEDIA_IMAGE_CACHE_MAX_BYTES` overrides it); entries are rebuildable.
+const DISK_CACHE_BYTES: u64 = 512 * 1024 * 1024;
+static DISK_WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 const CACHE_ENTRIES: usize = 2048;
 const MAX_ENCODED: usize = 2 * 1024 * 1024;
 type Key = (PathBuf, u64, String, u32);
@@ -155,6 +158,18 @@ fn write_disk_cache(key: &Key, preview: &Preview) {
     file_bytes.extend_from_slice(&preview.bytes);
     if std::fs::write(&temp, file_bytes).is_ok() {
         let _ = std::fs::rename(temp, target);
+    }
+    // First write after a start, then every 64th: bounded size and crash leftovers.
+    if DISK_WRITES
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        .is_multiple_of(64)
+    {
+        let _ = crate::disk_cache::enforce_quota(
+            &dir,
+            "img",
+            crate::disk_cache::budget_from_env("MEDIA_IMAGE_CACHE_MAX_BYTES", DISK_CACHE_BYTES),
+            std::time::Duration::from_secs(3600),
+        );
     }
 }
 

@@ -129,15 +129,15 @@ fs.mkdirSync(out, { recursive: true });
     report.results.librariesCreated = true;
 
     // 4. Trigger scans on both remote Nodes from UI and wait for completion
-    await page.getByLabel('Actions Films NAS Node 1',{exact:true}).click();
-    await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-    await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+    await page.getByLabel('Paramètres de Films NAS Node 1',{exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+    await page.getByRole('dialog').waitFor({state:'hidden'});
     const filmLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Films NAS Node 1', exact: true }) });
     await filmLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });
 
-    await page.getByLabel('Actions Séries NAS Node 2',{exact:true}).click();
-    await page.getByRole('button',{name:'Actualiser la bibliothèque',exact:true}).click();
-    await page.getByRole('dialog').getByRole('button',{name:'Actualiser',exact:true}).click();
+    await page.getByLabel('Paramètres de Séries NAS Node 2',{exact:true}).click();
+    await page.getByRole('dialog').getByRole('button',{name:'Actualisation rapide (recommandée)',exact:true}).click();
+    await page.getByRole('dialog').waitFor({state:'hidden'});
     const seriesLibArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: 'Séries NAS Node 2', exact: true }) });
     await seriesLibArticle.getByText(/Terminé/).waitFor({ timeout: 60000 });
     report.results.remoteScansCompleted = true;
@@ -151,7 +151,7 @@ fs.mkdirSync(out, { recursive: true });
     report.results.catalogLatencyMs = Math.round(performance.now() - tCatStart);
     await page.screenshot({ path: `${out}/03-catalog-films.png` });
 
-    await filmCard.click();
+    await filmCard.click({position:{x:12,y:12}});
     const playFilmBtn = page.locator('button.primary-play, button').filter({ hasText: /Lecture|Lire/ }).first();
     await playFilmBtn.waitFor({ timeout: 15000 });
     await playFilmBtn.click();
@@ -179,7 +179,7 @@ fs.mkdirSync(out, { recursive: true });
     await page.goto(origin + '/app/series/');
     const seriesCard = page.locator('.media-card').first();
     await seriesCard.waitFor({ timeout: 15000 });
-    await seriesCard.click();
+    await seriesCard.click({position:{x:12,y:12}});
 
     const playEpBtn = page.getByRole('button', { name: /^Lire / }).first();
     await playEpBtn.waitFor({ timeout: 15000 });

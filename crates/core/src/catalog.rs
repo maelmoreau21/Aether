@@ -90,6 +90,7 @@ pub struct CatalogQuery {
     limit: Option<usize>,
     count: Option<bool>,
     scope: Option<String>,
+    locale: Option<String>,
 }
 
 fn works(available: bool) -> Vec<Work> {
@@ -223,6 +224,10 @@ pub async fn list(
         || query.genre.as_ref().is_some_and(|v| v.len() > 100)
         || query.codec.as_ref().is_some_and(|v| v.len() > 64)
         || query.language.as_ref().is_some_and(|v| v.len() > 35)
+        || query
+            .locale
+            .as_deref()
+            .is_some_and(|v| crate::metadata_locale::normalize(v).is_none())
         || query.person.as_ref().is_some_and(|v| {
             v.trim().is_empty() || v.len() > 200 || v.chars().any(char::is_control)
         })
@@ -265,7 +270,18 @@ pub async fn list(
         } else {
             false
         };
+        let locale_chain = match crate::translations::locale_chain(
+            store,
+            user_id.as_deref(),
+            query.locale.as_deref(),
+        )
+        .await
+        {
+            Ok(chain) => chain,
+            Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+        };
         let filter = crate::inventory::CatalogueFilter {
+            locale_chain,
             bypass_cache: false,
             user_id,
             hide_watched,
@@ -322,6 +338,7 @@ pub async fn list(
 #[serde(rename_all = "camelCase")]
 pub struct DetailQuery {
     season: Option<i64>,
+    locale: Option<String>,
     episode_offset: Option<usize>,
     episode_limit: Option<usize>,
     episode_after: Option<String>,
@@ -335,6 +352,13 @@ pub async fn detail(
     actor: Option<Extension<crate::auth::Authenticated>>,
     visible: Option<Extension<crate::permissions::VisibleLibraries>>,
 ) -> Response {
+    if params
+        .locale
+        .as_deref()
+        .is_some_and(|v| crate::metadata_locale::normalize(v).is_none())
+    {
+        return error(StatusCode::BAD_REQUEST, "invalid_locale");
+    }
     if params
         .episode_limit
         .is_some_and(|limit| limit == 0 || limit > 100)
@@ -363,7 +387,21 @@ pub async fn detail(
     if !id.starts_with("fixture-") {
         return match store {
             Some(Extension(store)) => {
-                match crate::inventory::detail_window(&store, &id, page.as_ref()).await {
+                let chain = match crate::translations::locale_chain(
+                    &store,
+                    actor.as_ref().map(|Extension(a)| a.user.id.as_str()),
+                    params.locale.as_deref(),
+                )
+                .await
+                {
+                    Ok(chain) => chain,
+                    Err(_) => {
+                        return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable");
+                    }
+                };
+                match crate::inventory::detail_window_localized(&store, &id, page.as_ref(), &chain)
+                    .await
+                {
                     Ok(Some(mut value)) => {
                         if let (Some(Extension(actor)), Some(Extension(visible))) =
                             (&actor, &visible)

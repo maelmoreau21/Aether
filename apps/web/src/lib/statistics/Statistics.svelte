@@ -23,6 +23,9 @@
   const today = localDate(new Date());
   let from = $state(addDays(today, -29)), to = $state(today);
   let userId = $state(''), libraryId = $state(''), nodeId = $state(''), kind = $state(''), device = $state(''), rank = $state('users'), offset = $state(0);
+  let settingsReady = $state(false), persistedEnabled = $state(false), usersCanView = $state(false);
+  let tab = $state<'overview'|'activity'|'content'|'technical'|'history'|'settings'>('overview');
+  const tabs = ['overview','activity','content','technical','history','settings'] as const;
   let enabled = $state(false), eventDays = $state(365), summaryDays = $state(0), dirty = $state(false), eraseConfirmed = $state(false);
   let facets = $state<Statistics['facets']>({ libraries: [], nodes: [], devices: [] });
   let users = $state<Statistics['users']>([]);
@@ -55,6 +58,13 @@
     pending?.abort(); pending = new AbortController(); loading = true; error = '';
     const signal = pending.signal, query = params();
     try {
+      if (administrator) {
+        const config = await (await statisticsRequest(`${endpoint}/settings`, {signal})).json();
+        if (current !== requestNumber || generation !== getSessionGeneration()) return;
+        settingsReady = true;persistedEnabled=config.enabled;
+        if (!dirty) { enabled=config.enabled;usersCanView=config.usersCanView===true;eventDays=config.eventRetentionDays;summaryDays=config.summaryRetentionDays; }
+        if (!config.enabled) { data=null;insights=null;return; }
+      }
       const [result, extra, settings] = await Promise.all([
         statisticsRequest(`${endpoint}?${query}`, { signal }).then(response => response.json() as Promise<Statistics>),
         full ? statisticsRequest(`${endpoint}/insights?${query}`, { signal }).then(response => response.json() as Promise<Insights>).catch(cause => { if (!signal.aborted) insightsError = cause instanceof Error ? cause.message : $st('error_generic'); return null; }) : Promise.resolve(undefined),
@@ -78,11 +88,12 @@
   async function save() {
     saving = true; message = ''; error = '';
     try {
-      await statisticsRequest(`${endpoint}/settings`, { method: 'PUT', body: JSON.stringify({ enabled, eventRetentionDays: eventDays, summaryRetentionDays: summaryDays }) });
-      if (wrapped) await statisticsRequest(`${endpoint}/wrapped-settings`, { method: 'PUT', body: JSON.stringify(wrapped) });
+      await statisticsRequest(`${endpoint}/settings`, { method: 'PUT', body: JSON.stringify({ enabled, usersCanView, eventRetentionDays: eventDays, summaryRetentionDays: summaryDays }) });
+      persistedEnabled=enabled;
+      if (wrapped && wrappedDirty) await statisticsRequest(`${endpoint}/wrapped-settings`, { method: 'PUT', body: JSON.stringify(wrapped) });
       dirty = false; wrappedDirty = false; message = $st('saved'); await load();
       window.dispatchEvent(new Event('statistics-settings-changed'));
-    } catch (cause) { error = String(cause instanceof Error ? cause.message : cause); } finally { saving = false; }
+    } catch (cause) { enabled=persistedEnabled;error = String(cause instanceof Error ? cause.message : cause); } finally { saving = false; }
   }
   async function cleanup() {
     saving = true; message = ''; error = '';
@@ -137,7 +148,7 @@
     let ticks = 0;
     // Live counters every 15 s; the heavier analytics refresh every minute.
     const timer = setInterval(() => { ticks++; if (active && !loading && !dirty && !wrappedDirty && document.visibilityState === 'visible') void load(ticks % 4 === 0); }, 15000);
-    const off = onSessionGenerationChange(() => { requestNumber++; pending?.abort(); detailPending?.abort(); profilePending?.abort(); data = null; insights = null; detail = null; profile = null; users = []; facets = { libraries: [], nodes: [], devices: [] }; dialog?.close(); profileDialog?.close(); });
+    const off = onSessionGenerationChange(() => { requestNumber++; pending?.abort(); detailPending?.abort(); profilePending?.abort(); data = null; insights = null; settingsReady=false;enabled=false;usersCanView=false;dirty=false;wrappedDirty=false;wrapped=null;detail = null; profile = null; users = []; facets = { libraries: [], nodes: [], devices: [] }; dialog?.close(); profileDialog?.close(); });
     return () => { clearInterval(timer); off(); pending?.abort(); detailPending?.abort(); profilePending?.abort(); };
   });
   $effect(() => { const account = $session?.user.id; if (mounted && active && account) untrack(() => { void load(); }); });
@@ -161,6 +172,11 @@
 </script>
 
 <section class="statistics" aria-label={administrator ? $st('title_server') : $st('title_personal')}>
+  {#if administrator && !enabled}
+    {#if !embedded}<h2>{$st('title_server')}</h2>{/if}
+    {#if !settingsReady}<p role="status">{$st('loading')}</p>{:else}<label class="check activation"><input type="checkbox" bind:checked={enabled} disabled={saving} onchange={() => { dirty=true;void save(); }} /> {$st('enable_collection')}</label>{/if}
+    {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {:else}
   <header class="heading">
     <div>
       {#if !embedded}<p class="eyebrow">{administrator ? $st('eyebrow_server') : $st('eyebrow_personal')}</p>{#if administrator}<h2>{$st('title_server')}</h2>{:else}<h1>{$st('title_personal')}</h1>{/if}{/if}
@@ -178,13 +194,17 @@
   </header>
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
   {#if message}<p class="notice" role="status">{message}</p>{/if}
-  {#if administrator && data}
-    <details class="panel settings"><summary>{$st('settings_collection')}</summary><form onsubmit={event => { event.preventDefault(); void save(); }}>
-      <label class="check"><input type="checkbox" bind:checked={enabled} onchange={() => dirty = true} /> {$st('enable_collection')}</label>
+  {#if administrator}<label class="check activation"><input type="checkbox" bind:checked={enabled} disabled={saving} onchange={() => { dirty=true;void save(); }} /> {$st('enable_collection')}</label>{/if}
+  <nav class="statistics-tabs" aria-label={$st('sections')}>
+    {#each tabs as item (item)}<button type="button" class:active={tab===item} aria-current={tab===item?'page':undefined} onclick={() => tab=item}>{$st(`tab_${item}` as StatKey)}</button>{/each}
+  </nav>
+  {#if administrator && data && tab==='settings'}
+    <section class="panel settings"><h3>{$st('settings_collection')}</h3><form onsubmit={event => { event.preventDefault(); void save(); }}>
+      <label class="check"><input type="checkbox" bind:checked={usersCanView} disabled={saving} onchange={() => dirty = true} /> {$st('users_can_view')}</label>
       <p class="muted">{$st('collection_note')}</p>
       <div class="filters"><label>{$st('event_days')}<input type="number" min="1" max="3650" bind:value={eventDays} oninput={() => dirty = true} required /></label><label>{$st('summary_days')}<input type="number" min="0" max="36500" bind:value={summaryDays} oninput={() => dirty = true} required /></label></div>
       {#if wrapped}
-        <fieldset class="wrapped-settings"><legend>{$st('wrapped_settings')}</legend>
+        <fieldset class="wrapped-settings" disabled={!usersCanView}><legend>{$st('wrapped_settings')}</legend>
           <label class="check"><input type="checkbox" bind:checked={wrapped.visible} onchange={() => wrappedDirty = true} /> {$st('wrapped_visible')}</label>
           <label class="check"><input type="checkbox" bind:checked={wrapped.periodEnabled} disabled={!wrapped.visible} onchange={() => wrappedDirty = true} /> {$st('wrapped_period')}</label>
           {#if wrapped.periodEnabled && wrapped.visible}
@@ -199,11 +219,12 @@
         </fieldset>
       {/if}
       <div class="actions"><button class="primary" disabled={saving}>{$st('save')}</button><button type="button" onclick={() => void cleanup()} disabled={saving}>{$st('purge')}</button></div>
-    </form></details>
+    </form></section>
   {/if}
-  {#if data}
+  {#if data && tab==='settings'}
     <p class="collection-state">{data.enabled ? $st('collection_on') : $st('collection_off')}{#if data.firstEnabledAt} {$st('since', { date: date(data.firstEnabledAt) })}{:else} · {$st('no_history')}{/if}. {$st('retention', { events: data.eventRetentionDays, summaries: data.summaryRetentionDays ? $st('days_count', { count: data.summaryRetentionDays }) : $st('summaries_forever') })}</p>
   {/if}
+  {#if tab!=='settings'}
   <form class="panel filter-form" onsubmit={event => { event.preventDefault(); apply(); }}>
     <div class="presets" role="group" aria-label={$st('presets')}>
       {#each [[7, 'preset_7'], [30, 'preset_30'], [90, 'preset_90'], [365, 'preset_365']] as [days, key] (key)}
@@ -212,17 +233,20 @@
       <button type="button" class="chip" class:on={from === `${today.slice(0, 4)}-01-01` && to === today} onclick={() => preset('year')}>{$st('preset_year')}</button>
     </div>
     <div class="filters"><label>{$st('from')}<input type="date" bind:value={from} max={to} required /></label><label>{$st('to')}<input type="date" bind:value={to} min={from} max={today} required /></label>
+    </div><details class="advanced-filters"><summary>{$st('advanced_filters')}</summary><div class="filters">
       {#if administrator}<label>{$st('user')}<select bind:value={userId}><option value="">{$st('all_m')}</option>{#each users as user (user.id)}<option value={user.id}>{user.name}</option>{/each}</select></label>{/if}
       <label>{$st('type')}<select bind:value={kind}><option value="">{$st('all_m')}</option><option value="film">{$st('films')}</option><option value="episode">{$st('episodes')}</option><option value="music">{$st('music')}</option></select></label>
       <label>{$st('library')}<select bind:value={libraryId}><option value="">{$st('all_f')}</option>{#each facets.libraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
       <label>{$st('node')}<select bind:value={nodeId}><option value="">{$st('all_m')}</option>{#each facets.nodes as node (node)}<option>{node}</option>{/each}</select></label>
       <label>{$st('device')}<select bind:value={device}><option value="">{$st('all_m')}</option>{#each facets.devices as item (item)}<option>{item}</option>{/each}</select></label>
       <label>{$st('ranking')}<select bind:value={rank}><option value="users">{$st('rank_users')}</option><option value="seconds">{$st('rank_seconds')}</option><option value="completion">{$st('rank_completion')}</option><option value="favorites">{$st('rank_favorites')}</option><option value="rating">{$st('rank_rating')}</option></select></label>
-    </div><div class="actions"><button class="primary" disabled={loading}>{$st('apply')}</button><button type="button" onclick={() => void download()} disabled={!data}>{$st('export')}</button>{#if nextExportOffset !== null}<button type="button" onclick={() => void download(nextExportOffset ?? 0)}>{$st('export_next')}</button>{/if}</div>
+    </div></details><div class="actions"><button class="primary" disabled={loading}>{$st('apply')}</button><button type="button" onclick={() => void download()} disabled={!data}>{$st('export')}</button>{#if nextExportOffset !== null}<button type="button" onclick={() => void download(nextExportOffset ?? 0)}>{$st('export_next')}</button>{/if}</div>
   </form>
   <p class="muted">{$st('dates_note', { zone: insights?.timezone ?? zone, seconds: insights?.minimumPlaySeconds ?? 60 })}</p>
   {#if insightsError}<p class="notice error" role="alert">{insightsError}</p>{/if}
+  {/if}
   {#if data}
+    {#if tab==='overview'}
     <div class="kpis">
       <Kpi label={$st('kpi_time')} value={duration(data.summary.seconds)} growth={growth ? growth.seconds : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />
       <Kpi label={$st('kpi_plays')} value={number.format(playsCount)} growth={growth ? growth.plays : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />
@@ -235,7 +259,9 @@
     </div>
     {#if !data.summary.plays}<p class="panel empty">{$st('no_plays')}</p>{/if}
     {#if insights?.truncated}<p class="notice">{$st('truncated')}</p>{/if}
+    {/if}
     {#if insights && data.summary.plays}
+      {#if tab==='activity'}
       <div class="columns">
         <section class="panel"><h2>{$st('monthly_title')}</h2><p class="muted">{$st('monthly_note')}</p><Bars items={monthlyBars} label={$st('monthly_title')} format={shortDuration} /></section>
         <section class="panel"><h2>{$st('weekdays_title')}</h2><p class="muted">{$st('weekdays_note')}</p><Bars items={weekdayBars} label={$st('weekdays_title')} format={plays} /></section>
@@ -248,16 +274,22 @@
           <details><summary>{$st('daily_values')}</summary><ul class="values">{#each insights.calendar as item (item.date)}<li>{day(item.date)} : {duration(item.seconds)} · {plays(item.plays)}</li>{/each}</ul></details></section>
         <section class="panel"><h2>{$st('hours_title')}</h2><p class="muted">{$st('hours_note')}</p><HourHeatmap cells={insights.hours} label={$st('hours_title')} locale={$statLocale} {hourLabel} unit={plays} /></section>
       </div>
+      {/if}
+      {#if tab==='content'}
       <div class="columns">
         <section class="panel"><h2>{$st('genres_title')}</h2><p class="muted">{$st('genres_note')}</p><Meter items={insights.genres.map(item => ({ key: item.id, label: item.title, value: item.seconds, detail: `${shortDuration(item.seconds)} · ${plays(item.plays)}` }))} empty={$st('no_data')} /></section>
         <section class="panel"><h2>{$st('resolution_title')}</h2><p class="muted">{$st('resolution_note')}</p><Meter items={insights.resolution.map(item => ({ key: item.label, label: item.label === 'unknown' ? $st('res_unknown') : item.label, value: item.seconds, detail: `${shortDuration(item.seconds)} · ${plays(item.plays)}` })).sort((a, b) => b.value - a.value)} empty={$st('no_data')} /></section>
       </div>
+      {/if}
+      {#if tab==='technical'}
       <div class="columns">
         <section class="panel"><h2>{$st('methods_title')}</h2><p class="muted">{$st('methods_note')}</p><Meter items={insights.methods.map(item => ({ key: item.label, label: methodLabel(item.label), value: item.seconds, detail: `${shortDuration(item.seconds)} · ${plays(item.plays)}` })).sort((a, b) => b.value - a.value)} empty={$st('no_data')} /></section>
         <section class="panel"><h2>{$st('clients_title')}</h2><p class="muted">{$st('clients_note')}</p>
           {#if insights.clients.length}<div class="table-wrap"><table><thead><tr><th>{$st('client')}</th><th>{$st('col_time')}</th><th>{$st('direct')}</th><th>{$st('prepared')}</th><th>{$st('share')}</th></tr></thead><tbody>{#each insights.clients as client (client.label)}<tr><td>{client.label}</td><td>{shortDuration(client.seconds)}</td><td>{client.direct}</td><td>{client.transcoded}</td><td><span class="share" style:--w={client.transcodeShare}><span></span></span>{percent.format(client.transcodeShare)}</td></tr>{/each}</tbody></table></div>{:else}<p class="muted">{$st('no_data')}</p>{/if}
         </section>
       </div>
+      {/if}
+      {#if tab==='content'}
       <div class="columns">
         <section class="panel"><h2>{$st('completion_title')}</h2><p class="muted">{$st('completion_note')}</p>
           {#if bucketTotal}
@@ -273,18 +305,30 @@
         <section class="panel"><h2>{$st('series_title')}</h2><p class="muted">{$st('series_note')}</p><Meter items={insights.series.map(item => ({ key: item.id, label: item.title, sub: $st('episodes_count', { count: item.items }), value: item.seconds, detail: `${shortDuration(item.seconds)} · ${plays(item.plays)}` }))} empty={$st('no_data')} /></section>
         <section class="panel"><h2>{$st('people_title')}</h2><p class="muted">{$st('people_note')}</p><Meter items={insights.people.map(person => ({ key: `${person.role}:${person.name}`, label: person.name, sub: person.role === 'director' ? $st('role_director') : $st('role_actor'), value: person.seconds, detail: $st('titles_count', { count: person.titles }) }))} empty={$st('no_data')} /></section>
       </div>
+      {/if}
+      {#if tab==='activity'}
       <section class="panel"><h2>{$st('concurrency_title')}</h2><p class="muted">{$st('concurrency_note')}{#if insights.concurrency.peakAt} {$st('peak_at', { count: insights.concurrency.peak, date: date(insights.concurrency.peakAt) })}.{/if}</p><Bars items={concurrencyBars} label={$st('concurrency_title')} format={value => String(value)} height={110} everyLabel={Math.max(1, Math.ceil(concurrencyBars.length / 12))} /></section>
+      {/if}
     {/if}
+      {#if tab==='content' || tab==='overview'}
     <section class="panel"><h2>{$st('popular_title')}</h2><p class="muted">{$st('popular_note')}</p><div class="table-wrap"><table><thead><tr><th>{$st('col_media')}</th><th>{$st('col_plays')}</th><th>{$st('col_people')}</th><th>{$st('col_time')}</th><th>{$st('col_completed')}</th><th>{$st('col_favorites')}</th><th>{$st('col_rating')}</th></tr></thead><tbody>{#each data.popular as media (`${media.kind}:${media.id}`)}<tr><td>{media.title}<small>{kindLabel(media.kind)}</small></td><td>{media.plays}</td><td>{media.users}</td><td>{duration(media.seconds)}</td><td>{media.completed} · {Math.round(media.completed / media.plays * 100)} %</td><td>{media.favorites}</td><td>{media.rating ? media.rating.toFixed(1) : '—'}</td></tr>{/each}</tbody></table></div></section>
+      {/if}
+      {#if tab==='technical'}
     <div class="columns">
       <section class="panel"><h2>{$st('behaviour_title')}</h2><dl>{#each metricKeys as key (key)}<dt>{$st(`m_${key}` as StatKey)}</dt><dd>{data.behavior[key]}</dd>{/each}</dl></section>
       <section class="panel"><h2>{$st('quality_title')}</h2><dl><dt>{$st('startup')}</dt><dd>{Math.round(data.behavior.startupMs)} ms</dd><dt>{$st('buffering')}</dt><dd>{data.behavior.bufferingCount}</dd><dt>{$st('buffering_time')}</dt><dd>{duration(data.behavior.bufferingSeconds)}</dd><dt>{$st('errors')}</dt><dd>{data.behavior.errors}</dd></dl><p class="muted">{$st('quality_note')}</p></section>
     </div>
     <div class="columns">{@render distribution($st('dist_initial_audio'), data.distributions.initialAudio ?? [])}{@render distribution($st('dist_audio_time'), data.distributions.audioTime ?? [])}{@render distribution($st('dist_subtitles_time'), data.distributions.subtitlesTime ?? [])}{@render distribution($st('dist_method_time'), (data.distributions.methodTime ?? []).map(row => ({ ...row, label: methodLabel(row.label) })))}{@render distribution($st('dist_artists'), data.music.artist ?? [])}{@render distribution($st('dist_albums'), data.music.album ?? [])}</div>
+      {/if}
+      {#if tab==='history'}
     <section class="panel"><h2>{$st('history_title')}</h2><div class="table-wrap"><table><thead><tr><th>{$st('col_date')}</th>{#if administrator}<th>{$st('col_user')}</th>{/if}<th>{$st('col_media')}</th><th>{$st('col_device')}</th><th>{$st('col_time')}</th><th>{$st('col_coverage')}</th><th>{$st('col_status')}</th><th>{$st('col_detail')}</th></tr></thead><tbody>{#each data.sessions as item (item.id)}<tr><td>{date(item.startedAt)}</td>{#if administrator}<td>{item.user}</td>{/if}<td>{item.title}{#if item.artist}<small>{item.artist} · {item.album}</small>{/if}</td><td class="device">{item.device}</td><td>{duration(item.seconds)}</td><td>{item.duration ? `${Math.min(100, Math.round(item.coveredSeconds / item.duration * 100))} %` : $st('unknown')}</td><td>{statusLabel(item.status)}</td><td><button onclick={() => void openDetail(item.id)} aria-label={$st('detail_of', { title: item.title })}>{$st('view')}</button></td></tr>{/each}</tbody></table></div><div class="actions"><button disabled={offset === 0 || loading} onclick={() => { offset = Math.max(0, offset - 50); void load(false); }}>{$st('previous')}</button><span>{$st('page', { page: Math.floor(offset / 50) + 1 })}</span><button disabled={!data.hasMore || loading} onclick={() => { offset += 50; void load(false); }}>{$st('next')}</button></div></section>
     {#if administrator}<section class="panel"><h2>{$st('users_title')}</h2><div class="table-wrap"><table><thead><tr><th>{$st('col_user')}</th><th>{$st('col_plays')}</th><th>{$st('col_time')}</th><th>{$st('profile')}</th></tr></thead><tbody>{#each data.users as user (user.id)}<tr><td>{user.name}</td><td>{user.plays}</td><td>{duration(user.seconds)}</td><td><button onclick={() => void openProfile(user.id)} aria-label={$st('profile_of', { name: user.name })}>{$st('profile')}</button></td></tr>{/each}</tbody></table></div></section>{/if}
+      {/if}
+    {#if tab==='settings'}
     <details class="panel"><summary>{$st('periods_title')}</summary><p>{$st('periods_note')}</p><ul>{#each data.periods as period, index (`${period.startedAt}-${index}`)}<li>{date(period.startedAt)} → {period.endedAt ? date(period.endedAt) : $st('ongoing')}</li>{/each}</ul><p>{$st('privacy_note')}</p></details>
     {#if !administrator}<details class="panel"><summary>{$st('erase_title')}</summary><p>{$st('erase_note')}</p><label class="check"><input type="checkbox" bind:checked={eraseConfirmed} /> {$st('erase_confirm')}</label><button disabled={!eraseConfirmed || saving} onclick={() => void erase()}>{$st('erase_action')}</button></details>{/if}
+    {/if}
+  {/if}
   {/if}
 </section>
 {#snippet distribution(title: string, rows: Distribution[])}<section class="panel"><h2>{title}</h2>{#if rows.length}<dl>{#each rows.slice(0, 12) as row (row.label)}<dt>{row.label || $st('not_set')}</dt><dd>{row.plays} · {duration(row.seconds)}</dd>{/each}</dl>{:else}<p class="muted">{$st('no_data')}</p>{/if}</section>{/snippet}
@@ -315,6 +359,7 @@
   {/if}
 </dialog>
 <style>
+  .statistics-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);padding-bottom:12px}.statistics-tabs button.active{background:var(--tx);color:var(--bg)}.activation{margin-block:16px}
   .statistics{display:grid;gap:22px;color:var(--tx);width:100%;max-width:var(--maxw);margin:0 auto;min-width:0}
   .heading{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}.heading h1{font-size:clamp(1.6rem,3vw,2.4rem);margin:4px 0}.heading h2{margin:4px 0}.heading p,.muted,.collection-state{color:var(--mu);line-height:1.6}
   .heading-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}

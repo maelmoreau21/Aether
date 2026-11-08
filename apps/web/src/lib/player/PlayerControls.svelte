@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { fade } from 'svelte/transition';
+  const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   import { tick } from 'svelte';
 
   import Icon from '../ui/Icon.svelte';
@@ -303,7 +305,7 @@
               disabled={busy}
               onclick={() => choose(() => onSubtitle(item.id))}
             >
-              <span>{item.label}<small>WebVTT · {item.language.toUpperCase()}</small></span>
+              <span>{item.label}<small>{$t('webvtt', { value: item.language.toUpperCase() })}</small></span>
               {#if item.id === subtitle}
                 <Icon name="check" size={18} />
               {/if}
@@ -329,7 +331,7 @@
             </div>
           {/each}
           <p class="menu-note" role="note">
-            Conteneur : {containerLabel(source?.mime)} · Décodage assuré par le navigateur.
+            {$t('container_decoding_handled_by_the_browser', { value: containerLabel(source?.mime) })}
           </p>
         </div>
         {#if selectableVersions.length > 1}
@@ -414,14 +416,6 @@
       {/if}
     </div>
   {/if}
-    {#if skipMarker}
-    <div class="skip-marker-overlay">
-      <button type="button" class="skip-marker-btn" onclick={() => { onSeek(skipMarker.end, skipMarker.kind); onWake(); }}>
-        <span>{skipMarker.label}</span>
-        <span class="skip-marker-arrow">&rsaquo;</span>
-      </button>
-    </div>
-  {/if}
   <!-- Barre de lecture : tronçons de chapitres séparés par un fin espace, aperçu au survol. -->
   <div
     class="timeline"
@@ -453,13 +447,18 @@
       <span class="knob" aria-hidden="true" style:left={`${percentOf(shownPosition, playback.duration)}%`}></span>
     {/if}
     {#if preview.hoverTime !== null && playback.duration > 0}
-      <output class="seek-preview" aria-hidden="true" bind:offsetWidth={tooltipWidth} style:left={`${tooltipLeft}px`}>
+      <output class="seek-preview" class:has-frame={!!previewFrame} aria-hidden="true" bind:offsetWidth={tooltipWidth} style:left={`${tooltipLeft}px`}>
         {#if previewFrame}
-          <span class="trickplay-frame" style:width={previewFrame.width + 'px'} style:height={previewFrame.height + 'px'}>
+          <!-- Vignette au ratio exact de la tuile, mise à l'échelle (jamais rognée) :
+               la planche est positionnée en pourcentages de la tuile affichée. -->
+          <span class="trickplay-frame"
+            style:aspect-ratio={`${previewFrame.width} / ${previewFrame.height}`}
+            style:width={`min(${previewFrame.width}px, var(--trickplay-max-w), calc(var(--trickplay-max-h) * ${previewFrame.width / previewFrame.height}))`}>
             <img src={previewFrame.url} alt="" draggable="false"
-              style:width={previewFrame.fullWidth + 'px'}
-              style:height={previewFrame.fullHeight + 'px'}
-              style:transform={`translate(-${previewFrame.x}px, -${previewFrame.y}px)`}
+              style:width={`${(previewFrame.fullWidth / previewFrame.width) * 100}%`}
+              style:height={`${(previewFrame.fullHeight / previewFrame.height) * 100}%`}
+              style:left={`${(-previewFrame.x / previewFrame.width) * 100}%`}
+              style:top={`${(-previewFrame.y / previewFrame.height) * 100}%`}
               onerror={() => { if (previewFrame) preview.markHoveredSheetFailed(); }}
             />
           </span>
@@ -473,7 +472,7 @@
     <input
       class="seek"
       aria-label={$t('position')}
-      aria-valuetext={`${clock(shownPosition)} sur ${clock(playback.duration)}${activeSegment?.title ? ' · ' + activeSegment.title : ''}`}
+      aria-valuetext={$t('clock_of_duration', { position: clock(shownPosition), duration: clock(playback.duration) }) + (activeSegment?.title ? ' · ' + activeSegment.title : '')}
       type="range"
       min="0"
       max={playback.duration || 1}
@@ -561,7 +560,7 @@
         <Icon name="jump-forward" size={22} />
       </button>
     </div>
-    <span class="time" aria-label="{clock(playback.position)} sur {clock(playback.duration)}{endTime ? ', fin à ' + endTime : ''}">
+    <span class="time" aria-label={$t('clock_of_duration', { position: clock(playback.position), duration: clock(playback.duration) }) + (endTime ? $t('ends_at') + endTime : '')}>
       <span class="current-time">{clock(shownPosition)}</span>
       <span class="duration-time"> / {clock(playback.duration)}</span>
       {#if playback.duration > 0 && endTime}
@@ -634,6 +633,15 @@
     </div>
   </div>
 </div>
+<!-- Hors du dock : le bouton reste visible et cliquable quand les commandes se masquent. -->
+{#if skipMarker}
+  <div class="skip-marker-overlay" class:raised={visible} transition:fade={{ duration: reducedMotion ? 0 : 200 }}>
+    <button type="button" class="skip-marker-btn" onclick={() => { if (skipMarker) onSeek(skipMarker.end, skipMarker.kind); onWake(); }}>
+      <span>{skipMarker.label}</span>
+      <span class="skip-marker-arrow">&rsaquo;</span>
+    </button>
+  </div>
+{/if}
 <style>
   /* ==========================================================================
      Commandes du lecteur (Halo, toujours sombre). Pas de dock vitré : un voile
@@ -830,40 +838,67 @@
   }
 
   /* Aperçu au survol : vignette Trickplay, chapitre et horodatage. */
+  /* Carte en verre discret : la vignette remplit la carte, le temps est incrusté en bas. */
   .seek-preview {
     position: absolute;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + 10px);
     z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
     max-width: min(320px, 80vw);
     pointer-events: none;
     transform: translateX(-50%);
     color: #fff;
+    animation: seek-preview-in 120ms ease-out;
   }
+  .seek-preview.has-frame {
+    max-width: none;
+    padding: 3px;
+    border-radius: 14px;
+    background: rgb(18 20 28 / 0.55);
+    border: 1px solid rgb(255 255 255 / 0.14);
+    box-shadow: 0 12px 32px rgb(0 0 0 / 0.45), inset 0 1px 0 rgb(255 255 255 / 0.08);
+    backdrop-filter: blur(16px) saturate(1.4);
+    -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  }
+  @keyframes seek-preview-in { from { opacity: 0; translate: 0 4px; } }
   .trickplay-frame {
+    --trickplay-max-w: min(70vw, 320px);
+    --trickplay-max-h: 180px;
     display: block;
     overflow: hidden;
     position: relative;
-    max-width: min(70vw, 320px);
-    max-height: 180px;
-    border: 2px solid rgb(255 255 255 / 0.9);
-    border-radius: var(--r-sm);
-    box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+    border-radius: 11px;
+    background: #000;
   }
-  .trickplay-frame img { position: absolute; top: 0; left: 0; max-width: none; }
+  .trickplay-frame img { position: absolute; display: block; max-width: none; max-height: none; }
   .preview-label {
     display: flex;
     flex-direction: column;
     align-items: center;
     max-width: 100%;
     padding: 4px 10px;
-    border-radius: var(--r-xs);
-    background: rgb(0 0 0 / 0.72);
+    border-radius: 999px;
+    background: rgb(18 20 28 / 0.62);
+    border: 1px solid rgb(255 255 255 / 0.12);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
     text-align: center;
   }
+  .has-frame .preview-label {
+    position: absolute;
+    inset: auto 3px 3px;
+    max-width: none;
+    padding: 18px 10px 7px;
+    border: 0;
+    border-radius: 0 0 11px 11px;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.78), rgb(0 0 0 / 0));
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    text-shadow: 0 1px 2px rgb(0 0 0 / 0.6);
+  }
+  .has-frame .preview-time { color: #fff; }
   .preview-chapter {
     display: -webkit-box;
     max-width: 260px;
@@ -882,11 +917,13 @@
   /* ---------- Bouton « Passer… » ---------- */
   .skip-marker-overlay {
     position: absolute;
-    right: max(var(--pc-gutter), env(safe-area-inset-right));
-    bottom: calc(100% - 104px);
+    right: max(var(--gutter, 40px), env(safe-area-inset-right));
+    bottom: max(48px, calc(env(safe-area-inset-bottom) + 32px));
     z-index: 40;
     pointer-events: auto;
+    transition: bottom var(--t-slow) ease;
   }
+  .skip-marker-overlay.raised { bottom: 168px; }
   .skip-marker-btn {
     gap: 10px;
     min-height: 52px;
@@ -1068,10 +1105,11 @@
     .time { order: 1; margin-left: 4px; font-size: 13px; }
     .right-controls { order: 2; }
     .left-controls { order: 3; width: 100%; justify-content: center; }
-    .skip-marker-overlay { right: max(12px, env(safe-area-inset-right)); bottom: calc(100% - 60px); }
+    .skip-marker-overlay { right: max(12px, env(safe-area-inset-right)); bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px)); }
+    .skip-marker-overlay.raised { bottom: 132px; }
     .skip-marker-btn { min-height: 44px; padding: 0 18px; font-size: 14px; }
     .seek-preview { max-width: 70vw; }
-    .trickplay-frame { max-width: min(48vw, 200px); max-height: 120px; }
+    .trickplay-frame { --trickplay-max-w: min(48vw, 200px); --trickplay-max-h: 120px; }
   }
   @media (max-width: 768px) {
     .floating-menu {

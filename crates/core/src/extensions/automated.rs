@@ -16,6 +16,87 @@ pub(super) type TargetResolution = (
     Option<(String, String, String, Option<f64>)>,
 );
 
+/// Durable error code for a search that found no single trustworthy candidate.
+pub(crate) const UNIDENTIFIED_ERROR: &str = "metadata_unidentified";
+
+/// Episodes sent together to one `intro.detect`, the target included. Measured with real Chromaprint
+/// output run in this Core's wasmi runtime: three episodes with a full head and tail use about
+/// 105 M of the guest's 200 M fuel and 63 KB of its 64 KiB request; a fourth exceeds both. The
+/// Core used to send up to eight (170 KB), which the runtime refuses as `input_too_large`.
+const MARKER_BATCH_MAX: usize = 3;
+/// JSON added by the keys, ids and numbers of one episode besides its two base64 fingerprints.
+const MARKER_EPISODE_OVERHEAD: usize = 320;
+/// Left free in the request for the extension settings' growth and the envelope.
+const MARKER_REQUEST_MARGIN: usize = 1024;
+
+/// Chapters sent with each episode of an acoustic detection (a typical file has 4 to 12).
+pub(crate) const MARKER_CHAPTERS_MAX: usize = 40;
+
+/// The chapters of an ffprobe result as the plugin reads them: start, end and title, sorted,
+/// at most `limit`. A chapter without a title is kept with an empty one: its boundaries still
+/// help, and unnamed chapters reveal an anime episode's structure.
+pub(super) fn probe_chapters(probe: &Value, limit: usize) -> Vec<Value> {
+    let mut chapters: Vec<(f64, Option<f64>, String)> = probe["chapters"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|chapter| {
+            let number = |key: &str| {
+                chapter[key]
+                    .as_str()
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .or_else(|| chapter[key].as_f64())
+                    .filter(|n| n.is_finite() && *n >= 0.0)
+            };
+            let round = |n: f64| (n * 1000.0).round() / 1000.0;
+            let start = round(number("start_time")?);
+            let end = number("end_time").map(round).filter(|end| *end > start);
+            let title: String = chapter["tags"]["title"]
+                .as_str()
+                .unwrap_or("")
+                .chars()
+                .take(64)
+                .collect();
+            Some((start, end, title))
+        })
+        .collect();
+    chapters.sort_by(|a, b| a.0.total_cmp(&b.0));
+    chapters
+        .into_iter()
+        .take(limit)
+        .map(|(start, end, title)| match end {
+            Some(end) => json!({"start": start, "end": end, "title": title}),
+            None => json!({"start": start, "title": title}),
+        })
+        .collect()
+}
+
+/// Order the candidates of one season for a detection: the target first, then the episodes whose
+/// number is closest to it (neighbours most often share the same opening), keeping the incoming
+/// order between equals. Returns indices into `episodes`: `(is_target, number)`.
+pub(super) fn marker_peer_order(episodes: &[(bool, Option<i64>)]) -> Vec<usize> {
+    let target = episodes.iter().find(|e| e.0).and_then(|e| e.1);
+    let mut order: Vec<usize> = (0..episodes.len()).collect();
+    order.sort_by_key(|&i| {
+        let (is_target, number) = episodes[i];
+        let distance = match (target, number) {
+            (Some(t), Some(n)) => (t - n).abs(),
+            _ => i64::MAX,
+        };
+        (!is_target, distance)
+    });
+    order
+}
+
+/// Whether one more episode of `size` bytes still fits the request.
+pub(super) fn marker_request_fits(used: usize, size: usize, budget: usize) -> bool {
+    used.saturating_add(size) <= budget
+}
+
+fn unidentified_search(non_music: bool, operation: &str, value: &Value) -> bool {
+    non_music && operation == "metadata.search" && value.is_array()
+}
+
 pub(crate) struct AutomatedResult {
     pub value: Value,
     pub marker_sources: Vec<(String, String)>,
@@ -82,23 +163,36 @@ pub(crate) async fn run_automated(
         return Err(err(StatusCode::CONFLICT, "invalid_settings"));
     }
     let mut settings = resolve_effective_extension_settings(extension_id, settings);
-    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
-        .bind(&job.library_id)
-        .fetch_one(auth.store.pool())
-        .await
-        .map_err(db)?;
+    let (options, library_kind): (String, String) =
+        query_as("SELECT options_json, kind FROM libraries WHERE id=?")
+            .bind(&job.library_id)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
     let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
-    let providers = if operation.starts_with("intro.") {
-        &options.segment_providers
+    let priority = if operation.starts_with("intro.") {
+        crate::library_options::LibraryOptions::provider_priority(
+            &options.segment_providers,
+            extension_id,
+            100,
+        )
     } else if operation == "metadata.images" {
-        &options.image_providers
+        crate::library_options::LibraryOptions::provider_priority(
+            &options.image_providers,
+            extension_id,
+            100,
+        )
+    } else if operation == "lyrics.get" {
+        crate::library_options::LibraryOptions::provider_priority(
+            &options.metadata_providers,
+            extension_id,
+            100,
+        )
     } else {
-        &options.metadata_providers
+        options.metadata_provider_priority_for_kind(&library_kind, extension_id, 100)
     };
-    if crate::library_options::LibraryOptions::provider_priority(providers, extension_id, 100)
-        .is_none()
-    {
+    if priority.is_none() {
         return Err(err(StatusCode::FORBIDDEN, "library_provider_disabled"));
     }
     let legacy = operation == "metadata.propose"
@@ -160,19 +254,31 @@ pub(crate) async fn run_automated(
             .bind(work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
         let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=a.library_id JOIN automation_observations obs ON obs.asset_id=a.id JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' AND t.component='fingerprint' AND t.status='completed' WHERE ep.season_id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id LIMIT 12")
             .bind(&scope.0).bind(&job.library_id).bind(&job.target_id).fetch_all(auth.store.pool()).await.map_err(db)?;
+        let order = marker_peer_order(
+            &candidates
+                .iter()
+                .map(|c| (c.0 == job.target_id, c.6.parse::<i64>().ok()))
+                .collect::<Vec<_>>(),
+        );
+        let mut candidates: Vec<Option<_>> = candidates.into_iter().map(Some).collect();
+        let candidates: Vec<_> = order
+            .into_iter()
+            .filter_map(|i| candidates[i].take())
+            .collect();
+        let request_budget = media_extension_sdk::MAX_JSON.saturating_sub(
+            serde_json::to_vec(&settings).map_or(0, |bytes| bytes.len()) + MARKER_REQUEST_MARGIN,
+        );
+        let mut request_bytes = 0usize;
         let mut episodes = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for (asset, raw, key, source, probe, episode_work, number) in candidates {
-            if episodes.len() >= 8 {
+            if episodes.len() >= MARKER_BATCH_MAX {
                 break;
             }
             if seen.contains(&episode_work) {
                 continue;
             }
-            let expected = format!(
-                "fp:{}",
-                crate::automation::hash(&(&asset, &source, "chromaprint-v1")).map_err(db)?
-            );
+            let expected = crate::automation::fingerprint_key(&asset, &source).map_err(db)?;
             if key != expected {
                 continue;
             }
@@ -229,6 +335,24 @@ pub(crate) async fn run_automated(
             else {
                 continue;
             };
+            // The plugin reads the chapters with the audio: named chapters are kept as authored,
+            // and an acoustic boundary close to a chapter mark lands on it. Only the target's
+            // result is stored (each peer has its own task), so only its chapters are sent: the
+            // request has no room to spare for three episodes.
+            let chapters = if episodes.is_empty() {
+                probe_chapters(&probe, MARKER_CHAPTERS_MAX)
+            } else {
+                Vec::new()
+            };
+            let chapters_size = serde_json::to_vec(&chapters).map_or(0, |bytes| bytes.len());
+            let size = bytes.len().div_ceil(3) * 4
+                + tail_compact.as_ref().map_or(0, String::len)
+                + chapters_size
+                + MARKER_EPISODE_OVERHEAD;
+            if !episodes.is_empty() && !marker_request_fits(request_bytes, size, request_budget) {
+                continue;
+            }
+            request_bytes += size;
             seen.insert(episode_work);
             marker_sources.push((asset.clone(), source));
             let mut ep_val = json!({
@@ -238,8 +362,13 @@ pub(crate) async fn run_automated(
                 "episodeNumber": number.parse::<u32>().ok(),
                 "duration": duration,
                 "fingerprintsCompact": STANDARD.encode(bytes),
-                "fingerprintRate": result["fingerprintRate"]
+                // The words are Chromaprint's; results stored before November 2026 carry a mislabelled
+                // rate (8.6133), so the rate is the algorithm's, never the stored one.
+                "fingerprintRate": media_node::tasks::FINGERPRINT_RATE
             });
+            if !chapters.is_empty() {
+                ep_val["chapters"] = json!(chapters);
+            }
             if let Some(compact) = tail_compact {
                 ep_val["tailFingerprintsCompact"] = json!(compact);
             }
@@ -259,7 +388,7 @@ pub(crate) async fn run_automated(
         let context = context
             .as_ref()
             .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"))?;
-        if context.kind != "episode" {
+        if context.kind != "episode" && context.kind != "film" {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "episode_required"));
         }
         let raw: String = query_scalar(
@@ -277,20 +406,29 @@ pub(crate) async fn run_automated(
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite() && *value > 0.0)
             .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "duration_required"))?;
-        let chapters = probe["chapters"].as_array().cloned().unwrap_or_default();
-        if chapters.len() > 1000 {
+        if probe["chapters"]
+            .as_array()
+            .is_some_and(|list| list.len() > 1000)
+        {
             return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "too_many_chapters"));
         }
-        let chapters: Vec<Value> = chapters
-            .iter()
-            .filter_map(|chapter| {
-                let start = chapter["start_time"].as_str()?.parse::<f64>().ok()?;
-                let title = chapter["tags"]["title"].as_str()?;
-                (start.is_finite() && start >= 0.0 && title.len() <= 128)
-                    .then(|| json!({"start":start,"title":title}))
-            })
-            .collect();
-        json!({"episodeId":work_id,"duration":duration,"chapters":chapters})
+        let chapters = probe_chapters(&probe, 256);
+        let mut input = json!({
+            "episodeId": work_id,
+            "duration": duration,
+            "chapters": chapters,
+            "mediaType": if context.kind == "film" { "movie" } else { "episode" },
+        });
+        // A film's end credits are also read from its picture once the Node measured it
+        // (lettering on black, see `media_node::end_credits`).
+        if context.kind == "film"
+            && let Some(frames) = crate::automation::film_credits_scan(&auth.store, &job.target_id)
+                .await
+                .map_err(db)?
+        {
+            input["blackFrames"] = frames;
+        }
+        input
     } else {
         let context = context
             .as_ref()
@@ -351,6 +489,9 @@ pub(crate) async fn run_automated(
     )
     .await
     .map_err(db)?
+        // Older builds cached unresolved candidate lists; those must be retried
+        // against the provider instead of replaying "not identified" for a day.
+        && !unidentified_search(music_track.is_none(), operation, &cached)
     {
         if operation == "lyrics.get" && !lyrics_result_matches_input(&payload, &cached) {
             return Err(err(
@@ -491,6 +632,13 @@ pub(crate) async fn run_automated(
             });
         }
     }
+    // No single trustworthy candidate: leave the work untouched and fail the
+    // task so the engine retries it later (ids found meanwhile by other
+    // providers or an NFO are picked up), then surfaces it for manual identify.
+    if unidentified_search(music_track.is_none(), operation, &result) {
+        drop(tx);
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, UNIDENTIFIED_ERROR));
+    }
     let _ = crate::automation::put_cached_provider_response(
         &mut tx,
         extension_id,
@@ -506,4 +654,50 @@ pub(crate) async fn run_automated(
         value: result,
         marker_sources,
     })
+}
+
+#[cfg(test)]
+mod marker_batch_tests {
+    use super::*;
+
+    #[test]
+    fn target_first_then_neighbours_in_incoming_order() {
+        // (is_target, episode number): the target is episode 6, listed after two newer results.
+        let episodes = [
+            (false, Some(1)),
+            (false, Some(12)),
+            (true, Some(6)),
+            (false, Some(7)),
+            (false, Some(5)),
+            (false, Some(7)),
+            (false, None),
+        ];
+        // Distances 5, 6, -, 1, 1, 1, unknown: ties keep the order the Core listed them in.
+        assert_eq!(marker_peer_order(&episodes), vec![2, 3, 4, 5, 0, 1, 6]);
+        // Without a numbered target nothing is reordered except that the target leads.
+        assert_eq!(
+            marker_peer_order(&[(false, Some(2)), (true, None), (false, Some(1))]),
+            vec![1, 0, 2]
+        );
+    }
+
+    #[test]
+    fn three_full_episodes_fit_the_guest_request_and_four_do_not() {
+        // Real Chromaprint output: a 300 s head is 2402 items, a 186 s tail 1481 items.
+        let head: usize = 2402 * 4;
+        let tail: usize = 1481 * 4;
+        let size = head.div_ceil(3) * 4 + tail.div_ceil(3) * 4 + MARKER_EPISODE_OVERHEAD;
+        let budget = media_extension_sdk::MAX_JSON - 400 - MARKER_REQUEST_MARGIN;
+        let mut used = 0;
+        let mut fitted = 0;
+        while marker_request_fits(used, size, budget) {
+            used += size;
+            fitted += 1;
+        }
+        assert_eq!(fitted, 3, "{size} bytes each, budget {budget}");
+        assert_eq!(fitted, MARKER_BATCH_MAX);
+        // Episodes with no tail leave room, but the batch size stays capped by the fuel measurement.
+        assert!(marker_request_fits(0, size, budget));
+        assert!(!marker_request_fits(usize::MAX, 1, budget));
+    }
 }

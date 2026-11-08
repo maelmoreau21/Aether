@@ -2,6 +2,7 @@ import { writable } from 'svelte/store';
 import { getSessionGeneration, onSessionGenerationChange } from '../auth/session';
 import { type Progress, writeProgress, readProgress } from '../player/progress';
 
+import { tr } from '../i18n';
 export const history = writable<Progress[]>([]);
 let pending: Promise<void> | undefined;
 let loaded = 0;
@@ -13,7 +14,7 @@ export function loadHistory(force = false): Promise<void> {
   const generation = getSessionGeneration();
   const operation = (async () => {
     const response = await fetch('/api/v1/progress', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000) });
-    if (!response.ok) throw new Error('Historique indisponible.');
+    if (!response.ok) throw new Error(tr('history_unavailable'));
     const result: { items: Progress[] } = await response.json();
     if (generation === getSessionGeneration()) { history.set(result.items); loaded = Date.now(); }
   })();

@@ -19,6 +19,7 @@
   import { serverPresentation } from '../config/presentation';
   import { loadFeatures } from '../applications/api';
   import { t } from '../i18n';
+  import { startWatchParty } from '../syncplay/launch';
 
   type Kind = AccessibleLibrary['kind'];
 
@@ -112,7 +113,7 @@
 
 <header class="site-header" class:scrolled={isScrolled}>
   <div class="header-inner">
-    <a class="brand" href={resolve('/')} onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} aria-label={`${$serverPresentation.serverName || name}, ${$t('home').toLowerCase()}`}>
+    <a class="brand" href={resolve('/')} onpointerenter={() => preloadCatalog('home')} onfocus={() => preloadCatalog('home')} aria-label={$t('brand_home_label', { name: $serverPresentation.serverName || name })}>
       <svg class="brand-mark" viewBox="0 0 256 256" width="28" height="28" aria-hidden="true">
         <defs><linearGradient id="halo-brand" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="logo-stop-a" /><stop offset="1" class="logo-stop-b" /></linearGradient></defs>
         <path d="M64 192 V48 L216 128 L116 180" fill="none" stroke="url(#halo-brand)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" />
@@ -201,7 +202,7 @@
     onClose={() => (watchPartyOpen = false)}
     onJoinParty={(partyId, mediaId) => {
       watchPartyOpen = false;
-      window.dispatchEvent(new CustomEvent('start-watch-party', { detail: { partyId, mediaId } }));
+      startWatchParty({ partyId, mediaId });
     }}
   />
 {/if}

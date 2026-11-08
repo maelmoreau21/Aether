@@ -16,6 +16,7 @@ import {
   type DriftOptions
 } from './sync-math';
 
+import { tr } from '../i18n';
 export class SyncPartyClient {
   public party = $state<PartyStatePayload | null>(null);
   public members = $state<MemberPayload[]>([]);
@@ -99,7 +100,7 @@ export class SyncPartyClient {
         this.connected = false;
       };
     } catch (e) {
-      this.errorMessage = e instanceof Error ? e.message : 'Erreur WebSocket';
+      this.errorMessage = e instanceof Error ? e.message : tr('websocket_error');
     }
   }
 
@@ -178,7 +179,7 @@ export class SyncPartyClient {
           this.party.position = msg.position;
           this.party.positionUpdatedServerMs = msg.targetServerEpochMs;
         }
-        this.notify(`Lancement de la lecture dans ${msg.seconds}s...`);
+        this.notify(tr('starting_playback_in_s', { seconds: msg.seconds }));
         this.onCountdown?.(msg.seconds, msg.position);
         this.applyPlaybackState(msg.causedByName);
         break;
@@ -191,7 +192,7 @@ export class SyncPartyClient {
         } else {
           this.members.push(msg.member);
         }
-        this.notify(`${msg.member.displayName} a rejoint la séance`);
+        this.notify(tr('joined_the_session', { displayName: msg.member.displayName }));
         break;
       }
 
@@ -200,7 +201,7 @@ export class SyncPartyClient {
         if (member) {
           member.isOnline = false;
         }
-        this.notify(`${msg.displayName} a quitté la séance`);
+        this.notify(tr('left_the_session', { displayName: msg.displayName }));
         break;
       }
 
@@ -221,7 +222,7 @@ export class SyncPartyClient {
         for (const m of this.members) {
           m.role = m.userId === msg.newHostId ? 'host' : 'participant';
         }
-        this.notify(`${msg.newHostName} est désormais l'organisateur`);
+        this.notify(tr('is_now_the_organiser', { newHostName: msg.newHostName }));
         break;
       }
 
@@ -229,7 +230,7 @@ export class SyncPartyClient {
         const m = this.members.find((mem) => mem.userId === msg.userId);
         if (m) m.hasControl = true;
         if (msg.userId === this.currentUserId) {
-          this.notify("Vous avez désormais le contrôle de la lecture");
+          this.notify(tr('you_now_control_playback'));
         }
         break;
       }
@@ -238,14 +239,14 @@ export class SyncPartyClient {
         const m = this.members.find((mem) => mem.userId === msg.userId);
         if (m) m.hasControl = false;
         if (msg.userId === this.currentUserId) {
-          this.notify("Votre contrôle de lecture a été retiré");
+          this.notify(tr('your_playback_control_was_removed'));
         }
         break;
       }
 
       case 'controlRequested': {
         if (this.isHost) {
-          this.notify(`${msg.displayName} demande le contrôle de la lecture`);
+          this.notify(tr('is_asking_for_playback_control', { displayName: msg.displayName }));
         }
         break;
       }
@@ -295,7 +296,7 @@ export class SyncPartyClient {
           this.party.positionUpdatedServerMs = this.getCurrentServerEpochMs();
         }
         this.clearPlaybackSchedule();
-        this.notify(`Nouveau média lancé par ${msg.causedByName} : ${msg.mediaTitle}`);
+        this.notify(tr('new_media_started_by', { causedByName: msg.causedByName, mediaTitle: msg.mediaTitle }));
         this.onMediaChanged?.(msg.mediaId, msg.mediaTitle);
         break;
       }

@@ -6,6 +6,7 @@
   import { session } from '../../lib/auth/session';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
+  import { t } from '../i18n';
 
   type IdentifyResult = {
     provider: string;
@@ -28,9 +29,10 @@
     onsaved?: () => void;
   } = $props();
 
+  const preferredProvider = $derived(work.kind === 'series' || work.kind === 'episode' ? 'tvdb' : 'tmdb');
   let searchTitle = $state('');
   let searchYear = $state<number | undefined>(undefined);
-  let searchProvider = $state('all');
+  let searchProvider = $state('');
   let replaceImages = $state(true);
   let tmdbId = $state('');
   let imdbId = $state('');
@@ -59,7 +61,7 @@
         .filter(([, value]) => value)
     );
     if (!searchTitle.trim() && Object.keys(externalIds).length === 0) {
-      error = 'Veuillez saisir un titre ou un identifiant à rechercher.';
+      error = $t('please_enter_a_title_or_an');
       return;
     }
     searching = true;
@@ -77,18 +79,23 @@
           externalIds,
           title: searchTitle.trim(),
           year: searchYear ? Number(searchYear) : undefined,
-          provider: searchProvider === 'all' ? null : searchProvider
+          provider: searchProvider || null
         }),
         signal: AbortSignal.timeout(45000)
       });
 
       if (!response.ok) {
-        throw new Error(`Recherche indisponible (HTTP ${response.status}). Vérifiez vos extensions activées.`);
+        throw new Error($t('search_unavailable_http_check_your_enabled', { status: response.status }));
       }
 
       const data = await response.json();
       results = data.results ?? [];
       providersList = data.providers ?? [];
+      if (!searchProvider) {
+        searchProvider = providersList.some(p => p.id === preferredProvider)
+          ? preferredProvider
+          : (providersList[0]?.id ?? 'all');
+      }
       const failures = (data.errors ?? []) as { providerName?: string; provider: string; error: string }[];
       if (results.length === 0 && failures.length > 0) {
         error = failures
@@ -96,7 +103,7 @@
           .join(' · ');
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Erreur lors de la recherche.';
+      error = cause instanceof Error ? cause.message : $t('error_during_the_search');
     } finally {
       searching = false;
     }
@@ -124,16 +131,16 @@
       });
 
       if (!response.ok) {
-        throw new Error(`Échec de l'application des métadonnées (HTTP ${response.status}).`);
+        throw new Error($t('applying_metadata_failed_http', { status: response.status }));
       }
 
-      successMsg = 'Identification réussie ! Mise à jour des métadonnées…';
+      successMsg = $t('identification_successful_updating_metadata');
       setTimeout(() => {
         onsaved();
         onclose();
       }, 700);
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : 'Erreur lors de l’enregistrement.';
+      error = cause instanceof Error ? cause.message : $t('error_while_saving');
       applying = false;
       applyingId = null;
     }
@@ -148,7 +155,7 @@
   <button
     type="button"
     class="modal-backdrop-click"
-    aria-label="Fermer la fenêtre"
+    aria-label={$t('close_the_window')}
     tabindex="-1"
     onclick={onclose}
   ></button>
@@ -157,12 +164,12 @@
     <div class="modal-header">
       <div class="modal-title-group">
         <Icon name="search" size={20} />
-        <h3 id="identify-modal-title">Identifier · {work.title}</h3>
+        <h3 id="identify-modal-title">{$t('identify', { title: work.title })}</h3>
       </div>
       <button
         type="button"
         class="close-modal-btn"
-        aria-label="Fermer"
+        aria-label={$t('close')}
         disabled={applying}
         onclick={onclose}
       >
@@ -175,36 +182,38 @@
       <form class="identify-search-bar" onsubmit={(e) => { e.preventDefault(); void performSearch(); }}>
         <div class="input-row">
           <label class="field-group flex-2">
-            <span>Titre</span>
+            <span>{$t('title')}</span>
             <input
               type="text"
               maxlength="256"
-              placeholder="Ex. Inception"
+              placeholder={$t('e_g_inception')}
               bind:value={searchTitle}
               disabled={searching || applying}
             />
           </label>
 
           <label class="field-group flex-1">
-            <span>Année</span>
+            <span>{$t('stats_w_year')}</span>
             <input
               type="number"
               min="1880"
               max="2100"
-              placeholder="Ex. 2010"
+              placeholder={$t('e_g_2010')}
               bind:value={searchYear}
               disabled={searching || applying}
             />
           </label>
 
-          {#if providersList.length > 1}
+          {#if providersList.length > 0}
             <label class="field-group flex-1">
-              <span>Source</span>
-              <select bind:value={searchProvider} disabled={searching || applying}>
-                <option value="all">Toutes sources</option>
+              <span>{$t('source')}</span>
+              <select bind:value={searchProvider} onchange={() => void performSearch()} disabled={searching || applying}>
                 {#each providersList as p (p.id)}
                   <option value={p.id}>{p.name}</option>
                 {/each}
+                {#if providersList.length > 1}
+                  <option value="all">{$t('all_sources')}</option>
+                {/if}
               </select>
             </label>
           {/if}
@@ -218,22 +227,22 @@
             >
               {#if searching}
                 <span class="mini-spinner"></span>
-                <span>Recherche…</span>
+                <span>{$t('searching')}</span>
               {:else}
                 <Icon name="search" size={16} />
-                <span>Rechercher</span>
+                <span>{$t('filter_extensions')}</span>
               {/if}
             </button>
           </div>
         </div>
 
         <details class="identify-ids">
-          <summary>Identifiants des fournisseurs</summary>
-          <p>Les identifiants du NFO sont repris automatiquement. Videz-les pour rechercher uniquement par titre.</p>
+          <summary>{$t('provider_identifiers')}</summary>
+          <p>{$t('nfo_identifiers_are_picked_up_automatically')}</p>
           <div class="input-row">
-            <label class="field-group flex-1"><span>TMDb</span><input aria-label="Identifiant TMDb" type="text" inputmode="numeric" maxlength="32" placeholder="Ex. 27205" bind:value={tmdbId} disabled={searching || applying} /></label>
-            <label class="field-group flex-1"><span>IMDb</span><input aria-label="Identifiant IMDb" type="text" maxlength="32" placeholder="Ex. tt1375666" bind:value={imdbId} disabled={searching || applying} /></label>
-            <label class="field-group flex-1"><span>TVDb</span><input aria-label="Identifiant TVDb" type="text" inputmode="numeric" maxlength="32" bind:value={tvdbId} disabled={searching || applying} /></label>
+            <label class="field-group flex-1"><span>{$t('tmdb')}</span><input aria-label={$t('tmdb_identifier')} type="text" inputmode="numeric" maxlength="32" placeholder={$t('e_g_27205')} bind:value={tmdbId} disabled={searching || applying} /></label>
+            <label class="field-group flex-1"><span>{$t('imdb')}</span><input aria-label={$t('imdb_identifier')} type="text" maxlength="32" placeholder={$t('e_g_tt1375666')} bind:value={imdbId} disabled={searching || applying} /></label>
+            <label class="field-group flex-1"><span>{$t('tvdb')}</span><input aria-label={$t('tvdb_identifier')} type="text" inputmode="numeric" maxlength="32" bind:value={tvdbId} disabled={searching || applying} /></label>
           </div>
         </details>
 
@@ -244,7 +253,7 @@
               bind:checked={replaceImages}
               disabled={searching || applying}
             />
-            Remplacer également l’affiche et l’arrière-plan existants par ceux du fournisseur
+            {$t('also_replace_the_existing_poster_and')}
           </label>
         </div>
       </form>
@@ -261,7 +270,7 @@
         {#if searching}
           <div class="loading-state">
             <div class="spinner"></div>
-            <p>Interrogation des fournisseurs en direct…</p>
+            <p>{$t('querying_providers_live')}</p>
           </div>
         {:else if providersList.length === 0}
           <div class="no-provider-notice" role="status">
@@ -269,16 +278,16 @@
               <Icon name="sparkles" size={28} />
             </div>
             <div class="notice-content">
-              <h4>Aucun fournisseur de métadonnées actif</h4>
+              <h4>{$t('no_active_metadata_provider')}</h4>
               <p>
-                Activez un fournisseur de métadonnées pour rechercher ce média ou utiliser ses identifiants NFO.
+                {$t('enable_a_metadata_provider_to_search')}
               </p>
               <p>
-                Vérifiez l’activation et l’accès à cette bibliothèque dans les paramètres de <strong>TMDb</strong> ou <strong>IMDb</strong>.
+                {$t('check_activation_and_access_to_this')} <strong>{$t('tmdb')}</strong> {$t('or_word')} <strong>{$t('imdb')}</strong>.
               </p>
               <a href={resolve('admin/libraries/#extensions-section')} class="btn primary-btn notice-link">
                 <Icon name="search" size={15} />
-                <span>Gérer les extensions</span>
+                <span>{$t('admin_manage_extensions')}</span>
               </a>
             </div>
           </div>
@@ -286,10 +295,10 @@
           <div class="empty-state">
             <Icon name="search" size={24} />
             <p>
-              Aucun résultat trouvé via {providersList.length === 1 ? providersList[0].name : `${providersList.length} fournisseurs`}.
+              {$t('no_result_via', { providers: providersList.length === 1 ? providersList[0].name : $t('providers_count', { count: providersList.length }) })}
             </p>
             <p class="empty-hint">
-              Vérifiez l'orthographe du titre, essayez sans renseigner l'année, ou assurez-vous que votre clé d'API est bien configurée dans les réglages de l'extension.
+              {$t('check_the_title_spelling_try_without')}
             </p>
           </div>
         {:else}
@@ -298,7 +307,7 @@
               <article class="result-card">
                 <div class="result-poster">
                   {#if item.posterUrl}
-                    <img src={providerImagePreview(item.provider, work.id, item.posterUrl)} alt={`Affiche de ${item.title}`} loading="lazy" />
+                    <img src={providerImagePreview(item.provider, work.id, item.posterUrl)} alt={$t('poster_of', { title: item.title })} loading="lazy" />
                   {:else}
                     <div class="poster-placeholder">
                       <Icon name="image" size={32} />
@@ -332,9 +341,9 @@
                     >
                       {#if applying && applyingId === item.id}
                         <span class="mini-spinner"></span>
-                        <span>Application…</span>
+                        <span>{$t('applying')}</span>
                       {:else}
-                        <span>Sélectionner</span>
+                        <span>{$t('catalog_select')}</span>
                       {/if}
                     </button>
                   </div>

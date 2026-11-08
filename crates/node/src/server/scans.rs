@@ -232,7 +232,7 @@ pub(super) fn task_grant(
             entry.size,
             entry.modified_ns.clone(),
         )
-    } else if matches!(req.category.as_str(), "analyze" | "prepare") {
+    } else if matches!(req.category.as_str(), "analyze" | "prepare" | "trickplay") {
         let entry = inventory.assets.get(&req.target_id).ok_or_else(denied)?;
         (
             inventory
@@ -263,7 +263,7 @@ pub(super) async fn run_node_task(
 ) {
     let result = async {
         let (grant, size, mtime) = task_grant(&state, &req)?;
-        crate::tasks::run_task_on_grant(
+        crate::tasks::run_task_with_trickplay_options(
             &req.category,
             &grant,
             req.component.as_deref(),
@@ -271,6 +271,8 @@ pub(super) async fn run_node_task(
             &state.preparations,
             size,
             &mtime,
+            req.trickplay.as_ref(),
+            Some(&state.trickplay),
         )
         .await
     };
@@ -414,6 +416,7 @@ pub(super) async fn run_remote_scan_task(
                 size: f.size,
                 modified_ns: f.modified_ns,
                 probe: media_contracts::media::Probe::default(),
+                content_fingerprint: f.content_fingerprint,
             },
         );
     }

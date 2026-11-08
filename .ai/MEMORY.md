@@ -1,5 +1,7 @@
 # Mémoire Aether — point d’entrée
 
+Ce fichier est un **index historique**, pas un prompt, un backlog, ni une liste de tâches à poursuivre automatiquement. Lire seulement l'entrée pertinente pour la mission et vérifier chaque affirmation dans le code/tests de la branche courante. Ne pas charger systématiquement l'archive complète.
+
 Le code et les tests actuels font foi. Cette mémoire est un index de décisions et
 preuves historiques, pas une garantie de comportement ni de déploiement actuel.
 Consulter les documents du domaine et les sources avant toute modification.
@@ -16,6 +18,191 @@ Consulter les documents du domaine et les sources avant toute modification.
 Les futures entrées restent courtes : périmètre, décision, vérifications réellement
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
+
+## 8 novembre 2026 — Fusion chapitres/audio Intro Skipper, ré-extraction des empreintes tronquées et éditeur de segments films/épisodes
+
+- Plugin `intro-skipper` (`Aether-Plugins-IntroSkipper/src/chapters.rs`, `src/lib.rs`, `tests/chapter_fusion_tests.rs`, `tests/intro_skipper_tests.rs`) :
+  - Détection par structure sur les chapitres génériques d’animé (`Chapter 1..N`) sans titres nommés (`detect_unnamed_structure`, confiance `0.72`) et reconnaissance élargie des mots-clés multilingues (`opening`, `ending`, `crédits`, `générique`, `récap`, `aperçu`, `scène post-générique`).
+  - Fusion intelligente chapitres + empreintes audio (`fuse_detections`) : recalage sur les frontières de chapitre proches (`CHAPTER_SNAP_SECONDS = 8.0`), arbitrage des chevauchements et conservation de la source combinée (`chapter+audio`).
+- Core & Node (`crates/core/src/automation.rs`, `timeline_markers.rs`, `extensions/automated.rs`, `crates/node/src/tasks.rs`, `crates/core/tests/automation_flow.rs`, `docs/INTRO_SKIPPER.md`) :
+  - Clé de déduplication canonique `fingerprint_key(asset, source)` basée sur `asset_id + container + size_bytes + mtime_secs + duration_ms` et ré-extraction automatique des anciennes empreintes ne couvrant pas la fin de l’épisode (`tailless`, lorsque `duration > 360 s` et qu’aucune fenêtre ne dépasse `300 s`).
+  - Planification et relance bornées (`usable_fingerprint_peers`, `season_fingerprint_candidates`, `queue_fingerprint`, `redetect`) sans doublons ni avertissements `clippy`/`dead_code`.
+- Interface Web (`MediaSegments.svelte`, `SegmentEditor.svelte`, `SegmentEditPanel.svelte`, `SegmentSteps.svelte`, `SeriesDetail.svelte`, `segments.ts`, `segments.test.ts`, `locales/{fr,en}/catalog.ts`) :
+  - Prise en charge de la détection et de l’édition de segments sur les films (`scope="film"`) comme sur les séries (`scope="episode"`), suivi détaillé des étapes d’analyse (`SegmentSteps.svelte`), aimantation aux chapitres proches et copie/propagation inter-épisodes avec filtrage des durées incompatibles.
+  - Synchronisation complète des clés i18n `segment_*` (`fr` et `en`) et enrichissement des tests unitaires `segments.test.ts`.
+- Vérifié : `git diff --check` (0 erreur sur `Aether` et `Aether-Plugins`), vérification miroir de `completeness.test.ts` (0 clé inutilisée, 0 clé manquante, 0 incohérence de placeholders). Exécution complète de la CI GitHub Actions après push.
+
+## 8 novembre 2026 — Correction des échecs CI (compilation Rust, rustfmt, et Vitest i18n)
+
+- Rust compilation (`crates/core/src/library_options.rs`) : ajout de la méthode associée `LibraryOptions::from_json(&str) -> Self` avec test unitaire, résolvant l'erreur `E0599` dans `crates/core/src/product.rs:486`.
+- Rustfmt (`crates/core/src/extensions/identify.rs`, `server_settings.rs`, `trickplay.rs`) : réalignement des retours à la ligne et fermetures de blocs pour satisfaire `cargo fmt --check`.
+- Vitest i18n (`MetadataEditorModal.svelte`, `work-metadata.ts`, `WorkDetails.svelte`, `locales/{fr,en}/catalog.ts`) :
+  - Élimination des 96 littéraux en dur dans `MetadataEditorModal.svelte`, 56 dans `work-metadata.ts` et 1 dans `WorkDetails.svelte` en déplaçant toutes les chaînes d'interface dans les catalogues bilingues (`$t('meta_*')`, `detail_*`) et en utilisant `$fmt.language(...)` pour les sélecteurs de langue.
+  - Nettoyage des clés orphelines de l'ancien formulaire textarea et synchronisation stricte des clés et paramètres d'interpolation entre `fr/catalog.ts` et `en/catalog.ts`.
+- Vérifié : `git diff --check` (0 erreur), script de vérification miroir de `completeness.test.ts` (0 clé orpheline, 0 clé manquante, 0 caractère accentué en anglais, 0 incohérence de placeholders) et vérification d'absence de phrases en dur sur tous les composants modifiés.
+
+## 8 novembre 2026 — Fournisseurs par défaut (TVDB séries/animés, TMDB films) et éditeur de métadonnées multi-langue
+
+- Fournisseurs par défaut selon le type de média (`library_options.rs`, `automation.rs`,
+  `extensions/automated.rs`, `extensions/identify.rs`, `IdentifyModal.svelte`,
+  `LibraryOptions.svelte`, `ProviderPriority.svelte`) : lorsque `metadataProviders` est vide,
+  seul `tmdb` (TheMovieDB) est activé par défaut pour les bibliothèques `films` et seul `tvdb`
+  (TheTVDB) est activé par défaut pour les `series` et `anime` (ainsi que les épisodes), afin
+  d’éviter qu’un même média soit rattaché simultanément à plusieurs fournisseurs concurrents.
+  L’application d’une identification manuelle (`identify::apply`) remplace désormais les
+  `external_ids` et nettoie les traductions `provider:*` obsolètes.
+- Éditeur de métadonnées multi-langue inspiré de Jellyfin (`MetadataEditorModal.svelte`,
+  `WorkTools.svelte`, `work-metadata.ts`, `product.rs`, `catalogue.rs`, `consolidation.rs`) :
+  ajout d’un bouton direct « Modifier les métadonnées » sur chaque film, série et épisode,
+  ainsi que des routes `GET/PUT /api/v1/admin/works/{work}/metadata` enrichies. Prise en charge
+  du sélecteur de langue d’édition (`work_translations`), du titre de tri, de la langue et du
+  titre d’origine, des dates d’ajout et de sortie, des notes communauté/critiques, de la
+  classification parentale (`mpaa`) et de l’âge minimum, des identifiants externes dédiés
+  (`imdb`, `tmdb`, `tvdb`, coffret `collection`), des listes interactives (`Genres`,
+  `Personnes` avec rôle et type Acteur/Réalisateur/Scénariste, `Pays`, `Studios`, `Étiquettes`)
+  et du verrouillage global ou par champ (`locked`, `lockedFields`) respecté par l’automatisation.
+- Vérifié : `git diff --check` (0 erreur) et ajout de tests unitaires Rust (`library_options.rs`)
+  et Vitest (`work-metadata.test.ts`). Chaînes Rust/Node absentes sur l’hôte Windows courant
+  (validation complète en CI).
+
+## 8 novembre 2026 — Trickplay WebP Docker, cadrage d’aperçu et taille des planches
+
+- Lecteur (`PlayerControls.svelte`) : suppression du débordement vertical (~15 px de la
+  ligne suivante visible en bas de la miniature) causé par `max-width: min(320px, 80vw)`
+  combiné au `padding: 3px` + `border: 1px` de `.seek-preview.has-frame` (qui réduisait la
+  largeur utile de `.trickplay-frame` à 312 px tout en gardant 180 px de hauteur en Flexbox
+  colonne). `.seek-preview.has-frame` utilise désormais `max-width: none` et `.trickplay-frame img`
+  fixe explicitement `style:height="${(previewFrame.fullHeight / previewFrame.height) * 100}%"`.
+- FFmpeg Docker (`scripts/build-ffmpeg.sh`, `Dockerfile`, `.github/actions/setup-ffmpeg/action.yml`,
+  `scripts/smoke-docker-images.py`) : ajout de `libwebp` (`libwebp-dev`, `libwebp7`, `libwebpmux3`,
+  `--enable-libwebp`, `--enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le`) et vérification à la
+  compilation afin que les Media Nodes Docker génèrent nativement leurs planches Trickplay en `.webp`
+  et remplacent les anciennes planches JPEG tout en réutilisant les planches Jellyfin en lecture seule.
+- Réglages serveur et bibliothèques : ajout de `trickplayColumns` et `trickplayRows` (1–20,
+  défaut `10×10`), activation par défaut de `trickplayAutoGenerate` (`true`), et exposition des
+  réglages Trickplay dans `AdminSettings.svelte` et `LibraryOptions.svelte`. L’architecture WebP
+  dédupliquée par SHA-256 des affiches (`artwork/migration.rs`, `assets.rs`) est conservée telle quelle.
+- Vérifié : syntaxe Python (`py_compile` sur `scripts/smoke-docker-images.py` et `scripts/test-build-ffmpeg.py`),
+  syntaxe shell (`sh -n scripts/build-ffmpeg.sh`) et `git diff --check`. `cargo`, `npm` et WSL ne sont
+  pas installés sur l’hôte Windows courant : compilation Rust, tests Vitest/Svelte et build Docker
+  devront être validés en CI ou sur une machine dotée de la chaîne Rust/Node.
+
+## 6 novembre 2026 — CI formatage et attentes des tests d’avatars
+
+- Formatage de `extensions/automated.rs` corrigé. Test `account` aligné sur le
+  contrat natif actuel (`allowCustom=true` par défaut), avec indépendance des
+  extensions vérifiée avant/après activation de la politique persistée.
+- Test `settings_avatars` : politique restrictive configurée explicitement par
+  l’API admin ; envoi dépassant 2 Mio attendu en 413 (limite HTTP), petits envois
+  interdits en 403. Aucun changement du comportement produit.
+- Vérifié sous Windows : `cargo fmt --check`, `git diff --check`, tests
+  `account` (4/4) et `settings_avatars` (2/2), avec `--locked --all-features`.
+  Shard complet et confirmation Linux/GitHub CI non exécutés.
+
+## 6 novembre 2026 — Activation et visibilité des statistiques
+
+- Collecte conservée désactivée par défaut. Admin : seul contrôle d’activation
+  tant qu’elle est arrêtée ; ensuite six sous-menus (vue d’ensemble, activité,
+  contenus, technique, historique, paramètres), filtres avancés repliés.
+- Visibilité personnelle indépendante (`usersCanView`, défaut false) ; collecte
+  active requise pour les utilisateurs, liens personnels masqués et refus Core
+  sur rapports, analyses, exports, détails et Wrapped. Historique conservé et
+  administration/API conservée ; effacement personnel toujours possible par API.
+- Bandeau global de collecte supprimé. Voir `docs/STATISTICS.md`.
+- Vérifié : 12 tests Rust statistiques/SQLite réussis (11 au premier passage,
+  puis nouveau test de visibilité après correction de son jeton synthétique) ;
+  deux contrats PostgreSQL ignorés. Douze tests Web ciblés réussis, check sans
+  erreur/avertissement et lint réussis. Chrome/API synthétique : activation,
+  six sous-menus, visibilité personnelle dans les quatre combinaisons et retrait
+  du bandeau, aperçu mobile 390 px. Build final et formatage Rust ciblé réussis.
+  Aucun déploiement ni validation PostgreSQL/lectures réelles supplémentaire.
+
+## 6 novembre 2026 — Menus playlist, thème et drapeaux
+
+- Menus playlist média/musique : fermeture au clic extérieur et Échap, avec
+  retour au déclencheur au clavier. Les clics internes restent possibles.
+- Menu profil : sélection du thème réellement affiché, même en mode système,
+  mise à jour lors des changements du système ; FR/EN remplacés par les
+  drapeaux SVG locaux existants, avec noms accessibles et état sélectionné.
+- Vérifié : Web check (0 erreur/avertissement), lint, build et diff. Chrome avec
+  API synthétique : clic interne/externe, réouverture, ajout à une playlist,
+  Échap/focus, largeur 390 px ; changement système clair→sombre, sélection
+  explicite et langue. Captures dans `output/playwright/menu-fixes/`.
+  Pas de validation du serveur déployé ni du parcours musical séparé.
+
+## 6 novembre 2026 — Paramètres d’avatars et chemins Docker
+
+- Politique d’avatars native à nouveau persistante : import personnel et attribution
+  à la création configurables ; obligation distincte, activée par défaut. Import
+  normalisé restauré dans API/profil, suppression réservée aux avatars facultatifs.
+  Les avatars facultatifs supprimés ne sont plus réattribués au démarrage.
+- Compose autonome sans répétition des chemins assets/backups déjà définis dans
+  l’image ; repli PostgreSQL vers les dossiers persistants présents. Diagnostic
+  explicite du mode privé 0700 ; procédure UID/GID personnalisé dans
+  `docs/ADMIN_DEPLOYMENT.md`. Aucun droit de volume NAS modifié.
+- Vérifié localement : Web check (0 erreur/avertissement), lint, build, Compose
+  config, fmt/diff ; huit tests Rust ciblés réussis (avatars, HTTP/galeries avec
+  politique persistée et redémarrage, sauvegardes). Aucun déploiement ni validation
+  PostgreSQL/NAS ou navigateur réelle ; test Unix de permissions ajouté, non
+  exécuté sous Windows.
+
+## 6 novembre 2026 — Isolation de la panne simulée multi-Node
+
+- Le test arrête désormais le runtime propre à chaque Node et attend sa fin :
+  arrêter le seul serveur HTTP laissait vivre les tâches de scan et leurs callbacks.
+  Les assertions de bascule et les 50 flux concurrents sont conservés. Le scénario
+  ciblé réussit localement sous Windows ; confirmation Linux/GitHub CI nécessaire.
+
+## 6 novembre 2026 — Diagnostic CI du basculement multi-Node
+
+- Le test de basculement à 50 requêtes a échoué en CI avec le média primaire
+  sélectionné au lieu de la copie de secours. L'assertion conserve son exigence
+  et affiche désormais les statuts et la télémétrie des deux Nodes en cas d'échec.
+- Le scénario ciblé a réussi deux fois localement sous Windows, dont une après
+  ajout du diagnostic ; `cargo fmt --check` réussit. Cause non établie et
+  reproduction Linux/CI encore nécessaire ; aucun correctif produit revendiqué.
+
+## 5 novembre 2026 — Tâches post-scan, permissions par type, images et lecteur
+
+- Tâches non-scan (trickplay, chapitres, analyses) suivies par `active_task_runs`
+  (`migrations/task_runs.sql`) : elles ne réécrivent plus `scan_jobs`, ne bloquent
+  plus un rescan (409) ni le statut du scan. Résultats trickplay distants acceptés.
+  Images de chapitres préparées après scan si `chapterImagesDuringScan`.
+  `introDetectionEnabled` respecté ; le premier épisode d'une saison est réanalysé.
+- Migrations : FK suspendues autour de l'init SQLite ; marqueurs `recap`/`preview`
+  autorisés (SQLite reconstruit, PostgreSQL ALTER idempotent, non testé sur PG réel).
+- Droits : types de médias refusés par utilisateur/groupe (`media_kinds.sql`) intégrés
+  à la vue `effective_library_permissions` ; paliers d'âge, classifications normalisées
+  (FR:-16, FSK, TV-MA…) et héritées de la série ; SyncPlay vérifie chaque membre.
+  Non fait : contrôle parental par groupe.
+- Web : `fitArtwork` publie le ratio réel (`--artwork-ratio`), plus de fond flouté ;
+  aperçu trickplay mis à l'échelle sans rognage ; chapitres WebP ; bouton « Passer »
+  hors du dock masqué ; saut auto du récap ; sous-titre en échec non bloquant ;
+  reprise conservée au basculement.
+- Vérifié : tests Rust ciblés (unitaires, scanner, séries, sauvegarde, permissions,
+  SyncPlay, automation, tâches), suite complète avant derniers correctifs ; Web 345
+  tests, check, lint, build ; clippy core/node. Aucun commit ni navigateur réel.
+
+## 5 novembre 2026 — Dossiers, extensions, groupes et réglages
+
+- Nouveau dossier de bibliothèque : le sélecteur ouvre la racine du Node (`/`
+  sous Linux), sans proposer sa racine interne temporaire comme chemin média.
+- Extensions : fin de l'installation automatique TMDb/IMDb ; actualisation des
+  dépôts à l'ouverture, choix main/develop conservé après redémarrage. Voir
+  `docs/PLUGIN_UPDATE_LIFECYCLE.md` ; installations existantes conservées.
+- Galerie native initiale : 12 avatars locaux « Orbites », supprimables sans
+  réapparition ; curseur d'attente réservé aux traitements réels. Groupes système
+  Utilisateurs/Administrateurs déterminés par le rôle, comptes existants inclus,
+  sans modifier les groupes personnalisés. Voir `docs/ADMIN_ACCESS.md`.
+- Menus simples habillés en Halo avec repli natif ; paramètres numériques des
+  extensions compatibles avec les décimales (Intro Skipper 0,75). Voir
+  `docs/UI_DIRECTION.md` et `docs/PLUGIN_SETTINGS_AND_COLLECTIONS.md`.
+- Contrôles locaux : check Svelte 0/0, lint, build Web, 18 tests Web ciblés ;
+  Chrome avec APIs simulées à 390/820/1440 px pour menus/décimales et 390/1440
+  pour dossiers, avatars et dépôts. Core groupes 5/5, extensions 3/3, galerie
+  native et collections 3/3 ; contrôle SQL PostgreSQL 18
+  sur base jetable ; fmt et Clippy Core lib/bin sans avertissement. Aucun
+  déploiement, média personnel ou fournisseur réel validé.
 
 ## 5 novembre 2026 — Personnes et portraits
 

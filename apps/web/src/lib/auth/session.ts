@@ -1,6 +1,7 @@
 import { writable } from 'svelte/store';
 import { deviceRequest } from './quick-connect';
 
+import { tr } from '../i18n';
 export interface AuthUser { id: string; login: string; role: 'administrator' | 'user'; displayName?: string | null; sso?: boolean | null; disabledAt?: number | null; }
 export interface Session { user: AuthUser; csrfToken: string }
 
@@ -106,7 +107,7 @@ export async function readSession(): Promise<Session | null> {
     if (sessionGeneration !== requestGeneration || authActionSeq !== requestActionSeq) {
       return currentSession;
     }
-    throw new Error('Impossible de vérifier la session. Réessayez.');
+    throw new Error(tr('unable_to_verify_the_session_try'));
   }
   const current: Session = await response.json();
   if (sessionGeneration !== requestGeneration || authActionSeq !== requestActionSeq) {
@@ -130,32 +131,32 @@ export async function bootstrapAdmin(login: string, password: string, bootstrapT
     if (response.status === 403) {
       const err = await response.json().catch(() => null);
       if (err?.error === 'http_bootstrap_disabled') {
-        throw new Error("L'initialisation via le Web est désactivée. Utilisez la commande locale 'media-bootstrap'.");
+        throw new Error(tr('web_initialisation_is_disabled_use_the'));
       }
-      throw new Error("L'initialisation du serveur est déjà clôturée.");
+      throw new Error(tr('server_initialisation_is_already_closed'));
     }
     if (response.status === 401) {
       const err = await response.json().catch(() => null);
       if (err?.error === 'invalid_bootstrap_token') {
-        throw new Error("Code d'initialisation invalide. Consultez la console du serveur ou le fichier .bootstrap_token.");
+        throw new Error(tr('invalid_initialisation_code_check_the_server'));
       }
-      throw new Error("Autorisation d'initialisation refusée.");
+      throw new Error(tr('initialisation_authorisation_refused'));
     }
-    if (response.status === 429) throw new Error('Trop de requêtes. Patientez avant de réessayer.');
+    if (response.status === 429) throw new Error(tr('too_many_requests_wait_before_trying'));
     if (response.status === 400) {
       const err = await response.json().catch(() => null);
       if (err?.error === 'invalid_password') {
-        throw new Error('Le mot de passe doit comporter au moins 15 caractères.');
+        throw new Error(tr('the_password_must_be_at_least'));
       }
       if (err?.error === 'invalid_login') {
-        throw new Error("L'identifiant est invalide (minuscules, chiffres, points, tirets uniquement).");
+        throw new Error(tr('the_username_is_invalid_lowercase_letters'));
       }
-      throw new Error('Identifiant ou mot de passe invalide.');
+      throw new Error(tr('invalid_username_or_password'));
     }
-    if (!response.ok) throw new Error("L'initialisation a échoué. Réessayez.");
+    if (!response.ok) throw new Error(tr('initialisation_failed_try_again'));
     const authenticated = (await response.json()) as Session;
     if (overrideSeq !== manualOverrideSeq) {
-      throw new Error('La session a changé pendant l’initialisation.');
+      throw new Error(tr('the_session_changed_during_initialisation'));
     }
     applySession(authenticated, true);
   });
@@ -169,12 +170,12 @@ export async function login(login: string, password: string): Promise<void> {
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }),
       signal: AbortSignal.timeout(15000)
     });
-    if (response.status === 429) throw new Error('Trop de tentatives. Patientez avant de réessayer.');
-    if (response.status === 401 || response.status === 400) throw new Error('Identifiants incorrects.');
-    if (!response.ok) throw new Error('La connexion est indisponible. Réessayez.');
+    if (response.status === 429) throw new Error(tr('too_many_attempts_wait_before_trying'));
+    if (response.status === 401 || response.status === 400) throw new Error(tr('incorrect_credentials'));
+    if (!response.ok) throw new Error(tr('sign_in_is_unavailable_try_again'));
     const authenticated = (await response.json()) as Session;
     if (overrideSeq !== manualOverrideSeq) {
-      throw new Error('La session a changé pendant la connexion.');
+      throw new Error(tr('the_session_changed_during_sign_in'));
     }
     applySession(authenticated, true);
   });
@@ -191,7 +192,7 @@ export async function logout(current: Session): Promise<void> {
       method: 'POST', credentials: 'same-origin', cache: 'no-store',
       headers: { 'x-csrf-token': current.csrfToken }, signal: AbortSignal.timeout(10000)
     });
-    if (!response.ok && response.status !== 401) throw new Error('Déconnexion impossible. Réessayez.');
+    if (!response.ok && response.status !== 401) throw new Error(tr('sign_out_failed_try_again'));
     if (overrideSeq === manualOverrideSeq && (sessionGeneration === requestGeneration || isSameSession(currentSession, current))) {
       applySession(null, true);
     }

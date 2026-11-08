@@ -1,6 +1,8 @@
 import type { Media } from '../player/types';
 import { getSessionGeneration, invalidateSession, onSessionGenerationChange } from '../auth/session';
 import { goto } from '$app/navigation';
+import { tr } from '../i18n';
+import { cacheScope, withMetadataLocale } from './cache-scope';
 import { resolve } from '$app/paths';
 export interface CatalogSource {
   id: string;
@@ -14,7 +16,7 @@ export interface CatalogSource {
 export interface Edition { id: string; label: string; versions: { id: string; label: string; sources: CatalogSource[] }[] }
 export interface Work {
   tags?: string[]; minimumAge?: number | null; globalMediaId?: string | null;
-  id: string; kind: 'film' | 'series' | 'episode'; title: string; year: number | null;
+  id: string; kind: 'film' | 'series' | 'episode'; title: string; sortTitle?: string | null; year: number | null;
   seasonNumber?: number;
   episodesPage?: { season: number | null; offset: number; limit: number; nextOffset: number; hasMore: boolean };
   description: string; libraryId: string; synthetic: boolean; number?: number;
@@ -26,44 +28,49 @@ export interface Work {
   nodeStatus?: 'connected' | 'disconnected' | 'revoked';
   available?: boolean;
   originalLanguage?: string | null; originalTitle?: string | null; plot?: string | null; outline?: string | null;
-  premiered?: string | null; genres?: string[]; rating?: number | null; mpaa?: string | null;
+  premiered?: string | null; genres?: string[]; studios?: string[]; countries?: string[];
+  rating?: number | null; criticRating?: number | null; mpaa?: string | null;
+  collection?: { id?: string | null; name?: string | null } | null;
+  locked?: boolean; lockedFields?: string[];
   actors?: { name: string; role?: string; imageUrl?: string | null; thumbUrl?: string | null; thumb_url?: string | null }[]; directors?: string[]; writers?: string[];
   crewCredits?: { name: string; role?: string; imageUrl?: string | null; providerId?: string | null }[];
   ratings?: { provider:string;value:number;max:number }[];
   externalIds?: Record<string, string>; metadataProvenance?: string | null;
   seasonCount?: number; episodeCount?: number; editions?: Edition[];
   seasons?: { id: string; number: number; title: string; episodeCount?: number; episodes: Work[] }[];
-  translations?: Record<string, { title?: string; overview?: string; plot?: string; tagline?: string }>;
+  translations?: Record<string, { title?: string; sortTitle?: string; overview?: string; plot?: string; tagline?: string }>;
 }
 
 export function localizedTitle(work: Work | null | undefined, locale?: string): string {
   if (!work) return '';
   const lang = (locale ?? 'fr').toLowerCase();
   const shortLang = lang.split('-')[0];
-  const tr = work.translations?.[lang] ?? work.translations?.[shortLang];
-  return tr?.title || work.title || '';
+  const entry = work.translations?.[lang] ?? work.translations?.[shortLang];
+  return entry?.title || work.title || '';
 }
 
 export function localizedPlot(work: Work | null | undefined, locale?: string): string {
   if (!work) return '';
   const lang = (locale ?? 'fr').toLowerCase();
   const shortLang = lang.split('-')[0];
-  const tr = work.translations?.[lang] ?? work.translations?.[shortLang];
-  return tr?.overview || tr?.plot || work.description || work.plot || '';
+  const entry = work.translations?.[lang] ?? work.translations?.[shortLang];
+  return entry?.overview || entry?.plot || work.description || work.plot || '';
 }
 
 export function localizedTagline(work: Work | null | undefined, locale?: string): string {
   if (!work) return '';
   const lang = (locale ?? 'fr').toLowerCase();
   const shortLang = lang.split('-')[0];
-  const tr = work.translations?.[lang] ?? work.translations?.[shortLang];
-  return tr?.tagline || work.outline || '';
+  const entry = work.translations?.[lang] ?? work.translations?.[shortLang];
+  return entry?.tagline || work.outline || '';
 }
 export interface CatalogPage { items: Work[]; total: number | null; hasMore?: boolean; offset: number; limit: number; notice: string }
 export interface FetchDescriptorOptions { revalidate?: boolean }
 
 const MAX_DESCRIPTOR_CACHE_SIZE = 128;
 const descriptorCache = new Map<string, Media>();
+/** Descriptors are cached per account and language chain: another reader never sees them. */
+const descriptorKey = (id: string): string => `${cacheScope()}\n${id}`;
 let cacheSessionGeneration = getSessionGeneration();
 let cacheGeneration = 0;
 let demoFetchPromise: Promise<Media[]> | null = null;
@@ -80,6 +87,14 @@ function syncCacheWithSession(): void {
   }
 }
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('media-locale-saved', () => {
+    descriptorCache.clear();
+    demoFetchPromise = null;
+    cacheGeneration += 1;
+  });
+}
+
 onSessionGenerationChange(newSessionGen => {
   descriptorCache.clear();
   demoFetchPromise = null;
@@ -89,15 +104,16 @@ onSessionGenerationChange(newSessionGen => {
 
 function setCachedDescriptor(id: string, media: Media): void {
   syncCacheWithSession();
-  if (descriptorCache.has(id)) {
-    descriptorCache.delete(id);
+  const key = descriptorKey(id);
+  if (descriptorCache.has(key)) {
+    descriptorCache.delete(key);
   } else if (descriptorCache.size >= MAX_DESCRIPTOR_CACHE_SIZE) {
     const oldestKey = descriptorCache.keys().next().value;
     if (oldestKey !== undefined) {
       descriptorCache.delete(oldestKey);
     }
   }
-  descriptorCache.set(id, media);
+  descriptorCache.set(key, media);
 }
 
 async function fetchWithAbort(url: string, signal: AbortSignal): Promise<Response> {
@@ -118,14 +134,34 @@ async function fetchWithAbort(url: string, signal: AbortSignal): Promise<Respons
   }
 }
 
+/**
+ * Why a catalogue request failed. Callers branch on `kind`, never on the translated message, so the
+ * behaviour stays the same in every interface language.
+ */
+export type CatalogErrorKind = 'no-library' | 'access-denied' | 'session-expired' | 'session-changed' | 'timeout' | 'not-found' | 'http';
+export class CatalogRequestError extends Error {
+  constructor(message: string, readonly kind: CatalogErrorKind, readonly status?: number) {
+    super(message);
+    this.name = 'CatalogRequestError';
+  }
+}
+/** Account-level failures: retrying or showing a partial page cannot help. */
+export function isCatalogAccessError(cause: unknown): cause is CatalogRequestError {
+  return cause instanceof CatalogRequestError && (cause.kind === 'no-library' || cause.kind === 'access-denied' || cause.kind === 'session-expired' || cause.kind === 'session-changed');
+}
+export function isAbortError(cause: unknown): boolean {
+  return cause instanceof DOMException && cause.name === 'AbortError';
+}
+
 export async function request<T>(url: string, signal: AbortSignal, timeoutMs=10000): Promise<T> {
   syncCacheWithSession();
   const requestSessionGen = getSessionGeneration();
   const combinedSignal = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+  const timedOut = () => new CatalogRequestError(tr('catalog_the_server_is_taking_too_long'), 'timeout');
   let response:Response;
-  try { response=await fetchWithAbort(url, combinedSignal); }
+  try { response=await fetchWithAbort(withMetadataLocale(url), combinedSignal); }
   catch (cause) {
-    if(!signal.aborted && combinedSignal.aborted)throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');
+    if(!signal.aborted && combinedSignal.aborted)throw timedOut();
     throw cause;
   }
   if (response.status === 401) {
@@ -137,28 +173,36 @@ export async function request<T>(url: string, signal: AbortSignal, timeoutMs=100
         // Ignore router navigation error outside active SvelteKit client context
       }
     }
-    throw new Error('Votre session a expiré. Connectez-vous à nouveau.');
+    throw new CatalogRequestError(tr('catalog_your_session_has_expired_sign_in'), 'session-expired', 401);
   }
   if (response.status === 403) {
     if (requestSessionGen === getSessionGeneration()) {
       clearDescriptorCache();
       if (typeof window !== 'undefined') window.dispatchEvent(new Event('media-access-denied'));
     }
-    throw new Error('Votre compte n’a pas accès à cette ressource.');
+    // The list endpoint answers 403 only when no library is shared with the account.
+    const listing = new URL(url, 'http://local').pathname === '/api/v1/catalog';
+    throw listing
+      ? new CatalogRequestError(tr('catalog_no_library_shared'), 'no-library', 403)
+      : new CatalogRequestError(tr('catalog_your_account_does_not_have_access'), 'access-denied', 403);
   }
-  if (!response.ok) throw new Error(response.status === 404 ? 'Ce média est introuvable.' : `Le catalogue est indisponible (HTTP ${response.status}).`);
+  if (!response.ok) {
+    throw response.status === 404
+      ? new CatalogRequestError(tr('this_media_item_was_not_found'), 'not-found', 404)
+      : new CatalogRequestError(tr('the_catalogue_is_unavailable_http', { status: response.status }), 'http', response.status);
+  }
   if (requestSessionGen !== getSessionGeneration()) {
-    throw new Error('La session a changé pendant la requête.');
+    throw new CatalogRequestError(tr('the_session_changed_during_the_request'), 'session-changed');
   }
   let data:T;
   try{data=await response.json() as T;}
-  catch(cause){if(!signal.aborted&&combinedSignal.aborted)throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');throw cause;}
+  catch(cause){if(!signal.aborted&&combinedSignal.aborted)throw timedOut();throw cause;}
   if (combinedSignal.aborted) {
-    if (!signal.aborted) throw new Error('Le serveur met trop de temps à répondre. Réessayez dans quelques instants.');
+    if (!signal.aborted) throw timedOut();
     throw combinedSignal.reason ?? new DOMException('Aborted', 'AbortError');
   }
   if (requestSessionGen !== getSessionGeneration()) {
-    throw new Error('La session a changé pendant la requête.');
+    throw new CatalogRequestError(tr('the_session_changed_during_the_request'), 'session-changed');
   }
   return data;
 }
@@ -179,7 +223,7 @@ export function clearDescriptorCache(): void {
 
 export function getCachedMedia(id: string): Media | undefined {
   syncCacheWithSession();
-  return descriptorCache.get(id);
+  return descriptorCache.get(descriptorKey(id));
 }
 
 export function cacheMedia(media: Media): void {
@@ -199,7 +243,7 @@ async function fetchDescriptor(
   const reqCacheGen = cacheGeneration;
   const revalidate = options?.revalidate ?? false;
   if (!revalidate) {
-    const cached = descriptorCache.get(id);
+    const cached = descriptorCache.get(descriptorKey(id));
     if (cached) return cached;
   }
 
@@ -240,20 +284,20 @@ async function fetchDescriptor(
         throw sig.reason ?? new DOMException('Aborted', 'AbortError');
       }
       if (reqSessionGen !== getSessionGeneration()) {
-        throw new Error('La session a changé pendant la requête.');
+        throw new Error(tr('the_session_changed_during_the_request'));
       }
       const found =
-        (reqCacheGen === cacheGeneration ? descriptorCache.get(id) : undefined) ??
+        (reqCacheGen === cacheGeneration ? descriptorCache.get(descriptorKey(id)) : undefined) ??
         list.find(item => item.id === id);
       if (found) return found;
-      throw new Error('Média de démonstration introuvable.');
+      throw new Error(tr('demo_media_not_found'));
     } catch (err) {
       if (
         !sig.aborted &&
         reqSessionGen === getSessionGeneration() &&
         reqCacheGen === cacheGeneration
       ) {
-        descriptorCache.delete(id);
+        descriptorCache.delete(descriptorKey(id));
       }
       throw err;
     }
@@ -265,7 +309,7 @@ async function fetchDescriptor(
       throw sig.reason ?? new DOMException('Aborted', 'AbortError');
     }
     if (reqSessionGen !== getSessionGeneration()) {
-      throw new Error('La session a changé pendant la requête.');
+      throw new Error(tr('the_session_changed_during_the_request'));
     }
     if (reqCacheGen === cacheGeneration) {
       setCachedDescriptor(item.id, item);
@@ -280,7 +324,7 @@ async function fetchDescriptor(
       reqSessionGen === getSessionGeneration() &&
       reqCacheGen === cacheGeneration
     ) {
-      descriptorCache.delete(id);
+      descriptorCache.delete(descriptorKey(id));
     }
     throw err;
   }

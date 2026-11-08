@@ -215,6 +215,7 @@ async fn unavailable_task_node_is_not_retried_until_reconnected() {
         target_id: "asset".into(),
         component: None,
         width: None,
+        trickplay: None,
         core_base_url: "http://127.0.0.1:3000".into(),
     };
     assert_eq!(

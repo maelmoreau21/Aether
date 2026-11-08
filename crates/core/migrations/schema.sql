@@ -590,10 +590,10 @@ CREATE TABLE durable_tasks (
     owner TEXT NOT NULL,
     idempotency_key TEXT NOT NULL,
     node_id TEXT NOT NULL REFERENCES media_nodes(id),
-    category TEXT NOT NULL DEFAULT 'scan' CHECK(category IN ('scan','analyze','prepare','image','system')),
+    category TEXT NOT NULL DEFAULT 'scan' CHECK(category IN ('scan','analyze','prepare','image','trickplay','system')),
     target_id TEXT NOT NULL DEFAULT '',
     component TEXT NOT NULL DEFAULT '',
-    width BIGINT NOT NULL DEFAULT 640 CHECK(width IN (320,640,1280)),
+    width BIGINT NOT NULL DEFAULT 640 CHECK((category='trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280)),
     result_json TEXT NOT NULL DEFAULT '{}',
     refresh_mode TEXT NOT NULL DEFAULT 'incremental' CHECK(refresh_mode IN ('incremental','new_only','missing_metadata','full')),
     status TEXT NOT NULL DEFAULT 'queued' CHECK(status IN ('queued','running','paused','completed','cancelled','error')),
@@ -648,7 +648,7 @@ CREATE TABLE system_task_schedules (
 
 CREATE TABLE manual_timeline_markers (
     asset_id TEXT NOT NULL REFERENCES inventory_assets(id) ON DELETE CASCADE,
-    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits')),
+    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits','recap','preview')),
     start_seconds REAL,
     end_seconds REAL,
     enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
@@ -662,7 +662,7 @@ CREATE TABLE manual_timeline_markers (
 CREATE TABLE automatic_timeline_markers (
     asset_id TEXT NOT NULL REFERENCES inventory_assets(id) ON DELETE CASCADE,
     extension_id TEXT NOT NULL REFERENCES extensions(id) ON DELETE CASCADE,
-    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits')),
+    marker_type TEXT NOT NULL CHECK(marker_type IN ('intro','credits','recap','preview')),
     start_seconds REAL NOT NULL CHECK(start_seconds>=0),
     end_seconds REAL NOT NULL CHECK(end_seconds>start_seconds),
     confidence REAL NOT NULL CHECK(confidence>=0 AND confidence<=1),
@@ -897,6 +897,8 @@ BEGIN
     WHERE id = NEW.id;
 END;
 
+-- `+has_available_asset` keeps the planner on the primary key: indexing the flag would visit
+-- every unavailable work once per inserted asset. Existing databases: asset_availability_insert.sql.
 CREATE TRIGGER inventory_assets_avail_insert AFTER INSERT ON inventory_assets
 WHEN NEW.available = 1 BEGIN
     UPDATE inventory_works SET has_available_asset = 1
@@ -905,7 +907,7 @@ WHEN NEW.available = 1 BEGIN
         JOIN inventory_versions v ON v.id = s.version_id
         JOIN inventory_editions e ON e.id = v.edition_id
         WHERE s.id = NEW.source_id
-    ) AND has_available_asset = 0;
+    ) AND +has_available_asset = 0;
 
     UPDATE inventory_works SET has_available_asset = 1
     WHERE id IN (
@@ -915,7 +917,7 @@ WHEN NEW.available = 1 BEGIN
         JOIN inventory_episodes ep ON ep.work_id = e.work_id
         JOIN inventory_seasons se ON se.id = ep.season_id
         WHERE s.id = NEW.source_id
-    ) AND has_available_asset = 0;
+    ) AND +has_available_asset = 0;
 END;
 
 CREATE TRIGGER inventory_episodes_avail_insert AFTER INSERT ON inventory_episodes BEGIN
@@ -1375,7 +1377,7 @@ CREATE TABLE automatic_timeline_markers (
     updated_at bigint NOT NULL,
     CONSTRAINT automatic_timeline_markers_check CHECK ((end_seconds > start_seconds)),
     CONSTRAINT automatic_timeline_markers_confidence_check CHECK (((confidence >= (0)::double precision) AND (confidence <= (1)::double precision))),
-    CONSTRAINT automatic_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text]))),
+    CONSTRAINT automatic_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text, 'recap'::text, 'preview'::text]))),
     CONSTRAINT automatic_timeline_markers_start_seconds_check CHECK ((start_seconds >= (0)::double precision))
 );
 
@@ -1541,7 +1543,7 @@ CREATE TABLE durable_tasks (
     available_at bigint NOT NULL,
     error text DEFAULT ''::text NOT NULL,
     CONSTRAINT durable_tasks_attempt_check CHECK ((attempt >= 0)),
-    CONSTRAINT durable_tasks_category_check CHECK ((category = ANY (ARRAY['scan'::text, 'analyze'::text, 'prepare'::text, 'image'::text, 'system'::text]))),
+    CONSTRAINT durable_tasks_category_check CHECK ((category = ANY (ARRAY['scan'::text, 'analyze'::text, 'prepare'::text, 'image'::text, 'trickplay'::text, 'system'::text]))),
     CONSTRAINT durable_tasks_failure_count_check CHECK ((failure_count >= 0)),
     CONSTRAINT durable_tasks_max_attempts_check CHECK (((max_attempts >= 1) AND (max_attempts <= 1000000))),
     CONSTRAINT durable_tasks_priority_check CHECK (((priority >= 0) AND (priority <= 1000))),
@@ -1550,7 +1552,7 @@ CREATE TABLE durable_tasks (
     CONSTRAINT durable_tasks_refresh_mode_check CHECK ((refresh_mode = ANY (ARRAY['incremental'::text, 'new_only'::text, 'missing_metadata'::text, 'full'::text]))),
     CONSTRAINT durable_tasks_scope_check CHECK ((((category = 'system'::text) AND (library_id IS NULL) AND (node_id = 'local'::text)) OR ((category <> 'system'::text) AND (library_id IS NOT NULL)))),
     CONSTRAINT durable_tasks_status_check CHECK ((status = ANY (ARRAY['queued'::text, 'running'::text, 'paused'::text, 'completed'::text, 'cancelled'::text, 'error'::text]))),
-    CONSTRAINT durable_tasks_width_check CHECK ((width = ANY (ARRAY[(320)::bigint, (640)::bigint, (1280)::bigint])))
+    CONSTRAINT durable_tasks_width_check CHECK (((category = 'trickplay' AND width BETWEEN 160 AND 1920) OR width IN (320,640,1280)))
 );
 
 
@@ -2030,7 +2032,7 @@ CREATE TABLE manual_timeline_markers (
     updated_at bigint NOT NULL,
     CONSTRAINT manual_timeline_markers_check CHECK ((((enabled = 0) AND (start_seconds IS NULL) AND (end_seconds IS NULL)) OR ((enabled = 1) AND (start_seconds >= (0)::double precision) AND (end_seconds > start_seconds)))),
     CONSTRAINT manual_timeline_markers_enabled_check CHECK ((enabled = ANY (ARRAY[0, 1]))),
-    CONSTRAINT manual_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text])))
+    CONSTRAINT manual_timeline_markers_marker_type_check CHECK ((marker_type = ANY (ARRAY['intro'::text, 'credits'::text, 'recap'::text, 'preview'::text])))
 );
 
 

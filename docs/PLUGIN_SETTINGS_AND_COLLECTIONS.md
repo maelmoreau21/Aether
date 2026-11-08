@@ -1,5 +1,49 @@
 # Plugins : installation libre, paramètres et collections d’avatars
 
+Les champs de configuration de type `number` acceptent les décimales (`step=any`)
+sans déduire une contrainte entière du type JSON. Les compteurs connus
+`pool_size` et `min_hours_between_switches` conservent leur pas entier. Cela permet
+d'enregistrer le seuil audio Intro Skipper à 0,75, ainsi que 0,825, sans rejet
+natif du formulaire. La validation métier du plugin reste appliquée côté serveur.
+Vérifié avec Chrome sur API simulée : valeur par défaut valide, enregistrement
+décimal et rejet d'un compteur fractionnaire. Aucun paquet signé n'est modifié.
+
+> 5 novembre 2026 : la galerie native contient au premier démarrage de cette
+> version la collection originale « Orbites », avec 12 avatars vectoriels locaux.
+> Elle ne requiert ni extension, ni import, ni accès réseau et apparaît également
+> sur les installations existantes. Elle utilise les mêmes assets et droits que
+> les images importées ; renommage, suppression et attribution sont disponibles.
+> Un marqueur d'initialisation séparé conserve la suppression d'une image ou de
+> la collection après redémarrage. Tous les comptes possèdent désormais un avatar :
+> attribution au bootstrap, à la création locale/SSO et rattrapage des comptes
+> existants au démarrage, sans remplacer une photo déjà choisie. Le profil permet
+> uniquement de choisir dans la galerie ; import personnel et suppression sont
+> retirés de l'interface et refusés par l'API (403), indépendamment des anciennes
+> politiques stockées. Les commutateurs administrateur qui réautorisaient ces
+> options sont retirés. La génération d'extension ne peut plus appliquer une photo
+> directement ; les collections administrées restent disponibles dans la galerie.
+>
+> Si toutes les galeries sont vides, une galerie virtuelle locale de secours
+> reste disponible, sans recréer les packs supprimés. Les photos déjà attribuées
+> restent conservées lorsqu'une collection ou une image est retirée. La lecture
+> d'un avatar possède aussi un repli SVG local si le stockage est indisponible,
+> afin de ne pas empêcher une connexion de récupération. L'attente du curseur
+> correspond exclusivement à une action réellement en cours.
+
+> Vérifié localement le 5 novembre : test Rust de création/idempotence/suppression
+> durable des 12 avatars, deux tests HTTP de collections (galerie native, image
+> SVG, attribution avec CSRF et sans remplacement, migration historique), puis
+> Chrome 390/1440 px sur APIs simulées pour import, choix d'avatar et curseurs.
+> Aperçu des douze SVG inspecté. Aucun déploiement ni import externe réel.
+
+> Parcours obligatoire également vérifié localement : bootstrap et comptes
+> existants, création locale, SSO sur fournisseur synthétique, conservation des
+> choix après redémarrage et suppression de toutes les collections, refus des
+> uploads/retraits et des politiques permissives, sélection dans la galerie de
+> secours. Les parcours Chrome 390/1440 px confirment l'absence des actions
+> d'import personnel et de retrait ; l'import de collections par l'administrateur
+> reste disponible. Cela ne prouve pas un déploiement ou un fournisseur SSO réel.
+
 > 5 novembre 2026 : l'import de collections depuis GitHub est retiré de
 > l'interface et du Core, pour les collections natives comme celles d'extensions.
 > `POST .../avatar-packs` et `POST .../avatar-packs/source` renvoient 405.
@@ -23,9 +67,10 @@
 
 > Les collections natives sont indépendantes des extensions : administration via
 > `/api/v1/admin/avatar-packs`, politique via `/api/v1/admin/avatar-policy` et
-> galerie via `/api/v1/account/avatar/collections`. La politique native autorise
-> les images personnalisées par défaut ; l’attribution à la création est
-> désactivée par défaut. Les anciens packs d’extension restent accessibles tant
+> galerie via `/api/v1/account/avatar/collections`. La politique native impose
+> `allowCustom=false`, `allowGravatar=false` et `assignOnCreate=true` ; aucun
+> réglage ne réautorise les uploads personnels ou l'absence d'image.
+> Les anciens packs d’extension restent accessibles tant
 > que leur extension est active, jusqu'à leur éventuel transfert décrit ci-dessus.
 > Les images importées sont normalisées et les contenus SVG restent validés.
 > Les anciennes descriptions de politique d’extension ci-dessous sont historiques : les réglages d’une extension active ne modifient pas les autorisations natives d’import ou de suppression d’avatar.

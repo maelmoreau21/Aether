@@ -1,0 +1,17 @@
+{
+  "lib/admin/AdminSettings.svelte": 1,
+  "lib/admin/AvatarCollections.svelte": 1,
+  "lib/admin/LibraryOptions.svelte": 1,
+  "lib/admin/user-list.ts": 7,
+  "lib/applications/api.ts": 30,
+  "lib/applications/ReportButton.svelte": 1,
+  "lib/catalog/CatalogSkeleton.svelte": 1,
+  "lib/catalog/DiscoverFeed.svelte": 1,
+  "lib/catalog/ImageManager.svelte": 2,
+  "lib/player/ImmersivePlayer.svelte": 1,
+  "lib/player/subtitle-style.ts": 2,
+  "lib/syncplay/WatchPartyModal.svelte": 2,
+  "lib/ui/MediaShelf.svelte": 1,
+  "routes/login/+page.svelte": 1,
+  "routes/music/+page.svelte": 1
+}

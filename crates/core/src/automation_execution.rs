@@ -44,7 +44,7 @@ pub(crate) async fn dispatch(
         tokio::pin!(deadline);
         loop { tokio::select! {
             _ = &mut deadline => break Err("extension_timeout".into()),
-            result = &mut operation => break result.map_err(|(_,body)| body.0["error"].as_str().unwrap_or("extension_failed").to_owned()),
+            result = &mut operation => break result.map_err(|(_,body)| automation_error(&body.0)),
             _ = tick.tick() => {
                 if jobs_task.is_cancelled() || crate::scans::LOCAL_STREAMS.load(std::sync::atomic::Ordering::Relaxed)>0 || auth.store.node_registry.get(&job.node_id).is_some_and(|node| node.telemetry.reported_active_streams>0 || node.telemetry.core_active_relays>0) {
                     break Err("playback_preempted".into());
@@ -69,4 +69,34 @@ pub(crate) async fn dispatch(
         task_engine::WAKE.notify_one();
     }));
     Ok(true)
+}
+
+/// Stored task error: the host code, followed by the extension's own bounded code when
+/// the extension itself failed (`extension_error:provider_error`), so the history says why.
+fn automation_error(body: &serde_json::Value) -> String {
+    let error = body["error"].as_str().unwrap_or("extension_failed");
+    match body["pluginError"].as_str().filter(|code| !code.is_empty()) {
+        Some(code) if error == "extension_error" => format!("{error}:{code}"),
+        _ => error.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn extension_failures_keep_the_extension_code() {
+        let body = serde_json::json!({"error":"extension_error","pluginError":"provider_error"});
+        assert_eq!(
+            super::automation_error(&body),
+            "extension_error:provider_error"
+        );
+        assert_eq!(
+            super::automation_error(&serde_json::json!({"error":"metadata_unidentified"})),
+            "metadata_unidentified"
+        );
+        assert_eq!(
+            super::automation_error(&serde_json::json!({})),
+            "extension_failed"
+        );
+    }
 }

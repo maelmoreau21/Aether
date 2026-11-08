@@ -1,4 +1,11 @@
-//! Existing system schedules are triggers into durable_tasks, never executors.
+//! Durable queue of Core maintenance runs (system tasks and the scheduled backup).
+//!
+//! Runs are admitted by the scheduler (`task_scheduler`), a startup trigger or an administrator,
+//! and executed here one at a time under a durable-task lease. Light maintenance (sessions,
+//! statistics, logs, caches, catalogue refresh) starts as soon as no other maintenance run is
+//! active: it no longer waits for an idle Node or for playback to stop, which used to starve it
+//! for hours on busy servers. Heavy work (database optimisation, backup) yields to scans and
+//! playback, but never for longer than [`HEAVY_MAX_WAIT`].
 use crate::{
     auth::AuthState,
     database::{begin_write, commit, query, query_as, query_scalar},
@@ -6,7 +13,11 @@ use crate::{
     scans::ScanJobs,
     task_engine,
 };
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    path::Path,
+    sync::{Arc, atomic::Ordering},
+    time::Duration,
+};
 
 const PERMANENT_FAILURE: &str = "system_task_failed_permanently";
 const TIMEOUT: &str = "system_task_timeout";
@@ -14,6 +25,14 @@ const TIMEOUT: &str = "system_task_timeout";
 /// Default execution deadlines when no trigger sets a time limit.
 const SYSTEM_TASK_DEADLINE: u64 = 300;
 const BACKUP_DEADLINE: u64 = 3600;
+
+/// Longest time (seconds) a heavy run waits for an idle server before it starts anyway.
+pub(crate) const HEAVY_MAX_WAIT: i64 = 3600;
+
+/// Runs that rewrite or copy the whole database and therefore wait for a quiet server.
+fn is_heavy(target: &str) -> bool {
+    matches!(target, "optimize-database" | "backup")
+}
 
 /// Time limit of one queued run: the firing trigger's `maxRuntimeSeconds`, else the default.
 fn deadline_seconds(job: &task_engine::Job) -> u64 {
@@ -28,6 +47,7 @@ fn deadline_seconds(job: &task_engine::Job) -> u64 {
         })
 }
 
+/// Insert one run unless the task already has an active run or the request key was used.
 async fn enqueue_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     id: &str,
@@ -40,6 +60,16 @@ async fn enqueue_in(
         .bind(id).fetch_optional(&mut **tx).await?;
     if let Some(existing) = existing {
         return Ok(existing);
+    }
+    // A request key identifies one request for its whole lifetime (UNIQUE(owner,key)).
+    let replayed: Option<String> =
+        query_scalar("SELECT id FROM durable_tasks WHERE owner=? AND idempotency_key=?")
+            .bind(owner)
+            .bind(key)
+            .fetch_optional(&mut **tx)
+            .await?;
+    if let Some(replayed) = replayed {
+        return Ok(replayed);
     }
     let count: i64 = query_scalar(
         "SELECT COUNT(*) FROM durable_tasks WHERE status IN ('queued','running','paused')",
@@ -59,8 +89,27 @@ async fn enqueue_in(
     query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,target_id,priority,created_at,updated_at,available_at,result_json) VALUES(?,NULL,?,?,'local','system',?,10,?,?,?,?)")
         .bind(&task).bind(owner).bind(key).bind(id).bind(now).bind(now).bind(now).bind(options)
         .execute(&mut **tx).await?;
-    query("UPDATE system_task_schedules SET last_outcome='queued' WHERE id=? AND last_outcome!='running'")
-        .bind(id).execute(&mut **tx).await?;
+    // The queued state is read from `durable_tasks`; the task keeps showing its last result.
+    Ok(task)
+}
+
+async fn enqueue_with_owner(
+    store: &IdentityStore,
+    id: &str,
+    owner: &str,
+    key: &str,
+    now: i64,
+    max_runtime_seconds: Option<i64>,
+) -> Result<String, sqlx::Error> {
+    let task = {
+        let _writer = store.task_writes.lock().await;
+        let mut conn = store.pool().acquire().await?;
+        let mut tx = begin_write(&mut conn).await?;
+        let task = enqueue_in(&mut tx, id, owner, key, now, max_runtime_seconds).await?;
+        commit(tx).await?;
+        task
+    };
+    task_engine::WAKE.notify_one();
     Ok(task)
 }
 
@@ -71,141 +120,121 @@ pub(crate) async fn enqueue_backup(
     now: i64,
     max_runtime_seconds: Option<i64>,
 ) -> Result<String, sqlx::Error> {
-    let _writer = store.task_writes.lock().await;
-    let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
-    let task = enqueue_in(
-        &mut tx,
+    enqueue_with_owner(
+        store,
         "backup",
         "system",
         &format!("system:backup:{key}"),
         now,
         max_runtime_seconds,
     )
-    .await?;
-    commit(tx).await?;
-    task_engine::WAKE.notify_one();
-    Ok(task)
+    .await
 }
 
+/// Queue a system task run requested by an administrator.
 pub(crate) async fn enqueue_manual(
     store: &IdentityStore,
     id: &str,
     owner: &str,
     now: i64,
 ) -> Result<String, sqlx::Error> {
-    let _writer = store.task_writes.lock().await;
-    let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
-    let task = enqueue_in(
-        &mut tx,
+    enqueue_with_owner(
+        store,
         id,
         owner,
         &format!("system-manual:{}", uuid::Uuid::new_v4()),
         now,
         None,
     )
-    .await?;
-    commit(tx).await?;
-    task_engine::WAKE.notify_one();
-    Ok(task)
+    .await
 }
 
-/// Queue a system task fired by a non-periodic trigger (server startup).
-pub(crate) async fn enqueue_triggered(
+/// Queue a system task fired by a trigger (`key` identifies the firing).
+pub(crate) async fn enqueue(
     store: &IdentityStore,
     id: &str,
     key: &str,
     now: i64,
     max_runtime_seconds: Option<i64>,
 ) -> Result<String, sqlx::Error> {
-    let _writer = store.task_writes.lock().await;
-    let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
-    let exists: i64 = query_scalar("SELECT COUNT(*) FROM system_task_schedules WHERE id=?")
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
-    if exists == 0 {
-        return Err(sqlx::Error::RowNotFound);
-    }
-    let task = enqueue_in(
-        &mut tx,
+    enqueue_with_owner(
+        store,
         id,
         "system",
         &format!("system:{id}:{key}"),
         now,
         max_runtime_seconds,
     )
-    .await?;
-    commit(tx).await?;
-    task_engine::WAKE.notify_one();
-    Ok(task)
+    .await
 }
 
-/// Schedule advancement and queue insertion share one transaction. The next due instant is the
-/// earliest next firing of the task's triggers (daily, weekly or interval).
-pub(crate) async fn pump(store: &IdentityStore, now: i64) -> Result<(), sqlx::Error> {
-    let _writer = store.task_writes.lock().await;
-    let mut conn = store.pool().acquire().await?;
-    let mut tx = begin_write(&mut conn).await?;
-    let due: Vec<(String, i64, i64)> = query_as("SELECT id,interval_minutes,next_due_at FROM system_task_schedules WHERE enabled=1 AND next_due_at<=? ORDER BY next_due_at,id LIMIT 5")
-        .bind(now).fetch_all(&mut *tx).await?;
-    for (id, interval, previous) in due {
-        let advance = crate::task_triggers::advance(&mut tx, "system", &id, now, interval).await?;
-        enqueue_in(
-            &mut tx,
-            &id,
-            "system",
-            &format!("system:{id}:{previous}"),
-            now,
-            advance.max_runtime_seconds,
-        )
-        .await?;
-        query("UPDATE system_task_schedules SET next_due_at=?,enabled=? WHERE id=? AND next_due_at=? AND enabled=1")
-            .bind(advance.next.unwrap_or(previous)).bind(i64::from(advance.next.is_some())).bind(id).bind(previous)
-            .execute(&mut *tx).await?;
+/// Whether the local server is busy for heavy maintenance: a scan or processing lease on the
+/// local Node, or a stream being served.
+async fn local_busy(store: &IdentityStore) -> Result<bool, sqlx::Error> {
+    if crate::scans::LOCAL_STREAMS.load(Ordering::Relaxed) > 0 {
+        return Ok(true);
     }
-    commit(tx).await
+    let leased: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE node_id='local' AND category<>'system' AND lease_until IS NOT NULL")
+        .fetch_one(store.pool())
+        .await?;
+    Ok(leased > 0)
 }
 
-/// One leased Core operation through the existing driver's bounded dispatch pass.
+/// Claim the next runnable maintenance run, if any. At most one runs at a time.
+async fn claim(store: &IdentityStore, timestamp: i64) -> Result<Option<String>, sqlx::Error> {
+    let candidates: Vec<(String, String, i64)> = query_as("SELECT id,target_id,created_at FROM durable_tasks WHERE category='system' AND status='queued' AND lease_until IS NULL AND available_at<=? AND failure_count<max_attempts AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.category='system' AND active.lease_until IS NOT NULL) ORDER BY priority DESC,created_at,id LIMIT 16")
+        .bind(timestamp)
+        .fetch_all(store.pool())
+        .await?;
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let mut busy = None;
+    let mut chosen = None;
+    for (id, target, created) in candidates {
+        if is_heavy(&target) && timestamp.saturating_sub(created) < HEAVY_MAX_WAIT {
+            let busy = match busy {
+                Some(value) => value,
+                None => *busy.insert(local_busy(store).await?),
+            };
+            if busy {
+                continue;
+            }
+        }
+        chosen = Some(id);
+        break;
+    }
+    let Some(id) = chosen else {
+        return Ok(None);
+    };
+    let _writer = store.task_writes.lock().await;
+    let claimed = query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,started_at=COALESCE(started_at,?),updated_at=?,finished_at=NULL,error='' WHERE id=? AND status='queued' AND lease_until IS NULL AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.category='system' AND active.lease_until IS NOT NULL)")
+        .bind(timestamp.saturating_add(60)).bind(timestamp).bind(timestamp).bind(&id)
+        .execute(store.pool()).await?
+        .rows_affected();
+    Ok((claimed == 1).then_some(id))
+}
+
+/// One bounded pass of the driver: start the next maintenance run, if one may start.
 pub(crate) async fn dispatch_once(
     auth: &AuthState,
     root: &Path,
     jobs: &Arc<ScanJobs>,
     timestamp: i64,
 ) -> Result<(), sqlx::Error> {
-    pump(&auth.store, timestamp).await?;
-    if jobs.is_cancelled()
-        || crate::scans::LOCAL_STREAMS.load(std::sync::atomic::Ordering::Relaxed) > 0
-    {
+    if jobs.is_cancelled() {
         return Ok(());
     }
-    let task = {
-        let _writer = auth.store.task_writes.lock().await;
-        let mut conn = auth.store.pool().acquire().await?;
-        let mut tx = begin_write(&mut conn).await?;
-        let task: Option<(String, String)> = query_as("SELECT id,target_id FROM durable_tasks WHERE category='system' AND status='queued' AND lease_until IS NULL AND available_at<=? AND failure_count<max_attempts AND NOT EXISTS(SELECT 1 FROM durable_tasks ready WHERE ready.node_id='local' AND ready.category!='system' AND ready.status='queued' AND ready.lease_until IS NULL AND ready.available_at<=? AND ready.priority>10) AND NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id='local' AND busy.lease_until IS NOT NULL) ORDER BY priority DESC,created_at,id LIMIT 1")
-            .bind(timestamp).bind(timestamp).fetch_optional(&mut *tx).await?;
-        if let Some((id, target)) = &task {
-            query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,started_at=COALESCE(started_at,?),updated_at=?,finished_at=NULL,error='' WHERE id=? AND status='queued' AND lease_until IS NULL")
-                .bind(timestamp.saturating_add(60)).bind(timestamp).bind(timestamp).bind(id)
-                .execute(&mut *tx).await?;
-            query("UPDATE system_task_schedules SET last_outcome='queued' WHERE id=?")
-                .bind(target)
-                .execute(&mut *tx)
-                .await?;
-        }
-        commit(tx).await?;
-        task
-    };
-    let Some((id, _)) = task else {
+    let Some(id) = claim(&auth.store, timestamp).await? else {
         return Ok(());
     };
     let Some(job) = task_engine::get(&auth.store, &id).await? else {
         return Ok(());
     };
+    // Heavy runs that started on a quiet server step aside for playback; once they have waited
+    // their maximum they run to completion.
+    let preemptible =
+        is_heavy(&job.target_id) && timestamp.saturating_sub(job.created_at) < HEAVY_MAX_WAIT;
     let auth = auth.clone();
     let root = root.to_owned();
     let stopping = jobs.clone();
@@ -224,7 +253,7 @@ pub(crate) async fn dispatch_once(
                     _ = &mut deadline => break Err(TIMEOUT),
                     _ = heartbeat.tick() => {
                         let now = media_contracts::protocol::unix_now();
-                        if stopping.is_cancelled() || crate::scans::LOCAL_STREAMS.load(std::sync::atomic::Ordering::Relaxed)>0 {
+                        if stopping.is_cancelled() || (preemptible && crate::scans::LOCAL_STREAMS.load(Ordering::Relaxed) > 0) {
                             break Err("playback_preempted");
                         }
                         match task_engine::get(&auth.store, &job.id).await {
@@ -271,4 +300,25 @@ pub(crate) async fn dispatch_once(
         }
     }));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_database_wide_work_is_heavy() {
+        assert!(is_heavy("optimize-database"));
+        assert!(is_heavy("backup"));
+        for light in [
+            "clean-sessions",
+            "clean-statistics",
+            "clean-activity-log",
+            "clean-cache",
+            "clean-playlists",
+            "update-extensions",
+        ] {
+            assert!(!is_heavy(light), "{light}");
+        }
+    }
 }

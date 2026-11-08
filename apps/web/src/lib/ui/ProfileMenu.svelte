@@ -5,7 +5,8 @@
   import { goto } from '$app/navigation';
   import { session, logout } from '../auth/session';
   import { t, locale, localeOptions, setLocale } from '../i18n';
-  import { themeMode, setTheme } from '../theme';
+  import { effectiveTheme, setTheme } from '../theme';
+  import LanguageLabel from './LanguageLabel.svelte';
 
   let panel: HTMLDivElement;
   let expanded = $state(false);
@@ -26,7 +27,7 @@
       panel.hidePopover();
       await goto(resolve('login/'), { replaceState: true });
     } catch (failure) {
-      error = failure instanceof Error ? failure.message : 'Déconnexion impossible. Réessayez.';
+      error = failure instanceof Error ? failure.message : $t('sign_out_failed_try_again');
     } finally {
       busy = false;
     }
@@ -55,7 +56,7 @@
   <button
     class="profile-trigger"
     popovertarget="profile-menu"
-    aria-label="Menu profil"
+    aria-label={$t('profile_menu')}
     aria-expanded={expanded}
     aria-controls="profile-menu"
   >
@@ -85,7 +86,7 @@
       </div>
     </div>
 
-    <nav aria-label="Menu profil">
+    <nav aria-label={$t('profile_menu')}>
       <a class="profile-entry" href={resolve('settings/')} onclick={(event) => navigate(event, 'settings/')}>
         <Icon name="profile" size={17} />
         <span>{$t('profile_settings')}</span>
@@ -107,20 +108,22 @@
           <button
             type="button"
             class="lang-pill"
-            class:active={$themeMode === 'light'}
+            class:active={$effectiveTheme === 'light'}
+            aria-pressed={$effectiveTheme === 'light'}
             onclick={() => setTheme('light')}
             title={$t('theme_light')}
           >
-            {$locale === 'fr' ? 'Clair' : 'Light'}
+            {$t('theme_light_short')}
           </button>
           <button
             type="button"
             class="lang-pill"
-            class:active={$themeMode === 'dark'}
+            class:active={$effectiveTheme === 'dark'}
+            aria-pressed={$effectiveTheme === 'dark'}
             onclick={() => setTheme('dark')}
             title={$t('theme_dark')}
           >
-            {$locale === 'fr' ? 'Sombre' : 'Dark'}
+            {$t('theme_dark_short')}
           </button>
         </div>
       </div>
@@ -130,7 +133,7 @@
         <span class="lang-title"><Icon name="globe" size={15} /> {$t('language')}</span>
         <div class="lang-pills">
           {#each localeOptions as option (option.code)}
-            <button type="button" class="lang-pill" class:active={$locale === option.code} onclick={() => setLocale(option.code)}>{option.label}</button>
+            <button type="button" class="lang-pill" class:active={$locale === option.code} aria-pressed={$locale === option.code} aria-label={$t(option.code === 'fr' ? 'language_fr' : 'language_en')} title={$t(option.code === 'fr' ? 'language_fr' : 'language_en')} onclick={() => setLocale(option.code)}><LanguageLabel language={option.code} flagOnly /></button>
           {/each}
         </div>
       </div>

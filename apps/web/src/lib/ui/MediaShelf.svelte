@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
+  import { t } from '../i18n';
 
   let {
     title,
@@ -81,7 +82,7 @@
             class="nav-arrow"
             disabled={!canScrollLeft}
             onclick={() => scroll('left')}
-            aria-label="Faire défiler vers la gauche"
+            aria-label={$t('scroll_left')}
           >
             <Icon name="chevron-left" size={18} />
           </button>
@@ -90,7 +91,7 @@
             class="nav-arrow"
             disabled={!canScrollRight}
             onclick={() => scroll('right')}
-            aria-label="Faire défiler vers la droite"
+            aria-label={$t('scroll_right')}
           >
             <Icon name="chevron-right" size={18} />
           </button>

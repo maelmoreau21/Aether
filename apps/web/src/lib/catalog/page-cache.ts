@@ -1,8 +1,11 @@
 import { writable } from 'svelte/store';
 import { onSessionGenerationChange } from '../auth/session';
 import { request, type CatalogPage } from './api';
+import { languageScope, scopedKey, unscopedKey } from './cache-scope';
 
-// Session-only metadata. Never stores playback credentials or media bytes.
+// Session-only metadata. Never stores playback credentials or media bytes. Every entry is keyed by
+// the reader's account and language chain (see cache-scope.ts): a page rendered for someone else, or
+// in another language, can never be found under the current reader's key.
 const FRESH_MS = 30_000;
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_PAGES = 48;
@@ -54,10 +57,20 @@ export function invalidateCatalog(library?: string, notify = true): void {
 }
 onSessionGenerationChange(() => { scrolls.clear(); invalidateCatalog(undefined, false); });
 if (typeof window !== 'undefined') window.addEventListener('media-access-denied', () => invalidateCatalog(undefined, false));
+// Pages are rendered in the account's metadata language: a language change makes them stale.
+if (typeof window !== 'undefined') window.addEventListener('media-locale-saved', () => invalidateCatalog());
+// A change of language chain (interface language, metadata language or fallbacks) makes the pages that
+// are on screen stale: mounted views reload through `catalogRevision`. Entries of the previous chain
+// stay unreachable under their own scope.
+let lastScope: string | undefined;
+languageScope.subscribe(value => {
+  if (lastScope !== undefined && value !== lastScope) invalidateCatalog();
+  lastScope = value;
+});
 // Progress affects latest shelves, not the rest of the inventory. Do not
 // trigger a catalog reload while the player is open.
 export function invalidateLatestCatalog(): void {
-  const latest = (key: string) => new URL(key, 'http://localhost').searchParams.get('scope') === 'latest';
+  const latest = (key: string) => new URL(unscopedKey(key), 'http://localhost').searchParams.get('scope') === 'latest';
   for (const [key, entry] of pages) {
     if (!latest(key)) continue;
     bytes -= entry.bytes;
@@ -75,7 +88,8 @@ export function invalidateLatestCatalog(): void {
 }
 if (typeof window !== 'undefined') window.addEventListener('media-progress-updated', invalidateLatestCatalog);
 
-export function cachedCatalog(key: string): CatalogPage | undefined {
+export function cachedCatalog(rawKey: string): CatalogPage | undefined {
+  const key = scopedKey(rawKey);
   const entry = pages.get(key);
   if (entry) {
     pages.delete(key);
@@ -101,7 +115,8 @@ export function cachedCatalog(key: string): CatalogPage | undefined {
 }
 export function catalogCacheStats() { return { pages: pages.size, jsonBytes: bytes, pending: pending.size }; }
 
-export function loadCatalog(key: string, url: string): Promise<CatalogPage> {
+export function loadCatalog(rawKey: string, url: string): Promise<CatalogPage> {
+  const key = scopedKey(rawKey);
   const entry = pages.get(key);
   if (entry && Date.now() - entry.at < FRESH_MS) return Promise.resolve(entry.data);
   if (!entry && typeof sessionStorage !== 'undefined') {

@@ -24,7 +24,9 @@ class Video extends EventTarget {
   }
 }
 const media: Media = { id: 'demo', title: 'Test', subtitles: [], sources: ['fr', 'en'].map(language => ({ id: language, audioTrackId: language, language, mime: 'video/mp4', url: `/${language}` })) };
-function setup() { const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
+// Failure diagnosis probes the failing URL with a one-byte Range request; default to a reachable one.
+const reachable = () => vi.isMockFunction(globalThis.fetch) || vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 206, body: null }));
+function setup() { reachable(); const video = new Video(); const error = vi.fn(); return { video, error, player: new NativePlayer(video as unknown as HTMLVideoElement, error) }; }
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe('native source replacement', () => {
   it('disables a native caption before detaching it on a paused subtitle change', async () => {
@@ -432,6 +434,49 @@ describe('native source replacement', () => {
     const loading=expect(player.load(media,'fr',new Promise<number>(()=>{}))).rejects.toThrow('chargement de la position');
     video.dispatchEvent(new Event('loadedmetadata'));await vi.advanceTimersByTimeAsync(10000);
     await loading;expect(video.loads).toBe(1);player.destroy();
+  });
+  it('names a vanished Node when the video element fails during playback',async()=>{
+    const {video,player,error}=setup();await player.load(media);
+    Object.assign(video,{error:{code:4,message:''},currentSrc:'/fr'});
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({error:'node_unavailable'}),{status:503})));
+    video.dispatchEvent(new Event('error'));
+    await vi.waitFor(()=>expect(error).toHaveBeenCalledOnce());
+    expect(error.mock.calls[0][1]).toBe('node');expect(video.paused).toBe(true);player.destroy();
+  });
+  it('blames the codec, not the network, when the bytes are reachable but cannot be decoded',async()=>{
+    const {video,player,error}=setup();await player.load(media);
+    Object.assign(video,{error:{code:3,message:''},currentSrc:'/fr'});
+    video.dispatchEvent(new Event('error'));
+    await vi.waitFor(()=>expect(error).toHaveBeenCalledOnce());
+    expect(error.mock.calls[0][1]).toBe('codec');player.destroy();
+  });
+  it('types a refused preparation so a permission error is not retried on another Node',async()=>{
+    const {video,player}=setup();await player.load(media);
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(null,{status:403})));
+    await expect(player.load({...media,sources:[{...media.sources[0],prepare:true,url:'/prepared/video'}]})).rejects.toMatchObject({kind:'permission'});
+    vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(null,{status:503,headers:{'x-media-preparation-error':'preparation_busy'}})));
+    await expect(player.load({...media,sources:[{...media.sources[0],prepare:true,url:'/prepared/video'}]})).rejects.toMatchObject({kind:'preparation'});
+    expect(video.loads).toBe(1);player.destroy();
+  });
+  it('reports a network failure of the preparation request as such',async()=>{
+    const {player}=setup();
+    vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(player.load({...media,sources:[{...media.sources[0],prepare:true,url:'/prepared/video'}]})).rejects.toMatchObject({kind:'network'});
+    player.destroy();
+  });
+  it('measures first frame and first sound as separate startup stages',async()=>{
+    const {video,player}=setup();vi.spyOn(console,'info').mockImplementation(()=>{});
+    const callbacks:Array<(now:number,metadata:{mediaTime:number})=>void>=[];
+    Object.assign(video,{requestVideoFrameCallback:(cb:(now:number,metadata:{mediaTime:number})=>void)=>callbacks.push(cb),cancelVideoFrameCallback(){}});
+    await player.load(media);await player.play();
+    callbacks.splice(0).forEach(cb=>cb(0,{mediaTime:0}));
+    let summary=player.startupSummary();
+    expect(summary.stages['first-frame']).toBeDefined();expect(summary.stages['first-audio']).toBeUndefined();
+    expect(summary.stages.metadata).toBeDefined();expect(summary.stages.buffered).toBeDefined();
+    callbacks.splice(0).forEach(cb=>cb(0,{mediaTime:0.2}));
+    summary=player.startupSummary();
+    expect(summary.stages['first-audio']).toBeDefined();expect(summary.audioSignal).toBe('media-clock');
+    player.destroy();
   });
   it('serializes preparation to respect the single Node worker',async()=>{
     const replies:((value:Response)=>void)[]=[];

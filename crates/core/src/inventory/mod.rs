@@ -6,8 +6,10 @@
 mod catalogue;
 mod details;
 mod editorial;
+mod equivalence;
 mod playback;
 mod publication;
+mod relocation;
 mod resources;
 mod scan;
 
@@ -19,15 +21,18 @@ pub use crate::{
 };
 pub use catalogue::{
     BoundedCatalogueCache, CatalogueFilter, EpisodePage, catalogue, catalogue_cache_stats,
-    catalogue_filtered, catalogue_page, detail, detail_window, estimate_json_bytes,
-    invalidate_catalogue_cache, resource_library,
+    catalogue_filtered, catalogue_page, detail, detail_window, detail_window_localized,
+    estimate_json_bytes, invalidate_catalogue_cache, resource_library,
 };
 pub(crate) use catalogue::{
     refresh_work_availability_from_editions, sort_edition_sources_by_score,
 };
 pub use details::asset_details;
 pub use editorial::{editorial_warnings, refresh_editorial_for_works, refresh_work_editorial};
-pub(crate) use playback::{audio_operational_id, report_track_allowed, valid_chapters};
+pub(crate) use playback::playable_asset_for_work;
+pub(crate) use playback::{
+    audio_operational_id, report_track_allowed, usable_marker, valid_chapters,
+};
 pub use playback::{descriptor, descriptor_for_user};
 pub use publication::publish_staged_scan;
 pub use resources::{audio, content, image, prepared, subtitle};

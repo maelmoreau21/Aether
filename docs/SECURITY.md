@@ -2,9 +2,11 @@
 > groupes sans promotion de rôle, clés catalogue seulement et permissions vivantes,
 > sauvegardes chiffrées avec clé externe et extraction hors ligne sans écrasement.
 > Contrats : ADMIN_USERS.md, ADMIN_ACCESS.md, ADMIN_BACKUPS.md, BACKUP_BUNDLE.md.
-> État du 27 octobre : les nouvelles archives `MDBK0002` sont non chiffrées,
-> contiennent des secrets en clair et exigent un stockage privé. La mention
-> historique du 19 octobre ci-dessus ne décrit plus le format courant.
+> État du 6 novembre : les nouvelles archives sont `MDBK0003`, chiffrées et
+> authentifiées avec une clé externe (`MEDIA_BACKUP_KEY_FILE`) ; sans clé, aucune
+> archive n'est créée. Les archives `MDBK0002` (non chiffrées, secrets en clair)
+> restent lisibles mais ne sont plus produites sans opt-in explicite. Voir
+> [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md), dont la clé `MDBK0001` publiée dans l'historique Git.
 > Les préférences sont persistées par session utilisateur, sans ID de compte fourni par le client.
 
 > Jalon OIDC (18 octobre 2026) : Code + PKCE S256, découverte/JWKS, identités

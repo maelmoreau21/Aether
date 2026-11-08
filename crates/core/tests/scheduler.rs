@@ -303,19 +303,33 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     .await
     .unwrap();
     assert_eq!(count, 0);
+    // A firing that finds the library already being scanned is skipped (the scan is happening
+    // anyway) and the trigger moves on: no pile-up of scans behind a long one.
     media_poc::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES('films','running',0,0)").execute(store.pool()).await.unwrap();
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
-    let unclaimed: Option<i64> = media_poc::database::query_scalar(
-        "SELECT last_run_at FROM scheduled_scans WHERE library_id='films'",
+    let unclaimed: (Option<i64>, i64) = media_poc::database::query_as(
+        "SELECT last_run_at,next_run_at FROM scheduled_scans WHERE library_id='films'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
-    assert_eq!(unclaimed, None);
+    assert_eq!(unclaimed, (None, due + 300));
+    assert_eq!(
+        media_poc::database::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM durable_tasks WHERE category='scan'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        0
+    );
     media_poc::database::query("DELETE FROM scan_jobs WHERE library_id='films'")
         .execute(store.pool())
         .await
         .unwrap();
+    let due = due + 300;
+    scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
+    // A second pass at the same instant never fires the same trigger twice.
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
     assert_eq!(
         media_poc::database::query_scalar::<_, i64>(
@@ -515,6 +529,56 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
     .await
     .unwrap();
     assert_eq!(outcome, "completed");
+}
+
+#[tokio::test]
+async fn missing_credentials_fail_once_while_provider_errors_retry() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("credentials.sqlite"))
+        .await
+        .unwrap();
+    media_poc::libraries::initialize_local(&store)
+        .await
+        .unwrap();
+    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','lib','films','local','synthetic-root',1)")
+        .execute(store.pool()).await.unwrap();
+    for (key, error, expected) in [
+        ("k1", "extension_error:missing_api_key", ("error", 1)),
+        ("k2", "extension_error:unauthorized", ("error", 1)),
+        ("k3", "extension_error:provider_error", ("queued", 1)),
+    ] {
+        media_poc::task_engine::enqueue(&store, "lib", "scheduler", key, 100, 1000)
+            .await
+            .unwrap();
+        let running = media_poc::task_engine::claim(&store, "local", 1000, 30, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        media_poc::task_engine::finish(
+            &store,
+            &running.id,
+            running.attempt,
+            "local",
+            1001,
+            Some(error),
+        )
+        .await
+        .unwrap();
+        let (status, failures): (String, i64) = media_poc::database::query_as(
+            "SELECT status,failure_count FROM durable_tasks WHERE id=?",
+        )
+        .bind(&running.id)
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        assert_eq!((status.as_str(), failures), expected, "{error}");
+        media_poc::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
+            .bind(&running.id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+    store.close().await;
 }
 
 #[tokio::test]
@@ -1045,12 +1109,12 @@ async fn startup_triggers_queue_once_and_time_limits_reach_the_queue() {
     let pool = store.pool();
     media_poc::database::query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,max_runtime_seconds,enabled,created_at) VALUES('boot','system','optimize-database','startup',900,1,0)")
         .execute(pool).await.unwrap();
-    let fired = media_poc::task_triggers::fire_startup(&auth, 1_000)
+    let fired = media_poc::task_scheduler::fire_startup(&auth, 1_000)
         .await
         .unwrap();
     assert_eq!(fired, 1);
     // A second start in the same instant (or an already active run) does not duplicate work.
-    media_poc::task_triggers::fire_startup(&auth, 1_000)
+    media_poc::task_scheduler::fire_startup(&auth, 1_000)
         .await
         .unwrap();
     let queued: Vec<String> = media_poc::database::query_scalar("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='optimize-database' AND status='queued'")
@@ -1069,18 +1133,15 @@ async fn startup_triggers_queue_once_and_time_limits_reach_the_queue() {
         .unwrap();
     media_poc::database::query("UPDATE task_triggers SET max_runtime_seconds=3600,next_fire_at=0 WHERE task_kind='system' AND task_id='clean-sessions'")
         .execute(pool).await.unwrap();
-    media_poc::database::query(
-        "UPDATE system_task_schedules SET next_due_at=0 WHERE id='clean-sessions'",
-    )
-    .execute(pool)
-    .await
-    .unwrap();
     let jobs = Arc::new(ScanJobs::default());
     let now = media_contracts::protocol::unix_now();
-    // The worker pass pumps due system schedules into the durable queue.
-    scheduler::dispatch_once(&auth, temp.path(), &jobs, now)
-        .await
-        .unwrap();
+    // The trigger alone decides: the legacy `next_due_at` column is never read to fire a run.
+    assert_eq!(
+        media_poc::task_scheduler::fire_due(&auth, now)
+            .await
+            .unwrap(),
+        1
+    );
     let (options,): (String,) = media_poc::database::query_as("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='clean-sessions' ORDER BY created_at DESC LIMIT 1")
         .fetch_one(pool).await.unwrap();
     assert!(options.contains("\"maxRuntimeSeconds\":3600"), "{options}");

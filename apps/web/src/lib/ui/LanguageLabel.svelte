@@ -1,6 +1,6 @@
 <script lang="ts">
   import { languageLabel } from '../player/track-labels';
-  let { language }: {language:string} = $props();
+  let { language, flagOnly = false }: {language:string;flagOnly?:boolean} = $props();
   const label=$derived(languageLabel(language));
   const flags:Record<string,string[]>={
     français:['#002395','#fff','#ED2939'],italien:['#009246','#fff','#CE2B37'],
@@ -10,7 +10,7 @@
   };
   const colors=$derived(flags[label]);
 </script>
-<span class="language-label">
+<span class="language-label" class:flag-only={flagOnly}>
   {#if colors}
     <svg viewBox="0 0 18 12" aria-hidden="true">
       {#if label==='français' || label==='italien'}
@@ -29,9 +29,10 @@
   {:else if label==='japonais'}
     <svg viewBox="0 0 18 12" aria-hidden="true"><path fill="#fff" d="M0 0h18v12H0z"/><circle cx="9" cy="6" r="3" fill="#BC002D"/></svg>
   {/if}
-  {label}
+  {#if !flagOnly}{label}{/if}
 </span>
 <style>
   .language-label { display: inline-flex; align-items: center; gap: 6px; }
+  .flag-only svg { width: 24px; height: 16px; }
   svg { width: 18px; height: 12px; flex-shrink: 0; box-shadow: 0 0 0 1px var(--line-2); border-radius: 2px; overflow: hidden; }
 </style>

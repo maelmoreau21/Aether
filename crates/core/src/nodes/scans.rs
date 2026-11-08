@@ -59,6 +59,25 @@ pub(crate) async fn scan_run_authorized(
     true
 }
 
+/// Durable non-scan task results must match their own run fence, the current
+/// library owner and an unexpired running attempt.
+pub(crate) async fn task_run_authorized(
+    store: &IdentityStore,
+    library: &str,
+    node: &str,
+    run: &str,
+) -> bool {
+    let Some((id, attempt)) = run.split_once(':') else {
+        return false;
+    };
+    let Ok(attempt) = attempt.parse::<i64>() else {
+        return false;
+    };
+    let valid: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM active_task_runs r JOIN libraries l ON l.id=r.library_id JOIN media_nodes n ON n.id=l.node_id JOIN durable_tasks j ON j.id=? AND j.attempt=? AND j.node_id=r.node_id AND j.library_id=r.library_id WHERE r.run_id=? AND r.library_id=? AND r.node_id=? AND r.status='running' AND j.status='running' AND j.lease_until>? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.node_id=r.node_id AND n.status!='revoked'")
+        .bind(id).bind(attempt).bind(run).bind(library).bind(node).bind(unix_now()).fetch_one(&store.pool).await.unwrap_or(0);
+    valid == 1
+}
+
 pub(crate) async fn dispatch_remote_task(
     store: &IdentityStore,
     request: &media_contracts::protocol::NodeTaskRequest,
@@ -76,6 +95,7 @@ pub(crate) async fn dispatch_remote_task(
             .try_send(NodeCommandEnvelope {
                 command_id: format!("task-{}", request.run_id),
                 command_type: NodeCommandType::Task,
+                expires_at: None,
                 payload: serde_json::to_value(request).map_err(|_| "Task encoding failed")?,
             })
             .map_err(|_| "node_busy_playback_priority".into());
@@ -136,7 +156,7 @@ pub(super) async fn receive_task_complete(
     let _effects = crate::task_engine::EFFECT_GATE.lock().await;
     if result.node_id.as_str() != rec.id
         || result.run_id != scan_id
-        || !scan_run_authorized(
+        || !task_run_authorized(
             &state.auth.store,
             result.library_id.as_str(),
             &rec.id,
@@ -161,7 +181,7 @@ pub(super) async fn receive_task_complete(
             .flatten();
     if !matches!(
         job_category.as_deref(),
-        Some("analyze" | "prepare" | "image")
+        Some("analyze" | "prepare" | "image" | "trickplay")
     ) {
         return error(StatusCode::CONFLICT, "invalid_task_category");
     }
@@ -180,14 +200,9 @@ pub(super) async fn receive_task_complete(
         return error(StatusCode::CONFLICT, "task_result_denied");
     }
     let failure = (!result.success).then(|| result.error.chars().take(1024).collect::<String>());
-    if crate::task_execution::set_scan_result(
-        &state.auth.store,
-        result.library_id.as_str(),
-        &scan_id,
-        failure.as_deref(),
-    )
-    .await
-    .is_err()
+    if crate::task_execution::set_task_result(&state.auth.store, &scan_id, failure.as_deref())
+        .await
+        .is_err()
     {
         return error(StatusCode::INTERNAL_SERVER_ERROR, "task_result_failed");
     }
@@ -217,6 +232,7 @@ pub(crate) async fn cancel_remote_scan(
             .try_send(NodeCommandEnvelope {
                 command_id: format!("cancel-{scan}"),
                 command_type: NodeCommandType::CancelScan,
+                expires_at: None,
                 payload: serde_json::json!({"scanId":scan}),
             })
             .map_err(|_| "Node channel busy")?;
@@ -641,7 +657,7 @@ pub async fn sync_all_libraries_for_node(
     if rec.status != NodeStatus::Connected.as_str() {
         return Ok(());
     }
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);
+    let is_channel_active = super::channel::channel_is_active(node_id).await;
     if !is_channel_active && rec.base_url.is_none() {
         return Ok(());
     }
@@ -663,6 +679,7 @@ pub async fn sync_all_libraries_for_node(
             let cmd = NodeCommandEnvelope {
                 command_id: format!("sync-{}", sync.library_id),
                 command_type: NodeCommandType::SyncInventory,
+                expires_at: None,
                 payload: serde_json::to_value(&sync).unwrap_or_default(),
             };
             let channels = ACTIVE_CHANNELS.read().await;
@@ -737,6 +754,7 @@ pub async fn dispatch_remote_scan(
                 relative_path: path,
                 size: cache.size,
                 modified_ns: cache.modified_ns,
+                content_fingerprint: cache.content_fingerprint,
             })
             .collect()
     };
@@ -758,11 +776,12 @@ pub async fn dispatch_remote_scan(
         excluded_patterns,
     };
 
-    let is_channel_active = ACTIVE_CHANNELS.read().await.contains_key(node_id);
+    let is_channel_active = super::channel::channel_is_active(node_id).await;
     if is_channel_active {
         let cmd = NodeCommandEnvelope {
             command_id: format!("scan-{scan_id}"),
             command_type: NodeCommandType::Scan,
+            expires_at: None,
             payload: serde_json::to_value(&start_req).unwrap_or_default(),
         };
         let sender = ACTIVE_CHANNELS.read().await.get(node_id).cloned();

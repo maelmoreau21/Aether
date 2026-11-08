@@ -1,22 +1,9 @@
-export const scanLabels = {
-  idle: 'Jamais scanné',
-  queued: 'En attente',
-  running: 'En cours',
-  completed: 'Terminé',
-  error: 'Erreur'
-} as const;
+import { translatedLabels } from '../i18n';
+export const scanLabels = translatedLabels({ idle: 'never_scanned', queued: 'waiting', paused: 'paused', running: 'stats_kpi_active', completed: 'done', error: 'admin_error' });
 
-export const nodeStatusLabels = {
-  connected: 'Connecté',
-  disconnected: 'Hors ligne',
-  revoked: 'Révoqué'
-} as const;
+export const nodeStatusLabels = translatedLabels({ connected: 'connected', disconnected: 'disconnected', revoked: 'revoked' });
 
-export const connectionModeLabels: Record<string, string> = {
-  outbound: 'Relais sortant (NAT)',
-  direct: 'Direct HTTPS',
-  inbound: 'Entrant direct (Legacy)'
-};
+export const connectionModeLabels: Readonly<Record<string, string>> = translatedLabels({ outbound: 'outbound_relay_nat', direct: 'direct_https', inbound: 'direct_inbound_legacy' });
 
 export interface EnrollmentToken {
   tokenId: string;
@@ -41,9 +28,12 @@ export interface LibraryOptions {
   subtitleProviders: ProviderPreference[];
   onlineRefreshIntervalDays: number;
   realtimeMonitoring: boolean; automaticCollections: boolean; introDetectionEnabled: boolean;
+  /** Percent (50–99): automatic markers below it are stored but not used during playback. */
+  markerMinConfidence?: number;
   saveNfoToMedia: boolean; saveImagesToMedia: boolean;
   trickplayEnabled: boolean; trickplayDuringScan: boolean; trickplaySaveToMedia: boolean;
   trickplayIntervalSeconds: number; trickplayWidth: number; trickplayQuality: number;
+  trickplayColumns?: number; trickplayRows?: number;
   chapterImagesEnabled: boolean; chapterImagesDuringScan: boolean; chapterImagesSaveToMedia: boolean;
   subtitleDownloadEnabled: boolean; subtitleLanguages: string[];
   subtitleOnlyMissing: boolean; subtitleMatchAudio: boolean; subtitleRequireHash: boolean;
@@ -53,20 +43,40 @@ export interface LibraryOptions {
   artworkSimilarity: number;
   artworkMinPosterWidth: number;
   artworkMinPosterHeight: number;
+  artworkLanguages?: string[];
+  artworkIncludeNeutral?: boolean;
+  artworkMaxImages?: number;
+  /** Multi-image mode: several images per kind, collected automatically. Off by default. */
+  artworkPoolEnabled?: boolean;
+  /** Administrators see the library in their catalogue; management is unaffected. */
+  adminAccess?: boolean;
+  /** A series library named "Animés": same scan and playback as series, another label. */
+  anime?: boolean;
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
     fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
     automaticRefreshIntervalDays: 0, preferEmbeddedTitles: false, embeddedSubtitlePolicy: 'allow_all',
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
-    onlineRefreshIntervalDays: 0, realtimeMonitoring: false, automaticCollections: false, introDetectionEnabled: false,
+    onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true, markerMinConfidence: 80,
     saveNfoToMedia: false, saveImagesToMedia: false,
-    trickplayEnabled: true, trickplayDuringScan: false, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
-    chapterImagesEnabled: false, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
+    trickplayEnabled: true, trickplayDuringScan: true, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7, trickplayColumns: 10, trickplayRows: 10,
+    chapterImagesEnabled: true, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
-    posterRotationEnabled: false, artworkDeduplicate: true, artworkSimilarity: 5,
-    artworkMinPosterWidth: 0, artworkMinPosterHeight: 0 };
+    posterRotationEnabled: true, artworkDeduplicate: true, artworkSimilarity: 5,
+    artworkMinPosterWidth: 0, artworkMinPosterHeight: 0,
+    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12, artworkPoolEnabled: false, adminAccess: true, anime: false };
+}
+/** Apply the processing preset without changing language, provider scopes or media paths. */
+export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptions {
+  const defaults = defaultLibraryOptions();
+  const processingKeys = ['realtimeMonitoring', 'automaticCollections', 'introDetectionEnabled',
+    'onlineRefreshIntervalDays', 'trickplayEnabled', 'trickplayDuringScan',
+    'trickplayIntervalSeconds', 'trickplayWidth', 'trickplayQuality', 'trickplayColumns', 'trickplayRows', 'chapterImagesEnabled'] as const;
+  const next = { ...current };
+  for (const key of processingKeys) Object.assign(next, { [key]: defaults[key] });
+  return next;
 }
 export interface LibraryFolder { nodeId: string; root: string }
 export interface Library {
@@ -86,13 +96,17 @@ export interface Library {
 }
 
 export interface Scan {
-  status: 'idle' | 'queued' | 'running' | 'completed' | 'error';
+  status: 'idle' | 'queued' | 'paused' | 'running' | 'completed' | 'error';
   discovered: number;
   probed: number;
   reused: number;
   errors: string[];
   errorsCount?: number;
   warningsCount?: number;
+  /** Why a queued scan has not started; the counters then describe the previous scan. */
+  waitingReason?: 'node_busy' | 'node_offline' | 'retry' | 'prerequisite' | 'dispatching';
+  /** Category of the task occupying the node, or the last error before a retry. */
+  waitingDetail?: string;
 }
 
 export interface NodeLibraryRef {

@@ -132,7 +132,7 @@ async fn contract(store: IdentityStore) {
     let (reader, csrf) = login(&auth, "stats-reader", &"b".repeat(64)).await;
     let (other, other_csrf) = login(&auth, "stats-other", &"c".repeat(64)).await;
     let settings_path = "/api/v1/admin/statistics/settings";
-    let settings = json!({"enabled":true,"eventRetentionDays":365,"summaryRetentionDays":0});
+    let settings = json!({"enabled":true,"usersCanView":true,"eventRetentionDays":365,"summaryRetentionDays":0});
     let id = uuid::Uuid::new_v4().to_string();
     let start = json!({"id":id,"mediaId":"stats-film","music":false});
     let create = "/api/v1/playback/sessions";
@@ -559,8 +559,8 @@ async fn contract(store: IdentityStore) {
         call(
             &app,
             "GET",
-            "/api/v1/account/statistics",
-            &reader,
+            "/api/v1/admin/statistics?userId=stats-reader",
+            &admin,
             "",
             Value::Null
         )
@@ -575,9 +575,16 @@ async fn contract(store: IdentityStore) {
         .await
         .unwrap();
     assert_eq!(maintain(&store).await.unwrap(), 12);
-    let detail = call(&app, "GET", &personal_detail, &reader, "", Value::Null)
-        .await
-        .1;
+    let detail = call(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/statistics/sessions/{id}"),
+        &admin,
+        "",
+        Value::Null,
+    )
+    .await
+    .1;
     assert_eq!(detail["detailsExpired"], true);
     assert_eq!(detail["session"]["seconds"], 90.0);
     assert_eq!(
@@ -646,4 +653,92 @@ async fn statistics_sqlite_http_is_private_idempotent_optional_and_durable() {
 async fn statistics_postgres_http_contract() {
     let url = std::env::var("MEDIA_TEST_POSTGRES_URL").expect("disposable PostgreSQL URL");
     contract(IdentityStore::open_postgres(&url).await.unwrap()).await;
+}
+
+#[tokio::test]
+async fn statistics_personal_visibility_requires_collection_and_explicit_permission() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("visibility.sqlite");
+    let store = IdentityStore::open(&path).await.unwrap();
+    fixture(&store).await;
+    let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
+    let app = router(auth.clone());
+    let (admin, csrf) = login(&auth, "stats-admin", &"d".repeat(64)).await;
+    let (reader, _) = login(&auth, "stats-reader", &"e".repeat(64)).await;
+    let config = call(
+        &app,
+        "GET",
+        "/api/v1/admin/statistics/settings",
+        &admin,
+        "",
+        Value::Null,
+    )
+    .await
+    .1;
+    assert_eq!(config["enabled"], false);
+    assert_eq!(config["usersCanView"], false);
+    for (enabled, visible) in [(false, false), (true, false), (true, true), (false, true)] {
+        assert_eq!(call(&app,"PUT","/api/v1/admin/statistics/settings",&admin,&csrf,json!({"enabled":enabled,"usersCanView":visible,"eventRetentionDays":365,"summaryRetentionDays":0})).await.0,StatusCode::NO_CONTENT);
+        let collection = call(
+            &app,
+            "GET",
+            "/api/v1/playback/statistics",
+            &reader,
+            "",
+            Value::Null,
+        )
+        .await
+        .1;
+        assert_eq!(collection["enabled"], enabled);
+        assert_eq!(collection["canView"], enabled && visible);
+        for route in [
+            "/api/v1/account/statistics",
+            "/api/v1/account/statistics/insights",
+            "/api/v1/account/statistics/export",
+            "/api/v1/account/statistics/wrapped",
+        ] {
+            assert_eq!(
+                call(&app, "GET", route, &reader, "", Value::Null).await.0,
+                if enabled && visible {
+                    StatusCode::OK
+                } else {
+                    StatusCode::FORBIDDEN
+                },
+                "{route}: enabled={enabled}, visible={visible}"
+            );
+        }
+        assert_eq!(
+            call(
+                &app,
+                "GET",
+                "/api/v1/account/statistics/sessions/missing",
+                &reader,
+                "",
+                Value::Null
+            )
+            .await
+            .0,
+            if enabled && visible {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::FORBIDDEN
+            }
+        );
+        assert_eq!(
+            call(
+                &app,
+                "GET",
+                "/api/v1/admin/statistics",
+                &admin,
+                "",
+                Value::Null
+            )
+            .await
+            .0,
+            StatusCode::OK
+        );
+    }
+    let reopened = IdentityStore::open(&path).await.unwrap();
+    assert!(users_can_view(&reopened).await.unwrap());
+    assert_eq!(settings(&reopened).await.unwrap().enabled, 0);
 }

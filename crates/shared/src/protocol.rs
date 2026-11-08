@@ -144,12 +144,70 @@ pub enum NodeCommandType {
 }
 
 /// Core -> Node command envelope sent as response to channel poll.
+///
+/// `expires_at` (Unix seconds) is optional on the wire: an older Core never sets it and an
+/// older Node ignores it, so the field is additive within protocol `v1`. A command that is
+/// delivered after its deadline describes a situation that no longer exists (a browser
+/// that gave up on a relay, a scan the administrator already cancelled), so both sides drop it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeCommandEnvelope {
     pub command_id: String,
     pub command_type: NodeCommandType,
     pub payload: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+}
+
+impl NodeCommandType {
+    /// How long a queued command stays meaningful. Relay requests mirror a browser that is
+    /// actively waiting; control commands survive a short reconnection of the channel.
+    pub const fn default_ttl_secs(self) -> i64 {
+        match self {
+            Self::StreamRelay => 15,
+            Self::Ping => 5,
+            Self::Scan | Self::Task | Self::CancelScan | Self::SyncInventory => 60,
+            Self::RotateSecret | Self::Revoke => 300,
+        }
+    }
+}
+
+impl NodeCommandEnvelope {
+    /// Stamp the default deadline for this command type when none was set.
+    pub fn with_default_expiry(mut self, now: i64) -> Self {
+        if self.expires_at.is_none() {
+            self.expires_at = Some(now.saturating_add(self.command_type.default_ttl_secs()));
+        }
+        self
+    }
+
+    /// Strict Core-side check against the Core clock.
+    pub fn is_expired(&self, now: i64) -> bool {
+        self.expires_at.is_some_and(|deadline| now >= deadline)
+    }
+
+    /// Node-side check: the Node clock may drift from the Core clock by up to
+    /// `MAX_CLOCK_SKEW_SECS` (the same tolerance as signed requests), so only a command that
+    /// is late beyond that tolerance is refused.
+    pub fn is_expired_with_skew(&self, now: i64) -> bool {
+        self.expires_at
+            .is_some_and(|deadline| now >= deadline.saturating_add(MAX_CLOCK_SKEW_SECS))
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrickplayTaskOptions {
+    pub interval_ms: u64,
+    pub quality: u8,
+    #[serde(default = "default_trickplay_grid")]
+    pub columns: u32,
+    #[serde(default = "default_trickplay_grid")]
+    pub rows: u32,
+}
+
+fn default_trickplay_grid() -> u32 {
+    10
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -162,6 +220,8 @@ pub struct NodeTaskRequest {
     pub target_id: String,
     pub component: Option<String>,
     pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trickplay: Option<TrickplayTaskOptions>,
     pub core_base_url: String,
 }
 
@@ -263,6 +323,8 @@ pub struct CachedFileMeta {
     pub relative_path: String,
     pub size: u64,
     pub modified_ns: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_fingerprint: Option<String>,
 }
 
 /// Core -> Node scan initiation command (`POST /internal/v1/node/scans`).
@@ -359,7 +421,11 @@ pub struct RemoteScanCompleteResponse {
 }
 
 /// Short-lived, node-bound, asset-bound, action-bound playback authorization token claims.
-/// Contains zero user session identifiers, zero cookies, and zero host filesystem paths.
+/// Contains no cookie and no host filesystem path. It does carry `session_hash`, the SHA-256 of
+/// the viewer's session token (never the token): the Node forwards it to the Core, which
+/// re-checks the live session and permissions on every new request. The token is signed, not
+/// encrypted, so the hash is readable by whoever holds the URL; see
+/// `docs/MULTI_NODE_RELIABILITY.md` for the residual risk and the proposed opaque reference.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackTokenClaims {
@@ -1017,9 +1083,51 @@ mod tests {
                 "targetKind": "asset",
                 "targetId": "asset-1"
             }),
+            expires_at: Some(1_000),
         };
         let serialized = serde_json::to_string(&cmd).unwrap();
         let deserialized: NodeCommandEnvelope = serde_json::from_str(&serialized).unwrap();
         assert_eq!(cmd, deserialized);
+    }
+
+    #[test]
+    fn command_envelope_without_deadline_stays_wire_compatible() {
+        // An older Core sends no deadline: it must still decode, and never counts as expired.
+        let legacy = r#"{"commandId":"c","commandType":"ping","payload":null}"#;
+        let decoded: NodeCommandEnvelope = serde_json::from_str(legacy).unwrap();
+        assert_eq!(decoded.expires_at, None);
+        assert!(!decoded.is_expired(i64::MAX));
+        assert!(!decoded.is_expired_with_skew(i64::MAX));
+        // A command without a deadline serialises exactly as before, so an older Node is unaffected.
+        let encoded = serde_json::to_string(&decoded).unwrap();
+        assert!(!encoded.contains("expiresAt"), "{encoded}");
+        // An older Node ignores the new field of a newer Core.
+        let current =
+            r#"{"commandId":"c","commandType":"ping","payload":null,"expiresAt":5,"future":1}"#;
+        assert!(serde_json::from_str::<NodeCommandEnvelope>(current).is_ok());
+    }
+
+    #[test]
+    fn command_deadlines_are_strict_for_core_and_skew_tolerant_for_nodes() {
+        let relay = NodeCommandEnvelope {
+            command_id: "r".into(),
+            command_type: NodeCommandType::StreamRelay,
+            payload: serde_json::Value::Null,
+            expires_at: None,
+        }
+        .with_default_expiry(1_000);
+        assert_eq!(relay.expires_at, Some(1_015));
+        assert!(!relay.is_expired(1_014));
+        assert!(relay.is_expired(1_015));
+        // The Node tolerates the signed-request clock skew before refusing a late command.
+        assert!(!relay.is_expired_with_skew(1_015 + MAX_CLOCK_SKEW_SECS - 1));
+        assert!(relay.is_expired_with_skew(1_015 + MAX_CLOCK_SKEW_SECS));
+        // An explicit deadline is never overwritten by the default.
+        let explicit = NodeCommandEnvelope {
+            expires_at: Some(7),
+            ..relay.clone()
+        }
+        .with_default_expiry(1_000);
+        assert_eq!(explicit.expires_at, Some(7));
     }
 }

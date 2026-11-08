@@ -37,6 +37,14 @@ Les résultats des contrôles réellement exécutés sont consignés dans .ai/ME
 
 Compte réunit le profil, l’image, le thème et la langue. Sécurité réunit le mot de passe et le SSO. Appareils possède sa page de sessions ; Lecture conserve les préférences du lecteur. Les anciens liens `#appearance` et `#sso` arrivent respectivement sur Compte et Sécurité. Le texte générique d’enregistrement est supprimé.
 
-GET `/api/v1/account/avatar/policy` authentifié retourne `{uploadAllowed,removeAllowed}` sans cache. Les extensions actives d’un éditeur actif avec permission `avatars` interdisent l’import via `disallow_custom_avatars` et la suppression via `force_random_on_creation` ou `require_avatar`. Ces restrictions sont aussi appliquées à PUT/DELETE avatar, y compris pour les administrateurs. Les boutons concernés sont masqués. Le bouton de sélection apparaît pour les collections disponibles ou les extensions actives et présente les propositions derrière ce bouton.
+GET `/api/v1/account/avatar/policy` authentifié retourne `{uploadAllowed,removeAllowed}` sans cache. La politique native administrateur contrôle séparément l’import personnel (`allowCustom`), l’attribution à la création (`assignOnCreate`) et l’obligation d’avatar (`requireAvatar`, activée par défaut). Un avatar obligatoire peut être importé si l’import est autorisé, mais ne peut pas être supprimé. Les contrôles PUT/DELETE sont appliqués par le Core, administrateurs inclus ; le profil affiche les boutons autorisés. Voir [API](API.md).
 
 L’en-tête administratif présente le logo puis Menu et Retour. Le tiroir contient aussi un lien logo vers l’accueil et Retour.
+
+## Menu profil et menus playlist — 6 novembre 2026
+
+Dans le menu profil, Clair/Sombre reflètent le thème effectif, y compris lorsque
+la préférence suit le système. Les boutons de langue montrent les drapeaux
+locaux et conservent leur nom accessible ainsi que leur état sélectionné.
+Les menus d’ajout aux playlists se ferment au clic extérieur et à Échap ;
+les interactions internes restent disponibles et Échap rend le focus au bouton.

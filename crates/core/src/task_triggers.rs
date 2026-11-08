@@ -1,18 +1,19 @@
 //! Jellyfin-style scheduled-task triggers (daily, weekly, interval, server startup) shared by
 //! system tasks, library scans and the backup, plus the unified `/api/v1/admin/tasks` API.
 //!
-//! Triggers are the configuration; the legacy `next_due_at` / `next_run_at` / `enabled` columns
-//! stay the dispatch cache ("earliest next run") read by the existing schedulers, so every
-//! runner, lease and fencing rule is unchanged.
+//! Triggers are the only scheduling configuration: `task_scheduler` fires them. The legacy
+//! `next_due_at` / `next_run_at` / `enabled` columns are a mirror kept for older endpoints.
 use crate::{
     auth::AuthState,
     database::{begin_write, commit, query, query_as, query_scalar},
     identity::{IdentityStore, Role},
+    task_scheduler::{Admission, TaskRef},
 };
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
     http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use jiff::{Span, Timestamp, civil, tz::TimeZone};
@@ -193,7 +194,7 @@ pub struct TriggerRow {
 }
 
 impl TriggerRow {
-    fn spec(&self) -> Option<TriggerSpec> {
+    pub(crate) fn spec(&self) -> Option<TriggerSpec> {
         Some(TriggerSpec {
             kind: TriggerType::parse(&self.trigger_type)?,
             time_of_day_minutes: self.time_of_day_minutes,
@@ -201,7 +202,7 @@ impl TriggerRow {
             interval_minutes: self.interval_minutes,
         })
     }
-    fn timed(&self) -> bool {
+    pub(crate) fn timed(&self) -> bool {
         self.enabled == 1 && self.spec().is_some_and(|s| s.kind != TriggerType::Startup)
     }
 }
@@ -249,128 +250,6 @@ pub async fn load(
         .await
 }
 
-/// Result of a task firing: its new earliest next run and the time limit of this run.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Advance {
-    pub next: Option<i64>,
-    pub max_runtime_seconds: Option<i64>,
-}
-
-/// The task fired at `now`: every timed trigger is recomputed from `now`, and the time limit of
-/// this run is the largest one among the triggers that were due. A task without any trigger row
-/// keeps its legacy interval (`legacy_interval_minutes`), so pre-trigger rows behave as before.
-pub async fn advance(
-    conn: &mut AnyConnection,
-    kind: &str,
-    id: &str,
-    now: i64,
-    legacy_interval_minutes: i64,
-) -> Result<Advance, sqlx::Error> {
-    let rows = load(conn, kind, id).await?;
-    if rows.is_empty() {
-        return Ok(Advance {
-            next: Some(now.saturating_add(legacy_interval_minutes.max(1).saturating_mul(60))),
-            max_runtime_seconds: None,
-        });
-    }
-    let zone = server_time_zone();
-    let mut advance = Advance::default();
-    for row in rows.iter().filter(|row| row.timed()) {
-        let Some(spec) = row.spec() else { continue };
-        if row.next_fire_at.is_none_or(|at| at <= now)
-            && let Some(limit) = row.max_runtime_seconds
-        {
-            advance.max_runtime_seconds =
-                Some(advance.max_runtime_seconds.map_or(limit, |l| l.max(limit)));
-        }
-        let next = next_fire(&spec, now, &zone);
-        query("UPDATE task_triggers SET next_fire_at=? WHERE id=?")
-            .bind(next)
-            .bind(&row.id)
-            .execute(&mut *conn)
-            .await?;
-        advance.next = match (advance.next, next) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
-    }
-    Ok(advance)
-}
-
-/// After a trigger edit: fill missing next instants and write the legacy dispatch cache.
-pub async fn sync(
-    conn: &mut AnyConnection,
-    kind: &str,
-    id: &str,
-    now: i64,
-) -> Result<Option<i64>, sqlx::Error> {
-    let rows = load(conn, kind, id).await?;
-    let zone = server_time_zone();
-    let mut earliest: Option<i64> = None;
-    let mut first_interval = None;
-    for row in rows.iter().filter(|row| row.timed()) {
-        let Some(spec) = row.spec() else { continue };
-        let next = match row.next_fire_at {
-            Some(at) if at > now => Some(at),
-            _ => {
-                let next = next_fire(&spec, now, &zone);
-                query("UPDATE task_triggers SET next_fire_at=? WHERE id=?")
-                    .bind(next)
-                    .bind(&row.id)
-                    .execute(&mut *conn)
-                    .await?;
-                next
-            }
-        };
-        if first_interval.is_none() {
-            first_interval = spec.interval_minutes;
-        }
-        earliest = match (earliest, next) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        };
-    }
-    let enabled = i64::from(earliest.is_some());
-    match kind {
-        "system" => {
-            query("UPDATE system_task_schedules SET enabled=?,next_due_at=COALESCE(?,next_due_at),interval_minutes=COALESCE(?,interval_minutes) WHERE id=?")
-                .bind(enabled).bind(earliest).bind(first_interval.filter(|m| (5..=10080).contains(m))).bind(id)
-                .execute(&mut *conn).await?;
-        }
-        "backup" => {
-            query("UPDATE backup_schedule SET enabled=?,next_due_at=COALESCE(?,next_due_at),interval_minutes=COALESCE(?,interval_minutes) WHERE singleton=1")
-                .bind(enabled).bind(earliest).bind(first_interval.filter(|m| (60..=10080).contains(m)))
-                .execute(&mut *conn).await?;
-        }
-        "scan" => {
-            if let Some(next) = earliest {
-                query("INSERT INTO scheduled_scans(library_id,interval_minutes,enabled,next_run_at) VALUES(?,?,1,?) ON CONFLICT(library_id) DO UPDATE SET enabled=1,next_run_at=excluded.next_run_at,interval_minutes=excluded.interval_minutes")
-                    .bind(id).bind(first_interval.unwrap_or(1440).clamp(5, 10080)).bind(next)
-                    .execute(&mut *conn).await?;
-            } else {
-                query("UPDATE scheduled_scans SET enabled=0 WHERE library_id=?")
-                    .bind(id)
-                    .execute(&mut *conn)
-                    .await?;
-            }
-        }
-        _ => {}
-    }
-    mark_migrated(conn, kind, id, now).await?;
-    Ok(earliest)
-}
-
-async fn mark_migrated(
-    conn: &mut AnyConnection,
-    kind: &str,
-    id: &str,
-    now: i64,
-) -> Result<(), sqlx::Error> {
-    query("INSERT INTO task_trigger_migrations(task_kind,task_id,migrated_at) VALUES(?,?,?) ON CONFLICT(task_kind,task_id) DO NOTHING")
-        .bind(kind).bind(id).bind(now).execute(conn).await?;
-    Ok(())
-}
-
 /// Legacy `PUT .../schedule` endpoints: the task gets exactly one interval trigger (or none).
 pub async fn replace_with_interval(
     conn: &mut AnyConnection,
@@ -391,7 +270,8 @@ pub async fn replace_with_interval(
             .bind(now.saturating_add(interval_minutes.saturating_mul(60))).bind(now)
             .execute(&mut *conn).await?;
     }
-    mark_migrated(conn, kind, id, now).await
+    crate::task_scheduler::mirror(conn, kind, id).await?;
+    Ok(())
 }
 
 /// Legacy `DELETE` of a library scan plan.
@@ -402,36 +282,6 @@ pub async fn remove_all(conn: &mut AnyConnection, kind: &str, id: &str) -> Resul
         .execute(conn)
         .await?;
     Ok(())
-}
-
-/// Enqueue, once per process start, every task carrying an enabled "server startup" trigger.
-pub async fn fire_startup(auth: &AuthState, now: i64) -> Result<usize, sqlx::Error> {
-    let rows: Vec<(String, String, Option<i64>)> = query_as("SELECT task_kind,task_id,MAX(max_runtime_seconds) FROM task_triggers WHERE trigger_type='startup' AND enabled=1 GROUP BY task_kind,task_id ORDER BY task_kind,task_id")
-        .fetch_all(auth.store.pool()).await?;
-    let mut fired = 0;
-    for (kind, id, limit) in rows {
-        let key = format!("startup:{now}");
-        let result = match kind.as_str() {
-            "system" => {
-                crate::system_task_queue::enqueue_triggered(&auth.store, &id, &key, now, limit)
-                    .await
-                    .map(|_| ())
-            }
-            "backup" => crate::admin_backups::trigger_backup(&auth.store, &key, now, limit)
-                .await
-                .map(|_| ()),
-            "scan" => {
-                crate::scheduler::queue_library_scan(auth, &id, &format!("startup:{id}:{now}"), now)
-                    .await
-            }
-            _ => Ok(()),
-        };
-        match result {
-            Ok(()) => fired += 1,
-            Err(error) => eprintln!("startup trigger for {kind}:{id} failed: {error}"),
-        }
-    }
-    Ok(fired)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -472,40 +322,34 @@ pub struct TaskView {
     pub triggers: Vec<TriggerView>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum TaskRef {
-    System(String),
-    Backup,
-    Scan(String),
-}
-
-impl TaskRef {
-    fn parse(id: &str) -> Self {
-        if id == "backup" {
-            Self::Backup
-        } else if let Some(library) = id.strip_prefix("scan-") {
-            Self::Scan(library.to_owned())
-        } else {
-            Self::System(id.to_owned())
-        }
-    }
-    fn kind(&self) -> &'static str {
-        match self {
-            Self::System(_) => "system",
-            Self::Backup => "backup",
-            Self::Scan(_) => "scan",
-        }
-    }
-    fn target(&self) -> &str {
-        match self {
-            Self::System(id) | Self::Scan(id) => id,
-            Self::Backup => "backup",
-        }
-    }
-}
-
 fn now() -> i64 {
     media_contracts::protocol::unix_now()
+}
+
+/// An API refusal. With a code, the body is `{"error": code}` so the interface can explain it;
+/// without one only the status is sent (the interface then uses its generic status messages).
+#[derive(Debug)]
+pub struct ApiError(StatusCode, Option<&'static str>);
+
+impl ApiError {
+    fn coded(status: StatusCode, code: &'static str) -> Self {
+        Self(status, Some(code))
+    }
+}
+
+impl From<StatusCode> for ApiError {
+    fn from(status: StatusCode) -> Self {
+        Self(status, None)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        match self.1 {
+            Some(code) => (self.0, Json(serde_json::json!({ "error": code }))).into_response(),
+            None => self.0.into_response(),
+        }
+    }
 }
 
 async fn authorize(
@@ -523,9 +367,9 @@ async fn authorize(
     Ok(user.user.id)
 }
 
-fn internal<E: std::fmt::Display>(error: E) -> StatusCode {
+fn internal<E: std::fmt::Display>(error: E) -> ApiError {
     eprintln!("task API: {error}");
-    StatusCode::INTERNAL_SERVER_ERROR
+    StatusCode::INTERNAL_SERVER_ERROR.into()
 }
 
 pub fn router(auth: AuthState) -> Router {
@@ -559,12 +403,17 @@ type SystemRow = (
     Option<String>,
 );
 
-fn active_state(status: Option<&str>) -> &'static str {
-    match status {
-        Some("running") => "running",
-        Some("queued" | "paused") => "queued",
-        _ => "idle",
+/// Display state from the durable runs of a task.
+fn active_state<'a>(statuses: impl Iterator<Item = &'a str>) -> &'static str {
+    let mut state = "idle";
+    for status in statuses {
+        match status {
+            "running" => return "running",
+            "queued" | "paused" => state = "queued",
+            _ => {}
+        }
     }
+    state
 }
 
 fn last_run(
@@ -576,9 +425,10 @@ fn last_run(
     scope: Option<String>,
 ) -> Option<LastRun> {
     let outcome = match outcome {
-        "never" | "" => return None,
-        // `queued` only reflects admission; the previous run is not known separately.
-        "queued" | "dispatching" if start.is_none() => return None,
+        // No completed run is known (never run, or a legacy "queued" marker).
+        "never" | "" | "queued" | "dispatching" => return None,
+        // A "running" marker without an active run: the server stopped during that run.
+        "running" => "interrupted",
         "completed" => "succeeded",
         "error" => "failed",
         other => other,
@@ -592,6 +442,9 @@ fn last_run(
         error_scope: scope,
     })
 }
+
+/// One active durable run: (category, target, scope, owner, status, progress).
+type ActiveRow = (String, String, String, String, String, i64);
 
 /// Build every task view (or one task when `only` is set) from current database state.
 async fn collect(
@@ -614,11 +467,22 @@ async fn collect(
             .filter_map(|t| t.next_fire_at)
             .min()
     };
-    let active: Vec<(String, String, String, String, i64)> = query_as("SELECT category,target_id,COALESCE(library_id,''),status,progress FROM durable_tasks WHERE status IN ('queued','running','paused') ORDER BY created_at")
+    let active: Vec<ActiveRow> = query_as("SELECT category,COALESCE(target_id,''),COALESCE(library_id,''),owner,status,progress FROM durable_tasks WHERE status IN ('queued','running','paused') ORDER BY created_at")
         .fetch_all(pool).await?;
     let mut tasks = Vec::new();
 
     let wants = |candidate: &TaskRef| only.is_none_or(|only| only == candidate);
+    let system_runs = |target: &str| -> Vec<&ActiveRow> {
+        active
+            .iter()
+            .filter(|(category, t, ..)| category == "system" && t == target)
+            .collect()
+    };
+    let progress_of = |runs: &[&ActiveRow]| -> Option<i64> {
+        runs.iter()
+            .find(|(.., status, _)| status == "running")
+            .map(|(.., progress)| *progress)
+    };
 
     // System maintenance tasks.
     let systems: Vec<SystemRow> = query_as("SELECT id,name,description,category,last_started_at,last_completed_at,last_outcome,last_error_kind,last_error_scope,last_message FROM system_task_schedules ORDER BY category,name")
@@ -629,14 +493,8 @@ async fn collect(
         if !wants(&TaskRef::System(id.clone())) {
             continue;
         }
-        let current = active
-            .iter()
-            .filter(|(c, t, ..)| c == "system" && t == &id)
-            .max_by_key(|(.., status, _)| status == "running");
-        let mut state = active_state(current.map(|(.., s, _)| s.as_str()));
-        if state == "idle" && outcome == "running" {
-            state = "running";
-        }
+        let runs = system_runs(&id);
+        let state = active_state(runs.iter().map(|(.., status, _)| status.as_str()));
         tasks.push(TaskView {
             id: id.clone(),
             kind: "system",
@@ -644,9 +502,10 @@ async fn collect(
             description,
             category,
             state,
-            progress: current.filter(|_| state == "running").map(|(.., p)| *p),
+            progress: progress_of(&runs).filter(|_| state == "running"),
             next_run_at: next_of("system", &id),
-            last_run: if outcome == "running" || outcome == "queued" {
+            // While a run is active its outcome is not known yet.
+            last_run: if state == "running" {
                 None
             } else {
                 last_run(started, completed, &outcome, message, kind, scope)
@@ -665,13 +524,8 @@ async fn collect(
         let row: Option<(Option<i64>, Option<i64>, String)> = query_as("SELECT last_started_at,last_completed_at,last_outcome FROM backup_schedule WHERE singleton=1")
             .fetch_optional(pool).await?;
         if let Some((started, completed, outcome)) = row {
-            let current = active
-                .iter()
-                .find(|(c, t, ..)| c == "system" && t == "backup");
-            let mut state = active_state(current.map(|(.., s, _)| s.as_str()));
-            if state == "idle" && outcome == "running" {
-                state = "running";
-            }
+            let runs = system_runs("backup");
+            let state = active_state(runs.iter().map(|(.., status, _)| status.as_str()));
             let failure: Option<(String, String)> = query_as("SELECT error,result_json FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','completed','error','cancelled') AND (error!='' OR result_json LIKE '%\"message\"%') ORDER BY updated_at DESC,id LIMIT 1")
                 .fetch_optional(pool).await?;
             let failure = failure.map(|(error, detail)| {
@@ -687,12 +541,12 @@ async fn collect(
                 description: "Crée une archive non chiffrée de la base et de la configuration du serveur. Les fichiers médias ne sont pas inclus.".into(),
                 category: "Maintenance".into(),
                 state,
-                progress: current.filter(|_| state == "running").map(|(.., p)| *p),
+                progress: progress_of(&runs).filter(|_| state == "running"),
                 next_run_at: next_of("backup", "backup"),
-                last_run: if outcome == "running" {
+                last_run: if state == "running" {
                     None
                 } else {
-                    let message = (outcome == "failed" || outcome == "interrupted")
+                    let message = matches!(outcome.as_str(), "failed" | "interrupted" | "running")
                         .then(|| failure.filter(|e| !e.is_empty()))
                         .flatten();
                     last_run(started, completed, &outcome, message, None, None)
@@ -720,21 +574,19 @@ async fn collect(
                 .fetch_all(pool)
                 .await?;
         let in_scope = |scope: &str| scope == library || scopes.iter().any(|s| s == scope);
-        let current: Vec<_> = active
+        // Real-time monitoring polls are background housekeeping, not runs of this task.
+        let current: Vec<&ActiveRow> = active
             .iter()
-            .filter(|(c, _, scope, ..)| c == "scan" && in_scope(scope))
+            .filter(|(category, _, scope, owner, ..)| {
+                category == "scan" && owner != "library-monitor" && in_scope(scope)
+            })
             .collect();
-        let state = if current.iter().any(|(.., s, _)| s == "running") {
-            "running"
-        } else if current.is_empty() {
-            "idle"
-        } else {
-            "queued"
-        };
+        let state = active_state(current.iter().map(|(.., status, _)| status.as_str()));
         let progress = (state == "running")
             .then(|| current.iter().map(|(.., p)| *p).sum::<i64>() / current.len().max(1) as i64);
-        let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as("SELECT started_at,finished_at,status,error FROM durable_tasks WHERE category='scan' AND library_id=? AND status IN ('completed','error','cancelled') ORDER BY COALESCE(finished_at,updated_at) DESC,id LIMIT 1")
-            .bind(&library).fetch_optional(pool).await?;
+        // The most recent finished run over every scope of the library.
+        let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as("SELECT started_at,finished_at,status,error FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('completed','error','cancelled') ORDER BY COALESCE(finished_at,updated_at) DESC,id LIMIT 1")
+            .bind(&library).bind(&library).fetch_optional(pool).await?;
         let job: Option<(String, String, i64, i64)> = query_as("SELECT status,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=?")
             .bind(&library).fetch_optional(pool).await?;
         let issues: Vec<String> = job
@@ -815,19 +667,19 @@ async fn collect(
     Ok(tasks)
 }
 
-async fn find(store: &IdentityStore, id: &str) -> Result<(TaskRef, TaskView), StatusCode> {
+async fn find(store: &IdentityStore, id: &str) -> Result<(TaskRef, TaskView), ApiError> {
     let task = TaskRef::parse(id);
     let mut views = collect(store, Some(&task)).await.map_err(internal)?;
     views
         .pop()
         .map(|view| (task, view))
-        .ok_or(StatusCode::NOT_FOUND)
+        .ok_or(ApiError::coded(StatusCode::NOT_FOUND, "task_not_found"))
 }
 
 async fn list(
     State(auth): State<AuthState>,
     headers: HeaderMap,
-) -> Result<Json<Vec<TaskView>>, StatusCode> {
+) -> Result<Json<Vec<TaskView>>, ApiError> {
     authorize(&auth, &headers, false).await?;
     collect(&auth.store, None).await.map(Json).map_err(internal)
 }
@@ -836,7 +688,7 @@ async fn detail(
     State(auth): State<AuthState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<TaskView>, StatusCode> {
+) -> Result<Json<TaskView>, ApiError> {
     authorize(&auth, &headers, false).await?;
     find(&auth.store, &id).await.map(|(_, view)| Json(view))
 }
@@ -845,47 +697,59 @@ async fn run(
     State(auth): State<AuthState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiError> {
     let actor = authorize(&auth, &headers, true).await?;
     let (task, view) = find(&auth.store, &id).await?;
     if view.state != "idle" {
-        return Err(StatusCode::CONFLICT);
+        return Err(ApiError::coded(StatusCode::CONFLICT, "task_already_active"));
     }
     if view.reason.is_some() {
-        return Err(StatusCode::CONFLICT);
+        return Err(ApiError::coded(StatusCode::CONFLICT, "task_unavailable"));
     }
     let timestamp = now();
-    match &task {
+    let admission = match &task {
         TaskRef::System(id) => {
             crate::system_task_queue::enqueue_manual(&auth.store, id, &actor, timestamp)
                 .await
                 .map_err(internal)?;
+            Admission::Queued
         }
-        TaskRef::Backup => {
-            let key = format!("manual:{}", uuid::Uuid::new_v4());
-            if !crate::admin_backups::trigger_backup(&auth.store, &key, timestamp, None)
-                .await
-                .map_err(internal)?
-            {
-                return Err(StatusCode::CONFLICT);
-            }
+        TaskRef::Backup => crate::task_scheduler::admit(
+            &auth,
+            &task,
+            &format!("manual:{}", uuid::Uuid::new_v4()),
+            timestamp,
+            None,
+        )
+        .await
+        .map_err(internal)?,
+        TaskRef::Scan(library) => crate::task_scheduler::admit(
+            &auth,
+            &task,
+            &format!("manual:{library}:{}", uuid::Uuid::new_v4()),
+            timestamp,
+            None,
+        )
+        .await
+        .map_err(internal)?,
+    };
+    match admission {
+        Admission::Queued => {
+            crate::task_engine::WAKE.notify_one();
+            Ok(StatusCode::ACCEPTED)
         }
-        TaskRef::Scan(library) => {
-            let key = format!("manual:{library}:{}", uuid::Uuid::new_v4());
-            crate::scheduler::queue_library_scan(&auth, library, &key, timestamp)
-                .await
-                .map_err(internal)?;
+        Admission::AlreadyActive => {
+            Err(ApiError::coded(StatusCode::CONFLICT, "task_already_active"))
         }
+        Admission::Unavailable => Err(ApiError::coded(StatusCode::CONFLICT, "task_unavailable")),
     }
-    crate::task_engine::WAKE.notify_one();
-    Ok(StatusCode::ACCEPTED)
 }
 
 async fn cancel(
     State(auth): State<AuthState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiError> {
     authorize(&auth, &headers, true).await?;
     let (task, _) = find(&auth.store, &id).await?;
     let ids: Vec<String> = match &task {
@@ -893,7 +757,7 @@ async fn cancel(
             .bind(target).fetch_all(auth.store.pool()).await,
         TaskRef::Backup => query_scalar("SELECT id FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','running','paused')")
             .fetch_all(auth.store.pool()).await,
-        TaskRef::Scan(library) => query_scalar("SELECT id FROM durable_tasks WHERE category='scan' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running','paused')")
+        TaskRef::Scan(library) => query_scalar("SELECT id FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running','paused')")
             .bind(library).bind(library).fetch_all(auth.store.pool()).await,
     }
     .map_err(internal)?;
@@ -906,7 +770,7 @@ async fn cancel(
     if stopped {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(StatusCode::CONFLICT)
+        Err(ApiError::coded(StatusCode::CONFLICT, "task_not_active"))
     }
 }
 
@@ -914,7 +778,7 @@ async fn list_triggers(
     State(auth): State<AuthState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-) -> Result<Json<Vec<TriggerView>>, StatusCode> {
+) -> Result<Json<Vec<TriggerView>>, ApiError> {
     authorize(&auth, &headers, false).await?;
     let (_, view) = find(&auth.store, &id).await?;
     Ok(Json(view.triggers))
@@ -936,23 +800,23 @@ async fn create_trigger(
     Path(id): Path<String>,
     headers: HeaderMap,
     Json(input): Json<TriggerInput>,
-) -> Result<(StatusCode, Json<TriggerView>), StatusCode> {
+) -> Result<(StatusCode, Json<TriggerView>), ApiError> {
     authorize(&auth, &headers, true).await?;
     let (task, _) = find(&auth.store, &id).await?;
-    let min_interval = if task == TaskRef::Backup { 60 } else { 5 };
+    let invalid = || ApiError::coded(StatusCode::UNPROCESSABLE_ENTITY, "trigger_invalid");
     let spec = TriggerSpec {
         kind: input.trigger_type,
         time_of_day_minutes: input.time_of_day_minutes,
         day_of_week: input.day_of_week,
         interval_minutes: input.interval_minutes,
     }
-    .normalized(min_interval)
-    .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+    .normalized(task.min_interval())
+    .map_err(|_| invalid())?;
     if input
         .max_runtime_seconds
         .is_some_and(|limit| !(60..=604_800).contains(&limit))
     {
-        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+        return Err(invalid());
     }
     let timestamp = now();
     let trigger_id = uuid::Uuid::new_v4().to_string();
@@ -962,20 +826,20 @@ async fn create_trigger(
     let (kind, target) = (task.kind(), task.target());
     let existing = load(&mut tx, kind, target).await.map_err(internal)?;
     if existing.len() as i64 >= MAX_TRIGGERS_PER_TASK {
-        return Err(StatusCode::CONFLICT);
+        return Err(ApiError::coded(StatusCode::CONFLICT, "trigger_limit"));
     }
     let duplicate = existing.iter().any(|row| {
         row.spec() == Some(spec) && row.max_runtime_seconds == input.max_runtime_seconds
     });
     if duplicate {
-        return Err(StatusCode::CONFLICT);
+        return Err(ApiError::coded(StatusCode::CONFLICT, "trigger_duplicate"));
     }
     query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,time_of_day_minutes,day_of_week,interval_minutes,max_runtime_seconds,enabled,next_fire_at,created_at) VALUES(?,?,?,?,?,?,?,?,1,?,?)")
         .bind(&trigger_id).bind(kind).bind(target).bind(spec.kind.as_str())
         .bind(spec.time_of_day_minutes).bind(spec.day_of_week).bind(spec.interval_minutes)
         .bind(input.max_runtime_seconds).bind(next_fire(&spec, timestamp, &server_time_zone())).bind(timestamp)
         .execute(&mut *tx).await.map_err(internal)?;
-    sync(&mut tx, kind, target, timestamp)
+    crate::task_scheduler::mirror(&mut tx, kind, target)
         .await
         .map_err(internal)?;
     let created = load(&mut tx, kind, target)
@@ -983,7 +847,7 @@ async fn create_trigger(
         .map_err(internal)?
         .into_iter()
         .find(|row| row.id == trigger_id)
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        .ok_or_else(|| ApiError::from(StatusCode::INTERNAL_SERVER_ERROR))?;
     commit(tx).await.map_err(internal)?;
     Ok((StatusCode::CREATED, Json(TriggerView::from(&created))))
 }
@@ -992,7 +856,7 @@ async fn delete_trigger(
     State(auth): State<AuthState>,
     Path((id, trigger)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<StatusCode, ApiError> {
     authorize(&auth, &headers, true).await?;
     let (task, _) = find(&auth.store, &id).await?;
     let (kind, target) = (task.kind(), task.target());
@@ -1008,9 +872,11 @@ async fn delete_trigger(
         .map_err(internal)?
         .rows_affected();
     if removed == 0 {
-        return Err(StatusCode::NOT_FOUND);
+        return Err(ApiError::coded(StatusCode::NOT_FOUND, "trigger_not_found"));
     }
-    sync(&mut tx, kind, target, now()).await.map_err(internal)?;
+    crate::task_scheduler::mirror(&mut tx, kind, target)
+        .await
+        .map_err(internal)?;
     commit(tx).await.map_err(internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1018,17 +884,6 @@ async fn delete_trigger(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn task_references_round_trip() {
-        assert_eq!(TaskRef::parse("backup"), TaskRef::Backup);
-        assert_eq!(TaskRef::parse("scan-lib-1"), TaskRef::Scan("lib-1".into()));
-        assert_eq!(
-            TaskRef::parse("clean-cache"),
-            TaskRef::System("clean-cache".into())
-        );
-        assert_eq!(TaskRef::parse("scan-lib-1").target(), "lib-1");
-    }
 
     #[test]
     fn normalization_rejects_out_of_range_fields() {
@@ -1044,6 +899,26 @@ mod tests {
             }
             .normalized(5),
             Ok(TriggerSpec::startup())
+        );
+    }
+
+    #[test]
+    fn display_state_prefers_the_running_run() {
+        assert_eq!(active_state(["queued", "running"].into_iter()), "running");
+        assert_eq!(active_state(["paused"].into_iter()), "queued");
+        assert_eq!(active_state(std::iter::empty()), "idle");
+    }
+
+    #[test]
+    fn stale_markers_never_hide_the_last_run() {
+        assert!(last_run(Some(1), Some(2), "queued", None, None, None).is_none());
+        let interrupted = last_run(Some(1), None, "running", None, None, None).unwrap();
+        assert_eq!(interrupted.outcome, "interrupted");
+        assert_eq!(
+            last_run(Some(1), Some(2), "completed", None, None, None)
+                .unwrap()
+                .outcome,
+            "succeeded"
         );
     }
 }

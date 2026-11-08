@@ -8,7 +8,6 @@
   import { meaningfulText } from './detail-facts';
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
-  import { fitArtwork } from '../ui/fit-artwork';
 
   // En-tête « Affiche » : affiche nette + identité + actions + fiche rapide, sur le
   // fond de l'œuvre. Tout ce qui sert à agir tient dans le premier écran ; le reste
@@ -55,14 +54,14 @@
     {#if hasBackdrop}
       <!-- Calque image à part : lui seul est rogné aux coins arrondis, pour que les menus et
            fenêtres des actions (⋯, listes) passent au-dessus du reste de la page. -->
-      <div class="media" aria-hidden="true">
-        <!-- Fond : la même image floutée comble l'espace autour de l'image nette. -->
-        <img class="fill" class:ambient src={backdrop} alt="" width="1280" height="720" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
-        {#if !ambient}
-          <!-- Image nette affichée entière (jamais rognée), calée en haut à droite ; son cadre suit son ratio réel. -->
-          <div class="backdrop-frame">
-            <img class="backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" use:fitArtwork={{ adapt: false }} />
-          </div>
+      <div class="media" class:ambient aria-hidden="true">
+        {#if ambient}
+          <!-- Affiche seule : floutée en fond d'ambiance, jamais recadrée en net. -->
+          <img class="fill" src={backdrop} alt="" width="1280" height="720" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
+        {:else}
+          <!-- Image large affichée entière sur toute la largeur : c'est elle qui donne la hauteur
+               du bandeau (son ratio réel), sans recadrage ni remplissage. -->
+          <img class="backdrop" src={backdrop} alt="" width="1280" height="720" fetchpriority="high" decoding="async" onerror={() => failedBackdrops = [...failedBackdrops, backdrop]} />
         {/if}
         <div class="shade"></div>
       </div>
@@ -153,17 +152,34 @@
     color: var(--tx);
   }
 
+  /* Avec une image large : l'image et le contenu partagent la même cellule de grille.
+     Le bandeau prend la plus grande des deux hauteurs : celle de l'image à son ratio
+     réel (le cas courant) ou celle du contenu s'il est plus haut (téléphone, image très
+     large) ; dans ce cas le bas de l'image se fond dans le fond du bandeau. */
   .masthead.has-backdrop {
+    display: grid;
     background: #06080e;
     color: var(--on-media);
   }
 
   .media {
-    position: absolute;
-    inset: 0;
+    position: relative;
+    grid-area: 1 / 1;
+    align-self: start;
     overflow: hidden;
     border-radius: inherit;
     pointer-events: none;
+  }
+
+  .media.ambient {
+    position: absolute;
+    inset: 0;
+  }
+
+  .backdrop {
+    display: block;
+    width: 100%;
+    height: auto;
   }
 
   .fill {
@@ -172,36 +188,23 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    filter: blur(36px) saturate(1.2) brightness(0.55);
+    filter: blur(36px) saturate(1.2) brightness(0.6);
     transform: scale(1.2);
   }
 
-  /* Cadre de l'image nette : hauteur de l'en-tête, largeur selon le ratio réel (--artwork-ratio
-     publié par fitArtwork), plafonné à la largeur disponible ; l'image y est « contenue ». */
-  .backdrop-frame {
-    position: absolute;
-    top: 0;
-    right: 0;
-    height: 100%;
-    max-width: 100%;
-    aspect-ratio: var(--artwork-ratio, 16 / 9);
-  }
-
-  .backdrop {
-    display: block;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    object-position: right top;
-  }
-
-  /* Voile de lisibilité : seul dégradé autorisé sur une image */
+  /* Voile de lisibilité : seul dégradé autorisé sur une image. En bas, il rejoint
+     exactement le fond du bandeau pour qu'aucune limite d'image ne se voie. */
   .shade {
     position: absolute;
     inset: 0;
     background:
-      linear-gradient(0deg, var(--media-shade) 0%, rgb(6 8 14 / 0.55) 55%, rgb(6 8 14 / 0.35) 100%),
-      linear-gradient(90deg, rgb(6 8 14 / 0.55) 0%, rgb(6 8 14 / 0) 60%);
+      linear-gradient(0deg, #06080e 0%, rgb(6 8 14 / 0.6) 22%, rgb(6 8 14 / 0.15) 60%, rgb(6 8 14 / 0.25) 100%),
+      linear-gradient(90deg, rgb(6 8 14 / 0.85) 0%, rgb(6 8 14 / 0.55) 35%, rgb(6 8 14 / 0) 65%);
+  }
+
+  .masthead.has-backdrop .layout {
+    grid-area: 1 / 1;
+    align-self: center;
   }
 
   .layout {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
   import WorkTools from './WorkTools.svelte';

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   analysisState, analysisSteps, copySegment, effectiveSegment, formatClock,
-  nearestChapter, parseClock, seasonSummary, segmentProblem, snapBound,
+  parseClock, seasonSummary, segmentProblem, snapTo,
   suggestedSegment, type SegmentEpisode
 } from './segments';
 
@@ -56,18 +56,18 @@ describe('segment validation and copies', () => {
     expect(segmentProblem(30, 120, 1400)).toBeNull();
   });
   it('snaps bounds to nearby chapters and surfaces weak suggestions', () => {
-    const chapters = [{ start: 30, title: 'Opening' }, { start: 120, title: 'Part A' }];
-    expect(nearestChapter(chapters, 31.2, 3)?.title).toBe('Opening');
-    expect(snapBound(chapters, 118.4, 3)).toBe(120);
-    expect(snapBound(chapters, 110, 3)).toBe(110);
+    const chapters = [30, 120];
+    expect(snapTo(chapters, 31.2, 3)).toBe(30);
+    expect(snapTo(chapters, 118.4, 3)).toBe(120);
+    expect(snapTo(chapters, 110, 3)).toBe(110);
     const weak = { type: 'intro' as const, start: 30, end: 120, confidence: 0.72, extensionId: 'intro-skipper', updatedAt: 1, usable: false };
     expect(suggestedSegment(episode({ automatic: [weak] }), 'intro')).toEqual({ start: 30, end: 120 });
   });
   it('distinguishes film and episode analysis steps', () => {
     const film = episode({ chapterReading: { status: 'completed', error: null, updatedAt: 1 }, fingerprint: { status: 'missing', error: null, updatedAt: null }, detection: { status: 'missing', error: null, updatedAt: null } });
-    expect(analysisState(film, 'film').label).toBe('segment_status_analysed');
-    expect(analysisSteps(film, 'film')).toHaveLength(1);
-    expect(analysisSteps(episode(), 'episode')).toHaveLength(3);
+    expect(analysisState(film, true).key).toBe('segment_status_analysed');
+    expect(analysisSteps(film, true)).toHaveLength(1);
+    expect(analysisSteps(episode(), false)).toHaveLength(3);
   });
   it('keeps credits anchored to the end of each file', () => {
     expect(copySegment('credits', 1300, 1390, 1400, 1450)).toEqual({ start: 1350, end: 1440 });

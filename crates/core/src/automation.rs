@@ -456,8 +456,7 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
                         .is_ok_and(|options| options.intro_detection_enabled);
                         if enabled {
                             for (peer, peer_library, node, source) in
-                                season_fingerprint_candidates(&mut tx, &asset, &library, 64)
-                                    .await?
+                                season_fingerprint_candidates(&mut tx, &asset, &library, 64).await?
                             {
                                 queue_fingerprint(
                                     &mut tx,
@@ -828,7 +827,18 @@ async fn persist_timeline_markers(
                 continue;
             }
             query(upsert)
-                .bind(&asset).bind(&link.extension_id).bind(kind).bind(start).bind(end).bind(confidence).bind(&source_fingerprint).bind(&link.generation).bind(&job.id).bind(now).execute(&mut **tx).await?;
+                .bind(&asset)
+                .bind(&link.extension_id)
+                .bind(kind)
+                .bind(start)
+                .bind(end)
+                .bind(confidence)
+                .bind(&source_fingerprint)
+                .bind(&link.generation)
+                .bind(&job.id)
+                .bind(now)
+                .execute(&mut **tx)
+                .await?;
         }
         // A kind no longer reported (after a settings change or a better analysis) is stale and
         // must not keep reaching the player, within the ownership rule above.

@@ -293,7 +293,7 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
         .execute(store.pool())
         .await
         .unwrap();
-    query("UPDATE inventory_assets SET library_id='library-1'")
+    query("UPDATE inventory_assets SET library_id='library-1',relative_path=id || '.mp4'")
         .execute(store.pool())
         .await
         .unwrap();

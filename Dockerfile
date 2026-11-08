@@ -73,6 +73,7 @@ COPY crates/core/src/ ./crates/core/src/
 COPY crates/core/build.rs ./crates/core/build.rs
 COPY crates/core/migrations/ ./crates/core/migrations/
 COPY crates/core/embedded_plugins/ ./crates/core/embedded_plugins/
+COPY crates/core/embedded_avatars/ ./crates/core/embedded_avatars/
 COPY crates/core/experiments/ ./crates/core/experiments/
 
 # Version changes must not invalidate the dependency compilation layer above.

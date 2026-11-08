@@ -19,6 +19,24 @@ pub(super) async fn playback_library_options(
         .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))
 }
 
+/// An automatic timeline marker reaches the player when its bounds fit the file
+/// and its confidence clears the library floor (`marker_min_confidence`).
+pub(crate) fn usable_marker(
+    start: f64,
+    end: f64,
+    confidence: f64,
+    min_confidence: f64,
+    duration: Option<f64>,
+) -> bool {
+    start.is_finite()
+        && end.is_finite()
+        && confidence.is_finite()
+        && start >= 0.0
+        && end > start
+        && confidence >= min_confidence
+        && end <= duration.unwrap_or(0.0)
+}
+
 pub async fn descriptor(
     store: &IdentityStore,
     asset_id: &str,
@@ -606,44 +624,24 @@ pub async fn descriptor_for_user(
     .bind(&library_id)
     .fetch_all(&store.pool)
     .await?;
-    if !stored_markers.is_empty() {
-        let mut seen_kinds = std::collections::HashSet::new();
-        for (kind, start, end, confidence) in stored_markers {
-            if !seen_kinds.insert(kind.clone()) {
-                continue;
-            }
-            match kind.as_str() {
-                "intro" => intro_segment = None,
-                "credits" => credits_segment = None,
-                "recap" => recap_segment = None,
-                "preview" => preview_segment = None,
-                _ => continue,
-            }
-            if !start.is_finite()
-                || !end.is_finite()
-                || !confidence.is_finite()
-                || start < 0.0
-                || end <= start
-                || confidence < 0.9
-                || end > total_dur.unwrap_or(0.0)
-            {
-                continue;
-            }
-            match kind.as_str() {
-                "intro" if intro_segment.is_none() => {
-                    intro_segment = Some(json!({"start":start,"end":end}))
-                }
-                "credits" if credits_segment.is_none() => {
-                    credits_segment = Some(json!({"start":start,"end":end}))
-                }
-                "recap" if recap_segment.is_none() => {
-                    recap_segment = Some(json!({"start":start,"end":end}))
-                }
-                "preview" if preview_segment.is_none() => {
-                    preview_segment = Some(json!({"start":start,"end":end}))
-                }
-                _ => {}
-            }
+    // The most confident detection of each kind replaces the container-chapter
+    // fallback, but only when it clears the library's confidence floor: a weak
+    // detection must not erase a usable chapter marker.
+    let min_confidence = f64::from(library_options.marker_min_confidence) / 100.0;
+    let mut seen_kinds = std::collections::HashSet::new();
+    for (kind, start, end, confidence) in stored_markers {
+        if !usable_marker(start, end, confidence, min_confidence, total_dur)
+            || !seen_kinds.insert(kind.clone())
+        {
+            continue;
+        }
+        let value = Some(json!({"start":start,"end":end}));
+        match kind.as_str() {
+            "intro" => intro_segment = value,
+            "credits" => credits_segment = value,
+            "recap" => recap_segment = value,
+            "preview" => preview_segment = value,
+            _ => {}
         }
     }
     let manual: Vec<(String, Option<f64>, Option<f64>, i64)> = query_as(

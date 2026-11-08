@@ -28,6 +28,8 @@ export interface LibraryOptions {
   subtitleProviders: ProviderPreference[];
   onlineRefreshIntervalDays: number;
   realtimeMonitoring: boolean; automaticCollections: boolean; introDetectionEnabled: boolean;
+  /** Percent (50–99): automatic markers below it are stored but not used during playback. */
+  markerMinConfidence?: number;
   saveNfoToMedia: boolean; saveImagesToMedia: boolean;
   trickplayEnabled: boolean; trickplayDuringScan: boolean; trickplaySaveToMedia: boolean;
   trickplayIntervalSeconds: number; trickplayWidth: number; trickplayQuality: number;
@@ -55,7 +57,7 @@ export function defaultLibraryOptions(): LibraryOptions {
     fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
     automaticRefreshIntervalDays: 0, preferEmbeddedTitles: false, embeddedSubtitlePolicy: 'allow_all',
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
-    onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true,
+    onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true, markerMinConfidence: 80,
     saveNfoToMedia: false, saveImagesToMedia: false,
     trickplayEnabled: true, trickplayDuringScan: true, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7,
     chapterImagesEnabled: true, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,

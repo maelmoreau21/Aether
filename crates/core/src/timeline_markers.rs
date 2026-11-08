@@ -20,6 +20,7 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/admin/assets/{asset}/markers/{kind}",
             put(save).delete(clear),
         )
+        .route("/api/v1/admin/seasons/{id}/markers", get(season_markers))
         .route(
             "/api/v1/admin/seasons/{id}/analyze-markers",
             post(analyze_season_markers),
@@ -145,6 +146,173 @@ async fn get_markers(
         "assetId": asset,
         "automatic": auto_list,
         "manual": manual_list,
+    })))
+}
+
+/// Most recent task of one kind for an asset: its state and, when it failed, why.
+async fn latest_task(
+    auth: &AuthState,
+    sql: &'static str,
+    asset: &str,
+) -> Result<Value, StatusCode> {
+    let row: Option<(String, String, i64)> = query_as(sql)
+        .bind(asset)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(match row {
+        Some((status, error, updated)) => json!({
+            "status": status,
+            "error": if error.is_empty() { Value::Null } else { json!(error.chars().take(300).collect::<String>()) },
+            "updatedAt": updated,
+        }),
+        None => json!({"status": "missing", "error": Value::Null, "updatedAt": Value::Null}),
+    })
+}
+
+/// Season overview for the segment editor: every available episode file with its
+/// automatic detections (usable or not), manual corrections, container chapters and
+/// the state of its audio fingerprint and detection tasks.
+async fn season_markers(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(season_id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    let actor = auth.authenticate(&headers).await?;
+    if actor.user.role != Role::Administrator {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    if season_id.len() > 128 {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    type EpisodeRow = (String, String, i64, String, String, String);
+    let rows: Vec<EpisodeRow> = query_as(
+        "SELECT a.id, w.id, ep.episode_number, w.title, a.probe_json, a.library_id \
+         FROM inventory_episodes ep \
+         JOIN inventory_works w ON w.id=ep.work_id \
+         JOIN inventory_editions ed ON ed.work_id=ep.work_id \
+         JOIN inventory_versions v ON v.edition_id=ed.id \
+         JOIN inventory_sources s ON s.version_id=v.id \
+         JOIN inventory_assets a ON a.source_id=s.id \
+         JOIN libraries l ON l.id=a.library_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE ep.season_id=? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
+         AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+         ORDER BY ep.episode_number, a.id LIMIT 200",
+    )
+    .bind(&season_id)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let mut library_settings: std::collections::HashMap<String, (f64, bool)> =
+        std::collections::HashMap::new();
+    let mut episodes = Vec::with_capacity(rows.len());
+    for (asset, work, number, title, probe, library) in rows {
+        if !library_settings.contains_key(&library) {
+            let encoded: Option<String> = query_scalar("SELECT COALESCE(parent.options_json,l.options_json) FROM libraries l LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE l.id=?")
+                .bind(&library).fetch_optional(auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let options = encoded
+                .and_then(|text| {
+                    serde_json::from_str::<crate::library_options::LibraryOptions>(&text).ok()
+                })
+                .unwrap_or_default();
+            library_settings.insert(
+                library.clone(),
+                (
+                    f64::from(options.marker_min_confidence) / 100.0,
+                    options.intro_detection_enabled,
+                ),
+            );
+        }
+        let (min_confidence, detection_enabled) = library_settings[&library];
+        let probe: Value = serde_json::from_str(&probe).unwrap_or(Value::Null);
+        let duration = probe["format"]["duration"]
+            .as_str()
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|n| n.is_finite() && *n > 0.0);
+        let chapters: Vec<Value> = probe["chapters"]
+            .as_array()
+            .map(|list| crate::inventory::valid_chapters(list, duration))
+            .unwrap_or_default()
+            .into_iter()
+            .take(64)
+            .map(|(start, title)| json!({"start": start, "title": title}))
+            .collect();
+
+        type AutoMarkerRow = (String, f64, f64, f64, String, i64);
+        let automatic: Vec<AutoMarkerRow> = query_as(
+            "SELECT marker_type, start_seconds, end_seconds, confidence, extension_id, updated_at \
+             FROM automatic_timeline_markers WHERE asset_id=? ORDER BY confidence DESC",
+        )
+        .bind(&asset)
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        type ManualMarkerRow = (String, Option<f64>, Option<f64>, i64, i64);
+        let manual: Vec<ManualMarkerRow> = query_as(
+            "SELECT marker_type, start_seconds, end_seconds, enabled, updated_at \
+             FROM manual_timeline_markers WHERE asset_id=? ORDER BY marker_type",
+        )
+        .bind(&asset)
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let fingerprint = latest_task(&auth, "SELECT status, error, updated_at FROM durable_tasks WHERE target_id=? AND category='analyze' AND component='fingerprint' ORDER BY updated_at DESC, id LIMIT 1", &asset).await?;
+        let detection = latest_task(&auth, "SELECT t.status, t.error, t.updated_at FROM durable_tasks t JOIN automation_task_links link ON link.task_id=t.id WHERE t.target_id=? AND link.operation IN ('intro.detect','intro.parse_chapters','markers.detect') ORDER BY t.updated_at DESC, t.id LIMIT 1", &asset).await?;
+
+        episodes.push(json!({
+            "assetId": asset,
+            "workId": work,
+            "episodeNumber": number,
+            "title": title,
+            "duration": duration,
+            "minConfidence": min_confidence,
+            "detectionEnabled": detection_enabled,
+            "chapters": chapters,
+            "fingerprint": fingerprint,
+            "detection": detection,
+            "automatic": automatic.into_iter().map(|(kind, start, end, confidence, extension, updated)| json!({
+                "type": kind,
+                "start": start,
+                "end": end,
+                "confidence": confidence,
+                "extensionId": extension,
+                "updatedAt": updated,
+                "usable": crate::inventory::usable_marker(start, end, confidence, min_confidence, duration),
+            })).collect::<Vec<_>>(),
+            "manual": manual.into_iter().map(|(kind, start, end, enabled, updated)| json!({
+                "type": kind,
+                "start": start,
+                "end": end,
+                "enabled": enabled == 1,
+                "updatedAt": updated,
+            })).collect::<Vec<_>>(),
+        }));
+    }
+
+    let extensions: Vec<(String, i64, String)> =
+        query_as("SELECT id, enabled, package_json FROM extensions ORDER BY id")
+            .fetch_all(auth.store.pool())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let providers: Vec<Value> = extensions
+        .into_iter()
+        .filter_map(|(id, enabled, package)| {
+            let package: media_extension_sdk::Package = serde_json::from_str(&package).ok()?;
+            package
+                .manifest
+                .permissions
+                .iter()
+                .any(|p| p == "playback.markers")
+                .then(|| json!({"id": id, "name": package.manifest.name, "version": package.manifest.version, "enabled": enabled == 1}))
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "seasonId": season_id,
+        "providers": providers,
+        "episodes": episodes,
     })))
 }
 

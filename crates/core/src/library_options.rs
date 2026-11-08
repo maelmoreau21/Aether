@@ -57,6 +57,9 @@ pub struct LibraryOptions {
     pub subtitle_require_hash: bool,
     pub save_subtitles_to_media: bool,
     pub intro_detection_enabled: bool,
+    /// Lowest confidence (percent) at which an automatic timeline marker reaches the player.
+    /// Manual corrections always apply.
+    pub marker_min_confidence: u8,
     pub subtitle_download_enabled: bool,
     pub poster_rotation_enabled: bool,
     pub artwork_deduplicate: bool,
@@ -116,6 +119,7 @@ impl Default for LibraryOptions {
             subtitle_require_hash: true,
             save_subtitles_to_media: false,
             intro_detection_enabled: true,
+            marker_min_confidence: 80,
             subtitle_download_enabled: false,
             poster_rotation_enabled: true,
             artwork_deduplicate: true,
@@ -210,6 +214,7 @@ impl LibraryOptions {
             && (1..=60).contains(&self.trickplay_interval_seconds)
             && (160..=1920).contains(&self.trickplay_width)
             && (1..=31).contains(&self.trickplay_quality)
+            && (50..=99).contains(&self.marker_min_confidence)
             && self.artwork_similarity <= 16
             && self.artwork_min_poster_width <= 4096
             && self.artwork_min_poster_height <= 4096

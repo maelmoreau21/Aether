@@ -114,6 +114,7 @@
     <div class="group">
       <h4>{$t('intros_credits')}</h4>
       <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>{$t('detect_intros_with_enabled_extensions')}<small>{$t('extension_order_is_set_under_providers')}</small></span></label>
+      <label class="range">{$t('marker_min_confidence', { value: options.markerMinConfidence ?? 80 })}<input type="range" min="50" max="99" step="1" value={options.markerMinConfidence ?? 80} oninput={(event) => options.markerMinConfidence = Number(event.currentTarget.value)} /><small>{$t('marker_min_confidence_hint')}</small></label>
     </div>
   {:else if section === 'providers'}
     <h3>{$t('providers')}</h3><p class="lead">{$t('tick_the_extensions_to_use_and')}</p>
@@ -165,6 +166,9 @@
   .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .image-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .check { display: flex; align-items: flex-start; gap: 12px; min-height: 44px; margin: 4px 0; padding: 8px 0; font-weight: 600; cursor: pointer; }
+  .range { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; font-weight: 600; }
+  .range input { width: min(100%, 360px); accent-color: var(--ac); }
+  .range small { font-weight: 400; color: var(--mu); }
   .image-grid .check { font-weight: 500; }
   :is(input, select, button):focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
   @media (max-width: 640px) { .grid, .grid.three { grid-template-columns: minmax(0, 1fr); } .image-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } input:not([type='checkbox']), select { font-size: 16px; } }

@@ -167,6 +167,9 @@ struct InstallInput {
     confirm_downgrade: bool,
     expected_version: Option<String>,
     expected_sha256: Option<String>,
+    /// New permissions and HTTP hosts of this version the administrator approved.
+    #[serde(default)]
+    approved_access: super::AccessApproval,
 }
 
 pub(super) fn router() -> Router<AuthState> {
@@ -1133,10 +1136,19 @@ async fn install(
             package,
             item.public_key,
             Some(guard),
+            &input.approved_access,
         )
         .await
     } else if input.upgrade {
-        super::upgrade_with_key(auth, headers, input.extension_id, package, item.public_key).await
+        super::upgrade_with_key(
+            auth,
+            headers,
+            input.extension_id,
+            package,
+            item.public_key,
+            &input.approved_access,
+        )
+        .await
     } else {
         super::install_with_key(auth, headers, package, item.public_key).await
     }

@@ -81,7 +81,10 @@ Déclaré **et** imposé :
 - Espace de données épinglé à l'éditeur et à sa clé (`data.rs:361`) : une réinstallation
   par un autre éditeur ne relit pas les anciennes données.
 - Une mise à jour qui ajoute une permission ou un hôte HTTP est refusée
-  (`extension_update_requires_authorization`) : pas d'extension de privilèges silencieuse.
+  (`extension_update_requires_authorization`, avec `newPermissions` et `newHttpHosts`) tant
+  que l'administrateur ne l'a pas autorisée nommément (`approvedAccess` de l'installation) :
+  pas d'extension de privilèges silencieuse. L'administration affiche les nouveaux accès et
+  « Mettre à jour tout » n'en accorde jamais.
 - Révocation surveillée toutes les 30 ms pendant un run (`worker_permitted`) ; génération
   revérifiée après Demandes/Signalements.
 

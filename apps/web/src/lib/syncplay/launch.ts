@@ -26,6 +26,29 @@ export function startWatchParty(detail: StartWatchPartyDetail): void {
   void goto(`${resolve('/')}${partyQuery(detail.partyId, detail.mediaId || detail.workId)}`);
 }
 
+const PENDING_PARTY = 'aether.pendingParty';
+
+/**
+ * Keeps the session an invitation link asks for while the visitor signs in: the login
+ * page returns to the home page without the original `?party=` address.
+ */
+export function rememberPendingParty(search: string): void {
+  const requested = partyFromLocation(search);
+  if (!requested) return;
+  try { sessionStorage.setItem(PENDING_PARTY, partyQuery(requested.partyId, requested.mediaId)); } catch { /* storage unavailable */ }
+}
+
+/** The session remembered before signing in, once (it is forgotten as it is read). */
+export function takePendingParty(): { partyId: string; mediaId?: string } | null {
+  try {
+    const query = sessionStorage.getItem(PENDING_PARTY);
+    sessionStorage.removeItem(PENDING_PARTY);
+    return query ? partyFromLocation(query) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Session id and media requested by the current address, if any. */
 export function partyFromLocation(search: string): { partyId: string; mediaId?: string } | null {
   const params = new URLSearchParams(search);

@@ -79,6 +79,7 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       extension_version_not_newer: tr('the_proposed_version_must_be_higher'),
       publisher_key_mismatch: tr('the_signing_key_does_not_match'),
       extension_update_compatibility_unverified: tr('the_update_is_refused_data_compatibility'),
+      extension_update_requires_authorization: tr('the_update_requires_new_access'),
       extension_limit: tr('the_limit_of_32_installed_extensions'),
       extension_unavailable: tr('this_extension_is_not_available')
     };

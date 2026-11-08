@@ -76,6 +76,7 @@ pub(super) async fn handle_socket(
         let mut room = room_arc.write().await;
         room.online_user_ids.insert(user_id.clone());
         *room.connection_counts.entry(user_id.clone()).or_default() += 1;
+        room.last_online_ms = current_epoch_ms();
 
         // Ensure user is in participants map
         if !room.participants.contains_key(&user_id) {
@@ -227,8 +228,18 @@ pub(super) async fn handle_socket(
         if let Some(p) = room.participants.get_mut(&user_id) {
             p.last_seen_ms = current_epoch_ms();
         }
+        room.last_online_ms = current_epoch_ms();
 
         if remaining == 0 {
+            // Persisted so presence survives a restart of the server.
+            let _ = query(
+                "UPDATE watch_party_members SET last_seen_at = ? WHERE party_id = ? AND user_id = ?",
+            )
+            .bind(current_epoch_s())
+            .bind(&room.id)
+            .bind(&user_id)
+            .execute(&hub.store.pool)
+            .await;
             let _ = room.broadcast_tx.send(ServerMessage::MemberLeft {
                 user_id: user_id.clone(),
                 display_name: display_name.clone(),
@@ -1064,6 +1075,13 @@ pub(super) async fn handle_client_event(
                 .bind(user_id)
                 .execute(&hub.store.pool)
                 .await;
+
+            // The host role passes to someone still connected; nobody left ends the party.
+            if after_member_left(&mut room, user_id, &hub.store).await {
+                let id = room.id.clone();
+                drop(room);
+                hub.evict_room(&id).await;
+            }
         }
     }
 }

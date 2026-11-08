@@ -14,6 +14,8 @@ export interface PartySummary {
   isLocked: boolean;
   waitForBuffering: boolean;
   membersCount: number;
+  /** Members connected right now. */
+  onlineCount?: number;
   createdAt: number;
   isHost: boolean;
   isMember: boolean;

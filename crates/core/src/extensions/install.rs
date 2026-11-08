@@ -22,6 +22,8 @@ pub(super) struct InstallPackage {
     pub(super) public_key: Option<String>,
     #[serde(default)]
     pub(super) upgrade: bool,
+    #[serde(default)]
+    pub(super) approved_access: AccessApproval,
 }
 
 /// Initial library scope of a fresh install. Metadata providers and the native
@@ -64,7 +66,15 @@ pub(super) async fn install(
     };
     if input.upgrade {
         let ext_id = input.package.manifest.id.clone();
-        upgrade_with_key(auth, headers, ext_id, input.package, key).await
+        upgrade_with_key(
+            auth,
+            headers,
+            ext_id,
+            input.package,
+            key,
+            &input.approved_access,
+        )
+        .await
     } else {
         install_with_key(auth, headers, input.package, key).await
     }
@@ -87,7 +97,15 @@ pub(super) async fn upgrade(
             .map_err(db)?
             .ok_or_else(|| err(StatusCode::BAD_REQUEST, "package_public_key_required"))?
     };
-    upgrade_with_key(auth, headers, id, input.package, key).await
+    upgrade_with_key(
+        auth,
+        headers,
+        id,
+        input.package,
+        key,
+        &input.approved_access,
+    )
+    .await
 }
 
 pub(super) async fn upgrade_with_key(
@@ -96,13 +114,25 @@ pub(super) async fn upgrade_with_key(
     id: String,
     package: Package,
     public_key: String,
+    approved: &AccessApproval,
 ) -> Result<(StatusCode, Json<Value>), Error> {
-    change_version_with_key(auth, headers, id, package, public_key, None).await
+    change_version_with_key(auth, headers, id, package, public_key, None, approved).await
 }
 
 pub(super) struct DowngradeGuard {
     pub expected_version: String,
     pub expected_sha256: String,
+}
+
+/// Access an administrator explicitly granted to a new version: every permission and
+/// HTTP host it adds must be named here, or the update is refused with the list to approve.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct AccessApproval {
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default)]
+    pub http_hosts: Vec<String>,
 }
 
 pub(super) async fn change_version_with_key(
@@ -112,6 +142,7 @@ pub(super) async fn change_version_with_key(
     package: Package,
     public_key: String,
     downgrade: Option<DowngradeGuard>,
+    approved: &AccessApproval,
 ) -> Result<(StatusCode, Json<Value>), Error> {
     let actor = admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
@@ -182,20 +213,34 @@ pub(super) async fn change_version_with_key(
         return Err(err(StatusCode::BAD_REQUEST, "incompatible_server_version"));
     }
     validate_update_module(&package).map_err(|code| err(StatusCode::BAD_REQUEST, code))?;
-    if package
+    // No silent privilege extension: what the new version adds must have been
+    // approved by the administrator, by name.
+    let new_permissions: Vec<&String> = package
         .manifest
         .permissions
         .iter()
-        .any(|permission| !installed.manifest.permissions.contains(permission))
-        || package
-            .manifest
-            .http_hosts
+        .filter(|permission| !installed.manifest.permissions.contains(permission))
+        .collect();
+    let new_http_hosts: Vec<&String> = package
+        .manifest
+        .http_hosts
+        .iter()
+        .filter(|host| !installed.manifest.http_hosts.contains(host))
+        .collect();
+    if new_permissions
+        .iter()
+        .any(|permission| !approved.permissions.contains(permission))
+        || new_http_hosts
             .iter()
-            .any(|host| !installed.manifest.http_hosts.contains(host))
+            .any(|host| !approved.http_hosts.contains(host))
     {
-        return Err(err(
+        return Err((
             StatusCode::CONFLICT,
-            "extension_update_requires_authorization",
+            Json(json!({
+                "error": "extension_update_requires_authorization",
+                "newPermissions": new_permissions,
+                "newHttpHosts": new_http_hosts,
+            })),
         ));
     }
     let private_rows: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM extension_data WHERE extension_id=?) + (SELECT COUNT(*) FROM extension_objects WHERE extension_id=?)")

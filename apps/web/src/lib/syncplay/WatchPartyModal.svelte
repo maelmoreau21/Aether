@@ -501,7 +501,7 @@
                       </span>
                     </div>
                     <span class="sub-text">
-                      {$t('party_summary', { title: p.mediaTitle, count: p.membersCount, host: p.hostName })}
+                      {$t('party_summary', { title: p.mediaTitle, count: p.onlineCount ?? p.membersCount, host: p.hostName })}
                     </span>
                   </div>
                   <button

@@ -2403,6 +2403,47 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
         assert_eq!(response["error"], expected, "{response}");
     }
 
+    // A new HTTP host is accepted only once the administrator approves it by name;
+    // the refusal names what to approve.
+    let mut manifest = serde_json::to_value(&p2.manifest).unwrap();
+    manifest["httpHosts"] = json!(["example.com"]);
+    let mut new_host = p2.clone();
+    new_host.manifest = serde_json::from_value(manifest).unwrap();
+    new_host.signature = STANDARD.encode(signing.sign(&new_host.signing_bytes().unwrap()).as_ref());
+    for (approved, expected) in [
+        (
+            json!({"httpHosts": ["other.example.com"]}),
+            "extension_update_requires_authorization",
+        ),
+        (
+            json!({"permissions": ["example.com"]}),
+            "extension_update_requires_authorization",
+        ),
+        // Past the authorization check, the next guard of this fixture applies.
+        (
+            json!({"httpHosts": ["example.com"]}),
+            "extension_update_compatibility_unverified",
+        ),
+    ] {
+        let mut body = serde_json::to_value(&new_host).unwrap();
+        body["approvedAccess"] = approved;
+        let (status, response, _) = call(
+            &app,
+            "POST",
+            "/api/v1/admin/extensions/upgradable.ext/upgrade",
+            &cookie,
+            csrf,
+            body,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{response}");
+        assert_eq!(response["error"], expected, "{response}");
+        if expected == "extension_update_requires_authorization" {
+            assert_eq!(response["newHttpHosts"], json!(["example.com"]));
+            assert_eq!(response["newPermissions"], json!([]));
+        }
+    }
+
     let mut bad_abi = p2.clone();
     let invalid = wat::parse_str(r#"(module (memory (export "memory") 1))"#).unwrap();
     bad_abi.wasm = STANDARD.encode(&invalid);

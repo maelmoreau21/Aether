@@ -33,7 +33,7 @@
   } from './api';
   import { preloadProgress } from '../player/progress';
   import { session, getSessionGeneration } from '../auth/session';
-  import { START_WATCH_PARTY, partyFromLocation, type StartWatchPartyDetail } from '../syncplay/launch';
+  import { START_WATCH_PARTY, partyFromLocation, takePendingParty, type StartWatchPartyDetail } from '../syncplay/launch';
   import { joinParty as joinPartyRequest } from '../syncplay/party-api';
   import { t } from '../i18n';
 
@@ -396,8 +396,9 @@
       void launchWatchParty(d.partyId, d.mediaId || d.workId);
     };
     window.addEventListener(START_WATCH_PARTY, onStartParty);
-    // Invitation link or a session started from a page without the player: `?party=`.
-    const requested = partyFromLocation(window.location.search);
+    // Invitation link or a session started from a page without the player: `?party=`,
+    // or the invitation link opened before signing in.
+    const requested = partyFromLocation(window.location.search) ?? takePendingParty();
     if (requested) void joinFromLink(requested.partyId, requested.mediaId);
     return () => {controller.abort();window.removeEventListener('media-artwork-updated',artworkChanged);window.removeEventListener(START_WATCH_PARTY, onStartParty);};
   });

@@ -6,6 +6,7 @@
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
+  import { addedAccess, needsApproval, type AccessChange } from './extension-access';
   import { SvelteMap, SvelteSet } from 'svelte/reactivity';
   import { extensionPins, hasOwnPage, isPinnableExtension, toggleExtensionPin } from './extension-pins';
   import { loadFeatures } from '../applications/api';
@@ -312,14 +313,32 @@
       .filter((item): item is { ext: Installed; upd: CatalogueEntry } => item.upd !== null)
   );
 
-  async function switchVersion(entry: CatalogueEntry, showNotice = true) {
+  /** A version that adds access waits here for the administrator's explicit approval. */
+  let pendingAccess = $state<{ entry: CatalogueEntry; change: AccessChange } | null>(null);
+  const accessChangeOf = (entry: CatalogueEntry): AccessChange | null => {
+    const current = installed.find(e => e.manifest.id === entry.manifest.id);
+    if (!current) return null;
+    const change = addedAccess(current.manifest, entry.manifest);
+    return needsApproval(change) ? change : null;
+  };
+
+  async function switchVersion(entry: CatalogueEntry, showNotice = true, approved: AccessChange | null = null) {
     // The catalogue entry names the extension; the open detail page may be another one.
     const extId = entry.manifest.id;
     const currentInstalled = installed.find(e => e.manifest.id === extId);
+    const change = accessChangeOf(entry);
+    if (change && !approved && showNotice) {
+      error = ''; notice = '';
+      pendingAccess = { entry, change };
+      return;
+    }
     const action = async () => {
       await adminRequest(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/install`, {
         method: 'POST',
-        body: JSON.stringify({ extensionId: entry.manifest.id, version: entry.manifest.version, upgrade: !!currentInstalled })
+        body: JSON.stringify({
+          extensionId: entry.manifest.id, version: entry.manifest.version, upgrade: !!currentInstalled,
+          ...(approved ? { approvedAccess: approved } : {})
+        })
       });
       if (showNotice) managedId = extId;
     };
@@ -349,6 +368,8 @@
     await perform(async () => {
       // One incompatible package must not block the remaining updates.
       for (const { upd } of pending) {
+        // New access is never granted in bulk: it is approved one extension at a time.
+        if (accessChangeOf(upd)) { failures.push(`${displayName(upd.manifest.name)} : ${$t('extension_new_access_update_alone')}`); continue; }
         try { await switchVersion(upd, false); }
         catch (cause) { failures.push(`${displayName(upd.manifest.name)} : ${cause instanceof Error ? cause.message : $t('operation_failed')}`); }
       }
@@ -392,6 +413,21 @@
   {#if busy}<p class="loading-notice" role="status">{$t('loading')}</p>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
   {#if notice}<p role="status">{notice}</p>{/if}
+  {#if pendingAccess}
+    {@const pending = pendingAccess}
+    <section class="access-approval" role="alert" aria-labelledby="access-approval-title">
+      <h4 id="access-approval-title">{$t('extension_new_access_title', { name: displayName(pending.entry.manifest.name), version: pending.entry.manifest.version })}</h4>
+      <p>{$t('extension_new_access_intro')}</p>
+      <ul>
+        {#each pending.change.httpHosts as host (host)}<li>{$t('extension_new_access_host', { host })}</li>{/each}
+        {#each pending.change.permissions as permission (permission)}<li>{$t('extension_new_access_permission', { permission: permissionNames[permission] ?? permission })}</li>{/each}
+      </ul>
+      <div class="actions">
+        <button class="primary" disabled={busy} onclick={() => { const approved = pending.change; pendingAccess = null; void switchVersion(pending.entry, true, approved); }}>{$t('extension_new_access_approve')}</button>
+        <button disabled={busy} onclick={() => pendingAccess = null}>{$t('cancel')}</button>
+      </div>
+    </section>
+  {/if}
   {#if tab==='repositories'}
     <p class="repository-warning">{$t('third_party_warning')}</p>
     <div class="section-title"><h3>{$t('your_repositories')}</h3><button class="primary" aria-expanded={addingRepository} onclick={() => addingRepository=!addingRepository}>{addingRepository ? $t('close') : `+ ${$t('new_repository')}`}</button></div>
@@ -751,6 +787,10 @@
   [role='alert'], [role='status'] { margin: 0 0 16px; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--color-surface); font-size: 13px; line-height: 1.5; }
   [role='alert'] { background: var(--color-danger-soft); color: var(--color-text); }
   [role='status'] { color: var(--color-muted); }
+  .access-approval { margin: 0 0 16px; padding: 14px 18px; border-radius: var(--radius-md); border: 1px solid var(--color-warning); background: var(--color-warning-soft); color: var(--color-text); }
+  .access-approval h4 { margin: 0 0 6px; font-size: 15px; }
+  .access-approval p { margin: 0 0 8px; font-size: 13px; }
+  .access-approval ul { margin: 0 0 12px; padding-left: 18px; font-size: 13px; overflow-wrap: anywhere; }
   .repository-warning { margin: 0 0 16px; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--color-warning-soft); color: var(--color-text); font-size: 13px; }
   .catalogue-pending { display: flex; gap: 12px; margin: 0 0 16px; padding: 14px 18px; border-radius: var(--radius-md); background: var(--color-surface); font-size: 14px; }
   .catalogue-pending :global(svg) { flex: none; color: var(--color-info); }

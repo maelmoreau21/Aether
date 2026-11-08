@@ -16,6 +16,7 @@
   import { preloadCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
+  import { rememberPendingParty } from '../lib/syncplay/launch';
 
   onMount(() => {
     initTheme();
@@ -49,6 +50,7 @@
           const code = normalizeDeviceCode(window.location.hash.slice(1));
           if (code) sessionStorage.setItem(PENDING_DEVICE_CODE, code);
         }
+        rememberPendingParty(window.location.search);
         void goto(resolve('login/'), { replaceState: true }); return;
       }
       if (current && !connectPage && normalizeDeviceCode(sessionStorage.getItem(PENDING_DEVICE_CODE) ?? '')) {

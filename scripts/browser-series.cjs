@@ -265,7 +265,7 @@ fs.mkdirSync(out, {recursive: true});
     await nextCard.waitFor({state:'detached'});
     report.results.upNextCard = true;
 
-    // Continuous playback is opt-in; the manual next-episode button is removed.
+    // Continuous playback is on by default (the account can turn it off); the manual next-episode button is removed.
     assert.equal(await page.getByRole('button',{name:/^Épisode suivant :/}).count(),0);
     const nextControl=page.getByLabel('Enchaîner automatiquement');
     const nextTitle=await nextControl.locator('..').getAttribute('title');
@@ -274,7 +274,10 @@ fs.mkdirSync(out, {recursive: true});
     assert.ok(fits,'Next episode controls must fit on mobile');
     await page.screenshot({path:`${out}/next-episode-mobile.png`});
     await page.setViewportSize({width:1440,height:900});
-    assert.equal(await page.getByLabel('Enchaîner automatiquement').isChecked(),false);
+    assert.equal(await page.getByLabel('Enchaîner automatiquement').isChecked(),true,'Continuous playback is on by default');
+    // The choice stays the account's: turned off, it is off until turned on again.
+    await nextControl.uncheck();
+    assert.equal(await nextControl.isChecked(),false);
     const initialFullscreen=await page.evaluate(()=>Boolean(document.fullscreenElement));
     const nextDescriptor = page.waitForResponse(response => response.url().includes('/api/v1/media/') && response.request().method()==='GET');
     await nextControl.check();
@@ -292,7 +295,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.evaluate(async()=>{const v=document.querySelector('video');v.currentTime=v.duration-.3;await v.play();});
     await page.waitForFunction(()=>document.querySelector('.top-bar .title>span')?.textContent==='Season Two Episode');
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>.1);
-    report.results.nextEpisode={manualButtonRemoved:true,automaticOptIn:true,crossSeason:true};
+    report.results.nextEpisode={manualButtonRemoved:true,automaticDefault:true,canBeTurnedOff:true,crossSeason:true};
 
     // Close immersive player
     const closeBtn = page.getByRole('button', {name: 'Retour à l’accueil'});

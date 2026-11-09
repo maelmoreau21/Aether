@@ -300,7 +300,7 @@
       const creditsChapter = media.chapters?.find(ch => /cr[eé]dits?|g[eé]n[eé]rique|outro|ending/i.test(ch.title) && ch.start > 0);
       const detectedCreditsStart = media.credits?.start ?? creditsChapter?.start;
       const tracker = !restore && media.workId && !media.synthetic
-        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }, detectedCreditsStart) : undefined;
+        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }, detectedCreditsStart, Boolean(syncClient)) : undefined;
       if (tracker) progressTracker = tracker;
       else progressTracker?.setCreditsStart(detectedCreditsStart);
       const resume = tracker?.load();
@@ -822,7 +822,7 @@
     </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if syncClient}
-      <WatchPartyOverlay client={syncClient} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
+      <WatchPartyOverlay client={syncClient} controlsVisible={visible} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
     {/if}
     {#if partyModal && active}
       <WatchPartyModal mediaId={active.workId ?? active.id} mediaTitle={active.title} onClose={() => partyModal = false} onJoinParty={partyId => startPartyFromPlayer(partyId)} />

@@ -43,6 +43,8 @@ export class SyncPartyClient {
   private countdownInterval: ReturnType<typeof setInterval> | null = null;
   private latestSeq = 0;
   private notificationCounter = 0;
+  private notificationTimer: ReturnType<typeof setTimeout> | null = null;
+  static readonly NOTIFICATION_MS = 4000;
 
   // External hooks for player coordination
   public onPlaybackUpdate?: (state: string, position: number, causedByName: string) => void;
@@ -59,7 +61,14 @@ export class SyncPartyClient {
 
   private notify(text: string) {
     this.notificationCounter += 1;
-    this.lastNotification = { text, id: this.notificationCounter };
+    const id = this.notificationCounter;
+    this.lastNotification = { text, id };
+    // A toast is transient: without this it stayed on screen until the next event.
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
+    this.notificationTimer = setTimeout(() => {
+      if (this.lastNotification?.id === id) this.lastNotification = null;
+      this.notificationTimer = null;
+    }, SyncPartyClient.NOTIFICATION_MS);
   }
 
   public connect() {

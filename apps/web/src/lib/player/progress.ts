@@ -7,6 +7,8 @@ import { tr } from '../i18n';
 export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string }
 
 const warmed = new Map<string, { at: number; value: Promise<Progress> }>();
+/** Writes still on the wire: a read issued meanwhile would return the revision they are replacing. */
+const inflight = new Map<string, Promise<unknown>>();
 onSessionGenerationChange(() => warmed.clear());
 
 /** Read ahead on a play gesture's approach, never across accounts or progress writes. */
@@ -30,6 +32,8 @@ export async function readProgress(work: string): Promise<Progress> {
 }
 
 async function fetchProgress(work: string): Promise<Progress> {
+  const pending = inflight.get(work);
+  if (pending) await pending.catch(() => undefined);
   const response = await fetch(`/api/v1/progress/${encodeURIComponent(work)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(2500) });
   if (!response.ok) throw new Error(tr('resume_unavailable_progress_not_loaded'));
   return response.json();
@@ -40,14 +44,22 @@ async function fetchProgress(work: string): Promise<Progress> {
  * the next periodic save; the others (conflict, rights, session) stop the tracker.
  */
 export class ProgressWriteError extends Error {
-  constructor(message: string, readonly transient: boolean) {
+  constructor(message: string, readonly transient: boolean, readonly conflict = false) {
     super(message);
     this.name = 'ProgressWriteError';
   }
 }
 
-export async function writeProgress(progress: Progress, keepalive = false): Promise<Progress> {
+export function writeProgress(progress: Progress, keepalive = false): Promise<Progress> {
   warmed.delete(progress.workId);
+  const task = sendProgress(progress, keepalive);
+  inflight.set(progress.workId, task);
+  const forget = () => { if (inflight.get(progress.workId) === task) inflight.delete(progress.workId); };
+  void task.then(forget, forget);
+  return task;
+}
+
+async function sendProgress(progress: Progress, keepalive: boolean): Promise<Progress> {
   const current = get(session);
   if (!current) throw new ProgressWriteError(tr('session_required_to_save_progress'), false);
   let response: Response;
@@ -61,7 +73,7 @@ export async function writeProgress(progress: Progress, keepalive = false): Prom
     // Timeout ("signal timed out") or network failure: never shown raw, retried by the next save.
     throw new ProgressWriteError(tr('progress_save_delayed'), true);
   }
-  if (response.status === 409) throw new ProgressWriteError(tr('progress_changed_in_another_session_close'), false);
+  if (response.status === 409) throw new ProgressWriteError(tr('progress_changed_in_another_session_close'), false, true);
   if (response.status >= 500 || response.status === 429 || response.status === 408) throw new ProgressWriteError(tr('progress_save_delayed'), true);
   if (!response.ok) throw new ProgressWriteError(tr('progress_not_saved_check_your_connection'), false);
   const saved: Progress = await response.json();
@@ -108,7 +120,11 @@ export class ProgressTracker {
   private creditsStart?: number;
   private transientFailures = 0;
   static readonly TRANSIENT_FAILURES_BEFORE_NOTICE = 3;
-  constructor(private work: string, private onError: (message: string) => void, creditsStart?: number) {
+  /**
+   * `shared`: playback is driven by a watch party. Several windows of the same account then write the
+   * same work's progress at the same time; the last position wins instead of stopping the tracker.
+   */
+  constructor(private work: string, private onError: (message: string) => void, creditsStart?: number, private shared = false) {
     this.creditsStart = creditsStart;
   }
   setCreditsStart(creditsStart?: number) {
@@ -135,7 +151,15 @@ export class ProgressTracker {
     this.queue = this.queue.then(async () => {
       if (this.failed || this.generation !== getSessionGeneration()) return;
       try {
-        const progress = await writeProgress({ workId: this.work, position, duration, watched, revision: this.revision }, force);
+        let progress: Progress;
+        try {
+          progress = await writeProgress({ workId: this.work, position, duration, watched, revision: this.revision }, force);
+        } catch (error) {
+          if (!this.shared || !(error instanceof ProgressWriteError) || !error.conflict) throw error;
+          const latest = await fetchProgress(this.work).catch(() => { throw new ProgressWriteError(tr('progress_save_delayed'), true); });
+          if (this.failed || this.generation !== getSessionGeneration()) return;
+          progress = await writeProgress({ workId: this.work, position, duration, watched: watched || latest.watched, revision: latest.revision }, force);
+        }
         this.revision = progress.revision; this.watched = progress.watched;
         this.transientFailures = 0;
       } catch (error) {

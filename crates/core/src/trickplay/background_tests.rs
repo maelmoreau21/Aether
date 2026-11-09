@@ -192,3 +192,153 @@ async fn library_switch_alone_controls_manifest_and_tiles() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn a_full_rescan_rearms_finished_previews_so_deleted_ones_are_rebuilt() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("rearm.sqlite"))
+        .await
+        .unwrap();
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('previews','Previews','films','local','/read-only',1)").execute(store.pool()).await.unwrap();
+    publish(&store, "first", "1", false).await;
+    query(
+        "UPDATE durable_tasks SET status='completed',finished_at=5 WHERE owner='library-trickplay'",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    // An ordinary rescan trusts the finished warm-up.
+    publish(&store, "incremental", "1", true).await;
+    let status = || {
+        query_scalar::<sqlx::Any, String>(
+            "SELECT status FROM durable_tasks WHERE owner='library-trickplay'",
+        )
+        .fetch_one(store.pool())
+    };
+    assert_eq!(status().await.unwrap(), "completed");
+    // "Tout réanalyser" queues it again: the Node skips a cache still present and
+    // rebuilds one that was deleted.
+    query(
+        "INSERT INTO scan_jobs(library_id,status,refresh_mode) VALUES('previews','running','full')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    // An older manual run is over: the full rescan dates a new run, even though the
+    // warm-ups it re-arms are older than it.
+    query("UPDATE library_media_task_runs SET started_at=1,origin='manual' WHERE library_id='previews' AND task='trickplay'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("UPDATE durable_tasks SET created_at=1 WHERE owner='library-trickplay'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    publish(&store, "full", "1", true).await;
+    assert_eq!(status().await.unwrap(), "queued");
+    let count: i64 =
+        query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE owner='library-trickplay'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(count, 1);
+    let (origin, started): (String, i64) = query_as(
+        "SELECT origin,started_at FROM library_media_task_runs WHERE library_id='previews' AND task='trickplay'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(origin, "scan");
+    assert!(started > 1);
+}
+
+#[tokio::test]
+async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
+    use crate::library_media_tasks::{LibraryRow, MediaTask, admit, views};
+    use crate::task_scheduler::Admission;
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("manual.sqlite"))
+        .await
+        .unwrap();
+    // Previews are not prepared during scans here: a manual run still prepares them.
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('previews','Previews','films','local','/read-only',1,'{\"trickplayDuringScan\":false}')").execute(store.pool()).await.unwrap();
+    publish(&store, "first", "1", false).await;
+    assert_eq!(
+        query_scalar::<sqlx::Any, i64>(
+            "SELECT COUNT(*) FROM durable_tasks WHERE category='trickplay'"
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap(),
+        0
+    );
+    let auth = crate::auth::AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let now = media_contracts::protocol::unix_now();
+    assert_eq!(
+        admit(&auth, MediaTask::Trickplay, "previews", "admin", now)
+            .await
+            .unwrap(),
+        Admission::Queued
+    );
+    assert_eq!(
+        admit(&auth, MediaTask::Trickplay, "previews", "admin", now)
+            .await
+            .unwrap(),
+        Admission::AlreadyActive
+    );
+    let owners: Vec<String> =
+        query_scalar("SELECT owner FROM durable_tasks WHERE category='trickplay' ORDER BY owner")
+            .fetch_all(store.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        owners,
+        ["library-chapter-images-manual", "library-trickplay-manual"]
+    );
+    let row = LibraryRow {
+        id: "previews",
+        name: "Previews",
+        kind: "films",
+        reason: None,
+    };
+    let listed = views(&store, &row, None, false).await.unwrap();
+    assert_eq!(listed.len(), 3);
+    let previews = &listed[0];
+    assert_eq!(previews.id, "trickplay-previews");
+    assert_eq!(previews.parent_id.as_deref(), Some("scan-previews"));
+    // Neither previews nor chapter images are prepared during scans here: run by hand only.
+    assert_eq!(previews.after_scan, Some(false));
+    assert_eq!(listed[2].after_scan, Some(true));
+    assert_eq!(previews.state, "queued");
+    // The trickplay sheet and the chapter images of the video.
+    assert_eq!(previews.stats.as_ref().map(|stats| stats.pending), Some(2));
+    // Without an intro extension, only the intro sub-task explains why it cannot run.
+    assert!(previews.reason.is_none());
+    assert!(listed[1].reason.is_some());
+    assert!(listed[2].reason.is_none());
+    query("UPDATE durable_tasks SET status='completed',finished_at=? WHERE category='trickplay'")
+        .bind(now)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let done = views(&store, &row, Some(MediaTask::Trickplay), false)
+        .await
+        .unwrap();
+    assert_eq!(done.len(), 1);
+    assert_eq!(done[0].state, "idle");
+    assert_eq!(done[0].last_run.as_ref().unwrap().outcome, "succeeded");
+    assert_eq!(done[0].stats.as_ref().map(|stats| stats.done), Some(2));
+    // Turning the library's previews off makes only this sub-task unavailable.
+    query("UPDATE libraries SET options_json='{\"trickplayEnabled\":false,\"chapterImagesEnabled\":false}' WHERE id='previews'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        admit(&auth, MediaTask::Trickplay, "previews", "admin", now)
+            .await
+            .unwrap(),
+        Admission::Unavailable
+    );
+}

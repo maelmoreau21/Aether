@@ -86,11 +86,11 @@
     <div class="group">
       <h4>{$t('image_pool')}</h4>
       <p class="hint">{$t('artwork_single_image_note')}</p>
-      <label class="toggle-row"><span><strong>{$t('artwork_multi_image_mode')}</strong><small>{$t('artwork_multi_image_mode_note')}</small></span><input type="checkbox" role="switch" bind:checked={() => options.artworkPoolEnabled ?? false, value => options.artworkPoolEnabled = value} /></label>
+      <label class="toggle-row"><span><strong>{$t('artwork_multi_image_mode')}</strong><small>{$t('artwork_multi_image_mode_note')}</small></span><input type="checkbox" role="switch" bind:checked={() => options.artworkPoolEnabled ?? true, value => options.artworkPoolEnabled = value} /></label>
       <label for="artwork-languages">{$t('languages_searched_in_order')}</label>
       <input id="artwork-languages" maxlength="100" placeholder={$t('fr_en')} required bind:value={artworkLanguagesText.value} />
       <label class="check"><input type="checkbox" bind:checked={() => options.artworkIncludeNeutral ?? true, value => options.artworkIncludeNeutral = value} /><span>{$t('include_images_with_no_language_backdrops')}</span></label>
-      {#if options.artworkPoolEnabled}
+      {#if options.artworkPoolEnabled ?? true}
         <label for="artwork-max-images">{$t('images_added_per_media_item_and')}</label>
         <input id="artwork-max-images" type="number" min="1" max="12" step="1" required bind:value={() => options.artworkMaxImages ?? 12, value => options.artworkMaxImages = value} />
       {/if}

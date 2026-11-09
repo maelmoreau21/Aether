@@ -89,7 +89,8 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
       trigger_invalid: tr('sched_err_trigger_invalid'),
       trigger_duplicate: tr('sched_err_trigger_duplicate'),
       trigger_limit: tr('sched_err_trigger_limit'),
-      trigger_not_found: tr('sched_err_trigger_not_found')
+      trigger_not_found: tr('sched_err_trigger_not_found'),
+      trigger_unsupported: tr('sched_err_trigger_unsupported')
     };
     const code = detail?.pluginError ?? detail?.error;
     if (code && messages[code]) throw new Error(messages[code]);

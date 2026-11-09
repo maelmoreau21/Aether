@@ -23,6 +23,9 @@ pub enum TaskRef {
     System(String),
     Backup,
     Scan(String),
+    /// A media sub-task of a library (previews, intros, images): run by hand or after a scan,
+    /// never by a trigger of its own.
+    Media(crate::library_media_tasks::MediaTask, String),
 }
 
 impl TaskRef {
@@ -32,6 +35,8 @@ impl TaskRef {
             Self::Backup
         } else if let Some(library) = id.strip_prefix("scan-") {
             Self::Scan(library.to_owned())
+        } else if let Some((task, library)) = crate::library_media_tasks::MediaTask::parse_id(id) {
+            Self::Media(task, library)
         } else {
             Self::System(id.to_owned())
         }
@@ -50,11 +55,12 @@ impl TaskRef {
             Self::System(_) => "system",
             Self::Backup => "backup",
             Self::Scan(_) => "scan",
+            Self::Media(task, _) => task.key(),
         }
     }
     pub fn target(&self) -> &str {
         match self {
-            Self::System(id) | Self::Scan(id) => id,
+            Self::System(id) | Self::Scan(id) | Self::Media(_, id) => id,
             Self::Backup => "backup",
         }
     }
@@ -139,6 +145,9 @@ pub(crate) async fn admit(
             crate::scheduler::queue_library_scan(auth, library, key, now).await?;
             Ok(Admission::Queued)
         }
+        // Media sub-tasks carry no trigger: they run after scans or on an administrator's request
+        // (`library_media_tasks::admit`), which needs the administrator's identity.
+        TaskRef::Media(..) => Ok(Admission::Unavailable),
     }
 }
 

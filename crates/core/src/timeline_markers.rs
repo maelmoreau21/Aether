@@ -771,7 +771,21 @@ async fn analyze_library_markers(
     if library_id.len() > 128 {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
+    let (count, queued) = queue_library_markers(&auth, &library_id).await?;
+    Ok(Json(json!({
+        "status": "queued",
+        "libraryId": library_id,
+        "episodesCount": count,
+        "tasksQueued": queued,
+    })))
+}
 
+/// Analyse the intros and credits of a whole library again (also used by the task
+/// scheduler). Returns the number of files examined and of fingerprints queued.
+pub(crate) async fn queue_library_markers(
+    auth: &AuthState,
+    library_id: &str,
+) -> Result<(usize, usize), StatusCode> {
     let episodes: Vec<(String, String, String, String)> = query_as(
         "SELECT a.id, a.library_id, l.node_id, obs.fingerprint \
          FROM inventory_episodes ep \
@@ -787,8 +801,8 @@ async fn analyze_library_markers(
          AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
          ORDER BY a.id LIMIT 20000",
     )
-    .bind(&library_id)
-    .bind(&library_id)
+    .bind(library_id)
+    .bind(library_id)
     .fetch_all(auth.store.pool())
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -809,24 +823,18 @@ async fn analyze_library_markers(
          AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
          ORDER BY a.id LIMIT 20000",
     )
-    .bind(&library_id)
-    .bind(&library_id)
+    .bind(library_id)
+    .bind(library_id)
     .fetch_all(auth.store.pool())
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     for chunk in films.chunks(200) {
-        emit_chapter_reanalysis(&auth, chunk).await?;
+        emit_chapter_reanalysis(auth, chunk).await?;
     }
 
     let count = episodes.len() + films.len();
-    let queued = queue_episodes_fingerprints(&auth, &episodes).await?;
-
-    Ok(Json(json!({
-        "status": "queued",
-        "libraryId": library_id,
-        "episodesCount": count,
-        "tasksQueued": queued,
-    })))
+    let queued = queue_episodes_fingerprints(auth, &episodes).await?;
+    Ok((count, queued))
 }
 
 async fn clear_cache(

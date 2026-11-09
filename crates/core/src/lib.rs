@@ -51,6 +51,7 @@ pub mod identity;
 mod image_import;
 pub mod inventory;
 pub mod libraries;
+pub mod library_media_tasks;
 pub mod library_options;
 mod local_mounts;
 pub mod media;

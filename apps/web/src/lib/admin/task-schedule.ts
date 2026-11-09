@@ -20,9 +20,19 @@ export interface TaskLastRun {
   errorKind: string | null;
   errorScope: string | null;
 }
+/** Counts of a library media sub-task run (files, or works for images). */
+export interface TaskStats {
+  done: number;
+  failed: number;
+  pending: number;
+  /** Images downloaded, for the image sub-task. */
+  images: number | null;
+}
+/** Media sub-tasks of a library: shown under its scan, run by hand or after each scan. */
+export type MediaTaskKind = 'trickplay' | 'intros' | 'artwork';
 export interface ScheduledTask {
   id: string;
-  kind: 'system' | 'scan' | 'backup';
+  kind: 'system' | 'scan' | 'backup' | MediaTaskKind;
   name: string;
   description: string;
   category: string;
@@ -36,6 +46,11 @@ export interface ScheduledTask {
   warningsCount: number;
   issues: string[];
   triggers: TaskTrigger[];
+  /** The library scan a media sub-task belongs to (`scan-<library>`). */
+  parentId?: string | null;
+  stats?: TaskStats | null;
+  /** For a media sub-task: whether it also runs on its own after each library scan. */
+  afterScan?: boolean | null;
 }
 export interface TriggerDraft {
   type: TriggerType;
@@ -177,8 +192,40 @@ export function categoryLabel(category: string, t: Translate): string {
   return key ? t(key) : category;
 }
 
+const mediaNameKeys: Record<MediaTaskKind, TranslationKey> = {
+  trickplay: 'sched_trickplay_name',
+  intros: 'sched_intros_name',
+  artwork: 'sched_artwork_name'
+};
+
+export function isMediaTask(task: Pick<ScheduledTask, 'kind'>): task is Pick<ScheduledTask, 'kind'> & { kind: MediaTaskKind } {
+  return task.kind in mediaNameKeys;
+}
+
 export function taskName(task: Pick<ScheduledTask, 'kind' | 'name' | 'libraryId'>, libraryName: string | undefined, t: Translate): string {
   if (task.kind === 'backup') return t('sched_backup_name');
   if (task.kind === 'scan' && libraryName) return t('sched_scan_name', { name: libraryName });
+  if (isMediaTask(task) && libraryName) return t(mediaNameKeys[task.kind], { name: libraryName });
   return task.name;
+}
+
+/** "12 terminés · 3 en échec · 25 en attente", or works and images for the image sub-task. */
+export function statsLabel(task: Pick<ScheduledTask, 'kind' | 'stats'>, t: Translate): string {
+  const stats = task.stats;
+  if (!stats) return '';
+  const parts = task.kind === 'artwork'
+    ? [t('sched_stats_works', { count: stats.done }), t('sched_stats_images', { count: stats.images ?? 0 })]
+    : [t('sched_stats_done', { count: stats.done })];
+  if (stats.failed) parts.push(t('sched_stats_failed', { count: stats.failed }));
+  if (stats.pending) parts.push(t('sched_stats_pending', { count: stats.pending }));
+  return parts.join(' · ');
+}
+
+/** Top-level tasks in order, each followed by its media sub-tasks. A sub-task whose parent is
+ * not listed (filtered out) is shown on its own. */
+export function nestTasks<T extends Pick<ScheduledTask, 'id' | 'parentId'>>(tasks: T[]): { task: T; children: T[] }[] {
+  const ids = new Set(tasks.map(task => task.id));
+  return tasks
+    .filter(task => !task.parentId || !ids.has(task.parentId))
+    .map(task => ({ task, children: tasks.filter(child => child.parentId === task.id) }));
 }

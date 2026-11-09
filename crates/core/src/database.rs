@@ -263,6 +263,10 @@ const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
         "artwork_auto",
         include_str!("../migrations/artwork_auto.sql"),
     ),
+    (
+        "library_media_tasks",
+        include_str!("../migrations/library_media_tasks.sql"),
+    ),
 ];
 /// Depend on the role-group seed that Rust performs between the two lists.
 const IDEMPOTENT_STEPS_AFTER_GROUPS: &[(&str, &str)] = &[

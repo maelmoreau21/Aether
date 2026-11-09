@@ -1215,7 +1215,41 @@ pub async fn publish_staged_scan(
         .await;
     }
 
-    crate::trickplay::queue_scanned_assets(&mut tx, library_id, scan_id, &options).await?;
+    // The scheduler shows these warm-ups as a run of the library's preview sub-task. Whether a
+    // run is already in flight is read before this scan queues or re-arms its own warm-ups.
+    let preview_library: String =
+        query_scalar::<_, String>("SELECT parent_id FROM library_folders WHERE library_id=?")
+            .bind(library_id)
+            .fetch_optional(&mut *tx)
+            .await?
+            .unwrap_or_else(|| library_id.to_owned());
+    let previews_in_flight = crate::library_media_tasks::in_flight(
+        &mut tx,
+        &preview_library,
+        crate::library_media_tasks::MediaTask::Trickplay,
+    )
+    .await?;
+    let previews_at = media_contracts::protocol::unix_now();
+    let previews = crate::trickplay::queue_scanned_assets(
+        &mut tx,
+        library_id,
+        scan_id,
+        &options,
+        &refresh_mode,
+        previews_at,
+    )
+    .await?;
+    if previews > 0 {
+        crate::library_media_tasks::record_run(
+            &mut tx,
+            &preview_library,
+            crate::library_media_tasks::MediaTask::Trickplay,
+            previews_at,
+            "scan",
+            previews_in_flight,
+        )
+        .await?;
+    }
 
     query("DELETE FROM scan_staging_files WHERE scan_id=?")
         .bind(scan_id)

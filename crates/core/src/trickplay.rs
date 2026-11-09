@@ -18,20 +18,66 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::path::{Path, PathBuf};
 
+/// Owners of the preview warm-ups queued by a scan publication.
+pub(crate) const SCAN_OWNERS: [&str; 2] = ["library-trickplay", "library-chapter-images"];
+/// Owners of the preview warm-ups an administrator started from the task scheduler. They
+/// run even when the library does not prepare previews during scans.
+pub(crate) const MANUAL_OWNERS: [&str; 2] =
+    ["library-trickplay-manual", "library-chapter-images-manual"];
+
+/// Which files a preview pass covers.
+#[derive(Clone, Copy)]
+pub(crate) enum PreviewScope<'a> {
+    /// The files of one scan publication (new, changed and unchanged files alike).
+    Scan(&'a str),
+    /// Every available video of a library and of its active folders.
+    Library,
+}
+
 /// Persist preview warm-ups with the inventory publication. They use the existing
 /// Node executor, leases, queue limit and playback preemption, never the scan worker.
+/// A full rescan ("Tout réanalyser") re-arms finished warm-ups too: the Node keeps a
+/// prepared cache and returns at once, and regenerates previews deleted from its cache.
 pub(crate) async fn queue_scanned_assets(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     library: &str,
     scan: &str,
     options: &LibraryOptions,
+    refresh_mode: &str,
+    now: i64,
+) -> Result<u64, sqlx::Error> {
+    queue_previews(
+        tx,
+        library,
+        PreviewScope::Scan(scan),
+        options,
+        refresh_mode == "full",
+        false,
+        now,
+    )
+    .await
+}
+
+/// Queue the previews (trickplay sheets, chapter images) of the files in `scope`.
+/// With `rearm`, a warm-up that already finished (or failed) is queued again; the Node
+/// skips a file whose prepared cache is still present. `manual` runs ignore the
+/// "during scans" switches but never the library's on/off switches.
+pub(crate) async fn queue_previews(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    library: &str,
+    scope: PreviewScope<'_>,
+    options: &LibraryOptions,
+    rearm: bool,
+    manual: bool,
+    now: i64,
 ) -> Result<u64, sqlx::Error> {
     use sha2::{Digest, Sha256};
-    let previews = options.trickplay_enabled && options.trickplay_during_scan;
-    let chapters = options.chapter_images_enabled && options.chapter_images_during_scan;
+    let previews = options.trickplay_enabled && (manual || options.trickplay_during_scan);
+    let chapters = options.chapter_images_enabled && (manual || options.chapter_images_during_scan);
     if !previews && !chapters {
         return Ok(0);
     }
+    let [preview_owner, chapter_owner] = if manual { MANUAL_OWNERS } else { SCAN_OWNERS };
     // Share admission's cross-Core capacity lock only for this final queue step.
     if tx.as_mut().backend_name() == "PostgreSQL" {
         sqlx::query("SELECT pg_advisory_xact_lock($1)")
@@ -48,22 +94,26 @@ pub(crate) async fn queue_scanned_assets(
     if capacity == 0 {
         return Ok(0);
     }
-    let now = media_contracts::protocol::unix_now();
     let mut inserted = 0_u64;
     let mut last_asset = String::new();
     // Reused probes are included: enabling previews or changing their profile
     // must also warm existing videos. Compare indexed idempotency keys in batches,
     // rather than rewriting one task for every file on every monitoring scan.
     loop {
-        let assets: Vec<(String, i64, String, String)> = crate::database::query_as(
-            "SELECT a.id,a.size,a.modified_ns,l.node_id FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path JOIN libraries l ON l.id=a.library_id WHERE f.scan_id=? AND a.library_id=? AND a.id>? AND a.available=1 AND l.enabled=1 AND l.kind IN ('films','series') ORDER BY a.id LIMIT 128"
-        ).bind(scan).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?;
+        let assets: Vec<(String, i64, String, String, String)> = match scope {
+            PreviewScope::Scan(scan) => crate::database::query_as(
+                "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path JOIN libraries l ON l.id=a.library_id WHERE f.scan_id=? AND a.library_id=? AND a.id>? AND a.available=1 AND l.enabled=1 AND l.kind IN ('films','series') ORDER BY a.id LIMIT 128"
+            ).bind(scan).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?,
+            PreviewScope::Library => crate::database::query_as(
+                "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE (a.library_id=? OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND a.id>? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' AND l.kind IN ('films','series') AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) ORDER BY a.id LIMIT 128"
+            ).bind(library).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?,
+        };
         if assets.is_empty() {
             break;
         }
         last_asset = assets.last().map(|row| row.0.clone()).unwrap_or_default();
         let mut candidates = Vec::with_capacity(assets.len() * 2);
-        for (asset, size, modified, node) in assets {
+        for (asset, size, modified, node, asset_library) in assets {
             // Chapter images reuse the on-demand profile (width/quality, no
             // interval) so the player hits the prepared cache directly.
             if previews {
@@ -82,7 +132,14 @@ pub(crate) async fn queue_scanned_assets(
                         options.trickplay_quality
                     ))
                 );
-                candidates.push((asset.clone(), node.clone(), key, "library-trickplay", ""));
+                candidates.push((
+                    asset.clone(),
+                    node.clone(),
+                    asset_library.clone(),
+                    key,
+                    preview_owner,
+                    "",
+                ));
             }
             if chapters {
                 let key = format!(
@@ -92,26 +149,46 @@ pub(crate) async fn queue_scanned_assets(
                         options.trickplay_width, options.trickplay_quality
                     ))
                 );
-                candidates.push((asset, node, key, "library-chapter-images", "chapters"));
+                candidates.push((asset, node, asset_library, key, chapter_owner, "chapters"));
             }
         }
         let placeholders = vec!["?"; candidates.len()].join(",");
         let statement = format!(
-            "SELECT idempotency_key FROM durable_tasks WHERE owner IN ('library-trickplay','library-chapter-images') AND error NOT IN ('library_trickplay_disabled','library_chapter_images_disabled') AND idempotency_key IN ({placeholders})"
+            "SELECT owner,idempotency_key,status,CAST(CASE WHEN lease_until IS NULL THEN 0 ELSE 1 END AS BIGINT) FROM durable_tasks WHERE owner IN (?,?) AND error NOT IN ('library_trickplay_disabled','library_chapter_images_disabled') AND idempotency_key IN ({placeholders})"
         );
-        let mut lookup =
-            crate::database::query_scalar::<sqlx::Any, String>(sqlx::AssertSqlSafe(statement));
-        for (_, _, key, _, _) in &candidates {
+        let mut lookup = crate::database::query_as::<sqlx::Any, (String, String, String, i64)>(
+            sqlx::AssertSqlSafe(statement),
+        )
+        .bind(preview_owner)
+        .bind(chapter_owner);
+        for (_, _, _, key, _, _) in &candidates {
             lookup = lookup.bind(key);
         }
-        let existing: std::collections::HashSet<String> =
-            lookup.fetch_all(&mut **tx).await?.into_iter().collect();
-        for (asset, node, key, owner, component) in candidates {
-            if existing.contains(&key) {
+        let existing: std::collections::HashMap<(String, String), (String, i64)> = lookup
+            .fetch_all(&mut **tx)
+            .await?
+            .into_iter()
+            .map(|(owner, key, status, leased)| ((owner, key), (status, leased)))
+            .collect();
+        for (asset, node, asset_library, key, owner, component) in candidates {
+            if let Some((status, leased)) = existing.get(&(owner.to_owned(), key.clone())) {
+                // A finished warm-up says nothing about the cache today (it may have been
+                // deleted or evicted): an explicit full pass queues it again.
+                if rearm
+                    && *leased == 0
+                    && matches!(status.as_str(), "completed" | "error" | "cancelled")
+                {
+                    inserted += query("UPDATE durable_tasks SET status='queued',error='',failure_count=0,available_at=?,updated_at=?,finished_at=NULL WHERE owner=? AND idempotency_key=? AND status IN ('completed','error','cancelled') AND lease_until IS NULL")
+                        .bind(now).bind(now).bind(owner).bind(&key)
+                        .execute(&mut **tx).await?.rows_affected();
+                    if inserted >= capacity as u64 {
+                        return Ok(inserted);
+                    }
+                }
                 continue;
             }
             inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,1,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL WHERE durable_tasks.error IN ('library_trickplay_disabled','library_chapter_images_disabled') AND durable_tasks.lease_until IS NULL")
-                .bind(uuid::Uuid::new_v4().to_string()).bind(library).bind(owner).bind(key).bind(node)
+                .bind(uuid::Uuid::new_v4().to_string()).bind(&asset_library).bind(owner).bind(key).bind(node)
                 .bind(now).bind(now).bind(now).bind(asset).bind(component).bind(i64::from(options.trickplay_width))
                 .execute(&mut **tx).await?.rows_affected();
             if inserted >= capacity as u64 {

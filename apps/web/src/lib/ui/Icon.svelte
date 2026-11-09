@@ -38,6 +38,7 @@
     | 'sun'
     | 'moon'
     | 'more'
+    | 'more-vertical'
     | 'edit'
     | 'image'
     | 'copy'
@@ -89,6 +90,7 @@
     users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm13 14v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
     shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z',
     more: 'M12 13a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM5 13a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z',
+    'more-vertical': 'M12 6.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 7a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm0 7a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z',
     edit: 'm4 16 12-12 4 4L8 20H4v-4Z',
     image: 'M4 5h16v14H4V5Zm4 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4Zm12 6-5-5-7 7',
     copy: 'M8 4v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2Zm-4 4v12a2 2 0 0 0 2 2h8',
@@ -106,4 +108,4 @@
 <script lang="ts">
   let { name, size = 20 }: { name: IconName; size?: number } = $props();
 </script>
-<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>
+<svg width={size} height={size} viewBox="0 0 24 24" fill={name === 'more' || name === 'more-vertical' ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={paths[name]} /></svg>

@@ -39,7 +39,7 @@ jobs:
           fetch-depth: 0
 
       - name: Configurer Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -135,12 +135,12 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Télécharger le changelog
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-changelog
 
       - name: Télécharger les empreintes d'images Docker
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: digest-*
           path: digests
@@ -204,7 +204,7 @@ jobs:
           fetch-depth: 0
 
       - name: Configurer Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 

@@ -503,7 +503,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
       - uses: docker/setup-buildx-action@v3
-      - uses: docker/bake-action@v6
+      - uses: docker/bake-action@v7
         with:
           # Bake v6 otherwise refetches the event's ephemeral PR merge ref.
           source: .

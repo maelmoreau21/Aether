@@ -15,6 +15,8 @@ pub(super) struct Filter {
     pub(super) node_id: String,
     pub(super) kind: String,
     pub(super) device: String,
+    /// One title: a film, an episode, a track, or a series (all its episodes).
+    pub(super) media_id: String,
     pub(super) offset: usize,
     pub(super) limit: Option<usize>,
     pub(super) rank: String,
@@ -70,9 +72,16 @@ pub(super) async fn select(
         || to > now() + 86400
         || f.offset > 100000
         || f.limit.is_some_and(|v| v == 0 || v > 100)
-        || [&f.user_id, &f.library_id, &f.node_id, &f.kind, &f.device]
-            .iter()
-            .any(|v| v.len() > 160)
+        || [
+            &f.user_id,
+            &f.library_id,
+            &f.node_id,
+            &f.kind,
+            &f.device,
+            &f.media_id,
+        ]
+        .iter()
+        .any(|v| v.len() > 160)
         || super::aggregate::Zone::parse(&f.tz).is_none()
         || !matches!(f.kind.as_str(), "" | "film" | "episode" | "music")
         || !matches!(
@@ -95,6 +104,10 @@ pub(super) async fn select(
             sql.push_str(&format!(" AND {column}=?"));
             binds.push(value.clone());
         }
+    }
+    if !f.media_id.is_empty() {
+        sql.push_str(" AND (s.media_id=? OR s.canonical_id=? OR EXISTS(SELECT 1 FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id WHERE ep.work_id=s.media_id AND se.series_id=?))");
+        binds.extend([f.media_id.clone(), f.media_id.clone(), f.media_id.clone()]);
     }
     if !admin {
         sql.push_str(" AND s.user_id=? AND l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND ((s.kind='music' AND t.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM parental_policies p WHERE p.user_id=? AND p.allow_unrated=0)) OR (s.kind!='music' AND w.id IS NOT NULL AND ");

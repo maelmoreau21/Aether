@@ -10,6 +10,10 @@
   import Meter from './charts/Meter.svelte';
   import HourHeatmap from './charts/HourHeatmap.svelte';
   import CalendarHeatmap from './charts/CalendarHeatmap.svelte';
+  import AreaChart from './charts/AreaChart.svelte';
+  import Donut from './charts/Donut.svelte';
+  import TopList from './charts/TopList.svelte';
+  import { bucket, chartSeries, dailySeries } from './series';
 
   let { administrator = false, active = true, embedded = false }: { administrator?: boolean; active?: boolean; embedded?: boolean } = $props();
   const endpoint = $derived(administrator ? '/api/v1/admin/statistics' : '/api/v1/account/statistics');
@@ -32,6 +36,7 @@
   let pending: AbortController | undefined, detailPending: AbortController | undefined, profilePending: AbortController | undefined;
   let requestNumber = 0;
   let nextExportOffset = $state<number | null>(null);
+  let filtersOpen = $state(false);
   const metricKeys = ['pauses', 'resumes', 'additionalSessions', 'musicSkips', 'seeksForward', 'seeksBackward', 'audioChanges', 'subtitleChanges', 'speedChanges', 'introSkips', 'creditsSkips', 'otherSkips', 'bufferingCount', 'errors'] as const;
   const knownMethods = ['direct', 'remux', 'separate_audio', 'prepared', 'unknown'];
   const thisYear = new Date().getFullYear();
@@ -169,6 +174,36 @@
   const bucketTotal = $derived(insights ? bucketOrder.reduce((sum, key) => sum + insights!.completion.buckets[key], 0) : 0);
   const growth = $derived(insights?.growth);
   const playsCount = $derived(insights?.totals.plays ?? data?.summary.qualifiedPlays ?? 0);
+
+  // Dashboard (overview) data.
+  function shortDay(value: string) { return new Date(`${value}T12:00:00`).toLocaleDateString($statLocale, { day: 'numeric', month: 'short' }); }
+  const activity = $derived.by(() => {
+    const series = chartSeries(insights?.calendar ?? [], from, to);
+    return { grouped: series.grouped, items: series.points.map(point => ({ key: point.key, label: shortDay(point.from), value: point.seconds, hint: `${point.from === point.to ? day(point.from) : `${shortDay(point.from)} – ${shortDay(point.to)}`} · ${plays(point.plays)}` })) };
+  });
+  const sparkline = $derived(bucket(dailySeries(insights?.calendar ?? [], from, to), 30));
+  const rangeDays = $derived(Math.max(1, Math.round((localDayStart(addDays(to, 1)) - localDayStart(from)) / 86400)));
+  function kindPlural(value: string) { return value === 'music' ? $st('music') : value === 'episode' ? $st('episodes') : $st('films'); }
+  const kindSlices = $derived((data?.distributions.kind ?? []).map(row => ({ key: row.label, label: kindPlural(row.label), value: row.seconds, detail: `${shortDuration(row.seconds)} · ${plays(row.plays)}`, tone: row.label === 'music' ? 'var(--ok)' : row.label === 'episode' ? 'var(--info)' : 'var(--ac)' })));
+  const bucketTones: Record<(typeof bucketOrder)[number], string> = { completed: 'var(--ok)', partial: 'var(--info)', dropped: 'var(--warn)', abandoned: 'var(--err)', unknown: 'var(--mu-2)' };
+  const completionSlices = $derived(insights ? bucketOrder.map(key => ({ key, label: $st(`bucket_${key}` as StatKey), value: insights!.completion.buckets[key], detail: number.format(insights!.completion.buckets[key]), tone: bucketTones[key] })) : []);
+  /** Title page, opened on its statistics tab (films and series only). */
+  function mediaHref(kindValue: string, id: string): string | undefined {
+    if (kindValue === 'film') return `${resolve('films/')}?work=${encodeURIComponent(id)}&section=stats`;
+    if (kindValue === 'series') return `${resolve('series/')}?work=${encodeURIComponent(id)}&section=stats`;
+    return undefined;
+  }
+  const topTitles = $derived((insights?.titles ?? []).map(item => ({ key: item.id, title: item.title, sub: [kindLabel(item.kind), item.subtitle].filter(Boolean).join(' · '), image: item.image, href: mediaHref(item.kind, item.id), value: item.seconds, detail: shortDuration(item.seconds) })));
+  const topSeries = $derived((insights?.series ?? []).map(item => ({ key: item.id, title: item.title, sub: $st('episodes_count', { count: item.items }), image: item.image, href: mediaHref('series', item.id), value: item.seconds, detail: shortDuration(item.seconds) })));
+  const live = $derived((data?.sessions ?? []).filter(item => item.status === 'active'));
+  const activeFilters = $derived([
+    userId ? { key: 'user', label: $st('user'), value: users.find(user => user.id === userId)?.name ?? userId, clear: () => userId = '' } : null,
+    kind ? { key: 'kind', label: $st('type'), value: kindPlural(kind), clear: () => kind = '' } : null,
+    libraryId ? { key: 'library', label: $st('library'), value: facets.libraries.find(library => library.id === libraryId)?.name ?? libraryId, clear: () => libraryId = '' } : null,
+    nodeId ? { key: 'node', label: $st('node'), value: nodeId, clear: () => nodeId = '' } : null,
+    device ? { key: 'device', label: $st('device'), value: device, clear: () => device = '' } : null
+  ].filter(item => item !== null));
+  function clearFilters() { userId = ''; kind = ''; libraryId = ''; nodeId = ''; device = ''; rank = 'users'; apply(); }
 </script>
 
 <section class="statistics" aria-label={administrator ? $st('title_server') : $st('title_personal')}>
@@ -189,12 +224,11 @@
           <span>{$st('wrapped_cta', { year: wrappedYear })}</span>
         </a>
       {/if}
-      <button onclick={() => void load()} disabled={loading}>{loading ? $st('loading') : $st('refresh')}</button>
+      {#if administrator}<label class="switch"><input type="checkbox" role="switch" bind:checked={enabled} disabled={saving} onchange={() => { dirty=true;void save(); }} /><span>{$st('enable_collection')}</span></label>{/if}
     </div>
   </header>
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
   {#if message}<p class="notice" role="status">{message}</p>{/if}
-  {#if administrator}<label class="check activation"><input type="checkbox" bind:checked={enabled} disabled={saving} onchange={() => { dirty=true;void save(); }} /> {$st('enable_collection')}</label>{/if}
   <nav class="statistics-tabs" aria-label={$st('sections')}>
     {#each tabs as item (item)}<button type="button" class:active={tab===item} aria-current={tab===item?'page':undefined} onclick={() => tab=item}>{$st(`tab_${item}` as StatKey)}</button>{/each}
   </nav>
@@ -225,40 +259,87 @@
     <p class="collection-state">{data.enabled ? $st('collection_on') : $st('collection_off')}{#if data.firstEnabledAt} {$st('since', { date: date(data.firstEnabledAt) })}{:else} · {$st('no_history')}{/if}. {$st('retention', { events: data.eventRetentionDays, summaries: data.summaryRetentionDays ? $st('days_count', { count: data.summaryRetentionDays }) : $st('summaries_forever') })}</p>
   {/if}
   {#if tab!=='settings'}
-  <form class="panel filter-form" onsubmit={event => { event.preventDefault(); apply(); }}>
-    <div class="presets" role="group" aria-label={$st('presets')}>
+  <div class="toolbar">
+    <div class="segmented" role="group" aria-label={$st('presets')}>
       {#each [[7, 'preset_7'], [30, 'preset_30'], [90, 'preset_90'], [365, 'preset_365']] as [days, key] (key)}
-        <button type="button" class="chip" class:on={from === addDays(today, -((days as number) - 1)) && to === today} onclick={() => preset(days as number)}>{$st(key as StatKey)}</button>
+        <button type="button" aria-pressed={from === addDays(today, -((days as number) - 1)) && to === today} onclick={() => preset(days as number)}>{$st(key as StatKey)}</button>
       {/each}
-      <button type="button" class="chip" class:on={from === `${today.slice(0, 4)}-01-01` && to === today} onclick={() => preset('year')}>{$st('preset_year')}</button>
+      <button type="button" aria-pressed={from === `${today.slice(0, 4)}-01-01` && to === today} onclick={() => preset('year')}>{$st('preset_year')}</button>
     </div>
-    <div class="filters"><label>{$st('from')}<input type="date" bind:value={from} max={to} required /></label><label>{$st('to')}<input type="date" bind:value={to} min={from} max={today} required /></label>
-    </div><details class="advanced-filters"><summary>{$st('advanced_filters')}</summary><div class="filters">
-      {#if administrator}<label>{$st('user')}<select bind:value={userId}><option value="">{$st('all_m')}</option>{#each users as user (user.id)}<option value={user.id}>{user.name}</option>{/each}</select></label>{/if}
-      <label>{$st('type')}<select bind:value={kind}><option value="">{$st('all_m')}</option><option value="film">{$st('films')}</option><option value="episode">{$st('episodes')}</option><option value="music">{$st('music')}</option></select></label>
-      <label>{$st('library')}<select bind:value={libraryId}><option value="">{$st('all_f')}</option>{#each facets.libraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
-      <label>{$st('node')}<select bind:value={nodeId}><option value="">{$st('all_m')}</option>{#each facets.nodes as node (node)}<option>{node}</option>{/each}</select></label>
-      <label>{$st('device')}<select bind:value={device}><option value="">{$st('all_m')}</option>{#each facets.devices as item (item)}<option>{item}</option>{/each}</select></label>
-      <label>{$st('ranking')}<select bind:value={rank}><option value="users">{$st('rank_users')}</option><option value="seconds">{$st('rank_seconds')}</option><option value="completion">{$st('rank_completion')}</option><option value="favorites">{$st('rank_favorites')}</option><option value="rating">{$st('rank_rating')}</option></select></label>
-    </div></details><div class="actions"><button class="primary" disabled={loading}>{$st('apply')}</button><button type="button" onclick={() => void download()} disabled={!data}>{$st('export')}</button>{#if nextExportOffset !== null}<button type="button" onclick={() => void download(nextExportOffset ?? 0)}>{$st('export_next')}</button>{/if}</div>
-  </form>
-  <p class="muted">{$st('dates_note', { zone: insights?.timezone ?? zone, seconds: insights?.minimumPlaySeconds ?? 60 })}</p>
+    <div class="range" role="group" aria-label={$st('custom_range')}>
+      <label><span class="h-sr">{$st('from')}</span><input type="date" bind:value={from} max={to} required onchange={() => { if (from && to && from <= to) apply(); }} /></label>
+      <span aria-hidden="true">→</span>
+      <label><span class="h-sr">{$st('to')}</span><input type="date" bind:value={to} min={from} max={today} required onchange={() => { if (from && to && from <= to) apply(); }} /></label>
+    </div>
+    <button type="button" class="tool" aria-expanded={filtersOpen} aria-controls="statistics-filters" onclick={() => filtersOpen = !filtersOpen}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" /></svg>{$st('filters')}{#if activeFilters.length}<b class="count">{activeFilters.length}</b>{/if}
+    </button>
+    <span class="grow"></span>
+    <button type="button" class="tool" onclick={() => void download()} disabled={!data}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>{$st('export')}</button>
+    {#if nextExportOffset !== null}<button type="button" class="tool" onclick={() => void download(nextExportOffset ?? 0)}>{$st('export_next')}</button>{/if}
+    <button type="button" class="tool icon" onclick={() => void load()} disabled={loading} title={$st('refresh')}><svg class:spin={loading} viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" /></svg><span class="h-sr">{loading ? $st('loading') : $st('refresh')}</span></button>
+  </div>
+  {#if filtersOpen}
+    <form id="statistics-filters" class="panel filter-form" aria-label={$st('advanced_filters')} onsubmit={event => { event.preventDefault(); apply(); }}>
+      <div class="filters">
+        {#if administrator}<label>{$st('user')}<select bind:value={userId}><option value="">{$st('all_m')}</option>{#each users as user (user.id)}<option value={user.id}>{user.name}</option>{/each}</select></label>{/if}
+        <label>{$st('type')}<select bind:value={kind}><option value="">{$st('all_m')}</option><option value="film">{$st('films')}</option><option value="episode">{$st('episodes')}</option><option value="music">{$st('music')}</option></select></label>
+        <label>{$st('library')}<select bind:value={libraryId}><option value="">{$st('all_f')}</option>{#each facets.libraries as library (library.id)}<option value={library.id}>{library.name}</option>{/each}</select></label>
+        <label>{$st('node')}<select bind:value={nodeId}><option value="">{$st('all_m')}</option>{#each facets.nodes as node (node)}<option>{node}</option>{/each}</select></label>
+        <label>{$st('device')}<select bind:value={device}><option value="">{$st('all_m')}</option>{#each facets.devices as item (item)}<option>{item}</option>{/each}</select></label>
+        <label>{$st('ranking')}<select bind:value={rank}><option value="users">{$st('rank_users')}</option><option value="seconds">{$st('rank_seconds')}</option><option value="completion">{$st('rank_completion')}</option><option value="favorites">{$st('rank_favorites')}</option><option value="rating">{$st('rank_rating')}</option></select></label>
+      </div>
+      <div class="actions"><button class="primary" disabled={loading}>{$st('apply')}</button><button type="button" onclick={clearFilters} disabled={loading}>{$st('clear_filters')}</button></div>
+    </form>
+  {/if}
+  {#if activeFilters.length}
+    <div class="chips" role="group" aria-label={$st('filters_active')}>
+      {#each activeFilters as item (item.key)}<button type="button" class="chip on" onclick={() => { item.clear(); apply(); }} aria-label={`${item.label} : ${item.value} · ${$st('clear_filters')}`}><span>{item.label}</span><b>{item.value}</b><span aria-hidden="true">×</span></button>{/each}
+      <button type="button" class="chip link" onclick={clearFilters}>{$st('clear_filters')}</button>
+    </div>
+  {/if}
   {#if insightsError}<p class="notice error" role="alert">{insightsError}</p>{/if}
   {/if}
   {#if data}
     {#if tab==='overview'}
     <div class="kpis">
-      <Kpi label={$st('kpi_time')} value={duration(data.summary.seconds)} growth={growth ? growth.seconds : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />
-      <Kpi label={$st('kpi_plays')} value={number.format(playsCount)} growth={growth ? growth.plays : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />
-      <Kpi label={$st('kpi_opened')} value={number.format(data.summary.plays)} locale={$statLocale} />
+      <Kpi label={$st('kpi_time')} value={duration(data.summary.seconds)} growth={growth ? growth.seconds : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} spark={sparkline.map(point => point.seconds)} hint={$st('per_day', { value: shortDuration(data.summary.seconds / rangeDays) })} />
+      <Kpi label={$st('kpi_plays')} value={number.format(playsCount)} growth={growth ? growth.plays : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} spark={sparkline.map(point => point.plays)} hint={`${number.format(data.summary.plays)} ${$st('kpi_opened').toLowerCase()}`} />
       {#if administrator}<Kpi label={$st('kpi_users')} value={number.format(data.summary.users)} growth={growth ? growth.users : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />{/if}
       <Kpi label={$st('kpi_media')} value={number.format(data.summary.media)} growth={growth ? growth.media : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />
       <Kpi label={$st('kpi_completed')} value={number.format(data.summary.completed)} growth={growth ? growth.completed : undefined} locale={$statLocale} compare={$st('vs_previous')} none={$st('growth_none')} />
-      <Kpi label={$st('kpi_active')} value={number.format(data.summary.active)} locale={$statLocale} />
-      {#if insights}<Kpi label={$st('kpi_peak')} value={number.format(insights.concurrency.peak)} locale={$statLocale} />{/if}
+      <Kpi label={$st('kpi_active')} value={number.format(data.summary.active)} locale={$statLocale} hint={insights ? `${$st('kpi_peak')} : ${number.format(insights.concurrency.peak)}` : ''} />
     </div>
     {#if !data.summary.plays}<p class="panel empty">{$st('no_plays')}</p>{/if}
     {#if insights?.truncated}<p class="notice">{$st('truncated')}</p>{/if}
+    {#if insights && data.summary.plays}
+      {#if administrator && live.length}
+        <section class="panel live" aria-labelledby="statistics-live">
+          <h2 id="statistics-live"><span class="pulse" aria-hidden="true"></span>{$st('live_title')} <b>{live.length}</b></h2>
+          <ul>{#each live.slice(0, 8) as item (item.id)}<li><strong>{item.title}</strong><span>{item.user} · {item.device}</span><time>{$st('live_since', { time: new Date(item.startedAt * 1000).toLocaleTimeString($statLocale, { hour: '2-digit', minute: '2-digit' }) })}</time></li>{/each}</ul>
+        </section>
+      {/if}
+      <section class="panel">
+        <div class="panel-head"><div><h2>{$st('activity_title')}</h2><p class="muted">{activity.grouped ? $st('activity_weekly') : $st('activity_daily')}</p></div><button type="button" class="link" onclick={() => tab = 'activity'}>{$st('see_all')} →</button></div>
+        <AreaChart items={activity.items} label={$st('activity_title')} format={shortDuration} duration height={220} everyLabel={Math.max(1, Math.ceil(activity.items.length / 7))} />
+      </section>
+      <div class="dashboard">
+        <section class="panel wide">
+          <div class="panel-head"><div><h2>{$st('top_titles_title')}</h2><p class="muted">{$st('popular_note')}</p></div><button type="button" class="link" onclick={() => tab = 'content'}>{$st('see_all')} →</button></div>
+          <TopList items={topTitles} empty={$st('no_data')} limit={8} />
+        </section>
+        <section class="panel">
+          <h2>{$st('kinds_title')}</h2><p class="muted">{$st('kinds_note')}</p>
+          <Donut items={kindSlices} total={shortDuration(data.summary.seconds)} caption={$st('kinds_title')} empty={$st('no_data')} percent={value => percent.format(value)} />
+          <h2 class="spaced">{$st('completion_title')}</h2>
+          <Donut items={completionSlices} total={number.format(bucketTotal)} caption={$st('completion_title')} empty={$st('no_data')} percent={value => percent.format(value)} />
+        </section>
+      </div>
+      <div class="columns">
+        <section class="panel"><h2>{$st('hours_title')}</h2><p class="muted">{$st('hours_note')}</p><HourHeatmap cells={insights.hours} label={$st('hours_title')} locale={$statLocale} {hourLabel} unit={plays} /></section>
+        <section class="panel"><h2>{$st('top_series_title')}</h2><p class="muted">{$st('series_note')}</p><TopList items={topSeries} empty={$st('no_data')} limit={5} /></section>
+      </div>
+    {/if}
     {/if}
     {#if insights && data.summary.plays}
       {#if tab==='activity'}
@@ -310,8 +391,10 @@
       <section class="panel"><h2>{$st('concurrency_title')}</h2><p class="muted">{$st('concurrency_note')}{#if insights.concurrency.peakAt} {$st('peak_at', { count: insights.concurrency.peak, date: date(insights.concurrency.peakAt) })}.{/if}</p><Bars items={concurrencyBars} label={$st('concurrency_title')} format={value => String(value)} height={110} everyLabel={Math.max(1, Math.ceil(concurrencyBars.length / 12))} /></section>
       {/if}
     {/if}
-      {#if tab==='content' || tab==='overview'}
-    <section class="panel"><h2>{$st('popular_title')}</h2><p class="muted">{$st('popular_note')}</p><div class="table-wrap"><table><thead><tr><th>{$st('col_media')}</th><th>{$st('col_plays')}</th><th>{$st('col_people')}</th><th>{$st('col_time')}</th><th>{$st('col_completed')}</th><th>{$st('col_favorites')}</th><th>{$st('col_rating')}</th></tr></thead><tbody>{#each data.popular as media (`${media.kind}:${media.id}`)}<tr><td>{media.title}<small>{kindLabel(media.kind)}</small></td><td>{media.plays}</td><td>{media.users}</td><td>{duration(media.seconds)}</td><td>{media.completed} · {Math.round(media.completed / media.plays * 100)} %</td><td>{media.favorites}</td><td>{media.rating ? media.rating.toFixed(1) : '—'}</td></tr>{/each}</tbody></table></div></section>
+      {#if tab==='content'}
+    <section class="panel"><h2>{$st('popular_title')}</h2><p class="muted">{$st('popular_note')}</p><div class="table-wrap"><table><thead><tr><th>{$st('col_media')}</th><th>{$st('col_plays')}</th><th>{$st('col_people')}</th><th>{$st('col_time')}</th><th>{$st('col_completed')}</th><th>{$st('col_favorites')}</th><th>{$st('col_rating')}</th></tr></thead><tbody>{#each data.popular as media (`${media.kind}:${media.id}`)}{@const href = mediaHref(media.kind, media.id)}<tr><td>{#if href}
+<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved base path plus query. -->
+<a class="title-link" {href} aria-label={$st('open_stats', { title: media.title })}>{media.title}</a>{:else}{media.title}{/if}<small>{kindLabel(media.kind)}</small></td><td>{media.plays}</td><td>{media.users}</td><td>{duration(media.seconds)}</td><td>{media.completed} · {Math.round(media.completed / media.plays * 100)} %</td><td>{media.favorites}</td><td>{media.rating ? media.rating.toFixed(1) : '—'}</td></tr>{/each}</tbody></table></div></section>
       {/if}
       {#if tab==='technical'}
     <div class="columns">
@@ -324,6 +407,7 @@
     <section class="panel"><h2>{$st('history_title')}</h2><div class="table-wrap"><table><thead><tr><th>{$st('col_date')}</th>{#if administrator}<th>{$st('col_user')}</th>{/if}<th>{$st('col_media')}</th><th>{$st('col_device')}</th><th>{$st('col_time')}</th><th>{$st('col_coverage')}</th><th>{$st('col_status')}</th><th>{$st('col_detail')}</th></tr></thead><tbody>{#each data.sessions as item (item.id)}<tr><td>{date(item.startedAt)}</td>{#if administrator}<td>{item.user}</td>{/if}<td>{item.title}{#if item.artist}<small>{item.artist} · {item.album}</small>{/if}</td><td class="device">{item.device}</td><td>{duration(item.seconds)}</td><td>{item.duration ? `${Math.min(100, Math.round(item.coveredSeconds / item.duration * 100))} %` : $st('unknown')}</td><td>{statusLabel(item.status)}</td><td><button onclick={() => void openDetail(item.id)} aria-label={$st('detail_of', { title: item.title })}>{$st('view')}</button></td></tr>{/each}</tbody></table></div><div class="actions"><button disabled={offset === 0 || loading} onclick={() => { offset = Math.max(0, offset - 50); void load(false); }}>{$st('previous')}</button><span>{$st('page', { page: Math.floor(offset / 50) + 1 })}</span><button disabled={!data.hasMore || loading} onclick={() => { offset += 50; void load(false); }}>{$st('next')}</button></div></section>
     {#if administrator}<section class="panel"><h2>{$st('users_title')}</h2><div class="table-wrap"><table><thead><tr><th>{$st('col_user')}</th><th>{$st('col_plays')}</th><th>{$st('col_time')}</th><th>{$st('profile')}</th></tr></thead><tbody>{#each data.users as user (user.id)}<tr><td>{user.name}</td><td>{user.plays}</td><td>{duration(user.seconds)}</td><td><button onclick={() => void openProfile(user.id)} aria-label={$st('profile_of', { name: user.name })}>{$st('profile')}</button></td></tr>{/each}</tbody></table></div></section>{/if}
       {/if}
+    {#if tab!=='settings'}<p class="muted footnote">{$st('dates_note', { zone: insights?.timezone ?? zone, seconds: insights?.minimumPlaySeconds ?? 60 })}</p>{/if}
     {#if tab==='settings'}
     <details class="panel"><summary>{$st('periods_title')}</summary><p>{$st('periods_note')}</p><ul>{#each data.periods as period, index (`${period.startedAt}-${index}`)}<li>{date(period.startedAt)} → {period.endedAt ? date(period.endedAt) : $st('ongoing')}</li>{/each}</ul><p>{$st('privacy_note')}</p></details>
     {#if !administrator}<details class="panel"><summary>{$st('erase_title')}</summary><p>{$st('erase_note')}</p><label class="check"><input type="checkbox" bind:checked={eraseConfirmed} /> {$st('erase_confirm')}</label><button disabled={!eraseConfirmed || saving} onclick={() => void erase()}>{$st('erase_action')}</button></details>{/if}
@@ -359,7 +443,44 @@
   {/if}
 </dialog>
 <style>
-  .statistics-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);padding-bottom:12px}.statistics-tabs button.active{background:var(--tx);color:var(--bg)}.activation{margin-block:16px}
+  .statistics-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+  .statistics-tabs button{flex:none;border:0;border-radius:0;background:none;color:var(--mu);font-weight:600;padding:12px 14px;margin-bottom:-1px;border-bottom:2px solid transparent}
+  .statistics-tabs button:hover:not(:disabled){background:none;color:var(--tx)}
+  .statistics-tabs button.active{color:var(--tx);border-bottom-color:var(--ac)}
+  .activation{margin-block:16px}
+  .switch{display:inline-flex;align-items:center;gap:10px;min-height:40px;padding:0 14px;border:1px solid var(--line);border-radius:var(--r-pill);background:var(--bg-2);font-size:13px;font-weight:600;cursor:pointer}
+  .switch input{appearance:none;width:34px;min-height:20px;height:20px;padding:0;border-radius:var(--r-pill);background:var(--pn-3);border:0;position:relative;cursor:pointer;transition:background var(--t-fast) var(--ease)}
+  .switch input::after{content:'';position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--tx);transition:transform var(--t-fast) var(--ease)}
+  .switch input:checked{background:var(--ok)}.switch input:checked::after{transform:translateX(14px)}
+  .switch input:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+  .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+  .toolbar .grow{flex:1}
+  .segmented{display:inline-flex;flex-wrap:wrap;padding:3px;border-radius:var(--r-pill);background:var(--pn);border:1px solid var(--line)}
+  .segmented button{border:0;background:transparent;color:var(--mu);padding:6px 13px;min-height:32px;border-radius:var(--r-pill);font-size:12.5px;font-weight:600}
+  .segmented button:hover:not(:disabled){background:transparent;color:var(--tx)}
+  .segmented button[aria-pressed='true']{background:var(--bg-3);color:var(--tx);box-shadow:0 1px 0 var(--line-2) inset}
+  .range{display:inline-flex;align-items:center;gap:6px;color:var(--mu)}.range label{display:block}.range input{width:auto;min-height:38px;padding:6px 10px;font-size:13px}
+  .tool{display:inline-flex;align-items:center;gap:8px;min-height:38px;padding:0 14px;font-size:13px;font-weight:600;border-radius:var(--r-pill)}
+  .tool svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .tool[aria-expanded='true']{background:var(--ac-soft);border-color:var(--ac)}
+  .tool.icon{width:38px;padding:0;justify-content:center}
+  .count{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:var(--r-pill);background:var(--ac);color:var(--on-ac);font-size:11px}
+  .spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px}.chip b{font-weight:700}.chip.link{background:none;border-color:transparent;color:var(--mu);text-decoration:underline}
+  .panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+  .link{background:none;border:0;padding:4px 0;color:var(--ac);font-weight:600;font-size:13px;white-space:nowrap}.link:hover:not(:disabled){background:none;text-decoration:underline}
+  .dashboard{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:20px}
+  .spaced{margin-top:26px !important}
+  .live h2{display:flex;align-items:center;gap:10px}.live h2 b{font-size:12px;padding:2px 8px;border-radius:var(--r-pill);background:var(--info-soft);color:var(--info)}
+  .live ul{list-style:none;margin:14px 0 0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+  .live li{display:grid;gap:3px;padding:12px 14px;border-radius:var(--r-sm);background:var(--pn);font-size:13px;min-width:0}
+  .live li strong,.live li span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.live li span,.live li time{color:var(--mu);font-size:12px}
+  .pulse{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 var(--ok-soft);animation:pulse 1.6s ease-out infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 var(--ok-soft)}70%{box-shadow:0 0 0 10px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .title-link{color:var(--tx);font-weight:600;text-decoration:none}.title-link:hover{text-decoration:underline}
+  .footnote{font-size:12px;margin:0}
+  @media(prefers-reduced-motion:reduce){.spin,.pulse{animation:none}}
   .statistics{display:grid;gap:22px;color:var(--tx);width:100%;max-width:var(--maxw);margin:0 auto;min-width:0}
   .heading{display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}.heading h1{font-size:clamp(1.6rem,3vw,2.4rem);margin:4px 0}.heading h2{margin:4px 0}.heading p,.muted,.collection-state{color:var(--mu);line-height:1.6}
   .heading-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
@@ -390,6 +511,6 @@
   .profile-dates{margin:8px 0 22px;max-width:520px}
   .recent{list-style:none;margin:0;padding:0;display:grid;gap:10px;font-size:13px}.recent li{display:flex;justify-content:space-between;gap:12px}.recent small{display:block;color:var(--mu)}.recent time{color:var(--mu);white-space:nowrap}
   .timeline{list-style:none;padding:0}.timeline li{display:grid;grid-template-columns:145px 150px 1fr;gap:12px;padding:13px 0;border-bottom:1px solid var(--line);font-size:.8rem}.timeline time,.timeline span{color:var(--mu)}
-  @media(max-width:900px){.columns{grid-template-columns:1fr}}
-  @media(max-width:640px){.panel{padding:16px}.heading{align-items:flex-start}.timeline li{grid-template-columns:1fr;gap:6px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.wrapped-cta{width:100%;justify-content:center}}
+  @media(max-width:900px){.columns,.dashboard{grid-template-columns:1fr}}
+  @media(max-width:640px){.panel{padding:16px}.heading{align-items:flex-start}.timeline li{grid-template-columns:1fr;gap:6px}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.toolbar .grow{display:none}.range{width:100%}.range label{flex:1}.range input{width:100%}.wrapped-cta{width:100%;justify-content:center}}
 </style>

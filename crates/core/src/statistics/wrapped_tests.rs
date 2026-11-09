@@ -234,6 +234,57 @@ async fn contract(store: IdentityStore) {
     assert_eq!(v["series"][0]["id"], "stats-show");
     assert_eq!(v["growth"]["previous"]["plays"], 1);
     assert_eq!(v["concurrency"]["peak"], 1);
+    assert!(v.get("media").is_none(), "media audience only when asked");
+
+    // One title: personal view of a film watched twice (plus a zap).
+    let film = format!("{insights}&mediaId=stats-film");
+    let (status, v, raw) = call(&app, "GET", &film, &reader, "", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{raw}");
+    assert_eq!(v["totals"]["opened"], 3);
+    assert_eq!(v["media"]["audience"]["plays"], 2);
+    assert_eq!(v["media"]["audience"]["viewers"], 1);
+    assert_eq!(v["media"]["audience"]["rewatches"], 1);
+    assert_eq!(v["media"]["audience"]["completionRate"], 1.0);
+    assert_eq!(v["media"]["retention"][10]["share"], 1.0);
+    assert_eq!(v["media"]["viewers"].as_array().unwrap().len(), 0);
+    assert!(!raw.contains("stats-other"));
+    // Administrators see every account and who watched.
+    let admin_film =
+        format!("/api/v1/admin/statistics/insights?from={from}&to={to}&tz=UTC&mediaId=stats-film");
+    let (status, v, raw) = call(&app, "GET", &admin_film, &admin, "", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{raw}");
+    assert_eq!(v["media"]["audience"]["viewers"], 2);
+    assert_eq!(v["media"]["retention"][9]["share"], 0.5);
+    assert_eq!(v["media"]["viewers"].as_array().unwrap().len(), 2);
+    assert_eq!(v["media"]["viewers"][0]["id"], "stats-reader");
+    // A series aggregates its episodes, in season order.
+    let show = format!("{insights}&mediaId=stats-show");
+    let (status, v, raw) = call(&app, "GET", &show, &reader, "", Value::Null).await;
+    assert_eq!(status, StatusCode::OK, "{raw}");
+    assert_eq!(v["totals"]["plays"], 3);
+    let episodes = v["media"]["episodes"].as_array().unwrap();
+    assert_eq!(episodes.len(), 2);
+    assert_eq!(episodes[0]["id"], "stats-ep1");
+    assert_eq!(episodes[0]["season"], 1);
+    assert_eq!(episodes[0]["episode"], 1);
+    assert_eq!(episodes[0]["plays"], 2);
+    assert_eq!(episodes[1]["episode"], 2);
+    let report = call(
+        &app,
+        "GET",
+        &format!("/api/v1/account/statistics?from={from}&to={to}&mediaId=stats-show"),
+        &reader,
+        "",
+        Value::Null,
+    )
+    .await
+    .1;
+    assert_eq!(report["summary"]["plays"], 3);
+    let long = format!("{insights}&mediaId={}", "x".repeat(161));
+    assert_eq!(
+        call(&app, "GET", &long, &reader, "", Value::Null).await.0,
+        StatusCode::BAD_REQUEST
+    );
     let summary = format!("/api/v1/account/statistics?from={from}&to={to}");
     let report = call(&app, "GET", &summary, &reader, "", Value::Null)
         .await

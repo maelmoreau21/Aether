@@ -41,6 +41,15 @@ export interface Insights {
   completion: { buckets: Record<'completed' | 'partial' | 'dropped' | 'abandoned' | 'unknown', number>; dropoff: { id: string; title: string; kind: string; starters: number; below25: number; below50: number; averageCompletion: number }[] };
   resolution: Bucket[]; methods: Bucket[];
   clients: { label: string; plays: number; seconds: number; direct: number; transcoded: number; unknown: number; transcodeShare: number }[];
+  /** Present when the request is narrowed to one title (`mediaId`). */
+  media?: MediaAudience;
+}
+export interface MediaAudience {
+  audience: { viewers: number; sessions: number; plays: number; seconds: number; averageSession: number | null; averageCompletion: number | null; completionRate: number | null; rewatches: number; firstPlay: number | null; lastPlay: number | null; active: number };
+  retention: { percent: number; viewers: number; share: number }[];
+  episodes: { id: string; title: string; season: number | null; episode: number | null; plays: number; seconds: number; users: number; averageCompletion: number | null }[];
+  /** Administrators only. */
+  viewers: { id: string; name: string; plays: number; seconds: number; lastPlay: number; averageCompletion: number | null }[];
 }
 export interface Profile extends Insights {
   user: { id: string; name: string; role: string };

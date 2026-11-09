@@ -240,6 +240,153 @@ async fn routes_require_feature_csrf_administrator_and_ownership() {
     );
 }
 #[tokio::test]
+async fn list_filters_counts_pages_by_date_and_rejects_with_a_fixed_reason() {
+    let (_dir, store, app, sessions) = fixture().await;
+    let (owner, csrf) = &sessions[0];
+    let (other, _) = &sessions[1];
+    let (admin, admin_csrf) = &sessions[2];
+    query("UPDATE users SET display_name='Owner Name' WHERE id='owner'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    // Random ids sort against creation order: the list must follow the dates.
+    for (id, external, status, at) in [
+        ("zz-old", "1", "pending", 100),
+        ("aa-mid", "2", "available", 200),
+        ("mm-new", "3", "failed", 300),
+    ] {
+        let input = json!({"kind":"film","title":id,"externalId":external,"externalProvider":"tmdb","serverId":"radarr-a"});
+        query("INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,created_at,updated_at) VALUES(?,'owner','radarr-a','request-films','film',?,?,'tmdb',?,?,?,?)")
+            .bind(id).bind(id).bind(external).bind(input.to_string()).bind(status).bind(at).bind(at).execute(store.pool()).await.unwrap();
+    }
+    let (status, page) = request(
+        &app,
+        "GET",
+        "/api/v1/requests?limit=2",
+        admin,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{page}");
+    let ids: Vec<&str> = page["requests"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["mm-new", "aa-mid"]);
+    assert_eq!(page["requests"][0]["authorLabel"], "Owner Name");
+    assert_eq!(page["requests"][0]["own"], false);
+    assert_eq!(
+        page["counts"],
+        json!({"pending":1,"available":1,"failed":1})
+    );
+    let cursor = page["nextCursor"].as_str().unwrap().to_owned();
+    let (_, next) = request(
+        &app,
+        "GET",
+        &format!("/api/v1/requests?limit=2&before={cursor}"),
+        admin,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(next["requests"][0]["id"], "zz-old");
+    assert_eq!(next["nextCursor"], Value::Null);
+    let (_, attention) = request(
+        &app,
+        "GET",
+        "/api/v1/requests?status=attention",
+        owner,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(attention["requests"].as_array().unwrap().len(), 1);
+    assert_eq!(attention["requests"][0]["own"], true);
+    let (_, mine) = request(
+        &app,
+        "GET",
+        "/api/v1/requests?mine=true",
+        admin,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(mine["requests"], json!([]));
+    assert_eq!(
+        request(&app, "GET", "/api/v1/requests", other, "", Value::Null)
+            .await
+            .1["counts"],
+        json!({})
+    );
+    assert_eq!(
+        request(
+            &app,
+            "GET",
+            "/api/v1/requests?status=deleted",
+            admin,
+            "",
+            Value::Null
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    // A reason is accepted only when declining, and only from the fixed list.
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            "/api/v1/requests/zz-old/action",
+            admin,
+            admin_csrf,
+            json!({"action":"reject","reason":"because I said so"})
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        request(
+            &app,
+            "POST",
+            "/api/v1/requests/zz-old/action",
+            owner,
+            csrf,
+            json!({"action":"cancel","reason":"duplicate"})
+        )
+        .await
+        .0,
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let (status, rejected) = request(
+        &app,
+        "POST",
+        "/api/v1/requests/zz-old/action",
+        admin,
+        admin_csrf,
+        json!({"action":"reject","reason":"already_available"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rejected}");
+    assert_eq!(rejected["status"], "rejected");
+    assert_eq!(rejected["errorCode"], "already_available");
+    let (_, detail) = request(
+        &app,
+        "GET",
+        "/api/v1/requests/zz-old",
+        owner,
+        "",
+        Value::Null,
+    )
+    .await;
+    let last = detail["events"].as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["code"], "already_available");
+    assert!(last.get("actorId").is_none());
+}
+#[tokio::test]
 async fn legacy_import_is_suspended_idempotent_and_delta_safe() {
     let (_dir, store, _app, _sessions) = fixture().await;
     let mut value = json!({"id":12,"status":2,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","media":{"mediaType":"movie","tmdbId":123,"externalServiceId":42},"requestedBy":{"displayName":"Historical"}});

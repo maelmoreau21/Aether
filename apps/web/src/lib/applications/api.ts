@@ -13,34 +13,34 @@ let pending: Promise<Features> | undefined;
 let loadedAt = 0;
 onSessionGenerationChange(() => { features.set({ requests: false, reports: false }); pending = undefined; loadedAt = 0; });
 
-const errors: Record<string, string> = {
-  extension_disabled: 'Cette extension est désactivée ou indisponible.',
-  extension_busy: 'Une autre opération est en cours. Réessayez dans un instant.',
-  library_permission_denied: 'Vous n’avez plus accès à la bibliothèque concernée.',
-  report_limit_reached: 'Votre limite de signalements ouverts est atteinte.',
-  comment_limit_reached: 'Ce signalement a atteint sa limite de commentaires.',
-  track_not_supported: 'Demande échouée : ce titre n’est pas disponible pour acquisition dans Lidarr.',
-  single_monitoring_conflict: 'Ce single possède déjà une surveillance incompatible dans Lidarr. Vérifiez son édition avant de reprendre la demande.',
-  single_plan_unverified: 'L’identité exacte du single n’a pas pu être vérifiée. Aucun album complet ne sera acquis à sa place.',
-  remote_content_not_found: 'Ce contenu n’existe pas dans le catalogue du serveur choisi.',
-  request_quota_exceeded: 'Votre limite de demandes en attente est atteinte.',
-  request_action_not_allowed: 'Cette action ne correspond plus à l’état de la demande. Actualisez la page.',
-  external_metadata_parental_unverified: 'La classification de ce contenu externe ne peut pas être vérifiée pour votre compte.',
-  acquisition_server_not_configured: 'Un administrateur doit configurer une destination pour ce type de média.',
-  acquisition_server_incompatible: 'La destination choisie est désactivée ou incompatible avec ce type de média.',
-  server_has_request_history_disable_instead: 'Cette connexion possède un historique. Désactivez-la pour conserver le suivi des demandes.',
-  connection_address_changed: 'L’adresse réseau du serveur a changé. Un administrateur doit réenregistrer la connexion.',
-  api_key_required: 'Saisissez à nouveau la clé API après un changement de service ou d’adresse.',
-  extension_unavailable: 'Cette extension est désactivée ou indisponible.', feature_unavailable: 'Cette extension est désactivée ou indisponible.',
-  request_limit: 'Votre limite de demandes en attente est atteinte.', quota_exceeded: 'Votre limite de demandes est atteinte.',
-  duplicate_request: 'Une demande existe déjà pour ce contenu.', invalid_transition: 'Cette action ne correspond plus à l’état du dossier. Actualisez la page.',
-  csrf_required: 'Votre session a changé. Actualisez la page.', authentication_required: 'Reconnectez-vous pour continuer.',
-  lidarr_track_unsupported: 'Ce titre n’est pas disponible pour acquisition dans Lidarr.',
-  unsupported_track: 'Ce titre ne peut pas être acquis seul dans Lidarr.', remote_unavailable: 'Le serveur distant est indisponible.',
-  connection_unavailable: 'La connexion au serveur est indisponible.', not_found: 'Dossier introuvable ou inaccessible.'
-};
-export function errorMessage(code: string | undefined, status?: number): string {
-  if (code && errors[code]) return errors[code];
+const errors: Readonly<Record<string, string>> = translatedLabels({
+  extension_disabled: 'err_extension_unavailable', extension_unavailable: 'err_extension_unavailable', feature_unavailable: 'err_extension_unavailable',
+  extension_busy: 'err_extension_busy',
+  library_permission_denied: 'err_library_permission_denied',
+  report_limit_reached: 'err_report_limit_reached',
+  comment_limit_reached: 'err_comment_limit_reached',
+  track_not_supported: 'err_track_not_supported',
+  single_monitoring_conflict: 'err_single_monitoring_conflict',
+  single_plan_unverified: 'err_single_plan_unverified',
+  remote_content_not_found: 'err_remote_content_not_found',
+  request_quota_exceeded: 'err_request_quota', request_limit: 'err_request_quota', quota_exceeded: 'err_quota_exceeded',
+  request_action_not_allowed: 'err_state_changed', invalid_transition: 'err_state_changed', request_changed: 'err_state_changed', report_changed: 'err_state_changed',
+  external_metadata_parental_unverified: 'err_parental_unverified',
+  acquisition_server_not_configured: 'err_server_not_configured',
+  acquisition_server_incompatible: 'err_server_incompatible',
+  server_has_request_history_disable_instead: 'err_server_history',
+  server_has_active_requests: 'err_server_active_requests',
+  request_already_dispatched: 'err_request_dispatched',
+  connection_address_changed: 'err_connection_address_changed',
+  api_key_required: 'err_api_key_required',
+  duplicate_request: 'err_duplicate_request', request_already_exists: 'err_duplicate_request',
+  csrf_required: 'err_csrf_required', authentication_required: 'err_authentication_required',
+  lidarr_track_unsupported: 'err_lidarr_track', unsupported_track: 'err_unsupported_track',
+  remote_unavailable: 'err_remote_unavailable', connection_unavailable: 'err_connection_unavailable', not_found: 'err_not_found',
+  invalid_reject_reason: 'err_invalid_reject_reason', empty_selection: 'err_empty_selection', invalid_request_selection: 'err_empty_selection', invalid_priority: 'err_invalid_priority'
+});
+export function errorMessage(code: string | null | undefined, status?: number): string {
+  if (code && code in errors) return errors[code];
   if (status === 401) return tr('your_session_has_expired_sign_in');
   if (status === 403) return tr('this_action_is_not_allowed');
   if (status === 404) return tr('case_or_extension_not_found');
@@ -75,15 +75,86 @@ export async function loadFeatures(force = false): Promise<Features> {
   pending = task;
   try { return await task; } finally { if (pending === task) pending = undefined; }
 }
-export interface SearchResult { kind: RequestKind; title: string; externalId: string; externalProvider: string; serverId?: string; year?: number; summary?: string }
+export interface SeasonInfo { number: number; episodes?: number | null }
+export interface SearchResult {
+  kind: RequestKind; title: string; externalId: string; externalProvider: string; serverId?: string; year?: number | null; summary?: string | null;
+  genres?: string[]; runtime?: number | null; network?: string | null; artist?: string | null; album?: string | null; seasons?: SeasonInfo[];
+  onServer?: boolean; inLibrary?: { workId: string }; request?: { status: string; mine: boolean; id?: string | null };
+}
 export interface RequestSelection { seasons?: number[]; episodes?: { season: number; episode: number }[]; albumIds?: string[]; monitorFuture?: boolean; serverId?: string }
-export interface RequestEvent { status?: string; action?: string; createdAt: number; message?: string; code?: string }
-export interface MediaRequest extends SearchResult { id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; requestedBy?: string; error?: string; errorCode?: string; selection?: RequestSelection; events?: RequestEvent[]; authorLabel?: string; sourceStatus?: string }
+export interface RequestEvent { status?: string; action?: string; createdAt: number; message?: string; code?: string | null; actorLabel?: string | null }
+export interface MediaRequest extends SearchResult { id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; own?: boolean; workId?: string | null; error?: string; errorCode?: string | null; selection?: RequestSelection; events?: RequestEvent[]; authorLabel?: string | null; sourceStatus?: string | null }
 export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; rootFolder: string; qualityProfileId: number; metadataProfileId?: number; isDefault: boolean; enabled: boolean }
 export interface ReportContext { engine?: string; errorCode?: string; audioTrackId?: string; subtitleTrackId?: string }
 export interface ReportInput { category: string; description: string; workId?: string; trackId?: string; assetId?: string; positionSeconds?: number; endSeconds?: number; context?: ReportContext }
-export interface MediaReport extends ReportInput { id: string; status: string; createdAt: number; title?: string; userId?: string; authorLabel?: string; comments?: { id?: string; message: string; createdAt: number; author?: string; authorLabel?: string; userId?: string }[]; history?: { status?: string; action?: string; createdAt: number }[] }
-export function requestPayload(result: SearchResult, selection: RequestSelection): SearchResult & RequestSelection {
+export interface ReportSubject { kind: string; title: string; year?: number | null; artist?: string; album?: string; workId?: string; trackId?: string; image?: string }
+export interface ReportComment { id?: string; message: string; createdAt: number; authorLabel?: string | null; staff?: boolean; own?: boolean }
+export interface MediaReport extends ReportInput {
+  id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; authorLabel?: string | null; subject?: ReportSubject;
+  priority?: Priority; triage?: { code?: string | null; checks?: string[] }; comments?: ReportComment[];
+  history?: { kind?: string; status?: string; createdAt: number; actorLabel?: string | null }[];
+}
+export type Priority = 'high' | 'normal' | 'low';
+export type Tone = 'neutral' | 'info' | 'warn' | 'ok' | 'err';
+
+/** Visual weight of a status badge, shared by requests and reports. */
+export function statusTone(status: string): Tone {
+  if (['available', 'resolved'].includes(status)) return 'ok';
+  if (['pending', 'suspended', 'partial', 'partially_available', 'open'].includes(status)) return 'warn';
+  if (['failed'].includes(status)) return 'err';
+  if (['approved', 'queued', 'submitted', 'acquiring', 'downloading', 'processing', 'imported', 'in_progress'].includes(status)) return 'info';
+  return 'neutral';
+}
+/** Ordered steps a request goes through until it is playable in Aether. */
+export const requestSteps = ['pending', 'approved', 'submitted', 'acquiring', 'available'] as const;
+/** Index of the step reached, or -1 when the request left the normal path. */
+export function requestStep(status: string): number {
+  const aliases: Record<string, (typeof requestSteps)[number]> = { queued: 'approved', downloading: 'acquiring', processing: 'acquiring', imported: 'acquiring', partial: 'acquiring', partially_available: 'acquiring' };
+  return requestSteps.indexOf(aliases[status] ?? status as (typeof requestSteps)[number]);
+}
+/** Status filter groups understood by `GET /requests?status=`. */
+export const requestGroups = ['all', 'active', 'pending', 'done', 'attention', 'closed'] as const;
+export type RequestGroup = (typeof requestGroups)[number];
+export function groupCount(counts: Record<string, number>, group: RequestGroup): number {
+  const members: Record<RequestGroup, string[]> = {
+    all: Object.keys(counts), active: ['pending', 'approved', 'submitted', 'acquiring', 'imported', 'partial'], pending: ['pending'],
+    done: ['available'], attention: ['failed', 'suspended'], closed: ['rejected', 'cancelled']
+  };
+  return members[group].reduce((total, status) => total + (counts[status] ?? 0), 0);
+}
+export const rejectReasons = ['already_available', 'not_available', 'duplicate', 'out_of_scope', 'storage', 'other'] as const;
+export const rejectReasonLabels: Readonly<Record<string, string>> = translatedLabels({ already_available: 'reject_reason_already_available', not_available: 'reject_reason_not_available', duplicate: 'reject_reason_duplicate', out_of_scope: 'reject_reason_out_of_scope', storage: 'reject_reason_storage', other: 'reject_reason_other' });
+export const priorityLabels: Readonly<Record<Priority, string>> = translatedLabels({ high: 'priority_high', normal: 'priority_normal', low: 'priority_low' });
+export const checkLabels: Readonly<Record<string, string>> = translatedLabels({ file_presence: 'check_file_presence', library_scan: 'check_library_scan', video_decode: 'check_video_decode', playback_engine: 'check_playback_engine', audio_track: 'check_audio_track', audio_default_track: 'check_audio_default_track', subtitle_track: 'check_subtitle_track', subtitle_selection: 'check_subtitle_selection', subtitle_timing: 'check_subtitle_timing', metadata_match: 'check_metadata_match', timestamp: 'check_timestamp' });
+export const historyLabels: Readonly<Record<string, string>> = translatedLabels({ 'report.created': 'history_report_created', 'report.comment': 'history_report_comment', 'report.status': 'history_report_status', 'report.priority': 'history_report_priority', 'report.imported': 'history_report_imported' });
+/** `1:02:03` / `4:05` for a playback position in seconds. */
+export function formatPosition(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '';
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600), minutes = Math.floor(total % 3600 / 60), rest = total % 60;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return hours ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`;
+}
+/** Season numbers grouped as ranges: `1–3, 5`. */
+export function seasonRanges(numbers: number[]): string {
+  const sorted = [...new Set(numbers)].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let index = 0; index < sorted.length; index++) {
+    const start = sorted[index];
+    while (index + 1 < sorted.length && sorted[index + 1] === sorted[index] + 1) index++;
+    parts.push(start === sorted[index] ? String(start) : `${start}–${sorted[index]}`);
+  }
+  return parts.join(', ');
+}
+/** Catalogue page of a work, when the kind has one. */
+export function workHref(kind: string | undefined, workId: string): `films/?work=${string}` | `series/?work=${string}` | null {
+  if (kind === 'film') return `films/?work=${encodeURIComponent(workId)}`;
+  if (kind === 'series') return `series/?work=${encodeURIComponent(workId)}`;
+  return null;
+}
+/** Strict admission body accepted by `POST /requests`: discovery metadata never enters it. */
+export type RequestPayload = Pick<SearchResult, 'kind' | 'title' | 'externalId' | 'externalProvider' | 'serverId'> & Required<Omit<RequestSelection, 'serverId'>>;
+export function requestPayload(result: SearchResult, selection: RequestSelection): RequestPayload {
   return { kind: result.kind, title: result.title, externalId: result.externalId, externalProvider: result.externalProvider,
     ...(selection.serverId || result.serverId ? { serverId: selection.serverId || result.serverId } : {}),
     seasons: selection.seasons ?? [], episodes: selection.episodes ?? [], albumIds: selection.albumIds ?? [], monitorFuture: selection.monitorFuture ?? false };

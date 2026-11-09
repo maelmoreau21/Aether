@@ -118,6 +118,27 @@ async fn library_allowed(
     }
     Ok(())
 }
+/// Display names of the accounts behind requests, reports and comments, as shown to
+/// whoever may already read those records (author or administrator).
+pub(crate) async fn user_labels(
+    store: &IdentityStore,
+    ids: impl IntoIterator<Item = &str>,
+) -> Result<std::collections::BTreeMap<String, String>, Error> {
+    let ids: std::collections::BTreeSet<&str> = ids.into_iter().collect();
+    let mut labels = std::collections::BTreeMap::new();
+    for chunk in ids.into_iter().collect::<Vec<_>>().chunks(100) {
+        let marks = vec!["?"; chunk.len()].join(",");
+        let sql = format!(
+            "SELECT u.id,COALESCE(u.display_name,u.sso_username,c.login,u.id) FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.id IN ({marks})"
+        );
+        let mut statement = query_as::<_, (String, String)>(sqlx::AssertSqlSafe(sql));
+        for id in chunk {
+            statement = statement.bind(*id);
+        }
+        labels.extend(statement.fetch_all(store.pool()).await.map_err(db)?);
+    }
+    Ok(labels)
+}
 pub fn router(auth: AuthState) -> Router {
     Router::new()
         .route("/api/v1/extensions/features", get(features))

@@ -26,7 +26,7 @@ futures-util = "0.3"
 argon2 = { version = "0.6.0", features = ["zeroize"] }
 rpassword = "7.5.4"
 zeroize = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 sha2 = "0.10.9"
 bytes = "1"
 http-body-util = "0.1"

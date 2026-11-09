@@ -381,6 +381,171 @@ async fn reports_preserve_exact_inventory_track_and_reject_wrong_kind_or_asset()
     );
 }
 
+#[tokio::test]
+async fn report_queue_is_triaged_filtered_and_annotated_for_administrators_only() {
+    let _worker = WORKER_TEST.lock().await;
+    let f = fixture().await;
+    install(&f.store, "reports").await;
+    query("UPDATE users SET display_name='Alice A.' WHERE id='alice'")
+        .execute(f.store.pool())
+        .await
+        .unwrap();
+    let input =
+        json!({"category":"missing","description":"Le film ne démarre pas","workId":"work-1"});
+    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, input).await;
+    let status = response.status();
+    let created = body(response).await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_owned();
+    // The author sees the media it concerns, never the administrator triage.
+    assert_eq!(created["subject"]["title"], "Synthetic");
+    assert_eq!(created["subject"]["workId"], "work-1");
+    assert!(created.get("priority").is_none());
+    // A synthetic guest returns no classification; the real one ranks a missing file high.
+    let triaged: String =
+        query_scalar("SELECT priority FROM media_report_triage WHERE report_id=?")
+            .bind(&id)
+            .fetch_one(f.store.pool())
+            .await
+            .unwrap();
+    assert!(["normal", "high"].contains(&triaged.as_str()));
+    let priority = format!("/api/v1/reports/{id}/priority");
+    assert_eq!(
+        send(
+            &f,
+            Some(1),
+            "POST",
+            &priority,
+            true,
+            json!({"priority":"high"})
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        send(
+            &f,
+            Some(0),
+            "POST",
+            &priority,
+            true,
+            json!({"priority":"panic"})
+        )
+        .await
+        .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        send(
+            &f,
+            Some(0),
+            "POST",
+            &priority,
+            true,
+            json!({"priority":"high"})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let queue = body(
+        send(
+            &f,
+            Some(0),
+            "GET",
+            "/api/v1/reports?status=active&priority=high&sort=priority",
+            false,
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(queue["reports"].as_array().unwrap().len(), 1, "{queue}");
+    assert_eq!(queue["reports"][0]["priority"], "high");
+    assert_eq!(queue["reports"][0]["authorLabel"], "Alice A.");
+    assert_eq!(queue["counts"]["urgent"], 1);
+    assert_eq!(queue["counts"]["open"], 1);
+    let low = body(
+        send(
+            &f,
+            Some(0),
+            "GET",
+            "/api/v1/reports?priority=low",
+            false,
+            Value::Null,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(low["reports"], json!([]));
+    assert_eq!(
+        send(
+            &f,
+            Some(1),
+            "GET",
+            "/api/v1/reports?priority=high",
+            false,
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let own = body(send(&f, Some(1), "GET", "/api/v1/reports", false, Value::Null).await).await;
+    assert!(own["counts"].get("urgent").is_none());
+    // Resolving with a note posts it in the same transaction, marked as staff.
+    let path = format!("/api/v1/reports/{id}");
+    assert_eq!(
+        send(
+            &f,
+            Some(0),
+            "POST",
+            &format!("{path}/status"),
+            true,
+            json!({"status":"resolved","message":"Fichier replacé, nouvelle analyse faite."})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let detail = body(send(&f, Some(1), "GET", &path, false, Value::Null).await).await;
+    assert_eq!(detail["status"], "resolved");
+    let comments = detail["comments"].as_array().unwrap();
+    assert_eq!(comments.len(), 1);
+    assert_eq!(comments[0]["staff"], true);
+    assert_eq!(comments[0]["own"], false);
+    assert!(comments[0].get("userId").is_none());
+    // Time-ordered ids keep events of the same second in the order they happened.
+    let kinds: Vec<&str> = detail["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        ["report.created", "report.priority", "report.status"]
+    );
+    // The author may reopen with an explanation; the queue counts follow.
+    assert_eq!(
+        send(
+            &f,
+            Some(1),
+            "POST",
+            &format!("{path}/status"),
+            true,
+            json!({"status":"open","message":"Toujours bloqué au lancement."})
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    let detail = body(send(&f, Some(1), "GET", &path, false, Value::Null).await).await;
+    assert_eq!(detail["comments"][1]["own"], true);
+    assert_eq!(detail["comments"][1]["authorLabel"], "Alice A.");
+}
+
 async fn all_libraries(store: &IdentityStore, id: &str) -> i64 {
     query_scalar("SELECT CAST(all_libraries AS BIGINT) FROM extensions WHERE id=?")
         .bind(id)

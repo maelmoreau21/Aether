@@ -90,7 +90,7 @@ pub(super) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
         let sql = if cap == "requests" {
             "SELECT e.id,e.request_id,r.library_id,e.status,e.created_at FROM acquisition_events e JOIN media_requests r ON r.id=e.request_id WHERE r.imported=0 AND e.created_at>? AND NOT EXISTS(SELECT 1 FROM notification_events n WHERE n.id=e.id) ORDER BY e.created_at,e.id LIMIT 100"
         } else {
-            "SELECT e.id,e.report_id,r.library_id,e.kind,e.created_at FROM media_report_events e JOIN media_reports r ON r.id=e.report_id WHERE r.source_key IS NULL AND e.created_at>? AND NOT EXISTS(SELECT 1 FROM notification_events n WHERE n.id=e.id) ORDER BY e.created_at,e.id LIMIT 100"
+            "SELECT e.id,e.report_id,r.library_id,e.kind,e.created_at FROM media_report_events e JOIN media_reports r ON r.id=e.report_id WHERE r.source_key IS NULL AND e.kind!='report.priority' AND e.created_at>? AND NOT EXISTS(SELECT 1 FROM notification_events n WHERE n.id=e.id) ORDER BY e.created_at,e.id LIMIT 100"
         };
         let rows: Vec<(String, String, Option<String>, String, i64)> = query_as(sql)
             .bind(timestamp - LOOKBACK)

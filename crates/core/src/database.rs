@@ -235,6 +235,10 @@ const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
     ("acquisition", include_str!("../migrations/acquisition.sql")),
     ("reports", include_str!("../migrations/reports.sql")),
     (
+        "report_triage",
+        include_str!("../migrations/report_triage.sql"),
+    ),
+    (
         "person_images",
         include_str!("../migrations/person_images.sql"),
     ),

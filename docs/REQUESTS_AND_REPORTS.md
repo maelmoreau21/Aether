@@ -68,6 +68,32 @@ groupes candidats, éditions inconnues ou à plusieurs pistes sont refusés ; le
 bornes sont 100 sorties MusicBrainz et quatre éditions Lidarr. Aucun autre
 fournisseur de téléchargement de morceaux n'est ajouté.
 
+### Écran Demandes (refonte du 9 novembre 2026)
+
+La recherche choisit le type par un sélecteur segmenté ; la destination n'est
+proposée que lorsque plusieurs serveurs servent ce type. Chaque résultat affiche
+année, genres, durée, chaîne, nombre de saisons et résumé (bornés par le Core ;
+aucune URL d'image distante n'est transmise, seules les affiches servies par
+Aether sont chargées). Le Core signale aussi :
+
+- `inLibrary` : l'œuvre existe déjà dans une bibliothèque lisible (identifiant
+  TMDb pour un film, TVDB pour une série) ; un film présent n'est plus proposé ;
+- `request` : une demande active existe déjà pour ce contenu. Pour celle d'un
+  autre compte, seul son état est indiqué, jamais son auteur ni son identifiant ;
+- `onServer` : le service distant suit déjà ce contenu.
+
+La demande s'ouvre dans une boîte de dialogue native : saisons cochées à partir
+de la liste du serveur (épisodes spéciaux compris), épisodes précis en option,
+suivi des épisodes à venir, et récapitulatif avant envoi.
+
+La liste est triée par date de création (curseur `created_at:id`) et filtrable
+par groupe d'états (`active`, `pending`, `done`, `attention`, `closed`), par type
+et, pour l'administrateur, à ses seules demandes (`mine=true`). Elle renvoie des
+compteurs par état, le nom du demandeur et une frise d'avancement. L'administrateur
+peut approuver ou refuser plusieurs demandes en attente ; un refus porte un motif
+fixe (`already_available`, `not_available`, `duplicate`, `out_of_scope`,
+`storage`, `other`) visible du demandeur.
+
 Les résultats externes n'ont pas toujours une classification fiable : les comptes
 soumis à une politique parentale sont actuellement refusés sur cette recherche,
 plutôt que d'exposer des titres sans classification vérifiée.
@@ -91,6 +117,18 @@ ou fichier média n'est joint automatiquement. Les limites sont 100 signalements
 ouverts par auteur, 500 commentaires par signalement et 8 000 octets par texte.
 Les faits et transitions sont structurés ; aucune réparation automatique n'est
 exécutée dans cette version.
+
+À la création, le Core appelle `reports.classify` et conserve, dans
+`media_report_triage`, une priorité (`high`, `normal`, `low`) et des vérifications
+suggérées (codes bornés, par exemple `file_presence` ou `subtitle_timing`). Le
+texte libre n'est jamais interprété. Une extension occupée ou antérieure à 0.2.0
+laisse la priorité `normal`. Seul l'administrateur voit ce tri, peut changer la
+priorité (`POST /reports/{id}/priority`, sans notification à l'auteur) et filtrer
+ou trier la file par priorité. La liste renvoie le média concerné (titre, année,
+affiche Aether), le nom de l'auteur et des compteurs par état, plus `urgent`
+(priorité haute non résolue) pour l'administrateur. Une transition peut porter
+un message, enregistré comme commentaire dans la même transaction ; les réponses
+de l'administration sont marquées dans le fil.
 
 ## Connexions et API
 
@@ -121,7 +159,8 @@ Principales routes, sous `/api/v1` :
 | `GET, POST /reports` | Liste et création de signalements |
 | `GET /reports/{id}` | Contexte, commentaires et historique |
 | `POST /reports/{id}/comments` | Commenter |
-| `POST /reports/{id}/status` | Transition d'état |
+| `POST /reports/{id}/status` | Transition d'état, avec message facultatif |
+| `POST /reports/{id}/priority` | Priorité de traitement (administrateur) |
 | `GET /admin/imports` | Progression des imports |
 | `POST /admin/imports/preview` | Analyse d'une source, sans mutation de celle-ci |
 | `POST /admin/imports/{id}/start` | Correspondances et démarrage/reprise |

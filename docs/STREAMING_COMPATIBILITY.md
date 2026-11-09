@@ -31,7 +31,7 @@ synthétique copié dans une bibliothèque locale, découvert/indexé puis lu da
 le lecteur natif existant. Progression temporelle, pause et seek4s vérifiés,
 ainsi que catalogue et nouvelle lecture après arrêt/relance réel du Core avec
 la même SQLite. Aucun probe au deuxième scan des deux fichiers inchangés.
-Rapports et captures : [evidence/2026-10-16/scanner/](evidence/2026-10-16/scanner/).
+Rapports et captures : générés à chaque exécution du CI dans `docs/evidence/2026-10-16/scanner/` (artefact `browser-evidence-films-series`, dossier non suivi par Git).
 Ce parcours n'ajoute pas de preuve PCM/audio physique, de compatibilité MKV
 générale, de commutation des pistes internes ou de résultat Edge/Firefox/Safari.
 Les fichiers MKV multipistes sont inspectés par les tests Node/SQLite séparés.

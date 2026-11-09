@@ -19,6 +19,20 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 9 novembre 2026 — Optimisation des paramètres par défaut d'Aether et finitions lecteur/UI
+
+- Reprise de lecture (`crates/core/src/server_settings.rs`) :
+  - `min_resume_pct` relevé de `0%` à `5%` par défaut dans les paramètres serveur (`Settings::default()`), évitant qu'un lancement accidentel de quelques secondes ne pollue la ligne « Reprendre » de l'accueil.
+- Confort de lecture et VOSTFR (`apps/web/src/lib/player/playback-preferences.ts`, `Catalog.svelte`, `SettingsView.svelte`, `docs/PREFERENCES.md`) :
+  - `autoplayNextEpisode` activé par défaut (`true` si absent) pour enchaîner naturellement les épisodes de séries.
+  - Mode de sous-titres par défaut passé à `foreign` (« VOSTFR automatique ») : active automatiquement les sous-titres en cas d'audio en langue étrangère tout en conservant les sous-titres forcés pour l'audio en français.
+  - Raccourcis universels ajoutés au lecteur immersif (`ImmersivePlayer.svelte`) : `K` (play/pause), `J`/`L` (saut arrière/avant configuré), `C` (bascule des sous-titres), `0` (retour au début).
+  - Ajout d'un bouton de réinitialisation rapide (0 s) des décalages audio/sous-titres dans `SettingsView.svelte`.
+- Robustesse d'affichage et propreté Svelte (`DetailHero.svelte`, `HeroBanner.svelte`, `WorkTools.svelte`) :
+  - Chaîne de repli d'arrière-plan ordonnée : haute résolution native en priorité, repli vers prévisualisation 1280px puis affiche floutée en cas d'erreur de chargement.
+  - Nettoyage du CSS résiduel dans `WorkTools.svelte` : diagnostic `svelte-check` à 0 erreur et 0 avertissement.
+- Vérifié : `cargo test -p media-poc server_settings::tests` (4/4 ok), `cargo clippy` (0 warning), `svelte-check` (0 error, 0 warning), `vitest run` (63/63 fichiers, 436/436 tests ok).
+
 ## 8 novembre 2026 — Fusion chapitres/audio Intro Skipper, ré-extraction des empreintes tronquées et éditeur de segments films/épisodes
 
 - Plugin `intro-skipper` (`Aether-Plugins-IntroSkipper/src/chapters.rs`, `src/lib.rs`, `tests/chapter_fusion_tests.rs`, `tests/intro_skipper_tests.rs`) :
@@ -411,3 +425,8 @@ Essai de promotion sur registre local jetable réussi avec six images synthétiq
 Premier run PR : contrôles Rust/PG 462 s (655 s avant), frontend/navigateur/sécurité et ARM64 réussis ; archive réelle ARM64 145 Mo, save/gzip/contrôle/load 7 s + upload 2 s. Première répartition insuffisante (scanner 226 s contre 104 s) : poids finaux = maxima de deux runs, 461 s estimées par partition. Smoke AMD64 bloqué comme dans un run antérieur : reprise sur révision suivante, réutilisation FFmpeg hôte si disponible et limites explicites de job/step/exec, sans masquer d'erreur. Premier run non considéré comme succès complet ; validation de la révision finale requise.
 
 Diagnostic du blocage AMD64 confirmé après annulation : apt téléchargeait 81 paquets / 66,4 Mo, le smoke n'avait pas démarré. Remplacement final par le cache de fixtures Rust en lecture seule, contrôle réel AV1 dans les images avant extraction ; générateur FFmpeg épinglé seulement sur miss. Contrats locaux renforcés ; nouvelle CI complète requise. Travail poursuivi en worktree isolé pour préserver des changements visuels concurrents.
+
+## 2026-11-09 - Cascade global > bibliotheque > utilisateur (Trickplay, chapitres, intros)
+- LibraryOptions garde les booleens effectifs ; trickplayMode/chapterImagesMode/introDetectionMode (inherit|enabled|disabled) sont resolus par LibraryOptions::resolve a la sauvegarde et a chaque changement global. Anciennes options : false=disabled, true=inherit (ou enabled si profil propre). Detail : docs/INTRO_SKIPPER.md.
+- Corrections de segments = table manual_timeline_markers, jamais ecrite par l analyse : toujours verrouillees (locked/source derives a la lecture). Test : crates/core/tests/media_tools_flow.rs.
+- Non fait : relecture ffprobe du conteneur par fichier, purge du cache d un Node distant, bouton Position du lecteur sans lecteur dans l editeur.

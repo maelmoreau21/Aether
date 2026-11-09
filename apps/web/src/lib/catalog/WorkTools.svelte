@@ -1101,11 +1101,6 @@
     padding: 8px 28px 24px;
   }
 
-  .form-body .modal-footer {
-    padding: 8px 0 4px;
-    justify-content: space-between;
-  }
-
   .modal-footer-right {
     display: flex;
     flex-wrap: wrap;
@@ -1480,7 +1475,7 @@
     color: var(--tx);
   }
 
-  input, textarea {
+  input {
     box-sizing: border-box;
     width: 100%;
     min-height: 46px;
@@ -1495,13 +1490,7 @@
     transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
   }
 
-  textarea {
-    padding: 12px 14px;
-    line-height: 1.5;
-    resize: vertical;
-  }
-
-  input:focus, textarea:focus {
+  input:focus {
     outline: none;
     border-color: var(--ac);
     background: var(--bg-3);
@@ -1635,10 +1624,6 @@
     font-size: 13px;
   }
 
-  .candidate-row code {
-    font-family: var(--font-mono);
-  }
-
   .candidate-actions {
     display: flex;
     gap: 6px;
@@ -1679,7 +1664,6 @@
     .modal-header { padding: 20px 16px 4px; }
     .modal-body { padding: 16px; }
     .modal-footer { padding: 8px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
-    .form-body .modal-footer { padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); }
 
     .info-grid { grid-template-columns: minmax(0, 1fr); }
     .info-item.full { grid-column: auto; }

@@ -753,6 +753,11 @@ async fn save(
     let root = input.root.clone();
     input.user_ids.sort();
     input.user_ids.dedup();
+    // Read before the write transaction opens: the server-wide values a library in
+    // `inherit` mode follows.
+    let media_defaults = crate::server_settings::load(&state.auth.store)
+        .await?
+        .media_defaults();
     let mut conn = state.auth.store.pool.acquire().await.map_err(database)?;
     let mut tx = crate::database::begin_write(&mut conn)
         .await
@@ -798,11 +803,12 @@ async fn save(
             .fetch_optional(&mut *tx)
             .await
             .map_err(database)?;
-    let options = match input.options {
+    let mut options = match input.options {
         Some(options) => options,
         None => serde_json::from_str(previous.as_deref().unwrap_or("{}"))
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     };
+    options.resolve(&media_defaults, &input.kind);
     let options_json =
         serde_json::to_string(&options).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let previous_options: crate::library_options::LibraryOptions =

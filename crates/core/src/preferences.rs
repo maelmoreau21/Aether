@@ -70,6 +70,9 @@ struct Preferences {
     skip_recap_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     auto_skip_recap: Option<bool>,
+    /// `false`: no preview thumbnails when hovering the timeline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trickplay_previews: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     autoplay_next_episode: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -15,7 +15,10 @@ use serde_json::{Value, json};
 
 pub fn router(auth: AuthState) -> Router {
     Router::new()
-        .route("/api/v1/admin/assets/{asset}/markers", get(get_markers))
+        .route(
+            "/api/v1/admin/assets/{asset}/markers",
+            get(get_markers).delete(clear_all),
+        )
         .route(
             "/api/v1/admin/assets/{asset}/markers/{kind}",
             put(save).delete(clear),
@@ -287,12 +290,16 @@ async fn asset_overview(
         .as_str()
         .and_then(|s| s.parse::<f64>().ok())
         .filter(|n| n.is_finite() && *n > 0.0);
-    let chapters: Vec<Value> = probe["chapters"]
+    let chapter_list: Vec<(f64, String)> = probe["chapters"]
         .as_array()
         .map(|list| crate::inventory::valid_chapters(list, duration))
         .unwrap_or_default()
         .into_iter()
         .take(64)
+        .collect();
+    let boundaries = chapter_boundaries(&chapter_list, duration);
+    let chapters: Vec<Value> = chapter_list
+        .into_iter()
         .map(|(start, title)| json!({"start": start, "title": title}))
         .collect();
 
@@ -338,6 +345,9 @@ async fn asset_overview(
             "extensionId": extension,
             "updatedAt": updated,
             "usable": crate::inventory::usable_marker(start, end, confidence, min_confidence, duration),
+            // Detections are replaced by every analysis; only a correction is kept.
+            "source": "auto",
+            "locked": false,
         })).collect::<Vec<_>>(),
         "manual": manual.into_iter().map(|(kind, start, end, enabled, updated)| json!({
             "type": kind,
@@ -345,8 +355,79 @@ async fn asset_overview(
             "end": end,
             "enabled": enabled == 1,
             "updatedAt": updated,
+            // An administrator's correction lives in its own table: no analysis writes or
+            // deletes it, and it wins over every detection until it is reset.
+            "source": manual_source(enabled == 1, start, end, &boundaries),
+            "locked": true,
         })).collect::<Vec<_>>(),
     }))
+}
+
+/// Tolerance, in seconds, within which a correction bound counts as sitting on a chapter.
+const CHAPTER_MATCH_TOLERANCE: f64 = 0.05;
+
+/// The times a segment taken from a chapter starts or ends at: the chapters' starts, the start
+/// of the file and its end.
+fn chapter_boundaries(chapters: &[(f64, String)], duration: Option<f64>) -> Vec<f64> {
+    let mut points: Vec<f64> = chapters.iter().map(|(start, _)| *start).collect();
+    points.push(0.0);
+    points.extend(duration);
+    points
+}
+
+/// `chapter` when both bounds of the correction sit on chapter boundaries (it was made with
+/// "use this chapter"), otherwise `manual`. Derived from the stored times: nothing extra is saved.
+fn manual_source(
+    enabled: bool,
+    start: Option<f64>,
+    end: Option<f64>,
+    boundaries: &[f64],
+) -> &'static str {
+    let on_boundary = |time: f64| {
+        boundaries
+            .iter()
+            .any(|point| (point - time).abs() <= CHAPTER_MATCH_TOLERANCE)
+    };
+    match (enabled, start, end) {
+        (true, Some(start), Some(end)) if on_boundary(start) && on_boundary(end) => "chapter",
+        _ => "manual",
+    }
+}
+
+/// Read the chapters of a file again (and, for an episode with an audio fingerprint, its
+/// acoustic detection). `false` when the file has not been observed yet.
+pub(crate) async fn reread_chapters(auth: &AuthState, asset: &str) -> Result<bool, StatusCode> {
+    let row: Option<(String, String)> = query_as(
+        "SELECT a.library_id, obs.fingerprint FROM inventory_assets a \
+         JOIN automation_observations obs ON obs.asset_id=a.id WHERE a.id=? AND a.available=1",
+    )
+    .bind(asset)
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let Some((library, fingerprint)) = row else {
+        return Ok(false);
+    };
+    emit_chapter_reanalysis(auth, &[(library, asset.to_owned(), fingerprint)]).await?;
+    Ok(true)
+}
+
+/// "Reset to automatic detection" for a whole file: every correction of the file is removed,
+/// so the detections apply again. Administrators only, like each single reset.
+async fn clear_all(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(asset): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    // `target` checks the administrator, the CSRF token and that the file is a film or an
+    // episode; the kind only matters for the single-marker routes.
+    target(&auth, &headers, &asset, "intro").await?;
+    query("DELETE FROM manual_timeline_markers WHERE asset_id=?")
+        .bind(&asset)
+        .execute(auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Installed extensions that may report timeline markers.
@@ -855,4 +936,30 @@ async fn clear_cache(
         "status": "cleared",
         "bytesFreed": freed,
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_correction_on_chapter_bounds_is_a_chapter_segment() {
+        let chapters = vec![(0.0, "Intro".to_owned()), (90.0, "Episode".to_owned())];
+        let points = chapter_boundaries(&chapters, Some(1500.0));
+        assert_eq!(
+            manual_source(true, Some(0.0), Some(90.0), &points),
+            "chapter"
+        );
+        assert_eq!(
+            manual_source(true, Some(90.02), Some(1500.0), &points),
+            "chapter"
+        );
+        // One bound off a chapter, or a segment switched off: a manual correction.
+        assert_eq!(
+            manual_source(true, Some(12.0), Some(90.0), &points),
+            "manual"
+        );
+        assert_eq!(manual_source(false, None, None, &points), "manual");
+        assert_eq!(manual_source(true, Some(0.0), Some(95.0), &[]), "manual");
+    }
 }

@@ -24,7 +24,7 @@
   import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, subtitleStyleToCss, type SubtitleStyle } from '../player/subtitle-style';
   import { fetchServerConfig, type AppServerConfig } from '../config/brand';
   import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
-  import { playbackPreferences, trackPreferences, SKIP_SECONDS } from '../player/playback-preferences';
+  import { playbackPreferences, trackPreferences, SKIP_SECONDS, segmentBehavior, segmentBehaviorPatch, segmentBehaviors, skippableKinds, type SegmentBehavior, type SkippableKind } from '../player/playback-preferences';
   import { invalidateLatestCatalog } from './page-cache';
 
   let serverConfig = $state<AppServerConfig | null>(null);
@@ -41,7 +41,7 @@
 
   let {
     prefAudio = $bindable('fr'),
-    prefSubtitles = $bindable('forced'),
+    prefSubtitles = $bindable('foreign'),
     onSavePreference
   }: {
     prefAudio: string;
@@ -57,12 +57,11 @@
   let current = $state('account');
   let audioOffset = $state(preferences().offsets?.audio ?? 0);
   let subtitleOffset = $state(preferences().offsets?.subtitle ?? 0);
-  let skipIntroEnabled = $state(preferences().skipIntroEnabled !== false);
-  let skipCreditsEnabled = $state(preferences().skipCreditsEnabled !== false);
-  let autoSkipIntro = $state(preferences().autoSkipIntro === true);
-  let autoSkipCredits = $state(preferences().autoSkipCredits === true);
-  let skipRecapEnabled = $state(preferences().skipRecapEnabled !== false);
-  let autoSkipRecap = $state(preferences().autoSkipRecap === true);
+  // Per kind of segment: skip by itself, show the button, or do nothing.
+  const readBehaviors = (saved: ReturnType<typeof preferences>) =>
+    Object.fromEntries(skippableKinds.map(kind => [kind, segmentBehavior(saved, kind)])) as Record<SkippableKind, SegmentBehavior>;
+  let segmentChoices = $state(readBehaviors(preferences()));
+  let trickplayPreviews = $state(preferences().trickplayPreviews !== false);
   let offsetsEdited = false;
   let playbackDefaults = $state(playbackPreferences(preferences()));
   let playbackEdited = false;
@@ -137,12 +136,8 @@
       if (saved.subtitleStyle) {
         subtitleStyle = { ...DEFAULT_SUBTITLE_STYLE, ...sanitizeSubtitleStyle(saved.subtitleStyle) };
       }
-      skipIntroEnabled = saved.skipIntroEnabled !== false;
-      skipCreditsEnabled = saved.skipCreditsEnabled !== false;
-      autoSkipIntro = saved.autoSkipIntro === true;
-      autoSkipCredits = saved.autoSkipCredits === true;
-      skipRecapEnabled = saved.skipRecapEnabled !== false;
-      autoSkipRecap = saved.autoSkipRecap === true;
+      segmentChoices = readBehaviors(saved);
+      trickplayPreviews = saved.trickplayPreviews !== false;
       if (!artworkEdited) artworkRotation = { ...defaultArtworkRotationPolicy, ...saved.artworkRotation };
     }).catch(() => {});
     const sync = () => {
@@ -325,19 +320,38 @@
 
         <section class="offsets" aria-label={$t('intros_credits')}>
           <h3>{$t('intros_credits')}</h3>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={skipIntroEnabled} onchange={() => savePreferences({ skipIntroEnabled })} /> {$t('suggest_skip_intro')}</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={skipCreditsEnabled} onchange={() => savePreferences({ skipCreditsEnabled })} /> {$t('suggest_skip_credits')}</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipIntro} onchange={() => savePreferences({ autoSkipIntro })} /> {$t('auto_skip_intro')}</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipCredits} onchange={() => savePreferences({ autoSkipCredits })} /> {$t('auto_skip_credits')}</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={skipRecapEnabled} onchange={() => savePreferences({ skipRecapEnabled })} /> {$t('suggest_skip_recap')}</label>
-          <label class="checkbox-row"><input type="checkbox" bind:checked={autoSkipRecap} onchange={() => savePreferences({ autoSkipRecap })} /> {$t('auto_skip_recap')}</label>
+          <p class="muted">{$t('segment_behavior_note')}</p>
+          {#each skippableKinds as kind (kind)}
+            <label>{$t(`segment_behavior_${kind}`)}
+              <select bind:value={segmentChoices[kind]} onchange={() => savePreferences(segmentBehaviorPatch(kind, segmentChoices[kind]))}>
+                {#each segmentBehaviors as behavior (behavior)}<option value={behavior}>{$t(`segment_behavior_${behavior}`)}</option>{/each}
+              </select>
+            </label>
+          {/each}
+          <label class="checkbox-row"><input type="checkbox" bind:checked={trickplayPreviews} onchange={() => savePreferences({ trickplayPreviews })} /> {$t('trickplay_previews_pref')}</label>
         </section>
 
         <form class="offsets" onsubmit={saveOffsets}>
           <h3>{$t('synchronization')}</h3><p class="muted">{$t('offset_note')}</p>
           <label>{$t('audio_offset_seconds_label')}<input type="number" min="-30" max="30" step="0.1" required bind:value={audioOffset} oninput={() => { offsetsEdited = true; }} /></label>
           <label>{$t('subtitle_offset_seconds_label')}<input type="number" min="-30" max="30" step="0.1" required bind:value={subtitleOffset} oninput={() => { offsetsEdited = true; }} /></label>
-          <button type="submit">{$t('save_offsets')}</button>
+          <div class="offset-actions">
+            <button type="submit">{$t('save_offsets')}</button>
+            {#if audioOffset !== 0 || subtitleOffset !== 0}
+              <button
+                type="button"
+                class="ghost-btn"
+                onclick={() => {
+                  audioOffset = 0;
+                  subtitleOffset = 0;
+                  offsetsEdited = true;
+                  savePreferences({ offsets: { audio: 0, subtitle: 0 } });
+                }}
+              >
+                {$t('reset')} (0 s)
+              </button>
+            {/if}
+          </div>
         </form>
 
         <section class="subtitles-appearance" aria-labelledby="subtitles-style-heading">
@@ -573,6 +587,15 @@
   button:active { transform: scale(0.98); }
   .offsets { padding-top: 0; }
   .offsets p { margin: 0; }
+  .offset-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .ghost-btn {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--tx);
+  }
+  .ghost-btn:hover {
+    background: var(--pn-2);
+  }
   .subtitles-appearance { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); }
   .subtitles-appearance h3 { margin-bottom: 8px; }
   /* Aperçu des sous-titres : posé sur une image sombre neutre, comme dans le lecteur */

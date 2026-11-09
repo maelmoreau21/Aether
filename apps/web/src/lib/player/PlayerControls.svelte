@@ -17,6 +17,7 @@
   } from './chapters';
   import { clampHoverPosition } from './trickplay';
   import { TrickplayPreview } from './trickplay.svelte';
+  import { preferences } from '../preferences';
   import { focusMenuItem, menuItems, nextMenuIndex } from './menu-navigation';
   import { t } from '../i18n';
 
@@ -85,7 +86,7 @@
   let isSeeking = $state(false);
 
   // Vignettes de survol : état, chargement et préchargement dans trickplay.svelte.ts.
-  const preview = new TrickplayPreview({ media: () => media, duration: () => playback.duration });
+  const preview = new TrickplayPreview({ media: () => media, duration: () => playback.duration, enabled: () => preferences().trickplayPreviews !== false });
   const previewFrame = $derived(preview.frame);
 
   function updateHoverPosition(clientX: number, target: HTMLElement) {

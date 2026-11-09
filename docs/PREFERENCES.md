@@ -14,7 +14,7 @@ aucun paramètre `userId` ni champ arbitraire n'est accepté, même pour un
 administrateur. La mutation requiert origine et CSRF valides.
 
 Champs autorisés : `theme` (`light`, `dark`, `system`), `locale` (`fr`, `en`),
-`audioLanguage` (code de langue borné), `subtitles` (`forced`, `always`, `off`),
+`audioLanguage` (code de langue borné), `subtitles` (`forced`, `foreign`, `always`, `off`),
 `audioTrack` (`mediaId`, `trackId`, chacun au plus 256 octets), `offsets`
 (`audio`, `subtitle`, chacun de −30 à +30 secondes) et `subtitlePreference`
 (`enabled`, `language`, `forced`, `sdh`). Les propriétés imbriquées inconnues
@@ -26,6 +26,21 @@ Les langues/valeurs non prises en charge sont refusées, pas transformées en
 commandes ni en chemins de disque.
 
 ## Commandes de lecture (2 novembre 2026)
+
+### Segments détectés et aperçus de la barre de lecture (9 novembre 2026)
+
+Pour chaque type de passage (introduction, récapitulatif, générique), le compte choisit
+`auto_skip` (passer automatiquement), `ask` (afficher le bouton) ou `off` (ne rien faire).
+Ce choix n'est pas un nouveau champ : il se lit et s'écrit dans les deux booléens qui
+existaient déjà, donc aucun compte n'est migré — `off` = `skip{Intro,Recap,Credits}Enabled: false`,
+`ask` = affiché sans `autoSkip…`, `auto_skip` = affiché avec `autoSkip{Intro,Recap,Credits}: true`.
+Absent : `ask`. Le lecteur n'obtient un segment que s'il est affiché ; un passage en `off`
+n'est donc jamais sauté, même automatiquement.
+
+`trickplayPreviews: false` désactive les vignettes au survol de la barre (le manifeste n'est
+alors pas demandé). Absent : vignettes affichées. Les vignettes restent soumises au réglage de
+la bibliothèque (cascade global → bibliothèque → utilisateur : un utilisateur ne peut pas
+activer ce que la bibliothèque a désactivé).
 
 ### Nouveautés de l'accueil
 
@@ -42,7 +57,7 @@ changements d'inventaire. Le cache navigateur invalide seulement les nouveautés
 après changement de progression ou sauvegarde réussie du réglage ; les autres
 pages sont conservées. La limite de page et le mode sans comptage restent actifs.
 
-`autoplayNextEpisode` (booléen, défaut `false`) conserve le choix d’enchaîner
+`autoplayNextEpisode` (booléen, défaut `true`) conserve le choix d’enchaîner
 l’épisode suivant entre les séances et les appareils du compte. Le réglage est
 accessible dans Lecture et dans le lecteur lorsqu’un épisode suivant existe.
 L’enchaînement intervient à la fin du média, reste soumis au parcours autorisé

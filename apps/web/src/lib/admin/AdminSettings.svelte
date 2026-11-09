@@ -9,6 +9,8 @@
   let trickplayEnabled = $state(true), trickplayAutoGenerate = $state(true);
   let trickplayQuality = $state(7), trickplayWidth = $state(320), trickplayIntervalSeconds = $state(10);
   let trickplayColumns = $state(10), trickplayRows = $state(10), trickplayMaxCacheMb = $state(5120);
+  // Server-wide defaults a library in "inherit" mode follows (each library can force on or off).
+  let chapterImagesEnabled = $state(true), introDetectionEnabled = $state(true), markerMinConfidence = $state(80);
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
   let loading = $state(true), saving = $state(false);
@@ -38,6 +40,7 @@
           trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
           trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
           trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
+          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
         }>('/api/v1/admin/settings');
@@ -53,6 +56,9 @@
         trickplayColumns = data.trickplayColumns ?? 10;
         trickplayRows = data.trickplayRows ?? 10;
         trickplayMaxCacheMb = data.trickplayMaxCacheMb ?? 5120;
+        chapterImagesEnabled = data.chapterImagesEnabled ?? true;
+        introDetectionEnabled = data.introDetectionEnabled ?? true;
+        markerMinConfidence = data.markerMinConfidence ?? 80;
         minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
@@ -73,6 +79,7 @@
           trickplayEnabled, trickplayAutoGenerate,
           trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
           trickplayColumns, trickplayRows, trickplayMaxCacheMb,
+          chapterImagesEnabled, introDetectionEnabled, markerMinConfidence,
           minResumePct, maxResumePct, minResumeDurationSeconds,
           activityLogRetentionDays,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
@@ -83,6 +90,7 @@
         trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
         trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
         trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
+          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
       }>('/api/v1/admin/settings');
@@ -98,6 +106,9 @@
       trickplayColumns = saved.trickplayColumns ?? 10;
       trickplayRows = saved.trickplayRows ?? 10;
       trickplayMaxCacheMb = saved.trickplayMaxCacheMb ?? 5120;
+      chapterImagesEnabled = saved.chapterImagesEnabled ?? true;
+      introDetectionEnabled = saved.introDetectionEnabled ?? true;
+      markerMinConfidence = saved.markerMinConfidence ?? 80;
       minResumePct = saved.minResumePct ?? 0; maxResumePct = saved.maxResumePct ?? 90;
       minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
@@ -134,6 +145,18 @@
             <label>{$t('trickplay_rows')}<input type="number" min="1" max="20" step="1" required bind:value={trickplayRows} /></label>
             <label>{$t('trickplay_max_cache_mb')}<input type="number" min="128" max="1048576" step="1" required bind:value={trickplayMaxCacheMb} /></label>
           </div>
+        {/if}
+      </fieldset>
+    </details>
+    <details class="adv">
+      <summary>{$t('server_media_defaults')}</summary>
+      <fieldset class="settings-fieldset">
+        <p>{$t('server_media_defaults_note')}</p>
+        <label class="policy-toggle"><input type="checkbox" bind:checked={chapterImagesEnabled} />{$t('show_chapter_images')}</label>
+        <label class="policy-toggle"><input type="checkbox" bind:checked={introDetectionEnabled} />{$t('detect_intros_with_enabled_extensions')}</label>
+        {#if introDetectionEnabled}
+          <label>{$t('marker_min_confidence', { value: markerMinConfidence })}<input type="range" min="50" max="99" step="1" bind:value={markerMinConfidence} /><small>{$t('marker_min_confidence_hint')}</small></label>
+          <p class="hint">{$t('server_intro_thresholds_note')}</p>
         {/if}
       </fieldset>
     </details>

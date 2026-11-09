@@ -28,6 +28,8 @@ export type Preferences = {
   skipIntroEnabled?: boolean; skipCreditsEnabled?: boolean;
   autoSkipIntro?: boolean; autoSkipCredits?: boolean;
   skipRecapEnabled?: boolean; autoSkipRecap?: boolean;
+  /** `false`: no preview thumbnails when hovering the timeline. Absent: shown. */
+  trickplayPreviews?: boolean;
   autoplayNextEpisode?: boolean; skipBackSeconds?: number; skipForwardSeconds?: number;
   artworkRotation?: ArtworkRotationPolicy;
 };

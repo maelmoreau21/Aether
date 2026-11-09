@@ -301,6 +301,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(automation_http::router(auth.clone()))
             .merge(server_log::router(auth.clone()))
             .merge(timeline_markers::router(auth.clone()))
+            .merge(media_tools::router(auth.clone()))
             .merge(extensions::router(auth.clone()))
             .merge(auth::router(auth))
             .merge(oidc),
@@ -789,6 +790,7 @@ mod tests {
     }
 }
 
+pub mod media_tools;
 pub mod task_engine;
 mod task_execution;
 pub mod timeline_markers;

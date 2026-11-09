@@ -32,6 +32,8 @@ pub(crate) enum PreviewScope<'a> {
     Scan(&'a str),
     /// Every available video of a library and of its active folders.
     Library,
+    /// One file, from the media tools of its detail page.
+    Asset(&'a str),
 }
 
 /// Persist preview warm-ups with the inventory publication. They use the existing
@@ -107,6 +109,9 @@ pub(crate) async fn queue_previews(
             PreviewScope::Library => crate::database::query_as(
                 "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE (a.library_id=? OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND a.id>? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' AND l.kind IN ('films','series') AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) ORDER BY a.id LIMIT 128"
             ).bind(library).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?,
+            PreviewScope::Asset(asset) => crate::database::query_as(
+                "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.id>? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' AND l.kind IN ('films','series') ORDER BY a.id LIMIT 1"
+            ).bind(asset).bind(&last_asset).fetch_all(&mut **tx).await?,
         };
         if assets.is_empty() {
             break;
@@ -199,18 +204,18 @@ pub(crate) async fn queue_previews(
     Ok(inserted)
 }
 
-struct AssetSource {
-    node_id: String,
-    relative_path: PathBuf,
-    media_root: PathBuf,
-    duration: f64,
-    size: u64,
-    modified_ns: String,
-    options: LibraryOptions,
-    chapters: Vec<(f64, String)>,
+pub(crate) struct AssetSource {
+    pub(crate) node_id: String,
+    pub(crate) relative_path: PathBuf,
+    pub(crate) media_root: PathBuf,
+    pub(crate) duration: f64,
+    pub(crate) size: u64,
+    pub(crate) modified_ns: String,
+    pub(crate) options: LibraryOptions,
+    pub(crate) chapters: Vec<(f64, String)>,
 }
 
-async fn resolve_asset_source(
+pub(crate) async fn resolve_asset_source(
     store: &IdentityStore,
     asset_id: &str,
 ) -> Result<Option<AssetSource>, sqlx::Error> {

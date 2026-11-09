@@ -28,15 +28,28 @@
   const active = $derived(list.find(work => work.id === activeId) ?? list[0] ?? null);
   const switcher = $derived(list.length > 1);
 
-  // backdrop.jpg first, landscape.jpg as a wide fallback.
+  // backdrop.jpg first, landscape.jpg as a wide fallback. Pleine résolution avec repli.
   // Sans image large, l'affiche floutée sert de fond d'ambiance (jamais rognée en net).
-  function heroImage(work: Work): string {
+  function heroCandidates(work: Work): string[] {
     const artwork = selectArtwork(work, $session);
-    return imagePreviewUrl(artwork.backdrop || artwork.landscape || artwork.poster, 1280);
+    if (!artwork.backdrop && !artwork.landscape && artwork.poster) {
+      return [imagePreviewUrl(artwork.poster, 1280), artwork.poster];
+    }
+    return [
+      artwork.backdrop,
+      artwork.landscape,
+      imagePreviewUrl(artwork.backdrop || artwork.landscape, 1280),
+      artwork.poster ? imagePreviewUrl(artwork.poster, 1280) : ''
+    ].filter(Boolean) as string[];
+  }
+  function heroImage(work: Work): string {
+    return heroCandidates(work).find(usable) ?? '';
   }
   function isAmbient(work: Work): boolean {
     const artwork = selectArtwork(work, $session);
-    return !artwork.backdrop && !artwork.landscape && Boolean(artwork.poster);
+    const chosen = heroImage(work);
+    return Boolean(artwork.poster && chosen.includes('poster'))
+      || (!artwork.backdrop && !artwork.landscape && Boolean(artwork.poster));
   }
   // Vignettes du sélecteur : landscape.jpg, puis backdrop.
   function tabImage(work: Work): string {
@@ -255,7 +268,7 @@
     object-fit: cover;
     object-position: 70% 25%;
     opacity: 0;
-    transform: scale(1.01);
+    transform: none;
     transition: opacity var(--t-slow) var(--ease), transform 8s ease-out;
   }
 
@@ -266,7 +279,7 @@
   .backdrop.ambient { object-position: center; filter: blur(36px) saturate(1.2) brightness(0.6); transform: scale(1.2); }
   .hero:hover .backdrop.ambient { transform: scale(1.2); }
 
-  .hero:hover .backdrop { transform: scale(1.035); }
+  .hero:hover .backdrop:not(.ambient) { transform: scale(1.035); }
 
   /* Voile de lisibilité : seul dégradé autorisé sur une image */
   .shade {

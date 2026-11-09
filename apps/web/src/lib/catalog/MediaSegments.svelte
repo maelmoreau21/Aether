@@ -3,6 +3,7 @@
   import { adminRequest } from '../admin/request';
   import { t } from '../i18n';
   import Icon from '../ui/Icon.svelte';
+  import MediaMaintenance from './MediaMaintenance.svelte';
   import SegmentEditPanel from './SegmentEditPanel.svelte';
   import SegmentSteps from './SegmentSteps.svelte';
   import { analysisActive, analysisState, formatClock, pollWhile, type AssetSegments } from './segments';
@@ -82,6 +83,7 @@
   {#if loading && !data}<p role="status">{$t('segment_loading')}</p>{/if}
 
   {#if data && overall}
+    {#key assetId}<MediaMaintenance {assetId} onSegmentsChanged={load} />{/key}
     <div class="status">
       <p class="overall {overall.tone}">{$t(overall.key)}{#if data.asset.duration} · {$t('segment_media_duration', { duration: formatClock(data.asset.duration) })}{/if}</p>
       <SegmentSteps episode={data.asset} {film} />

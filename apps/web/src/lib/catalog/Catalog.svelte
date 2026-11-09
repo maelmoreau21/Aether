@@ -69,7 +69,7 @@
 
   // Account Preferences (saved in localStorage for persistence)
   let prefAudio = $state('fr');
-  let prefSubtitles = $state('forced');
+  let prefSubtitles = $state('foreign');
 
   async function launchEpisode(episode: Work, versionId: string): Promise<void> {
     quickWork = null;

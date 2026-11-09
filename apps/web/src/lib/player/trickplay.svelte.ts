@@ -12,6 +12,8 @@ import { computePreviewFrame, getAdjacentSheets, readyTrickplay, trickplaySheetF
 interface TrickplayDeps {
   media: () => Media;
   duration: () => number;
+  /** L'utilisateur peut désactiver les vignettes (réglage de compte) : rien n'est alors chargé. */
+  enabled?: () => boolean;
 }
 
 export class TrickplayPreview {
@@ -50,7 +52,7 @@ export class TrickplayPreview {
       const id = media?.id ?? '';
       this.manifest = null;
       this.failedSheets = new Set();
-      if (!id || media.synthetic) return;
+      if (!id || media.synthetic || this.#deps.enabled?.() === false) return;
       const controller = new AbortController();
       let retries = 0;
       let timer: ReturnType<typeof setTimeout> | undefined;

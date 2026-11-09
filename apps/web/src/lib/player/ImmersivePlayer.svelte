@@ -662,6 +662,15 @@
     const media = catalogue.find(media => media.id === id);
     if (media) { const restore = engine.state(); engine.pause(); void prepare(media, restore); }
   }
+  function toggleSubtitles() {
+    if (!active?.subtitles?.length) return;
+    if (subtitle) {
+      selectSubtitle(null);
+    } else {
+      const preferred = preferredSubtitle(active.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage);
+      selectSubtitle(preferred ?? active.subtitles[0]?.id ?? null);
+    }
+  }
   function keyboard(event: KeyboardEvent) {
     if (!opened) return;
     keyboardPinned = true; wake();
@@ -676,15 +685,20 @@
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (target?.closest('input, select, textarea, [role="menu"]')) return;
     if ((event.key === ' ' || event.key === 'Enter') && target?.closest('button, a')) return;
-    if ([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'm', 'M', 'f', 'F'].includes(event.key)) {
+    const key = event.key.toLowerCase();
+    const isControlKey = [' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm', 'f', 'k', 'j', 'l', 'c', '0'].includes(key)
+      || ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key);
+    if (isControlKey) {
       event.preventDefault();
-      if (event.key === ' ') togglePlayback();
-      else if (event.key === 'ArrowLeft') seek(Math.max(0, playback.position - skipBackSeconds));
-      else if (event.key === 'ArrowRight') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
+      if (key === ' ' || key === 'k') togglePlayback();
+      else if (event.key === 'ArrowLeft' || key === 'j') seek(Math.max(0, playback.position - skipBackSeconds));
+      else if (event.key === 'ArrowRight' || key === 'l') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
       else if (event.key === 'ArrowUp') volume(Math.min(1, playback.volume + .05));
       else if (event.key === 'ArrowDown') volume(Math.max(0, playback.volume - .05));
-      else if (event.key.toLowerCase() === 'm') mute();
-      else toggleFullscreen();
+      else if (key === 'm') mute();
+      else if (key === 'f') toggleFullscreen();
+      else if (key === 'c') toggleSubtitles();
+      else if (key === '0') seek(0);
     }
   }
   function windowKeyboard(event: KeyboardEvent) {

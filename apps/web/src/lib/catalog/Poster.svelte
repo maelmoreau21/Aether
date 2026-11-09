@@ -141,10 +141,11 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#snippet posterImage()}
+{#snippet posterBody()}
   <div class="poster">
     {#if imageUrl}
       <img
+        class="poster-image"
         class:loaded={loadedUrl === imageUrl}
         src={imageUrl}
         alt=""
@@ -194,9 +195,7 @@
       </div>
     {/if}
   </div>
-{/snippet}
 
-{#snippet metadataContent()}
   {#if showMetadata}
     <div class="metadata-block">
       <h3>{displayTitle}</h3>
@@ -211,7 +210,7 @@
 {/snippet}
 
 {#if href && actions}
-  <!-- Buttons cannot live inside the link: poster-frame houses the link and the overlay buttons. -->
+  <!-- Buttons cannot live inside the link: they sit above the poster, beside it. -->
   <div
     class="card-shell has-actions"
     class:landscape={wide}
@@ -221,101 +220,204 @@
     onpointerenter={prime}
     onfocusin={prime}
   >
-    <div class="poster-frame">
-      <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-      <a class="poster-link" {href} aria-label={$t('catalog_view', { displayTitle })}>
-        {@render posterImage()}
-      </a>
+    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
+    <a class="media-card card-link" class:landscape={wide} {href} aria-label={$t('catalog_view', { displayTitle })}>
+      {@render posterBody()}
+    </a>
 
-      <div class="quick-actions" class:menu-active={menuOpen}>
+    <div class="quick-actions" class:menu-active={menuOpen}>
+      <button
+        type="button"
+        class="quick-play"
+        aria-label={$t('catalog_play', { displayTitle })}
+        title={$t('play_action')}
+        disabled={!!busy || work.available === false}
+        onclick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          launch();
+        }}
+      >
+        <Icon name="play" size={28} />
+      </button>
+
+      <div class="quick-row">
+        {#if canMarkWatched}
+          <button
+            type="button"
+            class="quick-button"
+            class:on={isWatched}
+            aria-pressed={isWatched}
+            aria-label={isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}
+            title={isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}
+            disabled={!!busy}
+            onclick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              toggleWatched();
+            }}
+          >
+            <Icon name="check" size={18} />
+          </button>
+        {/if}
+
         <button
           type="button"
-          class="quick-play"
-          aria-label={$t('catalog_play', { displayTitle })}
-          title={$t('play_action')}
-          disabled={!!busy || work.available === false}
+          class="quick-button heart"
+          class:on={favorite === true}
+          aria-pressed={favorite === true}
+          aria-label={favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}
+          title={favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}
+          disabled={!!busy}
           onclick={(e) => {
             e.stopPropagation();
             e.preventDefault();
-            launch();
+            toggleFav();
           }}
         >
-          <Icon name="play" size={28} />
+          <Icon name="heart" size={18} />
         </button>
 
-        <div class="quick-row">
+        <button
+          type="button"
+          class="quick-button more"
+          class:on={menuOpen}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label={$t('more_actions')}
+          title={$t('more_actions')}
+          onclick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            menuOpen = !menuOpen;
+            if (menuOpen) void loadPlaylists();
+          }}
+        >
+          <Icon name="more-vertical" size={18} />
+        </button>
+      </div>
+
+      {#if actionError}<p class="quick-error" role="alert">{actionError}</p>{/if}
+
+      {#if menuOpen}
+        <button
+          type="button"
+          class="menu-backdrop"
+          aria-label={$t('close_menu')}
+          tabindex="-1"
+          onclick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            menuOpen = false;
+            showPlaylists = false;
+          }}
+        ></button>
+
+        <div class="card-dropdown-menu" role="menu">
+          <button
+            type="button"
+            class="menu-item"
+            role="menuitem"
+            onclick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              menuOpen = false;
+              launch();
+            }}
+          >
+            <Icon name="play" size={16} />
+            <span>{$t('play_action')}</span>
+          </button>
+
           {#if canMarkWatched}
             <button
               type="button"
-              class="quick-button"
-              class:on={isWatched}
-              aria-pressed={isWatched}
-              aria-label={isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}
-              title={isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}
-              disabled={!!busy}
+              class="menu-item"
+              role="menuitem"
               onclick={(e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                menuOpen = false;
                 toggleWatched();
               }}
             >
-              <Icon name="check" size={18} />
+              <Icon name="check" size={16} />
+              <span>{isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}</span>
             </button>
           {/if}
 
           <button
             type="button"
-            class="quick-button heart"
-            class:on={favorite === true}
-            aria-pressed={favorite === true}
-            aria-label={favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}
-            title={favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}
-            disabled={!!busy}
-            onclick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              toggleFav();
-            }}
-          >
-            <Icon name="heart" size={18} />
-          </button>
-
-          <button
-            type="button"
-            class="quick-button more"
-            class:on={menuOpen}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            aria-label={$t('more_actions')}
-            title={$t('more_actions')}
-            onclick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              menuOpen = !menuOpen;
-              if (menuOpen) void loadPlaylists();
-            }}
-          >
-            <Icon name="more-vertical" size={18} />
-          </button>
-        </div>
-
-        {#if actionError}<p class="quick-error" role="alert">{actionError}</p>{/if}
-
-        {#if menuOpen}
-          <button
-            type="button"
-            class="menu-backdrop"
-            aria-label={$t('close_menu')}
-            tabindex="-1"
+            class="menu-item"
+            role="menuitem"
             onclick={(e) => {
               e.stopPropagation();
               e.preventDefault();
               menuOpen = false;
-              showPlaylists = false;
+              toggleFav();
             }}
-          ></button>
+          >
+            <Icon name="heart" size={16} />
+            <span>{favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}</span>
+          </button>
 
-          <div class="card-dropdown-menu" role="menu">
+          <button
+            type="button"
+            class="menu-item"
+            role="menuitem"
+            onclick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              showPlaylists = !showPlaylists;
+              if (showPlaylists) void loadPlaylists();
+            }}
+          >
+            <Icon name="playlist" size={16} />
+            <span>{$t('add_to_playlist')}</span>
+          </button>
+
+          {#if showPlaylists}
+            <div class="playlist-sublist">
+              {#each playlists as list (list.id)}
+                <button
+                  type="button"
+                  class="menu-subitem"
+                  disabled={!!busy}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    void addToPlaylist(list.id, list.name);
+                  }}
+                >
+                  <span>{list.name}</span>
+                </button>
+              {:else}
+                <p class="empty-playlists">{$t('no_playlists')}</p>
+              {/each}
+              {#if playlistNotice}
+                <p class="playlist-notice">{playlistNotice}</p>
+              {/if}
+            </div>
+          {/if}
+
+          <button
+            type="button"
+            class="menu-item"
+            role="menuitem"
+            onclick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              menuOpen = false;
+              // eslint-disable-next-line svelte/no-navigation-without-resolve -- href is resolved by the caller.
+              goto(href);
+            }}
+          >
+            <Icon name="info" size={16} />
+            <span>{$t('media_information')}</span>
+          </button>
+
+          {#if isAdmin}
+            <div class="menu-divider" role="separator"></div>
             <button
               type="button"
               class="menu-item"
@@ -324,127 +426,16 @@
                 e.stopPropagation();
                 e.preventDefault();
                 menuOpen = false;
-                launch();
+                metadataOpen = true;
               }}
             >
-              <Icon name="play" size={16} />
-              <span>{$t('play_action')}</span>
+              <Icon name="edit" size={16} />
+              <span>{$t('edit_metadata')}</span>
             </button>
-
-            {#if canMarkWatched}
-              <button
-                type="button"
-                class="menu-item"
-                role="menuitem"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  menuOpen = false;
-                  toggleWatched();
-                }}
-              >
-                <Icon name="check" size={16} />
-                <span>{isWatched ? $t('mark_as_unwatched') : $t('mark_as_watched')}</span>
-              </button>
-            {/if}
-
-            <button
-              type="button"
-              class="menu-item"
-              role="menuitem"
-              onclick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                menuOpen = false;
-                toggleFav();
-              }}
-            >
-              <Icon name="heart" size={16} />
-              <span>{favorite ? $t('remove_from_favourites') : $t('add_to_favourites')}</span>
-            </button>
-
-            <button
-              type="button"
-              class="menu-item"
-              role="menuitem"
-              onclick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                showPlaylists = !showPlaylists;
-                if (showPlaylists) void loadPlaylists();
-              }}
-            >
-              <Icon name="playlist" size={16} />
-              <span>{$t('add_to_playlist')}</span>
-            </button>
-
-            {#if showPlaylists}
-              <div class="playlist-sublist">
-                {#each playlists as list (list.id)}
-                  <button
-                    type="button"
-                    class="menu-subitem"
-                    disabled={!!busy}
-                    onclick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      void addToPlaylist(list.id, list.name);
-                    }}
-                  >
-                    <span>{list.name}</span>
-                  </button>
-                {:else}
-                  <p class="empty-playlists">{$t('no_playlists')}</p>
-                {/each}
-                {#if playlistNotice}
-                  <p class="playlist-notice">{playlistNotice}</p>
-                {/if}
-              </div>
-            {/if}
-
-            <button
-              type="button"
-              class="menu-item"
-              role="menuitem"
-              onclick={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                menuOpen = false;
-                goto(href);
-              }}
-            >
-              <Icon name="info" size={16} />
-              <span>{$t('media_information')}</span>
-            </button>
-
-            {#if isAdmin}
-              <div class="menu-divider" role="separator"></div>
-              <button
-                type="button"
-                class="menu-item"
-                role="menuitem"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  menuOpen = false;
-                  metadataOpen = true;
-                }}
-              >
-                <Icon name="edit" size={16} />
-                <span>{$t('edit_metadata')}</span>
-              </button>
-            {/if}
-          </div>
-        {/if}
-      </div>
+          {/if}
+        </div>
+      {/if}
     </div>
-
-    {#if showMetadata}
-      <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-      <a class="metadata-link" {href} aria-label={$t('catalog_view', { displayTitle })}>
-        {@render metadataContent()}
-      </a>
-    {/if}
   </div>
 
   {#if metadataOpen && isAdmin}
@@ -460,13 +451,11 @@
 {:else if href}
   <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
   <a class="media-card" class:landscape={wide} {href} aria-label={$t('catalog_view', { displayTitle })}>
-    {@render posterImage()}
-    {@render metadataContent()}
+    {@render posterBody()}
   </a>
 {:else}
   <div class="media-card" class:landscape={wide}>
-    {@render posterImage()}
-    {@render metadataContent()}
+    {@render posterBody()}
   </div>
 {/if}
 
@@ -485,6 +474,7 @@
     overflow: hidden;
     background: var(--pn-2);
     border-radius: var(--r-md);
+    transition: transform var(--t-slow) var(--ease), box-shadow var(--t-slow) ease;
   }
 
   .landscape .poster {
@@ -514,48 +504,24 @@
     z-index: 30;
   }
 
-  .poster-frame {
-    position: relative;
-    border-radius: var(--r-md);
-    transition: transform var(--t-slow) var(--ease), box-shadow var(--t-slow) ease;
-  }
-
-  .poster-link {
-    display: block;
-    color: inherit;
-    text-decoration: none;
-    border-radius: var(--r-md);
-  }
-
-  .metadata-link {
-    display: block;
-    color: inherit;
-    text-decoration: none;
-  }
-
   @media (hover: hover) and (pointer: fine) {
     a.media-card:hover .poster,
-    .has-actions:hover .poster-frame,
-    .has-actions.has-menu-open .poster-frame {
+    .has-actions:hover .poster,
+    .has-actions.has-menu-open .poster {
       transform: translateY(-4px);
       box-shadow: var(--shadow);
     }
   }
 
   a.media-card:focus-visible,
-  .poster-link:focus-visible,
-  .metadata-link:focus-visible {
+  .card-link:focus-visible {
     outline: none;
   }
 
   a.media-card:focus-visible .poster,
-  .poster-link:focus-visible .poster {
+  .card-link:focus-visible .poster {
     outline: 2px solid var(--ac);
     outline-offset: 3px;
-  }
-
-  .metadata-link:focus-visible h3 {
-    color: var(--ac);
   }
 
   /* Shade on hover: Jellyfin-like dark overlay */
@@ -571,11 +537,18 @@
   /* Quick actions container: sits directly over the poster */
   .quick-actions {
     position: absolute;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    aspect-ratio: var(--artwork-ratio, 2 / 3);
     pointer-events: none;
     opacity: 0;
     transition: opacity var(--t-med) ease;
     z-index: 3;
+  }
+
+  .landscape .quick-actions {
+    aspect-ratio: var(--artwork-ratio, 16 / 9);
   }
 
   .has-actions:hover .card-hover-overlay,
@@ -634,7 +607,7 @@
     outline-offset: 3px;
   }
 
-  /* Bottom Right Actions Row */
+  /* Bottom Actions Row */
   .quick-row {
     position: absolute;
     right: 10px;
@@ -934,7 +907,7 @@
   }
 
   .has-actions:hover h3,
-  .metadata-link:hover h3 {
+  a.media-card:hover h3 {
     color: var(--ac);
   }
 

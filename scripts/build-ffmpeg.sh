@@ -58,10 +58,30 @@ build_chromaprint() {
   cmake --build "$work/chromaprint-build" --parallel "${MEDIA_BUILD_JOBS:-2}"
   cmake --install "$work/chromaprint-build"
 }
+# NVENC/NVDEC headers (MIT): FFmpeg loads the NVIDIA driver libraries at run time,
+# so the image carries no proprietary code. Debian ships them outside main only.
+nv_codec_version=12.1.14.0
+nv_codec_sha256=62b30ab37e4e9be0d0c5b37b8fee4b094e38e570984d56e1135a6b6c2c164c9f
+install_nv_codec_headers() {
+  curl --fail --location --proto '=https' --proto-redir '=https' \
+    --retry 2 --retry-all-errors --retry-delay 2 --retry-max-time 60 \
+    --connect-timeout 15 --max-time 120 \
+    "https://github.com/FFmpeg/nv-codec-headers/releases/download/n${nv_codec_version}/nv-codec-headers-${nv_codec_version}.tar.gz" \
+    -o "$work/nv-codec-headers.tar.gz"
+  if ! printf '%s  %s\n' "$nv_codec_sha256" "$work/nv-codec-headers.tar.gz" | sha256sum --check --status
+  then
+    printf 'nv-codec-headers %s checksum mismatch; refusing extraction.\n' "$nv_codec_version" >&2
+    return 1
+  fi
+  tar -xzf "$work/nv-codec-headers.tar.gz" -C "$work"
+  make -C "$work/nv-codec-headers-${nv_codec_version}" PREFIX="$work/nv-codec-prefix" install
+}
 download_source
 tar -xJf "$work/source.tar.xz" -C "$work"
 if [ "$profile" = runtime ]; then
   build_chromaprint
+  install_nv_codec_headers
+  PKG_CONFIG_PATH="$work/nv-codec-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   PKG_CONFIG_PATH="$work/chromaprint-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
   export PKG_CONFIG_PATH
 fi
@@ -79,8 +99,15 @@ else
   # Keep only the WebP/JPEG/WebVTT encoders and the filters used by the Node.
   # Audio fingerprints (intro detection) need the chromaprint muxer, the PCM encoder it
   # consumes and the audio resampler that downmixes to 11 kHz mono.
-  set -- "$@" --enable-libdav1d --enable-libwebp --disable-encoders --enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le \
-    --disable-filters --enable-filter=fps,scale,format,tile,aresample,aformat,anull \
+  # Optional fallback transcoding (never the default path) adds H.264 (x264, NVENC,
+  # VAAPI for Intel QuickSync and AMD), AAC, hardware decoding, HDR -> SDR tone mapping
+  # (zimg), image-subtitle burn-in and the loudness/night-mode audio filters.
+  # x264 makes this binary GPL, compatible with the project's AGPLv3.
+  set -- "$@" --enable-gpl --enable-libdav1d --enable-libwebp --enable-libx264 --enable-libzimg \
+    --enable-vaapi --enable-ffnvcodec --enable-cuda --enable-nvenc --enable-nvdec \
+    --enable-hwaccel=h264_vaapi,hevc_vaapi,av1_vaapi,vp9_vaapi,mpeg2_vaapi,h264_nvdec,hevc_nvdec,av1_nvdec,vp9_nvdec,mpeg2_nvdec \
+    --disable-encoders --enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le,aac,libx264,h264_nvenc,h264_vaapi \
+    --disable-filters --enable-filter=fps,scale,format,tile,aresample,aformat,anull,null,zscale,tonemap,overlay,hwupload,dynaudnorm,acompressor,alimiter \
     --enable-chromaprint --enable-muxer=chromaprint \
     --extra-cflags="-I$work/chromaprint-prefix/include" \
     --extra-ldflags="-L$work/chromaprint-prefix/lib" --extra-libs="-lstdc++ -lm"
@@ -94,13 +121,18 @@ if [ "$profile" = runtime ]; then
   "$prefix/bin/ffmpeg" -hide_banner -muxers | grep -qw chromaprint
   # Native Trickplay sheets default to WebP: fail the image build if libwebp is missing.
   "$prefix/bin/ffmpeg" -hide_banner -encoders | grep -qw libwebp
+  # Fallback transcoding needs at least the software H.264/AAC pair and tone mapping.
+  for encoder in libx264 aac h264_vaapi h264_nvenc; do
+    "$prefix/bin/ffmpeg" -hide_banner -encoders | grep -qw "$encoder"
+  done
+  for filter in zscale tonemap overlay dynaudnorm acompressor; do
+    "$prefix/bin/ffmpeg" -hide_banner -filters | grep -qw "$filter"
+  done
+  "$prefix/bin/ffmpeg" -hide_banner -muxers | grep -qw sup
 fi
 mkdir -p "$prefix/share/media-probe"
 "$prefix/bin/ffmpeg" -version > "$prefix/share/media-probe/version.txt"
-if [ "$profile" = fixtures ]; then
-  cp COPYING.GPLv2 "$prefix/share/media-probe/LICENSE"
-else
-  cp COPYING.LGPLv2.1 "$prefix/share/media-probe/LICENSE"
-fi
+# Both profiles link GPL libraries (x264 at least).
+cp COPYING.GPLv2 "$prefix/share/media-probe/LICENSE"
 "$prefix/bin/ffmpeg" -version | head -n 1 | grep -F "ffmpeg version $version"
 "$prefix/bin/ffprobe" -version | head -n 1 | grep -F "ffprobe version $version"

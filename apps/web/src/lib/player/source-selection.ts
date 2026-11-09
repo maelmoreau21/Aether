@@ -6,9 +6,16 @@ export function audioLanguage(language: string): string {
   return ({ fra: 'fr', fre: 'fr', eng: 'en', deu: 'de', ger: 'de' } as Record<string, string>)[primary] ?? primary;
 }
 
+/** Audio description for blind and partially sighted viewers, from dispositions or the title. */
+export function isAudioDescription(source: Source): boolean {
+  return Boolean(source.tracks?.some(track => track.codec_type === 'audio' && (
+    track.disposition?.visual_impaired === 1 || track.disposition?.descriptions === 1
+    || /audio[\s-]?descri|description audio|descriptive|AD/i.test(track.tags?.title ?? ''))));
+}
+
 // An original multi-audio file does not expose a selectable track through HTMLMediaElement.
 // Prefer a concrete track over that ambiguous source, without overriding a manual choice.
-export function chooseSource(media: Media, trackId?: string, language = 'fr', playable: (source: Source) => boolean = () => true, preferDefaultAudio = false): Source | undefined {
+export function chooseSource(media: Media, trackId?: string, language = 'fr', playable: (source: Source) => boolean = () => true, preferDefaultAudio = false, preferAudioDescription = false): Source | undefined {
   const manual = media.sources.find(source => source.audioTrackId === trackId);
   // Migrate old preferences that saved the browser-selected multi-audio original
   // as though it identified a language. Explicit indexed choices remain authoritative.
@@ -32,7 +39,9 @@ export function chooseSource(media: Media, trackId?: string, language = 'fr', pl
   }
   for (const wanted of new Set([audioLanguage(language), 'fr'])) {
     const matches = candidates.filter(source => audioLanguage(source.language) === wanted);
-    const source = matches.find(source => concrete(source) && !source.tracks?.some(track => track.disposition?.comment === 1 || track.disposition?.hearing_impaired === 1))
+    const described = preferAudioDescription ? matches.find(source => concrete(source) && isAudioDescription(source)) : undefined;
+    const source = described
+      ?? matches.find(source => concrete(source) && !isAudioDescription(source) && !source.tracks?.some(track => track.disposition?.comment === 1 || track.disposition?.hearing_impaired === 1))
       ?? matches.find(concrete);
     if (source) return source;
   }

@@ -27,6 +27,7 @@ mod sidecar_manifest;
 pub mod stream;
 pub mod subtitles;
 pub mod tasks;
+pub mod transcode;
 pub mod transport;
 pub mod trickplay;
 pub mod video_stream;

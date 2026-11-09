@@ -116,7 +116,8 @@ pub(super) async fn prepare_asset(
     }
     let native_audio = Component::opus_chunk(component);
     let video_position = crate::video_stream::position(component);
-    if native_audio.is_some() || video_position.is_some() {
+    let transcode = crate::transcode::request(component);
+    if native_audio.is_some() || video_position.is_some() || transcode.is_some() {
         let opened = match crate::OpenedFile::open_in_root(
             Path::new(&entry.root_snapshot),
             Path::new(&entry.relative_path),
@@ -141,6 +142,12 @@ pub(super) async fn prepare_asset(
                 .preparations
                 .native_audio()
                 .serve(opened, track, chunk, &req)
+                .await
+        } else if let Some(transcode) = transcode {
+            state
+                .preparations
+                .transcodes()
+                .serve(opened, transcode, &req)
                 .await
         } else {
             state
@@ -173,6 +180,11 @@ pub(super) async fn prepare_asset(
         .and_then(|s| s.parse::<u32>().ok())
     {
         Some(Component::AssSubtitle(index))
+    } else if let Some(index) = component
+        .strip_prefix("subtitle-pgs-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        Some(Component::PgsSubtitle(index))
     } else {
         component
             .strip_prefix("subtitle-")

@@ -67,6 +67,10 @@ pub struct Settings {
     /// "Watch together": when off, every party route refuses and the web hides its entry points.
     #[serde(default = "default_true")]
     pub watch_together_enabled: bool,
+    /// Fallback transcoding when a browser cannot decode the original. Direct play stays
+    /// the default; when off, the Core refuses every `transcode-*` resource.
+    #[serde(default = "default_true")]
+    pub transcoding_enabled: bool,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -145,6 +149,7 @@ struct SettingsInput {
     log_level: Option<crate::server_log::Level>,
     log_retention_days: Option<u32>,
     watch_together_enabled: Option<bool>,
+    transcoding_enabled: Option<bool>,
 }
 
 impl Default for Settings {
@@ -175,6 +180,7 @@ impl Default for Settings {
             log_level: crate::server_log::Level::Info,
             log_retention_days: default_log_retention(),
             watch_together_enabled: true,
+            transcoding_enabled: true,
         }
     }
 }
@@ -340,6 +346,9 @@ async fn write(
         watch_together_enabled: input
             .watch_together_enabled
             .unwrap_or(previous.watch_together_enabled),
+        transcoding_enabled: input
+            .transcoding_enabled
+            .unwrap_or(previous.transcoding_enabled),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)
@@ -524,6 +533,7 @@ mod tests {
         assert!(parsed.chapter_images_enabled && parsed.intro_detection_enabled);
         assert_eq!(parsed.marker_min_confidence, 80);
         assert!(parsed.watch_together_enabled);
+        assert!(parsed.transcoding_enabled);
         assert_eq!(
             parsed.media_defaults(),
             crate::library_options::GlobalMediaDefaults::default()

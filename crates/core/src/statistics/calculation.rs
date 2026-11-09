@@ -88,7 +88,7 @@ impl Event {
             && self.method.as_deref().is_none_or(|s| {
                 matches!(
                     s,
-                    "direct" | "remux" | "separate_audio" | "prepared" | "unknown"
+                    "direct" | "remux" | "separate_audio" | "prepared" | "transcode" | "unknown"
                 )
             })
             && self.error_code.as_deref().is_none_or(|s| {

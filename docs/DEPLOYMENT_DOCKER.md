@@ -28,7 +28,7 @@ Le Synology DiskStation DS1522+ est équipé d'un processeur **AMD Ryzen Embedde
 ### Contraintes matérielles critiques :
 - **Absence totale d'iGPU** : Le Ryzen R1600 ne possède aucun processeur graphique intégré (pas d'AMD VCN/VCE, pas d'Intel QuickSync).
 - **Interdiction de passthrough `/dev/dri`** : Ne JAMAIS déclarer de montage `/dev/dri:/dev/dri` dans `docker-compose.yml`. Sur DSM, ce nœud de périphérique n'existe pas et provoquerait le crash immédiat du conteneur au démarrage.
-- **Lecture directe (Direct Play) prioritaire** : Aether privilégie la lecture directe AV1 vidéo + Opus audio dans les conteneurs `.mkv` et `.mp4`. Aucun transcodage vidéo en temps réel n'est imposé, garantissant une charge CPU minimale sur le DS1522+.
+- **Lecture directe (Direct Play) prioritaire** : Aether privilégie la lecture directe AV1 vidéo + Opus audio dans les conteneurs `.mkv` et `.mp4`. Aucun transcodage vidéo n'est imposé. Le transcodage de secours (navigateur incompatible, qualité réduite à distance) est optionnel : sur le DS1522+ (Ryzen R1600, sans GPU), il reste logiciel et coûteux ; limitez `MEDIA_TRANSCODE_MAX_SESSIONS` ou désactivez-le dans Administration > Général.
 
 ---
 
@@ -155,6 +155,12 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |
 | `MEDIA_LIBRARY_ROOT` | optionnelle | Restriction explicite à une racine ; sinon découverte des montages de dossiers Linux |
+| `MEDIA_TRANSCODE_ENABLED` | `true` | `false` coupe le transcodage de secours sur ce Media Node (le réglage serveur *Autoriser le transcodage de secours* s'applique aussi) |
+| `MEDIA_TRANSCODE_HARDWARE` | `none` | `nvenc` (NVIDIA), `vaapi` (Intel QuickSync et AMD sous Linux), `qsv`/`amf` (FFmpeg personnalisé) ; encodeur absent : repli logiciel x264 journalisé |
+| `MEDIA_TRANSCODE_VAAPI_DEVICE` | `/dev/dri/renderD128` | Nœud de rendu VA-API, sous `/dev/dri/` uniquement |
+| `MEDIA_TRANSCODE_MAX_SESSIONS` | `2` | Transcodages simultanés (1 à 16) ; au-delà, `transcode_capacity_reached` |
+
+**Accélération matérielle.** VA-API : exposer le périphérique (`devices: ["/dev/dri:/dev/dri"]`) et ajouter le groupe `render` de l'hôte (`group_add`). NVIDIA : NVIDIA Container Toolkit, `runtime: nvidia` (ou `deploy.resources.reservations.devices`) et `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility` ; les bibliothèques du pilote sont injectées à l'exécution, l'image n'en contient aucune. Le FFmpeg de l'image inclut x264 : ce binaire est sous GPL, compatible avec l'AGPLv3 du projet (`/usr/share/media-probe/LICENSE`).
 
 ---
 

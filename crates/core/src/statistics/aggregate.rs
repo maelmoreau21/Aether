@@ -262,7 +262,7 @@ pub(crate) fn resolution(height: i64) -> &'static str {
 fn transcoded(method: &str) -> Option<bool> {
     match method {
         "direct" => Some(false),
-        "remux" | "separate_audio" | "prepared" => Some(true),
+        "remux" | "separate_audio" | "prepared" | "transcode" => Some(true),
         _ => None,
     }
 }

@@ -57,4 +57,11 @@ describe('subtitle-style', () => {
     expect(css.color).toBe(DEFAULT_SUBTITLE_STYLE.textColor);
     expect(css.backgroundColor).toBe('transparent');
   });
+  it('keeps a bounded vertical position and maps it to a cue line', async () => {
+    const { subtitleLine } = await import('./subtitle-style');
+    expect(sanitizeSubtitleStyle({ position: 24.4, fontSize: 'x-large' })).toEqual({ position: 24, fontSize: 'x-large' });
+    expect(sanitizeSubtitleStyle({ position: 41 })).toEqual({});
+    expect(subtitleLine()).toBe(90);
+    expect(subtitleLine({ position: 30 })).toBe(70);
+  });
 });

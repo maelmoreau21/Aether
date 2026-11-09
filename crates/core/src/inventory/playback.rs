@@ -395,6 +395,10 @@ async fn descriptor_for_asset(
     let library_id: String = row.get("library_id");
     let node_id: String = row.get("node_id");
     let library_options = playback_library_options(store, &library_id).await?;
+    // Fallback transcoding is a server choice; an unreadable setting offers none.
+    let transcoding = crate::server_settings::load(store)
+        .await
+        .is_ok_and(|settings| settings.transcoding_enabled);
     let node_rec = crate::nodes::load_node(store, &node_id).await?;
     let direct_info = if node_status == "connected" {
         node_rec.as_ref().and_then(|n| {
@@ -548,14 +552,15 @@ async fn descriptor_for_asset(
                 }
             }
         }
-        for track in probe.streams.iter().filter(|t| {
+    }
+    for track in probe.streams.iter().filter(|t| {
             t.codec_type.as_deref() == Some("subtitle")
                 && library_options.embedded_subtitle_allowed(t.codec_name.as_deref())
                 // Even allow_all only offers formats that preparation supports.
-                && matches!(
+                && (matches!(
                     t.codec_name.as_deref(),
-                    Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text")
-                )
+                    Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text" | "hdmv_pgs_subtitle")
+                ) || transcoding && matches!(t.codec_name.as_deref(), Some("dvd_subtitle" | "dvb_subtitle")))
         }) {
             let language = track
                 .tags
@@ -573,12 +578,100 @@ async fn descriptor_for_asset(
                 .and_then(|d| d.get("forced"))
                 .and_then(Value::as_i64)
                 == Some(1);
+            let sdh = track
+                .details
+                .get("disposition")
+                .and_then(|d| d.get("hearing_impaired"))
+                .and_then(Value::as_i64)
+                == Some(1)
+                || track
+                    .tags
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .is_some_and(|title| {
+                        let title = title.to_lowercase();
+                        ["sdh", "malentendant", "sourds", "hearing", "cc"]
+                            .iter()
+                            .any(|word| title.split(|c: char| !c.is_alphanumeric()).any(|part| part == *word || (word.len() > 3 && part.starts_with(word))))
+                    });
+            let image = match track.codec_name.as_deref() {
+                Some("hdmv_pgs_subtitle") => Some("pgs"),
+                Some("dvd_subtitle" | "dvb_subtitle") => Some("burn"),
+                _ => None,
+            };
+            let url = match image {
+                Some("pgs") => format!("/api/v1/assets/{asset_id}/prepared/subtitle-pgs-{}", track.index),
+                Some(_) => String::new(),
+                None => format!("/api/v1/assets/{asset_id}/prepared/subtitle-{}", track.index),
+            };
             subtitles.push(json!({ "id": format!("internal-{}", track.index), "language": language,
                 "reportTrackId":report_tracks.iter().find(|(_,index)|*index==i64::from(track.index)).map(|(id,_)|id),
-                "label": format!("{}{} · intégrés (texte)", language.to_uppercase(), if forced { " forcés" } else { "" }),
-                "forced": forced, "sourceFormat": track.codec_name,
-                "url": format!("/api/v1/assets/{asset_id}/prepared/subtitle-{}", track.index),
+                "label": format!("{}{}{} · intégrés ({})", language.to_uppercase(), if forced { " forcés" } else { "" }, if sdh { " SDH" } else { "" }, if image.is_some() { "image" } else { "texte" }),
+                "forced": forced, "sdh": sdh, "sourceFormat": track.codec_name,
+                "url": url,
+                "image": image,
+                "burnIndex": (image.is_some() && transcoding).then_some(track.index),
                 "assUrl": matches!(track.codec_name.as_deref(), Some("ass" | "ssa")).then(|| format!("/api/v1/assets/{asset_id}/prepared/subtitle-ass-{}",track.index)) }));
+    }
+    // Every other embedded audio track becomes selectable through fallback transcoding
+    // (video copied when the browser decodes it): direct play only reaches the default one.
+    if transcoding && original_audio.len() > 1 {
+        // The track a browser plays from the original (flagged default, else the first)
+        // stays direct play: its source is the original itself, with a known language.
+        let browser_default = original_audio
+            .iter()
+            .find(|track| {
+                track
+                    .details
+                    .get("disposition")
+                    .and_then(|d| d.get("default"))
+                    .and_then(Value::as_i64)
+                    == Some(1)
+            })
+            .or(original_audio.first())
+            .map(|track| track.index);
+        for track in &original_audio {
+            let id = format!("internal-{}", track.index);
+            if sources
+                .iter()
+                .any(|source| source["audioTrackId"] == id.as_str())
+            {
+                continue;
+            }
+            let language = track
+                .tags
+                .get("language")
+                .and_then(Value::as_str)
+                .unwrap_or("und");
+            let language = match language {
+                "fra" | "fre" => "fr",
+                "eng" => "en",
+                other => other,
+            };
+            if browser_default == Some(track.index) {
+                let mut alias = source_obj.clone();
+                alias["id"] = json!(format!("{asset_id}-default-{}", track.index));
+                alias["audioTrackId"] = json!(id);
+                alias["language"] = json!(language);
+                alias["reportTrackId"] = json!(
+                    report_tracks
+                        .iter()
+                        .find(|(_, index)| *index == i64::from(track.index))
+                        .map(|(id, _)| id)
+                );
+                alias["tracks"] = json!([track]);
+                sources.push(alias);
+                continue;
+            }
+            sources.push(json!({
+                "id": format!("{asset_id}-transcode-{}", track.index),
+                "audioTrackId": id, "language": language,
+                "reportTrackId": report_tracks.iter().find(|(_,index)|*index==i64::from(track.index)).map(|(id,_)|id),
+                "url": relay_url, "relayUrl": relay_url, "mime": source_obj["mime"].clone(),
+                "nodeId": node_id, "nodeStatus": node_status,
+                "label": "interne", "tracks": [track], "transcodeOnly": true,
+                "durationSeconds": duration
+            }));
         }
     }
     for (index, track) in audios.iter().enumerate() {
@@ -760,6 +853,34 @@ async fn descriptor_for_asset(
         "recap": recap_segment,
         "preview": preview_segment
     });
+    let picture = probe.streams.iter().find(|track| {
+        track.codec_type.as_deref() == Some("video")
+            && track
+                .details
+                .get("disposition")
+                .and_then(|d| d.get("attached_pic"))
+                .and_then(Value::as_i64)
+                != Some(1)
+    });
+    if transcoding && let (Some(video), Some(duration)) = (picture, total_dur) {
+        let bitrate = probe
+            .format
+            .get("bit_rate")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|bits| bits / 1000);
+        desc["transcode"] = json!({
+            "url": format!("/api/v1/assets/{asset_id}/prepared/transcode-"),
+            "videoIndex": video.index,
+            "videoCodec": video.codec_name,
+            "width": video.details.get("width"),
+            "height": video.details.get("height"),
+            "bitrateKbps": bitrate,
+            "durationSeconds": duration,
+            "dynamicRange": super::resources::video_dynamic_range(video),
+            "copyVideoMime": av1_video_mime(video).or_else(|| h264_video_mime(video)),
+        });
+    }
     if let Some(orig) = failover_from {
         desc["requestedId"] = json!(orig.clone());
         desc["failoverFrom"] = json!(orig);
@@ -806,6 +927,26 @@ fn av1_video_mime(track: &media_node::probe::Track) -> Option<String> {
     Some(format!(
         "video/mp4; codecs=\"av01.{profile}.{level:02}{tier}.{depth:02}\""
     ))
+}
+
+/// RFC 6381 `avc1` string from the probed profile and level, for copied H.264.
+fn h264_video_mime(track: &media_node::probe::Track) -> Option<String> {
+    if track.codec_name.as_deref() != Some("h264") {
+        return None;
+    }
+    let profile = match track.details.get("profile")?.as_str()? {
+        "Constrained Baseline" => "42E0",
+        "Baseline" => "4200",
+        "Main" => "4D40",
+        "High" => "6400",
+        _ => return None,
+    };
+    let level = track
+        .details
+        .get("level")?
+        .as_u64()
+        .filter(|level| (10..=62).contains(level))?;
+    Some(format!("video/mp4; codecs=\"avc1.{profile}{level:02X}\""))
 }
 
 pub(super) fn native_opus_track_id(probe: &Probe, track: &media_node::probe::Track) -> Option<u32> {

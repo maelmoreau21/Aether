@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { audioLanguage, audioSelectionNotice, chooseSource, playbackMime } from './source-selection';
+import { audioLanguage, audioSelectionNotice, chooseSource, isAudioDescription, playbackMime } from './source-selection';
 import type { Media } from './types';
 
 const media: Media = { id: 'dual', title: 'Synthetic', subtitles: [], sources: [
@@ -52,5 +52,21 @@ describe('AV1/Opus source selection', () => {
     expect(audioSelectionNotice(media, media.sources[2], 'fr')).toBe('');
     expect(audioSelectionNotice(media, media.sources[1], 'de')).toContain('indisponible');
     expect(audioSelectionNotice({...media,sources:[media.sources[0]]},media.sources[0],'fr')).toContain('ne peut pas être confirmée');
+  });
+});
+
+describe('audio description', () => {
+  const described: Media = { id: 'ad', title: 'AD', subtitles: [], sources: [
+    { id: 'main', audioTrackId: 'internal-1', language: 'fr', url: '/v', mime: 'video/mp4', tracks: [{ index: 1, codec_type: 'audio', codec_name: 'aac' }] },
+    { id: 'ad', audioTrackId: 'internal-2', language: 'fr', url: '/v', mime: 'video/mp4', tracks: [{ index: 2, codec_type: 'audio', codec_name: 'aac', tags: { title: 'Audiodescription' } }] },
+    { id: 'flagged', audioTrackId: 'internal-3', language: 'en', url: '/v', mime: 'video/mp4', tracks: [{ index: 3, codec_type: 'audio', codec_name: 'aac', disposition: { visual_impaired: 1 } }] }
+  ] };
+  it('recognises flags and titles', () => {
+    expect(described.sources.map(isAudioDescription)).toEqual([false, true, true]);
+  });
+  it('is never chosen by default, and first when the account prefers it', () => {
+    expect(chooseSource(described, undefined, 'fr')?.id).toBe('main');
+    expect(chooseSource(described, undefined, 'fr', () => true, false, true)?.id).toBe('ad');
+    expect(chooseSource(described, 'internal-1', 'fr', () => true, false, true)?.id).toBe('main');
   });
 });

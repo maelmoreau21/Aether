@@ -7,7 +7,11 @@
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
-  import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
+  import { subtitleLine, subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
+  import { maxBitrate, qualityChoice, qualityPreference, type AudioChannels, type QualityChoice, type ToneMapping } from './transcode';
+  import { audioEnhancement, type AudioEnhancement } from './audio-enhancement';
+  import { SLEEP_OFF, sleepDue, sleepRemaining, startSleep, type SleepChoice, type SleepTimer } from './sleep-timer';
+  import type { TranscodeInfo } from './PlayerControls.svelte';
   import { ProgressTracker } from './progress';
   import { PlaybackCollector, type EventKind, type Origin } from '../statistics/collector';
   import { PlaybackPresence } from './presence';
@@ -100,6 +104,17 @@
   /** Whether the audio being played is an original version, for remembering subtitle choices. */
   let foreignAudio = false;
   let subtitleStyle = $state<SubtitleStyle | undefined>();
+  let quality = $state<QualityChoice>('auto');
+  let maxKbps = $state(0);
+  let toneMapping: ToneMapping = 'auto';
+  let audioChannels: AudioChannels = 'stereo';
+  let enhancement = $state<AudioEnhancement>('off');
+  let preferAudioDescription = false;
+  let preferSdh = false;
+  let transcodeInfo = $state<TranscodeInfo>(null);
+  let sleepTimer = $state<SleepTimer>(SLEEP_OFF);
+  let sleepNow = $state(Date.now());
+  const sleepShown = $derived(sleepTimer.kind === 'end' ? 'end' as const : sleepRemaining(sleepTimer, sleepNow));
   const activeSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
   let menu = $state<Menu>(null);
   /** "Watch together" started from the player on the item being watched. */
@@ -130,6 +145,8 @@
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
     bufferedUntil = bufferedEnd(playback.position);
+    const running = engine.transcodeState?.() ?? null;
+    transcodeInfo = running ? { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap } : null;
     if (!busy) progressTracker?.save(playback);
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
@@ -177,6 +194,36 @@
     && playback.position >= nextCardStart && playback.position < playback.duration - 0.25));
   const postCreditsScene = $derived(Boolean(active?.credits && active.credits.end < playback.duration - 10 && playback.position < active.credits.end));
   $effect(() => { void active?.id; nextDismissed = false; });
+  $effect(() => {
+    if (!opened || sleepTimer.kind !== 'at') return;
+    const timer = setInterval(() => {
+      sleepNow = Date.now();
+      if (sleepDue(sleepTimer, sleepNow)) { sleepTimer = SLEEP_OFF; engine?.pause(); sync(); notice = $t('sleep_timer_paused_playback'); wake(); }
+    }, 1000);
+    return () => clearInterval(timer);
+  });
+  function setSleep(choice: SleepChoice | null) {
+    sleepTimer = startSleep(choice, Date.now()); sleepNow = Date.now();
+    notice = choice === null ? $t('sleep_timer_off') : choice === 'end' ? $t('sleep_timer_set_end') : $t('sleep_timer_set', { count: choice });
+    wake();
+  }
+  function streamOptions() { return { quality, maxKbps, toneMapping, audioChannels }; }
+  function setQuality(value: QualityChoice) {
+    quality = value;
+    savePreferences({ streamingQuality: qualityPreference(value) });
+    void action(player => player.setStreamOptions?.({ quality: value }));
+  }
+  function setMaxBitrate(value: number) {
+    maxKbps = value;
+    savePreferences({ maxBitrateKbps: value });
+    void action(player => player.setStreamOptions?.({ maxKbps: value }));
+  }
+  function setEnhancement(value: AudioEnhancement) {
+    enhancement = value;
+    savePreferences({ audioEnhancement: value });
+    if (engine?.setAudioEnhancement && !engine.setAudioEnhancement(value)) notice = $t('audio_enhancement_unavailable');
+    wake();
+  }
   function armIdle() {
     clearTimeout(idle);
     if (!opened || statistics || paused || menu || busy || error || keyboardPinned) { visible = true; return; }
@@ -313,10 +360,12 @@
       catch { preferenceNotice = $t('preferences_unavailable_settings_are_local'); }
       if (current !== generation) return;
       readPlaybackPreferences();
-      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))), playDefaultAudio);
+      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))) && !source.transcodeOnly, playDefaultAudio, preferAudioDescription);
       if (!source) throw new Error($t('no_usable_audio_source_for_this'));
       if (syncClient) await resume; // Load the progress revision before collective playback saves it.
       if (current !== generation) return;
+      await engine.setStreamOptions?.({ ...streamOptions(), burnSubtitle: undefined, adaptiveKbps: undefined });
+      engine.setSubtitlePosition?.(subtitleLine(subtitleStyle));
       await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? $t('automatically_switched_to_an_available_node') : '');
@@ -324,8 +373,9 @@
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
+      if (enhancement !== 'off' && engine.setAudioEnhancement && !engine.setAudioEnhancement(enhancement)) notice = $t('audio_enhancement_unavailable');
       foreignAudio = isForeignAudio(source.language, subtitleLanguage);
-      const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage);
+      const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage, preferSdh);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -387,6 +437,13 @@
       subtitlePreference = manualSubtitle ?? policy.subtitlePreference;
       foreignSubtitlePreference = manualForeignSubtitle ?? policy.foreignSubtitlePreference;
       subtitleStyle = account.subtitleStyle;
+      quality = qualityChoice(account.streamingQuality);
+      maxKbps = maxBitrate(account.maxBitrateKbps);
+      toneMapping = account.hdrToneMapping === 'always' || account.hdrToneMapping === 'never' ? account.hdrToneMapping : 'auto';
+      audioChannels = account.audioChannels === 'surround' || account.audioChannels === 'passthrough' ? account.audioChannels : 'stereo';
+      enhancement = audioEnhancement(account.audioEnhancement);
+      preferAudioDescription = account.preferAudioDescription === true;
+      preferSdh = account.preferSdhSubtitles === true;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
   // What the automatic detection stored for this file, shown beside the manual correction.
@@ -482,7 +539,7 @@
     if (engine) progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
     presence?.stop();presence=undefined;
-    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null;
     const returnTarget = opener;
     const restoreNavigation = () => {
       if (opened || generation !== closedGeneration) return;
@@ -668,7 +725,7 @@
     if (subtitle) {
       selectSubtitle(null);
     } else {
-      const preferred = preferredSubtitle(active.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage);
+      const preferred = preferredSubtitle(active.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage, preferSdh);
       selectSubtitle(preferred ?? active.subtitles[0]?.id ?? null);
     }
   }
@@ -710,6 +767,7 @@
   function ended() {
     collector?.stop(true); collector = undefined; collectorWork = '';
     sync(); if (engine) progressTracker?.save(engine.state(), true, true);
+    if (sleepTimer.kind === 'end') { sleepTimer = SLEEP_OFF; notice = $t('sleep_timer_paused_playback'); return; }
     if (repeat && active && engine && !syncClient) { collect(active); engine.seek(0); void engine.play().catch(cause => fail(String(cause))); return; }
     if (!syncClient && autoplayNext && onNext) onNext();
   }
@@ -816,6 +874,7 @@
         <dt>{$t('container_language')}</dt><dd>{selectedSource?.mime ?? $t('stats_not_set')} / {selectedSource?.language ?? $t('not_specified')}</dd>
         <dt>{$t('declared_audio_mode')}</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
         <dt>{$t('report_category_subtitles')}</dt><dd>{subtitle ?? 'Désactivés'}</dd>
+        <dt>{$t('transcoding')}</dt><dd>{transcodeInfo ? `${transcodeInfo.height ? `${transcodeInfo.height}p · ${(transcodeInfo.kbps / 1000).toFixed(1)} Mb/s` : $t('transcoding_audio_only')} · ${transcodeInfo.reason}${transcodeInfo.encoder ? ` · ${transcodeInfo.encoder}` : ''}` : $t('not_used')}</dd>
       </dl>
       {#each selectedSource?.tracks ?? [] as track, i (i)}<p>{$t('track_diagnostic', { index: track.index ?? i, type: track.codec_type, codec: track.codec_name, profile: track.profile ?? '', channels: track.channels ? `· ${$t('channels_count', { count: track.channels })}` : '' })}</p>{/each}
       <p>{$t('technical_diagnostic', { detail: error || loadStage })}</p>
@@ -833,7 +892,9 @@
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
       onSpeed={speed => action(player => { player.setSpeed(speed); collector?.event('speed_change'); })} onFullscreen={toggleFullscreen} onWake={wake}
-      buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
+      buffered={bufferedUntil} hideCreditsSkip={showNextCard}
+      {quality} {maxKbps} onQuality={setQuality} onMaxKbps={setMaxBitrate} transcode={transcodeInfo}
+      {enhancement} onEnhancement={setEnhancement} sleep={sleepShown} onSleep={setSleep} />{/if}
     {#if showNextCard}
       <aside class="next-card" class:raised={visible} aria-label={$t('next_episode')}>
         <div class="next-thumb">

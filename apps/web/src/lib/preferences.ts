@@ -32,6 +32,15 @@ export type Preferences = {
   trickplayPreviews?: boolean;
   autoplayNextEpisode?: boolean; skipBackSeconds?: number; skipForwardSeconds?: number;
   artworkRotation?: ArtworkRotationPolicy;
+  /** Fallback transcoding: `auto`, `original` or a maximum height. */
+  streamingQuality?: 'auto' | 'original' | '2160' | '1440' | '1080' | '720' | '480' | '360';
+  /** kbit/s ceiling for remote viewing; 0 or absent means unlimited. */
+  maxBitrateKbps?: number;
+  hdrToneMapping?: 'auto' | 'always' | 'never';
+  audioChannels?: 'stereo' | 'surround' | 'passthrough';
+  audioEnhancement?: 'off' | 'normalize' | 'night';
+  preferAudioDescription?: boolean;
+  preferSdhSubtitles?: boolean;
 };
 /** A `null` value removes the preference on the server and here (back to its default). */
 export type PreferencePatch = { [K in keyof Preferences]?: Preferences[K] | null };

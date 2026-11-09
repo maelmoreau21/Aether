@@ -70,6 +70,24 @@
   let playDefaultAudioTrack = $state(trackPreferences(preferences()).playDefaultAudioTrack);
   let selectionEdited = false;
   let hidePlayedInLatest = $state(preferences().hidePlayedInLatest === true);
+  // Streaming: quality, remote ceiling, HDR, channels, night mode, accessibility tracks.
+  const readStreaming = (saved: ReturnType<typeof preferences>) => ({
+    streamingQuality: saved.streamingQuality ?? 'auto',
+    maxBitrateKbps: saved.maxBitrateKbps ?? 0,
+    hdrToneMapping: saved.hdrToneMapping ?? 'auto',
+    audioChannels: saved.audioChannels ?? 'stereo',
+    audioEnhancement: saved.audioEnhancement ?? 'off',
+    preferAudioDescription: saved.preferAudioDescription === true,
+    preferSdhSubtitles: saved.preferSdhSubtitles === true
+  });
+  let streaming = $state(readStreaming(preferences()));
+  let streamingEdited = false;
+  function saveStreaming() {
+    streamingEdited = true;
+    void savePreferences({ ...streaming, maxBitrateKbps: Number(streaming.maxBitrateKbps) });
+  }
+  const STREAMING_QUALITIES = ['auto', 'original', '2160', '1440', '1080', '720', '480', '360'] as const;
+  const STREAMING_BITRATES = [0, 40000, 20000, 10000, 8000, 4000, 2000, 1000] as const;
   let latestEdited = false;
   function saveTrackDefaults() {
     selectionEdited = true;
@@ -129,6 +147,7 @@
         playDefaultAudioTrack = policy.playDefaultAudioTrack;
       }
       if (!latestEdited) hidePlayedInLatest = saved.hidePlayedInLatest === true;
+      if (!streamingEdited) streaming = readStreaming(saved);
       if (!offsetsEdited) {
         audioOffset = saved.offsets?.audio ?? 0;
         subtitleOffset = saved.offsets?.subtitle ?? 0;
@@ -307,6 +326,46 @@
           <label class="checkbox-row"><input type="checkbox" bind:checked={rememberAudioSelections} onchange={saveTrackDefaults} /> {$t('remember_audio')}</label>
           <label class="checkbox-row"><input type="checkbox" bind:checked={rememberSubtitleSelections} onchange={saveTrackDefaults} /> {$t('remember_subtitles')}</label>
           <p class="muted">{$t('manual_choices_note')}</p>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={streaming.preferAudioDescription} onchange={saveStreaming} /> {$t('prefer_audio_description')}</label>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={streaming.preferSdhSubtitles} onchange={saveStreaming} /> {$t('prefer_sdh_subtitles')}</label>
+          <p class="muted">{$t('accessibility_tracks_note')}</p>
+        </section>
+
+        <section class="offsets" aria-labelledby="streaming-heading">
+          <h3 id="streaming-heading">{$t('streaming_quality')}</h3>
+          <p class="muted">{$t('streaming_quality_note')}</p>
+          <label>{$t('quality')}
+            <select bind:value={streaming.streamingQuality} onchange={saveStreaming}>
+              {#each STREAMING_QUALITIES as value (value)}<option {value}>{value === 'auto' ? $t('quality_auto') : value === 'original' ? $t('quality_original') : `${value}p`}</option>{/each}
+            </select>
+          </label>
+          <label>{$t('max_bitrate')}
+            <select bind:value={streaming.maxBitrateKbps} onchange={saveStreaming}>
+              {#each STREAMING_BITRATES as value (value)}<option {value}>{value === 0 ? $t('bitrate_unlimited') : $t('bitrate_mbps', { value: value / 1000 })}</option>{/each}
+            </select>
+          </label>
+          <label>{$t('hdr_tone_mapping')}
+            <select bind:value={streaming.hdrToneMapping} onchange={saveStreaming}>
+              <option value="auto">{$t('hdr_tone_mapping_auto')}</option>
+              <option value="always">{$t('hdr_tone_mapping_always')}</option>
+              <option value="never">{$t('hdr_tone_mapping_never')}</option>
+            </select>
+          </label>
+          <label>{$t('audio_channels')}
+            <select bind:value={streaming.audioChannels} onchange={saveStreaming}>
+              <option value="stereo">{$t('audio_channels_stereo')}</option>
+              <option value="surround">{$t('audio_channels_surround')}</option>
+              <option value="passthrough">{$t('audio_channels_passthrough')}</option>
+            </select>
+          </label>
+          <label>{$t('audio_enhancement')}
+            <select bind:value={streaming.audioEnhancement} onchange={saveStreaming}>
+              <option value="off">{$t('none')}</option>
+              <option value="normalize">{$t('volume_levelling')}</option>
+              <option value="night">{$t('night_mode')}</option>
+            </select>
+          </label>
+          <p class="muted">{$t('audio_enhancement_note')}</p>
         </section>
 
         <section class="offsets" aria-label={$t('playback_controls')}>
@@ -376,12 +435,22 @@
               <span>{$t('font_size')}</span>
               <select
                 value={subtitleStyle.fontSize}
-                onchange={(e) => updateSubtitleStyle('fontSize', e.currentTarget.value as 'small' | 'medium' | 'large')}
+                onchange={(e) => updateSubtitleStyle('fontSize', e.currentTarget.value as 'small' | 'medium' | 'large' | 'x-large')}
               >
                 <option value="small">{$t('small')}</option>
                 <option value="medium">{$t('medium_default')}</option>
                 <option value="large">{$t('large')}</option>
+                <option value="x-large">{$t('extra_large')}</option>
               </select>
+            </label>
+
+            <label>
+              <span>{$t('subtitle_position', { value: subtitleStyle.position })}</span>
+              <div class="slider-wrap">
+                <input type="range" min="0" max="40" step="2" value={subtitleStyle.position}
+                  oninput={(e) => updateSubtitleStyle('position', Number(e.currentTarget.value))} />
+              </div>
+              <small class="muted">{$t('subtitle_position_note')}</small>
             </label>
 
             <label>

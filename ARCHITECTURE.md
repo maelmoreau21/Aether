@@ -228,7 +228,7 @@ POST /api/v1/playback/sessions
   -> Node direct authentifié / relais restreint si nécessaire
 ```
 
-Mode **direct** uniquement si le browser accepte l'assemblage complet conteneur + codecs ; sinon packaging/remux testé. `Range` / `206` seul ne garantit pas MSE, DASH ou la prise en charge native des MKV. Un MP4 non fragmenté n'est pas un segment fMP4 valide par sa seule extension. Aucun transcodage vidéo obligé. La mise en cache et les queues restent bornées.
+Mode **direct** uniquement si le browser accepte l'assemblage complet conteneur + codecs ; sinon packaging/remux testé. `Range` / `206` seul ne garantit pas MSE, DASH ou la prise en charge native des MKV. Un MP4 non fragmenté n'est pas un segment fMP4 valide par sa seule extension. Aucun transcodage vidéo obligé ; un transcodage de secours optionnel existe (`prepared/transcode-*`, voir docs/STREAMING_COMPATIBILITY.md). La mise en cache et les queues restent bornées.
 
 Le client doit gérer une capacité connue (« supportée/testée »), plutôt que supposer la compatibilité à partir du MIME ; mesurer les combinaisons réelles Chrome/Edge/Firefox/Safari. Voir `docs/STREAMING_COMPATIBILITY.md`.
 

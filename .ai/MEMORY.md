@@ -19,6 +19,15 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 9 novembre 2026 — Transcodage de secours, HDR, PGS, mode nuit, minuterie
+
+- Décision : transcodage **optionnel** via `prepared/transcode-*` (Node `transcode.rs`, contrôles Core
+  `resources.rs::transcode_allowed`, choix navigateur `player/transcode.ts`). Lecture directe d'abord ;
+  réglage serveur `transcodingEnabled` (vrai par défaut). FFmpeg runtime désormais GPL (x264).
+- Vérifié : construction de l'étape FFmpeg, transcodage réel HDR10 → SDR / 5.1 / copie vidéo avec ce FFmpeg,
+  tests unitaires Rust et web. Non vérifié : navigateur réel, GPU, incrustation PGS/VobSub. Détails :
+  [docs/STREAMING_COMPATIBILITY.md](../docs/STREAMING_COMPATIBILITY.md).
+
 ## 9 novembre 2026 — Optimisation des paramètres par défaut d'Aether et finitions lecteur/UI
 
 - Reprise de lecture (`crates/core/src/server_settings.rs`) :

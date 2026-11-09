@@ -7,6 +7,7 @@
   let name = $state(''), welcome = $state(''), ssoLabel = $state('Se connecter avec SSO'), error = $state(''), notice = $state('');
   let blockSsoLocalAccounts=$state(true);
   let watchTogetherEnabled = $state(true);
+  let transcodingEnabled = $state(true);
   let trickplayEnabled = $state(true), trickplayAutoGenerate = $state(true);
   let trickplayQuality = $state(7), trickplayWidth = $state(320), trickplayIntervalSeconds = $state(10);
   let trickplayColumns = $state(10), trickplayRows = $state(10), trickplayMaxCacheMb = $state(5120);
@@ -43,9 +44,10 @@
           trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
           chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
-          activityLogRetentionDays?: number; corsHosts?: string[]; watchTogetherEnabled?: boolean;
+          activityLogRetentionDays?: number; corsHosts?: string[]; watchTogetherEnabled?: boolean; transcodingEnabled?: boolean;
         }>('/api/v1/admin/settings');
         watchTogetherEnabled = data.watchTogetherEnabled ?? true;
+        transcodingEnabled = data.transcodingEnabled ?? true;
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
         welcome = data.welcomeMessage;
@@ -83,7 +85,7 @@
           trickplayColumns, trickplayRows, trickplayMaxCacheMb,
           chapterImagesEnabled, introDetectionEnabled, markerMinConfidence,
           minResumePct, maxResumePct, minResumeDurationSeconds,
-          activityLogRetentionDays, watchTogetherEnabled,
+          activityLogRetentionDays, watchTogetherEnabled, transcodingEnabled,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
         })
       });
@@ -94,9 +96,10 @@
         trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
           chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
-        activityLogRetentionDays?: number; corsHosts?: string[]; watchTogetherEnabled?: boolean;
+        activityLogRetentionDays?: number; corsHosts?: string[]; watchTogetherEnabled?: boolean; transcodingEnabled?: boolean;
       }>('/api/v1/admin/settings');
       watchTogetherEnabled = saved.watchTogetherEnabled ?? true;
+      transcodingEnabled = saved.transcodingEnabled ?? true;
       blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
       name = saved.serverName;
       welcome = saved.welcomeMessage;
@@ -133,6 +136,8 @@
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />{$t('block_sso_local')}</label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={watchTogetherEnabled} />{$t('enable_watch_together')}</label>
     <p class="hint">{$t('enable_watch_together_note')}</p>
+    <label class="policy-toggle"><input type="checkbox" bind:checked={transcodingEnabled} />{$t('enable_fallback_transcoding')}</label>
+    <p class="hint">{$t('enable_fallback_transcoding_note')}</p>
     </div>
 
     <details class="adv">

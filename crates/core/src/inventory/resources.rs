@@ -34,11 +34,15 @@ pub async fn prepared(
         Ok(probe) => probe,
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
     };
-    if let Some(index) = component
+    let transcode = media_node::transcode::request(component);
+    // A burnt subtitle obeys the same library policy as an extracted one.
+    let subtitle_index = component
         .strip_prefix("subtitle-ass-")
+        .or_else(|| component.strip_prefix("subtitle-pgs-"))
         .or_else(|| component.strip_prefix("subtitle-"))
         .and_then(|s| s.parse::<u32>().ok())
-    {
+        .or_else(|| transcode.and_then(|request| request.subtitle));
+    if let Some(index) = subtitle_index {
         let options = match playback_library_options(
             store,
             row.get::<String, _>("library_id").as_str(),
@@ -65,7 +69,24 @@ pub async fn prepared(
         }
     }
     let stream_position = media_node::video_stream::position(component);
-    let selected = if let Some((index, position)) = stream_position {
+    if transcode.is_some() {
+        match crate::server_settings::load(store).await {
+            Ok(settings) if settings.transcoding_enabled => {}
+            Ok(_) => {
+                let mut response =
+                    crate::error(StatusCode::UNPROCESSABLE_ENTITY, "transcode_disabled");
+                response.headers_mut().insert(
+                    "x-media-preparation-error",
+                    axum::http::HeaderValue::from_static("transcode_disabled"),
+                );
+                return response;
+            }
+            Err(status) => return crate::error(status, "settings_unavailable"),
+        }
+    }
+    let selected = if let Some(request) = transcode {
+        transcode_allowed(&probe, &request).then_some(Component::Video)
+    } else if let Some((index, position)) = stream_position {
         let duration = probe
             .format
             .get("duration")
@@ -156,6 +177,19 @@ pub async fn prepared(
             })
             .map(|_| Component::AssSubtitle(index))
     } else if let Some(index) = component
+        .strip_prefix("subtitle-pgs-")
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        probe
+            .streams
+            .iter()
+            .find(|t| {
+                t.index == index
+                    && t.codec_type.as_deref() == Some("subtitle")
+                    && t.codec_name.as_deref() == Some("hdmv_pgs_subtitle")
+            })
+            .map(|_| Component::PgsSubtitle(index))
+    } else if let Some(index) = component
         .strip_prefix("subtitle-")
         .and_then(|s| s.parse::<u32>().ok())
     {
@@ -227,7 +261,10 @@ pub async fn prepared(
             json!({"event":"prepared_audio_track","asset":asset_id,"index":index,"language":track.tags.get("language"),"channels":track.details.get("channels"),"codec":track.codec_name})
         );
     }
-    if matches!(selected, Component::OpusChunk(..)) || stream_position.is_some() {
+    if matches!(selected, Component::OpusChunk(..))
+        || stream_position.is_some()
+        || transcode.is_some()
+    {
         let opened = match media_node::OpenedFile::open_in_root(
             Path::new(&row.get::<String, _>("root")),
             Path::new(&row.get::<String, _>("relative_path")),
@@ -256,6 +293,11 @@ pub async fn prepared(
             preparations
                 .native_audio()
                 .serve(opened, id, chunk, &request)
+                .await
+        } else if let Some(transcode) = transcode {
+            preparations
+                .transcodes()
+                .serve(opened, transcode, &request)
                 .await
         } else {
             preparations
@@ -677,5 +719,162 @@ pub async fn image(
             crate::error(StatusCode::INTERNAL_SERVER_ERROR, code.as_str())
         }
         Err(code) => crate::error(StatusCode::NOT_FOUND, code.as_str()),
+    }
+}
+
+/// Every index in a transcode request must name a stream of the expected kind in this
+/// asset's probe, and each option must make sense for that stream. The Node trusts
+/// these checks: it never sees the probe.
+pub(crate) fn transcode_allowed(
+    probe: &media_contracts::media::Probe,
+    request: &media_node::transcode::TranscodeRequest,
+) -> bool {
+    use media_node::transcode::{FLAG_COPY_AUDIO, FLAG_SURROUND, FLAG_TONEMAP};
+    let stream = |index: u32, kind: &str| {
+        probe
+            .streams
+            .iter()
+            .find(|track| track.index == index && track.codec_type.as_deref() == Some(kind))
+    };
+    let duration = probe
+        .format
+        .get("duration")
+        .and_then(Value::as_str)
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0);
+    let Some(video) = stream(request.video, "video") else {
+        return false;
+    };
+    // An attached cover is a "video" stream too; it is not a picture to transcode.
+    if video
+        .details
+        .get("disposition")
+        .and_then(|d| d.get("attached_pic"))
+        .and_then(Value::as_i64)
+        == Some(1)
+    {
+        return false;
+    }
+    if request.copies_video()
+        && !matches!(
+            video.codec_name.as_deref(),
+            Some("h264" | "hevc" | "av1" | "vp9")
+        )
+    {
+        return false;
+    }
+    if request.has(FLAG_TONEMAP) && video_dynamic_range(video).is_none() {
+        return false;
+    }
+    if let Some(audio) = request.audio {
+        let Some(track) = stream(audio, "audio") else {
+            return false;
+        };
+        let channels = track.details.get("channels").and_then(Value::as_u64);
+        if request.has(FLAG_SURROUND) && channels.is_none_or(|channels| channels < 6) {
+            return false;
+        }
+        if request.has(FLAG_COPY_AUDIO)
+            && !matches!(
+                track.codec_name.as_deref(),
+                Some("aac" | "ac3" | "eac3" | "opus" | "mp3" | "flac")
+            )
+        {
+            return false;
+        }
+    }
+    if let Some(subtitle) = request.subtitle
+        && !stream(subtitle, "subtitle").is_some_and(|track| {
+            matches!(
+                track.codec_name.as_deref(),
+                Some("hdmv_pgs_subtitle" | "dvd_subtitle" | "dvb_subtitle")
+            )
+        })
+    {
+        return false;
+    }
+    duration.is_some_and(|duration| f64::from(request.position_ms) / 1000.0 < duration)
+}
+
+/// `hdr10`, `hlg` or `dolby_vision_{profile}` read from the probe, `None` for SDR.
+/// HDR10+ metadata lives in frames, not in the stream header: it reads as `hdr10`.
+pub(crate) fn video_dynamic_range(video: &media_contracts::media::Track) -> Option<String> {
+    let dovi = video
+        .details
+        .get("side_data_list")
+        .and_then(Value::as_array)
+        .and_then(|list| {
+            list.iter().find(|item| {
+                item.get("side_data_type")
+                    .and_then(Value::as_str)
+                    .is_some_and(|kind| kind.contains("DOVI"))
+            })
+        });
+    if let Some(dovi) = dovi {
+        let profile = dovi.get("dv_profile").and_then(Value::as_u64).unwrap_or(0);
+        return Some(format!("dolby_vision_{profile}"));
+    }
+    match video.details.get("color_transfer").and_then(Value::as_str) {
+        Some("smpte2084") => Some("hdr10".to_owned()),
+        Some("arib-std-b67") => Some("hlg".to_owned()),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod transcode_tests {
+    use super::*;
+    use media_node::transcode::request;
+
+    fn probe() -> media_contracts::media::Probe {
+        serde_json::from_value(json!({
+            "streams": [
+                {"index": 0, "codec_type": "video", "codec_name": "hevc", "color_transfer": "smpte2084"},
+                {"index": 1, "codec_type": "audio", "codec_name": "dts", "channels": 6},
+                {"index": 2, "codec_type": "audio", "codec_name": "eac3", "channels": 2},
+                {"index": 3, "codec_type": "subtitle", "codec_name": "hdmv_pgs_subtitle"},
+                {"index": 4, "codec_type": "subtitle", "codec_name": "subrip"},
+                {"index": 5, "codec_type": "video", "codec_name": "mjpeg", "disposition": {"attached_pic": 1}}
+            ],
+            "format": {"duration": "600.000"}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn transcode_requests_must_match_the_probe() {
+        let probe = probe();
+        let allowed = |raw: &str| transcode_allowed(&probe, &request(raw).unwrap());
+        assert!(allowed("transcode-v0a1s3h1080b8000f9-0"));
+        assert!(allowed("transcode-v0a2sxh0b8000f0-599000"));
+        assert!(allowed("transcode-v0a2sxh720b4000f16-0"));
+        // Wrong kinds, text subtitles, covers, positions beyond the end.
+        assert!(!allowed("transcode-v1a1sxh720b4000f0-0"));
+        assert!(!allowed("transcode-v0a0sxh720b4000f0-0"));
+        assert!(!allowed("transcode-v0a1s4h720b4000f0-0"));
+        assert!(!allowed("transcode-v5a1sxh720b4000f0-0"));
+        assert!(!allowed("transcode-v0a1sxh720b4000f0-600000"));
+        // 5.1 from a stereo track, DTS copied into MP4.
+        assert!(!allowed("transcode-v0a2sxh720b4000f8-0"));
+        assert!(!allowed("transcode-v0a1sxh720b4000f16-0"));
+    }
+
+    #[test]
+    fn dynamic_range_reads_transfer_and_dolby_vision_side_data() {
+        let probe = probe();
+        assert_eq!(
+            video_dynamic_range(&probe.streams[0]).as_deref(),
+            Some("hdr10")
+        );
+        let dovi: media_contracts::media::Track = serde_json::from_value(json!({
+            "index": 0, "codec_type": "video", "codec_name": "hevc",
+            "side_data_list": [{"side_data_type": "DOVI configuration record", "dv_profile": 8}]
+        }))
+        .unwrap();
+        assert_eq!(
+            video_dynamic_range(&dovi).as_deref(),
+            Some("dolby_vision_8")
+        );
+        assert_eq!(video_dynamic_range(&probe.streams[5]), None);
     }
 }

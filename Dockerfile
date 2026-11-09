@@ -129,10 +129,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         target/release/media-recover \
         target/release/media-extension-worker
 
-# FFmpeg/ffprobe 9.0.2: same verified source as CI, packet-copy runtime profile.
+# FFmpeg/ffprobe 9.0.2: same verified source as CI. Packet copy by default, plus the
+# optional fallback transcoding encoders (x264, NVENC, VAAPI) and filters.
 FROM debian:bookworm-slim AS probe-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates cmake curl pkg-config nasm xz-utils libdav1d-dev libwebp-dev \
+        libx264-dev libzimg-dev libva-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
 RUN bash /tmp/build-ffmpeg.sh /probe runtime
@@ -220,6 +222,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libdav1d6 \
         libwebp7 \
         libwebpmux3 \
+        libx264-164 \
+        libzimg2 \
+        libva2 \
+        libva-drm2 \
+        mesa-va-drivers \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        apt-get install -y --no-install-recommends intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
@@ -263,7 +272,12 @@ CMD ["aether-node"]
 # ==============================================================================
 FROM backup-runtime AS runtime
 
+# Fallback transcoding: x264, zimg and VA-API (Mesa for AMD, Intel media driver on amd64).
+# NVENC/NVDEC libraries come from the NVIDIA container toolkit at run time.
 RUN apt-get update && apt-get install -y --no-install-recommends libdav1d6 libwebp7 libwebpmux3 \
+        libx264-164 libzimg2 libva2 libva-drm2 mesa-va-drivers \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        apt-get install -y --no-install-recommends intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg

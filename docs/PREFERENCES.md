@@ -172,3 +172,14 @@ notification poussée en temps réel. Les affiches manuelles sont déjà disponi
 via Gérer les images de la fiche (administrateur), avec dépôt dans le stockage
 applicatif ; aucun fichier média n’est écrasé. Les choix de lecture, langues,
 sauts et décalages utilisent toujours les préférences du même compte.
+
+## Diffusion, accessibilité et style (9 novembre 2026)
+
+Champs validés par le Core (`crates/core/src/preferences.rs`) :
+`streamingQuality` (`auto`, `original`, `2160` … `360`), `maxBitrateKbps` (`0` illimité ou
+500 à 120 000), `hdrToneMapping` (`auto`, `always`, `never`), `audioChannels` (`stereo`,
+`surround`, `passthrough`), `audioEnhancement` (`off`, `normalize`, `night`),
+`preferAudioDescription` et `preferSdhSubtitles` (booléens). `subtitleStyle` accepte en plus
+`fontSize: "x-large"` et `position` (0 à 40 % depuis le bas, sous-titres texte seulement).
+Le mode nuit et la normalisation passent par Web Audio uniquement une fois activés ; tant qu'ils
+sont désactivés, aucun graphe audio n'existe. La minuterie de mise en veille n'est pas mémorisée.

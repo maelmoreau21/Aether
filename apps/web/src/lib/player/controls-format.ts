@@ -1,7 +1,7 @@
 import { tr, currentFormat } from '../i18n';
 /** Formatage et libellés purs de la barre de contrôle du lecteur. */
 
-export type ControlsMenu = 'audio' | 'subtitles' | 'video' | 'speed' | 'settings' | null;
+export type ControlsMenu = 'audio' | 'subtitles' | 'video' | 'quality' | 'speed' | 'sleep' | 'settings' | null;
 export type AspectRatio = 'contain' | 'cover' | 'fill';
 
 export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];

@@ -141,7 +141,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#snippet posterBody()}
+{#snippet posterContent()}
   <div class="poster">
     {#if imageUrl}
       <img
@@ -195,7 +195,9 @@
       </div>
     {/if}
   </div>
+{/snippet}
 
+{#snippet metadataContent()}
   {#if showMetadata}
     <div class="metadata-block">
       <h3>{displayTitle}</h3>
@@ -209,6 +211,11 @@
   {/if}
 {/snippet}
 
+{#snippet posterBody()}
+  {@render posterContent()}
+  {@render metadataContent()}
+{/snippet}
+
 {#if href && actions}
   <!-- Buttons cannot live inside the link: they sit above the poster, beside it. -->
   <div
@@ -220,12 +227,13 @@
     onpointerenter={prime}
     onfocusin={prime}
   >
-    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
-    <a class="media-card card-link" class:landscape={wide} {href} aria-label={$t('catalog_view', { displayTitle })}>
-      {@render posterBody()}
-    </a>
+    <div class="poster-frame">
+      <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
+      <a class="media-card card-link poster-link" class:landscape={wide} {href} aria-label={$t('catalog_view', { displayTitle })}>
+        {@render posterContent()}
+      </a>
 
-    <div class="quick-actions" class:menu-active={menuOpen}>
+      <div class="quick-actions" class:menu-active={menuOpen}>
       <button
         type="button"
         class="quick-play"
@@ -435,7 +443,15 @@
           {/if}
         </div>
       {/if}
+      </div>
     </div>
+
+    {#if showMetadata}
+      <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- URL resolved by caller. -->
+      <a class="media-card card-link metadata-link" class:landscape={wide} {href} tabindex="-1" aria-hidden="true">
+        {@render metadataContent()}
+      </a>
+    {/if}
   </div>
 
   {#if metadataOpen && isAdmin}
@@ -504,11 +520,30 @@
     z-index: 30;
   }
 
+  .poster-frame {
+    position: relative;
+    min-width: 0;
+    transition: transform var(--t-slow) var(--ease);
+  }
+
+  .metadata-link {
+    display: block;
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+    outline: none;
+  }
+
   @media (hover: hover) and (pointer: fine) {
+    a.media-card:not(.poster-link):hover .poster,
+    .has-actions:hover .poster-frame,
+    .has-actions.has-menu-open .poster-frame {
+      transform: translateY(-4px);
+    }
+
     a.media-card:hover .poster,
     .has-actions:hover .poster,
     .has-actions.has-menu-open .poster {
-      transform: translateY(-4px);
       box-shadow: var(--shadow);
     }
   }
@@ -537,18 +572,11 @@
   /* Quick actions container: sits directly over the poster */
   .quick-actions {
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    aspect-ratio: var(--artwork-ratio, 2 / 3);
+    inset: 0;
     pointer-events: none;
     opacity: 0;
     transition: opacity var(--t-med) ease;
     z-index: 3;
-  }
-
-  .landscape .quick-actions {
-    aspect-ratio: var(--artwork-ratio, 16 / 9);
   }
 
   .has-actions:hover .card-hover-overlay,
@@ -907,7 +935,8 @@
   }
 
   .has-actions:hover h3,
-  a.media-card:hover h3 {
+  a.media-card:hover h3,
+  .metadata-link:hover h3 {
     color: var(--ac);
   }
 

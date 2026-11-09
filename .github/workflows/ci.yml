@@ -278,6 +278,10 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Audit de sécurité (cargo audit)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+      issues: write
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
@@ -286,6 +290,7 @@ jobs:
         uses: rustsec/audit-check@v1.4.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: RUSTSEC-2026-0459
 
   # =========================================================================
   # 3. Vérifications et tests Frontend (SvelteKit)

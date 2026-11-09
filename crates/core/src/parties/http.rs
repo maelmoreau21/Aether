@@ -45,12 +45,35 @@ pub fn router(auth: AuthState) -> Router {
             delete(revoke_party_invite),
         )
         .route("/api/v1/parties/{id}/ws", get(ws_handler))
+        .route_layer(axum::middleware::from_fn_with_state(
+            auth.clone(),
+            require_watch_together,
+        ))
         .layer(DefaultBodyLimit::max(65536))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("private, no-store"),
         ))
         .with_state((auth, hub))
+}
+
+/// An administrator can switch "watch together" off server-wide: every party route then refuses,
+/// including joining an existing session or reconnecting its socket.
+async fn require_watch_together(
+    State(auth): State<AuthState>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match crate::server_settings::load(&auth.store).await {
+        Ok(settings) if settings.watch_together_enabled => next.run(request).await,
+        Ok(_) => PartyApiError(
+            StatusCode::FORBIDDEN,
+            "« Regarder ensemble » est désactivé sur ce serveur.".to_string(),
+        )
+        .into_response(),
+        Err(status) => PartyApiError::from(status).into_response(),
+    }
 }
 
 // ---------------------------------------------------------------------------

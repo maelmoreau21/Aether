@@ -16,7 +16,7 @@
   import Icon from './Icon.svelte';
   import ProfileMenu from './ProfileMenu.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
-  import { serverPresentation } from '../config/presentation';
+  import { serverPresentation, watchTogetherEnabled } from '../config/presentation';
   import { loadFeatures } from '../applications/api';
   import { t } from '../i18n';
   import { startWatchParty } from '../syncplay/launch';
@@ -34,9 +34,9 @@
   let pendingInvitesCount = $state(0);
 
   onMount(() => {
-    void loadInvitesCount();
     void loadFeatures().catch(() => {});
   });
+  $effect(() => { if ($watchTogetherEnabled) void loadInvitesCount(); else { pendingInvitesCount = 0; watchPartyOpen = false; } });
 
   async function loadInvitesCount() {
     try {
@@ -156,6 +156,7 @@
       >
         <Icon name="search" size={19} />
       </a>
+      {#if $watchTogetherEnabled}
       <button
         type="button"
         class="icon-btn watch-party-btn"
@@ -168,6 +169,7 @@
           <span class="invite-badge">{pendingInvitesCount}</span>
         {/if}
       </button>
+      {/if}
       <ProfileMenu />
     </div>
   </div>
@@ -197,7 +199,7 @@
   </a>
 </nav>
 
-{#if watchPartyOpen}
+{#if watchPartyOpen && $watchTogetherEnabled}
   <WatchPartyModal
     onClose={() => (watchPartyOpen = false)}
     onJoinParty={(partyId, mediaId) => {

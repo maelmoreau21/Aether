@@ -186,6 +186,8 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   server_name: 'Server name',
   welcome_message: 'Welcome message',
   block_sso_local: 'Prevent SSO users from creating local credentials',
+  enable_watch_together: 'Enable “Watch together”',
+  enable_watch_together_note: 'When off, the buttons disappear for everyone and the server refuses to create or join a session.',
   watched_at: 'Consider watched at (%)',
   minimum_resume_duration: 'Minimum duration to resume (s)',
   clear_fingerprint_cache: 'Clear audio fingerprint cache',

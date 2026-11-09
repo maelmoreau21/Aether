@@ -64,6 +64,9 @@ pub struct Settings {
     pub log_level: crate::server_log::Level,
     #[serde(default = "default_log_retention")]
     pub log_retention_days: u32,
+    /// "Watch together": when off, every party route refuses and the web hides its entry points.
+    #[serde(default = "default_true")]
+    pub watch_together_enabled: bool,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -141,6 +144,7 @@ struct SettingsInput {
     cors_hosts: Option<Vec<String>>,
     log_level: Option<crate::server_log::Level>,
     log_retention_days: Option<u32>,
+    watch_together_enabled: Option<bool>,
 }
 
 impl Default for Settings {
@@ -170,6 +174,7 @@ impl Default for Settings {
             cors_hosts: Vec::new(),
             log_level: crate::server_log::Level::Info,
             log_retention_days: default_log_retention(),
+            watch_together_enabled: true,
         }
     }
 }
@@ -332,6 +337,9 @@ async fn write(
             .log_retention_days
             .filter(|days| (1..=crate::server_log::MAX_RETENTION_DAYS).contains(days))
             .unwrap_or(previous.log_retention_days),
+        watch_together_enabled: input
+            .watch_together_enabled
+            .unwrap_or(previous.watch_together_enabled),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)
@@ -515,6 +523,7 @@ mod tests {
         assert_eq!(parsed.trickplay_max_cache_mb, 5120);
         assert!(parsed.chapter_images_enabled && parsed.intro_detection_enabled);
         assert_eq!(parsed.marker_min_confidence, 80);
+        assert!(parsed.watch_together_enabled);
         assert_eq!(
             parsed.media_defaults(),
             crate::library_options::GlobalMediaDefaults::default()

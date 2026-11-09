@@ -184,6 +184,8 @@ export const catalog = {
   server_name: 'Nom du serveur',
   welcome_message: 'Message d’accueil',
   block_sso_local: 'Empêcher les utilisateurs SSO de créer des identifiants locaux',
+  enable_watch_together: 'Activer « Regarder ensemble »',
+  enable_watch_together_note: 'Désactivé, les boutons disparaissent pour tous et le serveur refuse de créer ou de rejoindre une séance.',
   watched_at: 'Considéré comme vu à (%)',
   minimum_resume_duration: 'Durée minimale pour reprendre (s)',
   clear_fingerprint_cache: 'Vider le cache des empreintes audio',

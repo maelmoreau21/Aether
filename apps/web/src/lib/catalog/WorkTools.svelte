@@ -14,6 +14,7 @@
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { t, fmt } from '../i18n';
+  import { watchTogetherEnabled } from '../config/presentation';
   import { startWatchParty } from '../syncplay/launch';
   import {
     audioSummary,
@@ -160,7 +161,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if watchPartyOpen}
+{#if watchPartyOpen && $watchTogetherEnabled}
   <WatchPartyModal
     mediaId={work.id}
     mediaTitle={work.title}
@@ -308,6 +309,7 @@
       ></button>
 
       <div class="dropdown-menu" role="menu">
+        {#if $watchTogetherEnabled}
         <button
           type="button"
           class="menu-item"
@@ -320,6 +322,7 @@
           <Icon name="users" size={16} />
           <span>{$t('watch_together')}</span>
         </button>
+        {/if}
 
         <button
           type="button"

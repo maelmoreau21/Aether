@@ -2,7 +2,9 @@
 use super::{
     config::{is_http_bootstrap_disabled, resolve_allowed_origins},
     touch::{MAX_PENDING_TOUCHES, SessionTouchStats, SessionToucher, TOUCH_INTERVAL_SECONDS},
-    util::{COOKIE, IDLE_SECONDS, constant_equal, csrf, hash, random_token, session_token},
+    util::{
+        COOKIE, IDLE_SECONDS, bearer_token, constant_equal, csrf, hash, random_token, session_token,
+    },
 };
 use crate::identity::{IdentityError, IdentityStore, Role};
 use argon2::{Algorithm, Argon2, Params, Version, password_hash::PasswordHasher};
@@ -53,6 +55,8 @@ pub struct Authenticated {
     pub user: AuthUser,
     pub csrf_token: String,
     pub(crate) token_hash: String,
+    /// Authenticated by `Authorization: Bearer` (native application), not by the cookie.
+    pub(crate) bearer: bool,
 }
 #[derive(sqlx::FromRow)]
 struct SessionUserRow {
@@ -231,13 +235,19 @@ impl AuthState {
         *guard = token;
     }
     pub async fn authenticate(&self, headers: &HeaderMap) -> Result<Authenticated, StatusCode> {
-        let raw = session_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
+        // The cookie wins when both are present: a browser request then keeps its
+        // CSRF and origin checks whatever a proxy or script adds as Authorization.
+        let (raw, bearer) = match session_token(headers) {
+            Some(raw) => (raw, false),
+            None => (bearer_token(headers).ok_or(StatusCode::UNAUTHORIZED)?, true),
+        };
         let token_hash = hash(raw);
         let user = self.session_from_hash(&token_hash).await?;
         Ok(Authenticated {
             user,
             csrf_token: csrf(raw),
             token_hash,
+            bearer,
         })
     }
 
@@ -282,6 +292,11 @@ impl AuthState {
         headers: &HeaderMap,
         identity: &Authenticated,
     ) -> Result<(), StatusCode> {
+        // Browsers never attach an Authorization header on their own, so a bearer
+        // request cannot be forged cross-site: CSRF and origin checks do not apply.
+        if identity.bearer {
+            return Ok(());
+        }
         self.check_origin(headers)?;
         let provided = headers
             .get("x-csrf-token")
@@ -314,6 +329,15 @@ impl AuthState {
             return Err(StatusCode::FORBIDDEN);
         }
         Ok(())
+    }
+    /// For flows that hand out a bearer token, never a cookie: native applications
+    /// send neither `Origin` nor `Sec-Fetch-Site`, whereas a browser always sends
+    /// `Origin` on a POST and then gets the usual origin check.
+    pub(crate) fn check_origin_or_native(&self, headers: &HeaderMap) -> Result<(), StatusCode> {
+        if headers.get(header::ORIGIN).is_none() && headers.get("sec-fetch-site").is_none() {
+            return Ok(());
+        }
+        self.check_origin(headers)
     }
     pub(crate) fn cookie(&self, token: &str, max_age: i64) -> String {
         format!(

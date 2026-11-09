@@ -79,6 +79,106 @@ async fn request(
         cookie,
     )
 }
+/// A native application: no Origin, no cookie, optional `Authorization: Bearer`.
+async fn native(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("host", "127.0.0.1:3000")
+        .header(header::CONTENT_TYPE, "application/json");
+    if !token.is_empty() {
+        req = req.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            req.body(if body.is_null() {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !response.headers().contains_key(header::SET_COOKIE),
+        "{method} {uri} set {:?}",
+        response.headers().get(header::SET_COOKIE)
+    );
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+async fn native_bearer_contract(app: &Router) {
+    let (status, granted) = native(
+        app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        json!({"login":"contract-admin","password":PASSWORD,"tokenType":"bearer"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    let first = granted["accessToken"].as_str().unwrap().to_owned();
+    for uri in ["/api/v1/auth/me", "/api/v1/catalog"] {
+        assert_eq!(
+            native(app, "GET", uri, &first, Value::Null).await.0,
+            StatusCode::OK,
+            "{uri}"
+        );
+    }
+    let (status, refreshed) = native(
+        app,
+        "POST",
+        "/api/v1/auth/token/refresh",
+        &first,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    let second = refreshed["accessToken"].as_str().unwrap().to_owned();
+    assert_ne!(first, second);
+    assert_eq!(
+        native(app, "GET", "/api/v1/auth/me", &first, Value::Null)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        native(
+            app,
+            "POST",
+            "/api/v1/auth/token/refresh",
+            &first,
+            Value::Null
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        native(app, "POST", "/api/v1/auth/logout", &second, Value::Null)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        native(app, "GET", "/api/v1/auth/me", &second, Value::Null)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+}
 async fn app(root: &Path, store: &IdentityStore) -> Router {
     media_poc::secure_app(
         Inventory::local(root.to_owned()).await.unwrap(),
@@ -512,6 +612,7 @@ async fn exercise(store: IdentityStore, root: &Path) -> (String, String, String)
         .0,
         StatusCode::UNAUTHORIZED
     );
+    native_bearer_contract(&app).await;
     drop(app);
     store.close().await;
     (admin, cookie, asset)

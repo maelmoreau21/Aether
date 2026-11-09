@@ -848,3 +848,177 @@ async fn bootstrap_status_and_bootstrap_web_flow() {
     .await;
     assert_eq!(repeated_res.status(), StatusCode::FORBIDDEN);
 }
+async fn with_authorization(
+    state: &AuthState,
+    path: &str,
+    method: &str,
+    authorization: &str,
+    cookie: Option<&str>,
+) -> Response {
+    let mut req = Request::builder()
+        .uri(path)
+        .method(method)
+        .header(header::AUTHORIZATION, authorization);
+    if let Some(v) = cookie {
+        req = req.header(header::COOKIE, v);
+    }
+    router(state.clone())
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+}
+async fn json_body(response: Response) -> serde_json::Value {
+    serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
+}
+#[tokio::test]
+async fn native_bearer_login_refresh_and_logout() {
+    let (_temp, state) = setup().await;
+    let login = serde_json::json!({"login":"admin","password":PASSWORD,"tokenType":"bearer"});
+    let foreign = request(
+        &state,
+        "/api/v1/auth/login",
+        "POST",
+        None,
+        Some("https://attacker.example"),
+        None,
+        login.clone(),
+    )
+    .await;
+    assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
+    let granted = request(
+        &state,
+        "/api/v1/auth/login",
+        "POST",
+        None,
+        None,
+        None,
+        login,
+    )
+    .await;
+    assert_eq!(granted.status(), StatusCode::OK);
+    assert!(!granted.headers().contains_key(header::SET_COOKIE));
+    assert_eq!(granted.headers()[header::CACHE_CONTROL], "no-store");
+    let granted = json_body(granted).await;
+    assert_eq!(granted["user"]["role"], "administrator");
+    assert!(granted.get("csrfToken").is_none());
+    let first = granted["accessToken"].as_str().unwrap().to_owned();
+    let bearer = |token: &str| format!("Bearer {token}");
+    let me = |token: String| {
+        let state = state.clone();
+        async move {
+            with_authorization(&state, "/api/v1/auth/me", "GET", &bearer(&token), None)
+                .await
+                .status()
+        }
+    };
+    assert_eq!(me(first.clone()).await, StatusCode::OK);
+    assert_eq!(
+        me(super::util::random_token()).await,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Rotation: the old token survives the grace period but cannot be refreshed again.
+    let refreshed = with_authorization(
+        &state,
+        "/api/v1/auth/token/refresh",
+        "POST",
+        &bearer(&first),
+        None,
+    )
+    .await;
+    assert_eq!(refreshed.status(), StatusCode::OK);
+    let second = json_body(refreshed).await["accessToken"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(first, second);
+    assert_eq!(me(first.clone()).await, StatusCode::OK);
+    assert_eq!(
+        with_authorization(
+            &state,
+            "/api/v1/auth/token/refresh",
+            "POST",
+            &bearer(&first),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let label: String =
+        crate::database::query_scalar("SELECT device_label FROM sessions WHERE token_hash=?")
+            .bind(hash(&second))
+            .fetch_one(&state.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(label, "Navigateur");
+
+    // A browser cookie keeps CSRF even when a Bearer header rides along, and a
+    // proxy's non-session Authorization never breaks cookie authentication.
+    let (cookie, _csrf) = sign_in(&state).await;
+    assert_eq!(
+        with_authorization(
+            &state,
+            "/api/v1/auth/logout",
+            "POST",
+            &bearer(&second),
+            Some(&cookie)
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        with_authorization(
+            &state,
+            "/api/v1/auth/me",
+            "GET",
+            "Bearer eyJhbGciOi.jwt.sig",
+            Some(&cookie)
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        with_authorization(
+            &state,
+            "/api/v1/auth/token/refresh",
+            "POST",
+            "Basic abc",
+            Some(&cookie)
+        )
+        .await
+        .status(),
+        StatusCode::BAD_REQUEST
+    );
+
+    // Bearer logout needs neither CSRF nor Origin and ends that device only.
+    assert_eq!(
+        with_authorization(
+            &state,
+            "/api/v1/auth/logout",
+            "POST",
+            &bearer(&second),
+            None
+        )
+        .await
+        .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(me(second).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        request(
+            &state,
+            "/api/v1/auth/me",
+            "GET",
+            Some(&cookie),
+            None,
+            None,
+            serde_json::json!({})
+        )
+        .await
+        .status(),
+        StatusCode::OK
+    );
+}

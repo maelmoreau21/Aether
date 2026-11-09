@@ -3,8 +3,8 @@ use super::{
     config::{is_http_bootstrap_disabled, is_local_login_enabled},
     state::{AuthState, AuthUser, Authenticated},
     util::{
-        ABSOLUTE_SECONDS, COOKIE, IDLE_SECONDS, constant_equal, device_label, extract_client_key,
-        hash, random_token,
+        ABSOLUTE_SECONDS, COOKIE, IDLE_SECONDS, TokenType, constant_equal, device_label,
+        extract_client_key, hash, random_token,
     },
 };
 use crate::identity::IdentityError;
@@ -26,6 +26,28 @@ use zeroize::Zeroizing;
 struct Login {
     login: String,
     password: String,
+    #[serde(default, rename = "tokenType")]
+    token_type: TokenType,
+}
+/// How long a refreshed token stays usable, so requests already in flight on the
+/// device (segment fetches, a download resuming) do not fail mid-rotation.
+const REFRESH_GRACE_SECONDS: i64 = 60;
+/// Body handed to a native application in place of a cookie; never cached.
+pub(super) fn bearer_grant(user: AuthUser, raw: &str, status: Option<&str>) -> Response {
+    let mut body = serde_json::json!({
+        "user": user,
+        "tokenType": "bearer",
+        "accessToken": raw,
+        "expiresIn": ABSOLUTE_SECONDS,
+    });
+    if let Some(status) = status {
+        body["status"] = status.into();
+    }
+    let mut response = Json(body).into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
 }
 #[derive(Deserialize)]
 struct BootstrapInput {
@@ -49,6 +71,7 @@ pub fn router(state: AuthState) -> Router {
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/auth/logout", post(logout))
+        .route("/api/v1/auth/token/refresh", post(refresh))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(state)
 }
@@ -203,7 +226,12 @@ async fn login(
     if !is_local_login_enabled() {
         return failure(StatusCode::FORBIDDEN, "local_login_disabled");
     }
-    if let Err(status) = state.check_origin(&headers) {
+    let token_type = input.token_type;
+    let origin_check = match token_type {
+        TokenType::Cookie => state.check_origin(&headers),
+        TokenType::Bearer => state.check_origin_or_native(&headers),
+    };
+    if let Err(status) = origin_check {
         return failure(status, "forbidden");
     }
     let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
@@ -276,6 +304,12 @@ async fn login(
         .bind(hash(&raw))
         .execute(&state.store.pool)
         .await;
+    if token_type == TokenType::Bearer {
+        return match state.session_from_hash(&hash(&raw)).await {
+            Ok(user) => bearer_grant(user, &raw, None),
+            Err(s) => failure(s, "invalid_credentials"),
+        };
+    }
     let mut auth_headers = HeaderMap::new();
     if let Ok(value) = HeaderValue::from_str(&format!("{COOKIE}={raw}")) {
         auth_headers.insert(header::COOKIE, value);
@@ -323,10 +357,48 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response 
     }
     state.toucher.shared.cancel(&identity.token_hash);
     let mut response = StatusCode::NO_CONTENT.into_response();
-    if let Ok(cookie) = HeaderValue::from_str(&state.cookie("", 0)) {
+    if !identity.bearer
+        && let Ok(cookie) = HeaderValue::from_str(&state.cookie("", 0))
+    {
         response.headers_mut().insert(header::SET_COOKIE, cookie);
     }
     response
+}
+/// Rotates a native application's token before its absolute expiry. The old token
+/// keeps working for `REFRESH_GRACE_SECONDS` and can no longer be refreshed itself,
+/// so a copied token cannot fork the device session.
+async fn refresh(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+    let identity = match state.authenticate(&headers).await {
+        Ok(i) => i,
+        Err(s) => return failure(s, "authentication_required"),
+    };
+    if !identity.bearer {
+        return failure(StatusCode::BAD_REQUEST, "bearer_required");
+    }
+    let raw = random_token();
+    let rotated: Result<bool, sqlx::Error> = async {
+        let mut conn = state.store.pool.acquire().await?;
+        let mut tx = crate::database::begin_write(&mut conn).await?;
+        let created = crate::database::query("INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) SELECT ?,s.user_id,s.device_label,unixepoch(),unixepoch(),unixepoch()+? FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>unixepoch()+? AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
+            .bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&identity.token_hash).bind(REFRESH_GRACE_SECONDS).bind(IDLE_SECONDS)
+            .execute(&mut *tx).await?;
+        if created.rows_affected() != 1 {
+            return Ok(false);
+        }
+        crate::database::query("UPDATE sessions SET expires_at=unixepoch()+? WHERE token_hash=?")
+            .bind(REFRESH_GRACE_SECONDS)
+            .bind(&identity.token_hash)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+    .await;
+    match rotated {
+        Ok(true) => bearer_grant(identity.user, &raw, None),
+        Ok(false) => failure(StatusCode::UNAUTHORIZED, "authentication_required"),
+        Err(_) => failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+    }
 }
 fn failure(status: StatusCode, code: &str) -> Response {
     (status, Json(serde_json::json!({"error":code}))).into_response()

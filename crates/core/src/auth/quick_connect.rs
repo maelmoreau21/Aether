@@ -2,7 +2,7 @@
 use super::{
     AuthState,
     util::{
-        ABSOLUTE_SECONDS, COOKIE, IDLE_SECONDS, device_label, extract_client_key, hash,
+        ABSOLUTE_SECONDS, COOKIE, IDLE_SECONDS, TokenType, device_label, extract_client_key, hash,
         random_token,
     },
 };
@@ -41,8 +41,9 @@ async fn start(
     State(state): State<AuthState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, Error> {
+    // Starting grants nothing; native applications (TV, phone) start without Origin.
     state
-        .check_origin(&headers)
+        .check_origin_or_native(&headers)
         .map_err(|s| fail(s, "forbidden"))?;
     throttle(
         &state,
@@ -125,15 +126,21 @@ async fn approve(
 #[derive(Deserialize)]
 struct Poll {
     secret: String,
+    #[serde(default, rename = "tokenType")]
+    token_type: TokenType,
 }
 async fn poll(
     State(state): State<AuthState>,
     headers: HeaderMap,
     Json(input): Json<Poll>,
 ) -> Result<Response, Error> {
-    state
-        .check_origin(&headers)
-        .map_err(|s| fail(s, "forbidden"))?;
+    // A cookie is only ever set for the primary origin (no login CSRF); a bearer
+    // token is returned in the body to the holder of the requester secret.
+    match input.token_type {
+        TokenType::Cookie => state.check_origin(&headers),
+        TokenType::Bearer => state.check_origin_or_native(&headers),
+    }
+    .map_err(|s| fail(s, "forbidden"))?;
     if input.secret.len() != 64 || !input.secret.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(fail(StatusCode::BAD_REQUEST, "invalid_request"));
     }
@@ -163,6 +170,13 @@ async fn poll(
         return Err(fail(StatusCode::UNAUTHORIZED, "authentication_required"));
     }
     tx.commit().await.map_err(db)?;
+    if input.token_type == TokenType::Bearer {
+        let user = state
+            .session_from_hash(&hash(&raw))
+            .await
+            .map_err(|s| fail(s, "authentication_required"))?;
+        return Ok(super::http::bearer_grant(user, &raw, Some("authenticated")));
+    }
     let mut auth_headers = HeaderMap::new();
     auth_headers.insert(
         header::COOKIE,
@@ -465,16 +479,132 @@ mod tests {
             }
         }
     }
+    async fn with_bearer(
+        state: &AuthState,
+        action: &str,
+        token: &str,
+        body: serde_json::Value,
+    ) -> Response {
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/api/v1/auth/device/{action}"))
+            .header(header::CONTENT_TYPE, "application/json")
+            .header(header::AUTHORIZATION, format!("Bearer {token}"))
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        super::super::http::router(state.clone())
+            .oneshot(request)
+            .await
+            .unwrap()
+    }
+    #[tokio::test]
+    async fn native_device_flow_returns_a_bearer_token_and_never_a_cookie() {
+        let (_temp, state, cookie, csrf) = setup().await;
+        let challenge = body(call(&state, "start", json!({}), None, None, None).await).await;
+        let code = json!({"code":challenge["code"]});
+        let bearer_poll = json!({"secret":challenge["secret"],"tokenType":"bearer"});
+        assert_eq!(
+            call(
+                &state,
+                "approve",
+                code.clone(),
+                Some(&cookie),
+                Some(&csrf),
+                Some(ORIGIN)
+            )
+            .await
+            .status(),
+            StatusCode::NO_CONTENT
+        );
+        // A cookie still needs the primary origin; a bearer token is refused to a foreign page.
+        assert_eq!(
+            call(
+                &state,
+                "poll",
+                json!({"secret":challenge["secret"]}),
+                None,
+                None,
+                None
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(
+                &state,
+                "poll",
+                bearer_poll.clone(),
+                None,
+                None,
+                Some("https://attacker.example")
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        let granted = call(&state, "poll", bearer_poll.clone(), None, None, None).await;
+        assert_eq!(granted.status(), StatusCode::OK);
+        assert!(!granted.headers().contains_key(header::SET_COOKIE));
+        assert_eq!(granted.headers()[header::CACHE_CONTROL], "no-store");
+        let granted = body(granted).await;
+        assert_eq!(granted["status"], "authenticated");
+        assert_eq!(granted["tokenType"], "bearer");
+        assert_eq!(granted["user"]["id"], "sso-user");
+        assert!(granted.get("csrfToken").is_none());
+        let token = granted["accessToken"].as_str().unwrap().to_owned();
+        assert_eq!(token.len(), 64);
+        assert_eq!(
+            call(&state, "poll", bearer_poll, None, None, None)
+                .await
+                .status(),
+            StatusCode::GONE
+        );
+        // The phone, signed in by bearer, approves a TV without cookie, CSRF or Origin.
+        let tv = start(&state).await;
+        let tv_code = json!({"code":tv["code"]});
+        assert_eq!(
+            with_bearer(&state, "inspect", &token, tv_code.clone())
+                .await
+                .status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            with_bearer(&state, "approve", &token, tv_code)
+                .await
+                .status(),
+            StatusCode::NO_CONTENT
+        );
+        assert_eq!(
+            with_bearer(
+                &state,
+                "approve",
+                &random_token(),
+                json!({"code":"1234ABCD"})
+            )
+            .await
+            .status(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
     #[tokio::test]
     async fn origins_and_persistent_attempt_limits_are_enforced() {
         let (temp, state, cookie, csrf) = setup().await;
+        // Without Origin, start is the native path (covered below) and is allowed.
+        assert_eq!(
+            call(
+                &state,
+                "start",
+                json!({}),
+                None,
+                None,
+                Some("https://attacker.example")
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
         for origin in [None, Some("https://attacker.example")] {
-            assert_eq!(
-                call(&state, "start", json!({}), None, None, origin)
-                    .await
-                    .status(),
-                StatusCode::FORBIDDEN
-            );
             assert_eq!(
                 call(
                     &state,

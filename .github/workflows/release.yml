@@ -135,12 +135,12 @@ jobs:
           ref: ${{ github.sha }}
 
       - name: Télécharger le changelog
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-changelog
 
       - name: Télécharger les empreintes d'images Docker
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: digest-*
           path: digests

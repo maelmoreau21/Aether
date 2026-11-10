@@ -236,6 +236,41 @@ jobs:
           path: dist/*
           retention-days: 30
 
+  latest:
+    # Always at the same address: Releases > "Applications clientes (develop)".
+    name: Pré-version « Applications clientes (develop) »
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+    needs: [android, desktop, tv]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Récupérer les fichiers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aether-*
+          path: dist
+          merge-multiple: true
+
+      - name: Remplacer la pré-version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          short=$(echo "$GITHUB_SHA" | cut -c1-7)
+          cat > notes.md <<NOTES
+          Dernières applications clientes compilées depuis \`develop\` (commit $short), remplacées à chaque push.
+
+          - **Android** : \`Aether-android-*.apk\` (activer l'installation depuis des sources inconnues)
+          - **Windows** : \`Aether-desktop-windows-*.zip\` ; **Linux** et **macOS** : \`Aether-desktop-*.tar.gz\` (installer libmpv pour la lecture)
+          - **TV LG (webOS)** : \`Aether-webos-*.ipk\` ; **TV Samsung (Tizen)** : \`Aether-tizen-unsigned-*.zip\`, à signer avec Tizen Studio
+          - **Roku** : \`Aether-roku-*.zip\`, à installer en mode développeur
+          - **iPhone, iPad, Apple TV** : workflow Apple (apps non signées)
+          NOTES
+          sed -i 's/^          //' notes.md
+          gh release delete apps-develop --yes --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create apps-develop dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA"             --prerelease --latest=false --title "Applications clientes (develop)" --notes-file notes.md
+
   attach:
     name: Ajouter à la Release
     if: ${{ inputs.release_tag }}

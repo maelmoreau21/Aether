@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -57,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -250,9 +253,17 @@ private fun CatalogScreen(model: AetherViewModel) {
     }
 }
 
+/** A visible ring on the item the TV remote (D-pad) has selected. */
+@Composable
+private fun Modifier.focusRing(): Modifier {
+    var focused by remember { mutableStateOf(false) }
+    return onFocusChanged { focused = it.isFocused }
+        .border(3.dp, if (focused) Color.White else Color.Transparent, RoundedCornerShape(12.dp))
+}
+
 @Composable
 private fun WorkCard(work: Work, poster: String?, loader: ImageLoader, onDownload: (() -> Unit)?, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Card(Modifier.fillMaxWidth().focusRing().clickable(onClick = onClick)) {
         AsyncImage(
             model = poster,
             imageLoader = loader,
@@ -342,7 +353,7 @@ private fun SeriesScreen(model: AetherViewModel, series: Work) {
 
 @Composable
 private fun EpisodeRow(episode: Episode, onDownload: () -> Unit, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+    Card(Modifier.fillMaxWidth().focusRing().clickable(onClick = onClick)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f).padding(12.dp)) {
             Text(episode.number?.let { "$it · ${episode.title}" } ?: episode.title, style = MaterialTheme.typography.titleMedium)

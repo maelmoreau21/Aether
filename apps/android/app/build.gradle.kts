@@ -51,4 +51,6 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.15.0@aar")
     // Posters: memory and disk cache, downsampling; versioned URLs are cached for good.
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Daily device-token refresh, even when the app is not opened.
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

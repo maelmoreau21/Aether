@@ -89,6 +89,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 created.refreshIfDue(REFRESH_MARGIN_SECONDS)
                 store.save(created.token())
+                TokenRefresh.schedule(getApplication())
                 showCatalog()
             } catch (e: ClientException.Unauthorized) {
                 store.save(null)
@@ -162,6 +163,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         pairingJob?.cancel()
         _pairing.value = null
         store.save(client?.token())
+        TokenRefresh.schedule(getApplication())
         showCatalog()
     }
 
@@ -224,6 +226,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             runCatching { client.logout() }
             store.save(null)
+            TokenRefresh.cancel(getApplication())
             showSignIn()
         }
     }

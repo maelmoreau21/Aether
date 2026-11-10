@@ -1,10 +1,14 @@
 # Aether pour Android
 
-Application native (Kotlin, Compose, Media3) au-dessus du cœur Rust partagé
+Application native (Kotlin, Compose, Media3) pour téléphones, tablettes, Android
+TV, Google TV et Fire TV (même APK), au-dessus du cœur Rust partagé
 `crates/client`, exposé à Kotlin par UniFFI (`crates/client-ffi`).
 
 - Connexion par mot de passe ou par code QR approuvé depuis un autre appareil.
-- Jeton d'appareil chiffré par une clé du Keystore Android, renouvelé au démarrage.
+- Jeton d'appareil chiffré par une clé du Keystore Android, renouvelé au démarrage
+  et chaque jour en tâche de fond (WorkManager), même si l'app n'est pas ouverte.
+- Sur TV : lanceur et bannière de l'écran d'accueil, navigation à la télécommande
+  avec un contour sur l'élément sélectionné ; connexion conseillée par code QR.
 - Catalogue films et séries avec affiches et recherche ; écran série avec saisons
   et épisodes.
 - Lecture HLS par copie, décodée par le matériel ([docs/HLS.md](../../docs/HLS.md)),
@@ -33,6 +37,6 @@ L'APK de debug est produit dans `app/build/outputs/apk/debug/app-debug.apk`
 
 ## Limites actuelles
 
-Pas encore de Chromecast ni de renouvellement du jeton en tâche de fond ; la
+Pas encore de Chromecast ni de téléphone télécommande ; la
 position d'une lecture hors ligne n'est envoyée au Core que si le réseau est là. Un Core en certificat auto-signé n'est pas accepté ; utiliser
 un vrai certificat ou HTTP sur le réseau local.

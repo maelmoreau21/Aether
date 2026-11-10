@@ -18,12 +18,14 @@
   import RemotePanel from '../lib/remote/RemotePanel.svelte';
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
   import { rememberPendingParty } from '../lib/syncplay/launch';
+  import { installTvNavigation } from '../lib/tv/navigation';
 
   onMount(() => {
     initTheme();
     const refresh=()=>{if(document.visibilityState==='visible'&&!isDownloads)void hydratePreferences().then(saved=>{if(saved){setTheme(saved.theme??'system',false);setLocale(saved.locale??'fr',false);}}).catch(()=>{});};
     window.addEventListener('focus',refresh);
-    return()=>window.removeEventListener('focus',refresh);
+    const uninstallTv=installTvNavigation();
+    return()=>{window.removeEventListener('focus',refresh);uninstallTv();};
   });
   $effect(() => {
     const appearance = $preferenceState;

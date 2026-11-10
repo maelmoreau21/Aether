@@ -1,0 +1,30 @@
+/* Coquille TV d'Aether : jetons Halo sombres (apps/web/src/lib/styles/halo.css), écran 1920 × 1080. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0e18;
+  --pn: rgb(255 255 255 / 0.055);
+  --line-2: rgb(255 255 255 / 0.16);
+  --tx: #eef1f8;
+  --mu: #a2a9ba;
+  --ac: #ff7b47;
+  --err: #ff6b6b;
+  --btn: #eef1f8;
+  --btn-tx: #0b0e18;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--tx); font-family: "Manrope Variable", "Manrope", system-ui, sans-serif; }
+.shell { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 24px; padding: 64px; }
+.mark { width: 120px; height: 120px; }
+h1 { margin: 0 0 16px; font-size: 56px; font-weight: 700; letter-spacing: -0.02em; }
+form { width: min(960px, 100%); display: flex; flex-direction: column; gap: 16px; }
+label { font-size: 30px; font-weight: 600; }
+input { width: 100%; padding: 20px 24px; font: inherit; font-size: 32px; color: var(--tx); background: var(--pn); border: 2px solid var(--line-2); border-radius: 16px; }
+.hint { margin: 0; color: var(--mu); font-size: 24px; }
+.status { min-height: 36px; margin: 0; font-size: 26px; color: var(--mu); }
+.status.error { color: var(--err); }
+.actions { display: flex; gap: 24px; }
+button { padding: 18px 40px; font: inherit; font-size: 28px; font-weight: 700; border-radius: 999px; border: 2px solid transparent; cursor: pointer; }
+.primary { background: var(--btn); color: var(--btn-tx); }
+.secondary { background: var(--pn); color: var(--tx); border-color: var(--line-2); }
+button[hidden] { display: none; }
+input:focus, button:focus { outline: 4px solid var(--ac); outline-offset: 4px; }

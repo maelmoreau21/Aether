@@ -98,7 +98,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.evaluate(()=>window.scrollTo(0,0));
     // 3. Open Series catalogue
     await page.goto(origin + '/app/series/');
-    const card = page.locator('.media-card').filter({hasText:'Browser Series'});
+    const card = page.getByRole('link',{name:'Voir Browser Series',exact:true}); // the card's poster link; its title may be artwork only
     await card.waitFor();
     await page.locator('.page-indicator').filter({hasText:/^Page 1(?: sur 1)?$/}).waitFor();
     assert.equal(await page.getByRole('link',{name:'Page suivante →',exact:true}).count(),0);
@@ -377,7 +377,7 @@ fs.mkdirSync(out, {recursive: true});
     }
     assert.ok(filmScanCompleted, 'Film scan did not complete in time');
     await page.goto(origin+'/app/films/');
-    const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
+    const filmCard = page.getByRole('link',{name:'Voir Synthetic Film',exact:true}); // the card's poster link; its title may be artwork only
     await filmCard.waitFor();
     await filmCard.click({position:{x:12,y:12}});
     // Audio languages are in the masthead's quick facts; the cast is behind its tab.

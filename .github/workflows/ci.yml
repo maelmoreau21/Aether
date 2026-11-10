@@ -523,12 +523,22 @@ jobs:
       - name: Vérifier le runtime Node optimisé avant publication
         run: |
           set -euo pipefail
+          # Same checks, but each failure says what it found (annotations are public).
           docker run --rm --entrypoint sh media-ci:runtime-node -ec '
             ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
             ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
-            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+            found=$(find /usr/lib -name "libav*.so*" -print | tr "\n" " ")
+            if [ -n "$found" ]; then
+              echo "::error::runtime-node contains libav* libraries: $found"
+              exit 1
+            fi
           '
-          test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
+          size=$(docker inspect --format '{{.Size}}' media-ci:runtime-node)
+          echo "runtime-node image size: $size bytes"
+          if [ "$size" -ge 200000000 ]; then
+            echo "::error::runtime-node image is $size bytes (limit 200000000)"
+            exit 1
+          fi
       - name: Réutiliser la fixture AV1/Opus des tests Rust
         id: image-fixtures
         uses: actions/cache/restore@v4

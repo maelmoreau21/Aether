@@ -35,6 +35,7 @@ pub async fn prepared(
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
     };
     let transcode = media_node::transcode::request(component);
+    let hls = media_node::hls::request(component);
     // A burnt subtitle obeys the same library policy as an extracted one.
     let subtitle_index = component
         .strip_prefix("subtitle-ass-")
@@ -84,7 +85,9 @@ pub async fn prepared(
             Err(status) => return crate::error(status, "settings_unavailable"),
         }
     }
-    let selected = if let Some(request) = transcode {
+    let selected = if let Some(request) = hls {
+        super::hls::allowed(&probe, &request).then_some(Component::Video)
+    } else if let Some(request) = transcode {
         transcode_allowed(&probe, &request).then_some(Component::Video)
     } else if let Some((index, position)) = stream_position {
         let duration = probe
@@ -264,6 +267,7 @@ pub async fn prepared(
     if matches!(selected, Component::OpusChunk(..))
         || stream_position.is_some()
         || transcode.is_some()
+        || hls.is_some()
     {
         let opened = match media_node::OpenedFile::open_in_root(
             Path::new(&row.get::<String, _>("root")),
@@ -298,6 +302,17 @@ pub async fn prepared(
             preparations
                 .transcodes()
                 .serve(opened, transcode, &request)
+                .await
+        } else if let Some(hls) = hls {
+            // The Node's keyframe index cache follows this exact version of the file.
+            let source = format!(
+                "{asset_id}:{}:{}",
+                row.get::<i64, _>("size"),
+                row.get::<String, _>("modified_ns")
+            );
+            preparations
+                .hls()
+                .serve(opened, source, hls, request.method().clone())
                 .await
         } else {
             preparations

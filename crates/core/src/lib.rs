@@ -249,6 +249,15 @@ async fn secure_app_with_jobs_and_web_dist(
             "/api/v1/assets/{id}/image",
             get(indexed_image).head(indexed_image),
         )
+        .route(
+            "/api/v1/assets/{id}/hls",
+            axum::routing::post(indexed_hls_grant),
+        )
+        .route(
+            "/api/v1/assets/{id}/hls/{grant}/{component}",
+            get(indexed_hls).head(indexed_hls),
+        )
+        .layer(axum::Extension(auth.clone()))
         .layer(axum::Extension(jobs.preparations.clone()))
         .layer(axum::Extension(auth.store.clone()))
         .layer(middleware::from_fn_with_state(
@@ -376,6 +385,54 @@ async fn indexed_prepared(
     axum::extract::Path((id, component)): axum::extract::Path<(String, String)>,
     request: Request,
 ) -> Response {
+    inventory::prepared(&store, &preparations, &id, &component, request).await
+}
+
+/// Issues the capability URL a native player or a cast device opens:
+/// `{origin}/api/v1/assets/{id}/hls/{grant}/master.m3u8`.
+async fn indexed_hls_grant(
+    axum::Extension(auth): axum::Extension<auth::AuthState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    request: Request,
+) -> Response {
+    let Some(identity) = request.extensions().get::<auth::Authenticated>().cloned() else {
+        return error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "authentication_required",
+        );
+    };
+    if let Err(status) = auth.require_csrf(request.headers(), &identity) {
+        return error(status, "forbidden");
+    }
+    match auth.issue_playback_grant(&identity, &id).await {
+        Ok((grant, expires_at)) => {
+            let url = format!(
+                "{}/api/v1/assets/{id}/hls/{grant}/master.m3u8",
+                auth.origin()
+            );
+            let mut response =
+                Json(serde_json::json!({"url": url, "expiresAt": expires_at})).into_response();
+            response
+                .headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            response
+        }
+        Err(status) => error(status, "playback_grant_unavailable"),
+    }
+}
+
+async fn indexed_hls(
+    axum::Extension(preparations): axum::Extension<Arc<media_node::packaging::Preparations>>,
+    axum::Extension(store): axum::Extension<identity::IdentityStore>,
+    axum::extract::Path((id, _grant, component)): axum::extract::Path<(String, String, String)>,
+    request: Request,
+) -> Response {
+    if component == "master.m3u8" {
+        return inventory::hls_master(&store, &id, request.method()).await;
+    }
+    if media_node::hls::request(&component).is_none() {
+        return error(axum::http::StatusCode::NOT_FOUND, "hls_component_unknown");
+    }
     inventory::prepared(&store, &preparations, &id, &component, request).await
 }
 
@@ -607,6 +664,27 @@ pub fn local_security_with_store(
                 let host_ok = req_host == host.as_deref()
                     || (is_internal && has_internal_proto)
                     || (is_internal && internal_host.as_deref().is_some_and(|ih| req_host == Some(ih)));
+
+                // 0. HLS capability URLs are opened by cast receivers on another origin
+                // (Chromecast's page, AirPlay). They carry their own authorization and no
+                // cookie is ever read for them, so any origin may read them, uncredentialed.
+                if host_ok
+                    && matches!(*method, axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS)
+                    && permissions::hls_grant(req_path).is_some()
+                {
+                    let mut res = if method == axum::http::Method::OPTIONS {
+                        let mut res = StatusCode::NO_CONTENT.into_response();
+                        res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_METHODS, HeaderValue::from_static("GET, HEAD, OPTIONS"));
+                        res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("range"));
+                        res.headers_mut().insert(header::ACCESS_CONTROL_MAX_AGE, HeaderValue::from_static("86400"));
+                        res
+                    } else {
+                        next.run(req).await
+                    };
+                    res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+                    res.headers_mut().insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, HeaderValue::from_static("content-length, content-range"));
+                    return res;
+                }
 
                 // 1. OIDC callback accepts a cross-site top-level GET (single-use state bound to HttpOnly cookie).
                 let oidc_callback = method == axum::http::Method::GET

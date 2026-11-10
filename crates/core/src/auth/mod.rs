@@ -8,6 +8,7 @@
 //! - `http`: REST router and handlers.
 
 mod config;
+mod grants;
 mod http;
 mod quick_connect;
 mod state;

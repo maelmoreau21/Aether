@@ -38,12 +38,27 @@ async fn media_asset(
     Ok((asset, library))
 }
 
+/// `/api/v1/assets/{asset}/hls/{grant}/{component}`: (asset, grant). Such a URL
+/// carries its own authorization, so a cast device can follow it with no cookie.
+pub fn hls_grant(path: &str) -> Option<(&str, &str)> {
+    let mut parts = path.strip_prefix("/api/v1/assets/")?.split('/');
+    let (asset, kind, grant, component) =
+        (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    (kind == "hls" && !asset.is_empty() && !component.is_empty() && parts.next().is_none())
+        .then_some((asset, grant))
+}
+
 pub async fn require_media(
     State(state): State<MediaAccess>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    let identity = match state.auth.authenticate(request.headers()).await {
+    // A capability URL never falls back to a cookie, and a cookie never reaches it.
+    let authenticated = match hls_grant(request.uri().path()) {
+        Some((asset, grant)) => state.auth.authenticate_grant(grant, asset).await,
+        None => state.auth.authenticate(request.headers()).await,
+    };
+    let identity = match authenticated {
         Ok(identity) => identity,
         Err(status) => return error(status, "authentication_required"),
     };
@@ -135,6 +150,8 @@ pub async fn require_media(
                         .or_else(|| value.split_once("/subtitles/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/audio/").map(|(id, _)| id))
                         .or_else(|| value.split_once("/prepared/").map(|(id, _)| id))
+                        .or_else(|| value.strip_suffix("/hls"))
+                        .or_else(|| value.split_once("/hls/").map(|(id, _)| id))
                 })
                 .unwrap_or("");
             crate::inventory::resource_library(

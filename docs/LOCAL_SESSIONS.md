@@ -148,6 +148,8 @@ Règles de sécurité :
   son jeton à l'ouverture et en tâche de fond (WorkManager, `BGAppRefreshTask`)
   bien avant l'expiration absolue, et le range dans le trousseau du système.
 - La déconnexion Bearer (`POST /api/v1/auth/logout`) ne renvoie aucun cookie.
+- Pour la lecture native et la diffusion (Chromecast, AirPlay), l'application
+  demande une URL HLS autorisée par asset : voir [HLS.md](HLS.md).
 
 Vérifié par les tests unitaires `auth::` et par `tests/postgres.rs`, qui rejoue ce
 parcours à travers `secure_app` sur SQLite et sur PostgreSQL 18 (`--include-ignored`).

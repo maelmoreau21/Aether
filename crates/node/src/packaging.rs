@@ -160,6 +160,7 @@ pub struct Preparations {
     native_audio: crate::mp4_audio::NativeAudio,
     video_streams: crate::video_stream::VideoStreams,
     transcodes: crate::transcode::Transcodes,
+    hls: crate::hls::HlsStreams,
     in_flight: Mutex<HashMap<String, Weak<Mutex<()>>>>,
     joiners: Semaphore,
 }
@@ -177,6 +178,7 @@ impl Default for Preparations {
             native_audio: crate::mp4_audio::NativeAudio::default(),
             video_streams: crate::video_stream::VideoStreams::default(),
             transcodes: crate::transcode::Transcodes::default(),
+            hls: crate::hls::HlsStreams::default(),
             in_flight: Mutex::new(HashMap::new()),
             joiners: Semaphore::new(64),
         }
@@ -263,6 +265,9 @@ impl Preparations {
     }
     pub fn transcodes(&self) -> &crate::transcode::Transcodes {
         &self.transcodes
+    }
+    pub fn hls(&self) -> &crate::hls::HlsStreams {
+        &self.hls
     }
 
     pub async fn prepare(

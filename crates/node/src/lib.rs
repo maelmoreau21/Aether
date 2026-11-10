@@ -10,6 +10,7 @@ pub mod end_credits;
 pub mod external_audio;
 pub mod files;
 pub mod fingerprint;
+pub mod hls;
 mod image_preview;
 pub mod images;
 pub use image_preview::width as image_preview_width;

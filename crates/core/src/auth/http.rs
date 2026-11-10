@@ -390,6 +390,12 @@ async fn refresh(State(state): State<AuthState>, headers: HeaderMap) -> Response
             .bind(&identity.token_hash)
             .execute(&mut *tx)
             .await?;
+        // A cast in progress keeps playing across the rotation.
+        crate::database::query("UPDATE playback_grants SET session_hash=? WHERE session_hash=?")
+            .bind(hash(&raw))
+            .bind(&identity.token_hash)
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await?;
         Ok(true)
     }

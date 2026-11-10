@@ -157,6 +157,7 @@ pub async fn relay_from_remote_node(
     let progressive = component.is_some_and(|value| {
         media_node::video_stream::position(value).is_some()
             || media_node::transcode::request(value).is_some()
+            || media_node::hls::request(value).is_some()
             || media_node::packaging::Component::opus_chunk(value).is_some()
             || media_node::packaging::Component::audio_chunk(value).is_some()
     });

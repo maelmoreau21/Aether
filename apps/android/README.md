@@ -20,6 +20,15 @@ TV, Google TV et Fire TV (même APK), au-dessus du cœur Rust partagé
   et une copie terminée se lit sans réseau. La lecture en ligne n'écrit pas dans
   ce cache.
 
+- Télécommande et reprise entre appareils d'un même compte (canal
+  `/api/v1/remote/ws`) : l'écran Appareils montre ce que lisent les autres
+  appareils, les pilote (lecture/pause, −10 s, +30 s, arrêt) ou reprend ici à la
+  même position ; dans le lecteur, « Envoyer vers » passe la lecture à un autre
+  appareil. Les commandes ne sont reçues que lorsque l'app est ouverte.
+- Chromecast : bouton Cast dans le lecteur ; le récepteur standard de Google lit
+  le HLS du Core à la position en cours. Exige les services Google (absent sur
+  Fire TV : bouton masqué) et un Core joignable en HTTPS par le Chromecast.
+
 ## Construire
 
 Depuis la racine du dépôt, avec Docker (la construction de l'image accepte la
@@ -35,8 +44,25 @@ docker run --rm -v "$PWD:/work" -w /work \
 L'APK de debug est produit dans `app/build/outputs/apk/debug/app-debug.apk`
 (arm64-v8a et x86_64). Installation : `adb install -r app-debug.apk`.
 
+## Publier
+
+`RELEASE=1 sh apps/android/scripts/build.sh` produit l'APK minifié (R8,
+~9 Mo, installation directe ou F-Droid) et l'AAB pour le Play Store. La
+signature n'est jamais dans le dépôt : créer une clé une fois, la garder
+hors du dépôt avec une sauvegarde,
+
+```sh
+keytool -genkeypair -v -keystore aether-release.jks -alias aether   -keyalg RSA -keysize 4096 -validity 10000
+```
+
+puis la fournir par `apps/android/keystore.properties` (`storeFile`,
+`storePassword`, `keyAlias`, `keyPassword`) ou par les variables
+`AETHER_KEYSTORE`, `AETHER_KEYSTORE_PASSWORD`, `AETHER_KEY_ALIAS`,
+`AETHER_KEY_PASSWORD`. Sans elles, le build release reste non signé. Chaque
+publication augmente `-PversionCode=` (et `-PversionName=`).
+
 ## Limites actuelles
 
-Pas encore de Chromecast ni de téléphone télécommande ; la
+La
 position d'une lecture hors ligne n'est envoyée au Core que si le réseau est là. Un Core en certificat auto-signé n'est pas accepté ; utiliser
 un vrai certificat ou HTTP sur le réseau local.

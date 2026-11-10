@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
@@ -75,19 +75,32 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.HlsSegmentFormat
+import com.google.android.gms.cast.HlsVideoSegmentFormat
+import com.google.android.gms.cast.MediaInfo
+import com.google.android.gms.cast.MediaLoadRequestData
+import com.google.android.gms.cast.MediaMetadata
+import com.google.android.gms.cast.framework.CastButtonFactory
+import com.google.android.gms.cast.framework.CastContext
+import com.google.android.gms.cast.framework.CastSession
+import com.google.android.gms.cast.framework.SessionManagerListener
 import coil.ImageLoader
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import okhttp3.OkHttpClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import java.util.concurrent.Executors
 import kotlinx.coroutines.withContext
 import uniffi.aether_ffi.ClientException
 import uniffi.aether_ffi.Pairing
 import uniffi.aether_ffi.Episode
 import uniffi.aether_ffi.Work
 
-class MainActivity : ComponentActivity() {
+/** A FragmentActivity: the Cast route picker is shown as a dialog fragment. */
+class MainActivity : FragmentActivity() {
     private val model: AetherViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -116,8 +129,9 @@ private fun App(model: AetherViewModel) {
                 Screen.SignIn -> SignInScreen(model)
                 Screen.Catalog -> CatalogScreen(model)
                 Screen.Downloads -> DownloadsScreen(model)
+                Screen.Devices -> DevicesScreen(model)
                 is Screen.Series -> SeriesScreen(model, current.work)
-                is Screen.Player -> PlayerScreen(model, current.work)
+                is Screen.Player -> PlayerScreen(model, current.work, current.startAt)
             }
         }
     }
@@ -237,6 +251,7 @@ private fun CatalogScreen(model: AetherViewModel) {
             FilterChip(kind == "film", { kind = "film" }, { Text(stringResource(R.string.films)) })
             FilterChip(kind == "series", { kind = "series" }, { Text(stringResource(R.string.series)) })
             Spacer(Modifier.weight(1f))
+            TextButton(onClick = model::showDevices) { Text(stringResource(R.string.devices)) }
             TextButton(onClick = model::showDownloads) { Text(stringResource(R.string.downloads)) }
             TextButton(onClick = model::signOut) { Text(stringResource(R.string.sign_out)) }
         }
@@ -324,6 +339,50 @@ private fun DownloadsScreen(model: AetherViewModel) {
     }
 }
 
+private fun clock(seconds: Double): String {
+    val total = seconds.toLong()
+    return if (total >= 3600) "%d:%02d:%02d".format(total / 3600, total / 60 % 60, total % 60)
+    else "%d:%02d".format(total / 60, total % 60)
+}
+
+/** The account's other devices: drive what they play, or take it over here. */
+@Composable
+private fun DevicesScreen(model: AetherViewModel) {
+    val devices by model.devices.collectAsState()
+    BackHandler { model.closeSeries() }
+    Column(Modifier.fillMaxSize().padding(12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = model::closeSeries) { Text(stringResource(R.string.back)) }
+            Text(stringResource(R.string.devices), style = MaterialTheme.typography.titleLarge)
+        }
+        if (devices.isEmpty()) Text(stringResource(R.string.no_devices), modifier = Modifier.padding(16.dp))
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            listItems(devices, key = { it.id }) { device ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(device.name, style = MaterialTheme.typography.titleMedium)
+                        val playing = device.playing
+                        if (playing == null) {
+                            Text(stringResource(R.string.idle), style = MaterialTheme.typography.bodySmall)
+                            return@Column
+                        }
+                        Text("${playing.title ?: ""} · ${clock(playing.position)}", style = MaterialTheme.typography.bodySmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton(onClick = { model.remoteCommand(device, if (playing.paused) "play" else "pause") }) {
+                                Text(stringResource(if (playing.paused) R.string.play else R.string.pause))
+                            }
+                            TextButton(onClick = { model.remoteCommand(device, "seek", playing.position - 10) }) { Text("−10 s") }
+                            TextButton(onClick = { model.remoteCommand(device, "seek", playing.position + 30) }) { Text("+30 s") }
+                            TextButton(onClick = { model.remoteCommand(device, "stop") }) { Text(stringResource(R.string.stop)) }
+                        }
+                        TextButton(onClick = { model.resumeHere(device) }) { Text(stringResource(R.string.resume_here)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SeriesScreen(model: AetherViewModel, series: Work) {
     val detail by model.detail.collectAsState()
@@ -371,7 +430,7 @@ private fun EpisodeRow(episode: Episode, onDownload: () -> Unit, onClick: () -> 
  * every 15 s and when leaving; the Core applies its own "watched" threshold.
  */
 @Composable
-private fun PlayerScreen(model: AetherViewModel, work: Work) {
+private fun PlayerScreen(model: AetherViewModel, work: Work, startAt: Double?) {
     val context = LocalContext.current
     // Offline copy first (cache), network otherwise.
     val player = remember {
@@ -381,6 +440,9 @@ private fun PlayerScreen(model: AetherViewModel, work: Work) {
     var progressId by remember { mutableStateOf<String?>(null) }
     var revision by remember { mutableStateOf(0L) }
     var errorText by remember { mutableStateOf<String?>(null) }
+    var streamUrl by remember { mutableStateOf<String?>(null) }
+    var castingTo by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     fun save() {
         val id = progressId ?: return
@@ -397,7 +459,7 @@ private fun PlayerScreen(model: AetherViewModel, work: Work) {
             progressId = work.id
             revision = progress?.revision ?: 0
             val start = if (progress == null || progress.watched) 0L else (progress.position * 1000).toLong()
-            player.setMediaItem(offline.request.toMediaItem(), start)
+            player.setMediaItem(offline.request.toMediaItem(), startAt?.let { (it * 1000).toLong() } ?: start)
             player.prepare()
             player.playWhenReady = true
             while (isActive) {
@@ -412,9 +474,11 @@ private fun PlayerScreen(model: AetherViewModel, work: Work) {
             val id = media.workId ?: work.id
             val progress = client.progress(id)
             val url = client.playbackUrl(media.id)
+            streamUrl = url.url
             progressId = id
             revision = progress.revision
-            val start = if (progress.watched) 0L else (progress.position * 1000).toLong()
+            val saved = if (progress.watched) 0L else (progress.position * 1000).toLong()
+            val start = startAt?.let { (it * 1000).toLong() } ?: saved
             player.setMediaItem(MediaItem.Builder().setUri(url.url).setMimeType(MimeTypes.APPLICATION_M3U8).build(), start)
             player.prepare()
             player.playWhenReady = true
@@ -426,15 +490,97 @@ private fun PlayerScreen(model: AetherViewModel, work: Work) {
             errorText = unavailable.format(e.message)
         }
     }
+    // Chromecast: the receiver opens the same HLS capability URL at this position.
+    var cast by remember { mutableStateOf<CastContext?>(null) }
+    LaunchedEffect(Unit) {
+        runCatching {
+            CastContext.getSharedInstance(context, Executors.newSingleThreadExecutor()).addOnSuccessListener { cast = it }
+        }
+    }
+    fun castHere(session: CastSession) {
+        val client = session.remoteMediaClient ?: return
+        val position = player.currentPosition
+        scope.launch {
+            val url = streamUrl ?: model.streamUrl(work.id) ?: return@launch
+            val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
+                putString(MediaMetadata.KEY_TITLE, work.title)
+            }
+            val info = MediaInfo.Builder(url)
+                .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+                .setContentType("application/x-mpegURL")
+                // Without these the Default Media Receiver expects MPEG-TS segments.
+                .setHlsSegmentFormat(HlsSegmentFormat.FMP4)
+                .setHlsVideoSegmentFormat(HlsVideoSegmentFormat.FMP4)
+                .setMetadata(metadata)
+                .build()
+            client.load(MediaLoadRequestData.Builder().setMediaInfo(info).setAutoplay(true).setCurrentTime(position).build())
+            player.pause()
+            castingTo = session.castDevice?.friendlyName ?: ""
+        }
+    }
+    DisposableEffect(cast) {
+        val context = cast ?: return@DisposableEffect onDispose { }
+        val listener = object : SessionManagerListener<CastSession> {
+            override fun onSessionStarted(session: CastSession, sessionId: String) = castHere(session)
+            override fun onSessionResumed(session: CastSession, wasSuspended: Boolean) = castHere(session)
+            override fun onSessionEnded(session: CastSession, error: Int) { castingTo = null }
+            override fun onSessionStarting(session: CastSession) {}
+            override fun onSessionStartFailed(session: CastSession, error: Int) {}
+            override fun onSessionEnding(session: CastSession) {}
+            override fun onSessionResuming(session: CastSession, sessionId: String) {}
+            override fun onSessionResumeFailed(session: CastSession, error: Int) {}
+            override fun onSessionSuspended(session: CastSession, reason: Int) {}
+        }
+        context.sessionManager.addSessionManagerListener(listener, CastSession::class.java)
+        onDispose { context.sessionManager.removeSessionManagerListener(listener, CastSession::class.java) }
+    }
+
+    // Remote control: commands from another device, and what plays here.
+    LaunchedEffect(Unit) {
+        model.playerCommands.collect { command ->
+            when (command.action) {
+                "play" -> player.play()
+                "pause" -> player.pause()
+                "seek" -> command.position?.let { player.seekTo((it * 1000).toLong()) }
+                "stop" -> model.closePlayer()
+            }
+        }
+    }
+    LaunchedEffect(work.id) {
+        while (isActive) {
+            val id = progressId
+            if (id != null && player.duration > 0) {
+                model.reportPlaying(Playing(id, work.title.ifBlank { null }, player.currentPosition / 1000.0, player.duration / 1000.0, !player.isPlaying))
+            }
+            delay(3_000)
+        }
+    }
     DisposableEffect(Unit) {
         onDispose {
             save()
+            model.reportPlaying(null)
             player.release()
         }
     }
     BackHandler { model.closePlayer() }
+    val others by model.devices.collectAsState()
     Column(Modifier.fillMaxSize().background(Color.Black)) {
         errorText?.let { Text(it, color = Color.White, modifier = Modifier.padding(16.dp)) }
+        Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (cast != null) {
+                AndroidView(factory = { MediaRouteButton(it).also { button -> CastButtonFactory.setUpMediaRouteButton(it.applicationContext, button) } })
+            }
+            castingTo?.let { Text(stringResource(R.string.casting_to, it), color = Color.White) }
+        }
+        // "Send to…": hand this playback over to another device at this position.
+        if (others.isNotEmpty() && progressId != null) {
+            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(R.string.send_to), color = Color.White)
+                others.forEach { device ->
+                    TextButton(onClick = { model.sendTo(device, progressId!!, player.currentPosition / 1000.0) }) { Text(device.name) }
+                }
+            }
+        }
         AndroidView(factory = { PlayerView(it).apply { this.player = player } }, modifier = Modifier.fillMaxSize())
     }
 }

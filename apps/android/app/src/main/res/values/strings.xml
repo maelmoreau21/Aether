@@ -27,4 +27,12 @@
     <string name="download_percent">%1$d %%</string>
     <string name="play">Lire</string>
     <string name="delete">Supprimer</string>
+    <string name="devices">Appareils</string>
+    <string name="no_devices">Aucun autre appareil connecté à ce compte</string>
+    <string name="idle">Ne lit rien</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Arrêter</string>
+    <string name="resume_here">Reprendre ici</string>
+    <string name="send_to">Envoyer vers</string>
+    <string name="casting_to">Lecture sur %1$s</string>
 </resources>

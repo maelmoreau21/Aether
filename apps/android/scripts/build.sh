@@ -24,5 +24,12 @@ cargo run --locked -p aether-client-ffi --bin uniffi-bindgen -- generate \
     --language kotlin --out-dir "$APP/build/generated/uniffi" --no-format
 test -f "$APP/build/generated/uniffi/uniffi/aether_ffi/aether_ffi.kt"
 
-gradle --no-daemon -p apps/android assembleDebug
-echo "APK: $APP/build/outputs/apk/debug/app-debug.apk"
+if [ "${RELEASE:-0}" = 1 ]; then
+    # Minified APK (sideload, F-Droid) and AAB (Play Store); signed when
+    # keystore.properties or the AETHER_KEY* variables are present.
+    gradle --no-daemon -p apps/android assembleRelease bundleRelease
+    ls "$APP"/build/outputs/apk/release/*.apk "$APP"/build/outputs/bundle/release/*.aab
+else
+    gradle --no-daemon -p apps/android assembleDebug
+    echo "APK: $APP/build/outputs/apk/debug/app-debug.apk"
+fi

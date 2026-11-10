@@ -15,7 +15,9 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -36,9 +38,10 @@ sealed interface Screen {
     data object SignIn : Screen
     data object Catalog : Screen
     data object Downloads : Screen
+    data object Devices : Screen
     data class Series(val work: Work) : Screen
-    /** `back` is where leaving the player returns. */
-    data class Player(val work: Work, val back: Screen) : Screen
+    /** `back` is where leaving the player returns; `startAt` overrides the saved position (seconds). */
+    data class Player(val work: Work, val back: Screen, val startAt: Double? = null) : Screen
 }
 
 /** Navigation and session state; every network call goes through the Rust core. */
@@ -91,6 +94,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
                 store.save(created.token())
                 TokenRefresh.schedule(getApplication())
                 showCatalog()
+                connectRemote()
             } catch (e: ClientException.Unauthorized) {
                 store.save(null)
                 showSignIn()
@@ -165,6 +169,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         store.save(client?.token())
         TokenRefresh.schedule(getApplication())
         showCatalog()
+        connectRemote()
     }
 
     private fun showCatalog() {
@@ -224,6 +229,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     fun signOut() {
         val client = client ?: return
         viewModelScope.launch {
+            remote.disconnect()
             runCatching { client.logout() }
             store.save(null)
             TokenRefresh.cancel(getApplication())
@@ -239,6 +245,61 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
             runCatching { client.saveProgress(workId, positionSeconds, durationSeconds, false, revision) }
                 .onSuccess { done(it.revision) }
         }
+    }
+
+    // ---- Remote control ---------------------------------------------------
+
+    private val remote = RemoteControl(app, viewModelScope)
+    val devices: StateFlow<List<RemoteDevice>> = remote.devices
+    private val _playerCommands = MutableSharedFlow<RemoteCommand>(extraBufferCapacity = 16)
+    /** play, pause, seek and stop received for the player on screen. */
+    val playerCommands: SharedFlow<RemoteCommand> = _playerCommands
+
+    init {
+        viewModelScope.launch {
+            remote.commands.collect { command ->
+                when (command.action) {
+                    "open" -> command.workId?.let { id ->
+                        val back = (_screen.value as? Screen.Player)?.back ?: _screen.value
+                        _screen.value = Screen.Player(Work(id, "remote", "", null, "", null), back, command.position)
+                    }
+                    else -> _playerCommands.tryEmit(command)
+                }
+            }
+        }
+    }
+
+    private fun connectRemote() {
+        val server = store.server ?: return
+        remote.connect(server, device) { client?.token()?.access }
+    }
+
+    fun showDevices() {
+        _screen.value = Screen.Devices
+    }
+
+    fun reportPlaying(playing: Playing?) = remote.report(playing)
+
+    fun remoteCommand(device: RemoteDevice, action: String, position: Double? = null) =
+        remote.command(device, action, position)
+
+    /** "Resume here": continue locally where the other device is, and stop it there. */
+    fun resumeHere(device: RemoteDevice) {
+        val playing = device.playing ?: return
+        remote.command(device, "stop")
+        _screen.value = Screen.Player(Work(playing.workId, "remote", playing.title ?: "", null, "", null), _screen.value, playing.position)
+    }
+
+    /** A fresh HLS URL for a work (casting an offline copy needs the online one). */
+    suspend fun streamUrl(workId: String): String? {
+        val client = client ?: return null
+        return runCatching { client.playbackUrl(client.media(workId).id).url }.getOrNull()
+    }
+
+    /** "Send to…": the other device opens the work at this position; this one stops. */
+    fun sendTo(device: RemoteDevice, workId: String, position: Double) {
+        remote.command(device, "open", position, workId)
+        closePlayer()
     }
 
     // ---- Offline copies ---------------------------------------------------

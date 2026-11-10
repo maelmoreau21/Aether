@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon foreground: the Aether "A" inside the 72 dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#7C9CFF"
+        android:pathData="M54,28 L76,80 H66 L61,68 H47 L42,80 H32 Z M50,60 H58 L54,49 Z" />
+</vector>

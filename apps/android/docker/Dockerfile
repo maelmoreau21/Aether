@@ -22,7 +22,7 @@ RUN mkdir -p $ANDROID_HOME/cmdline-tools \
  && mv $ANDROID_HOME/cmdline-tools/cmdline-tools $ANDROID_HOME/cmdline-tools/latest \
  && rm /tmp/tools.zip \
  && yes | sdkmanager --licenses > /dev/null \
- && sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;${NDK_VERSION}" > /dev/null
+ && sdkmanager "platforms;android-35" "build-tools;35.0.0" "build-tools;34.0.0" "platform-tools" "ndk;${NDK_VERSION}" > /dev/null
 
 RUN curl -fsSL -o /tmp/gradle.zip https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip \
  && unzip -q /tmp/gradle.zip -d /opt \

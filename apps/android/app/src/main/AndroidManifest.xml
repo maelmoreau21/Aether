@@ -17,10 +17,11 @@
     <application
         android:allowBackup="false"
         android:banner="@drawable/tv_banner"
-        android:icon="@android:drawable/sym_def_app_icon"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.NoActionBar"
+        android:theme="@style/Theme.AppCompat.NoActionBar"
         android:usesCleartextTraffic="true">
         <activity
             android:name=".MainActivity"
@@ -47,5 +48,8 @@
             android:name="androidx.media3.exoplayer.scheduler.PlatformScheduler$PlatformSchedulerService"
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="app.aether.AetherCastOptions" />
     </application>
 </manifest>

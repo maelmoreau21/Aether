@@ -6,7 +6,14 @@ use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
 use zeroize::Zeroizing;
 
-const PASSWORD: &str = "synthetic client contract password";
+/// Made per run: the test account never has a fixed password in the source.
+static PASSWORD: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("synthetic client contract {nanos:x}")
+});
 
 fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -27,7 +34,7 @@ async fn serve() -> (tempfile::TempDir, String, PathBuf) {
         .await
         .unwrap();
     store
-        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .bootstrap("admin", Zeroizing::new(PASSWORD.clone()))
         .await
         .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -80,12 +87,12 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
     assert!(matches!(phone.me().await, Err(Error::SignedOut)));
     assert!(
         phone
-            .login("admin", "wrong password")
+            .login("admin", &format!("{}-wrong", *PASSWORD))
             .await
             .unwrap_err()
             .is_unauthorized()
     );
-    let user = phone.login("admin", PASSWORD).await.unwrap();
+    let user = phone.login("admin", &PASSWORD).await.unwrap();
     assert_eq!(
         (user.login.as_str(), user.role.as_str()),
         ("admin", "administrator")

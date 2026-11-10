@@ -632,6 +632,41 @@ jobs:
             git push origin "$TAG"
           fi
 
+  clients:
+    name: Applications clientes
+    permissions:
+      contents: read
+    uses: ./.github/workflows/clients.yml
+    secrets: inherit
+
+  beta-release:
+    name: Pré-version GitHub de la bêta (avec les applis)
+    needs: [calculate-beta, tag-beta, clients]
+    if: needs.calculate-beta.outputs.has_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Récupérer les applications
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aether-*
+          path: dist
+          merge-multiple: true
+
+      - name: Créer la pré-version et y joindre les applications
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.calculate-beta.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false \
+              --title "Aether $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
   publish:
     name: Publication Docker GHCR (develop)
     needs: [workflows, rust, security-audit, frontend, browser, images, calculate-beta]

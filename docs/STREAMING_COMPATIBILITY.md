@@ -10,7 +10,7 @@ ou seulement atteignable ainsi, sous-titre image à incruster, ou conversion HDR
 
 - Ressource `prepared/transcode-v{vidéo}a{audio|x}s{sous-titre|x}h{hauteur}b{kb/s}f{options}-{ms}`,
   orthographe canonique stricte (`crates/node/src/transcode.rs`). Le Core vérifie le réglage
-  serveur `transcodingEnabled`, la politique de sous-titres de la bibliothèque et chaque index
+  serveur `videoTranscodingEnabled` (image encodée) ou `audioTranscodingEnabled` (audio encodé ; un flux copié n’exige aucun des deux), la politique de sous-titres de la bibliothèque et chaque index
   contre le probe (`crates/core/src/inventory/resources.rs`) ; le Node ne voit jamais le probe.
 - Sortie : un fMP4 continu sur la sortie standard d'un FFmpeg par requête (même tuyau borné que
   le flux progressif AV1 : contre-pression, annulation, aucun fichier écrit). Un seek relance le

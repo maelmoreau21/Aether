@@ -70,9 +70,20 @@ pub async fn prepared(
         }
     }
     let stream_position = media_node::video_stream::position(component);
-    if transcode.is_some() || hls.is_some_and(|request| request.encodes()) {
+    // Audio and video encodes follow their own server switch; copied streams need neither.
+    let (encodes_audio, encodes_video) = match (&transcode, &hls) {
+        (Some(request), _) => (
+            request.audio.is_some() && !request.has(media_node::transcode::FLAG_COPY_AUDIO),
+            !request.copies_video(),
+        ),
+        (None, Some(request)) => (request.convert, request.encode.is_some()),
+        (None, None) => (false, false),
+    };
+    if encodes_audio || encodes_video {
         match crate::server_settings::load(store).await {
-            Ok(settings) if settings.transcoding_enabled => {}
+            Ok(settings)
+                if (!encodes_audio || settings.audio_transcoding_enabled)
+                    && (!encodes_video || settings.video_transcoding_enabled) => {}
             Ok(_) => {
                 let mut response =
                     crate::error(StatusCode::UNPROCESSABLE_ENTITY, "transcode_disabled");

@@ -67,10 +67,15 @@ pub struct Settings {
     /// "Watch together": when off, every party route refuses and the web hides its entry points.
     #[serde(default = "default_true")]
     pub watch_together_enabled: bool,
-    /// Fallback transcoding when a browser cannot decode the original. Direct play stays
-    /// the default; when off, the Core refuses every `transcode-*` resource.
+    /// Server video transcoding (re-encoded picture, reduced quality, tone mapping, burnt
+    /// subtitles). Direct play stays the default; when off, the Core refuses every encode
+    /// of the picture. Settings saved before the audio/video split used `transcodingEnabled`.
+    #[serde(default = "default_true", alias = "transcodingEnabled")]
+    pub video_transcoding_enabled: bool,
+    /// Server audio transcoding (AAC conversion, downmix, normalisation, night mode).
+    /// When off, the Core refuses every audio encode; copied audio stays allowed.
     #[serde(default = "default_true")]
-    pub transcoding_enabled: bool,
+    pub audio_transcoding_enabled: bool,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -149,7 +154,8 @@ struct SettingsInput {
     log_level: Option<crate::server_log::Level>,
     log_retention_days: Option<u32>,
     watch_together_enabled: Option<bool>,
-    transcoding_enabled: Option<bool>,
+    video_transcoding_enabled: Option<bool>,
+    audio_transcoding_enabled: Option<bool>,
 }
 
 impl Default for Settings {
@@ -180,7 +186,8 @@ impl Default for Settings {
             log_level: crate::server_log::Level::Info,
             log_retention_days: default_log_retention(),
             watch_together_enabled: true,
-            transcoding_enabled: true,
+            video_transcoding_enabled: true,
+            audio_transcoding_enabled: true,
         }
     }
 }
@@ -208,8 +215,21 @@ pub async fn load(store: &IdentityStore) -> Result<Settings, StatusCode> {
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     saved
-        .map(|s| serde_json::from_str(&s).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR))
+        .map(|s| parse(&s).ok_or(StatusCode::INTERNAL_SERVER_ERROR))
         .unwrap_or(Ok(Settings::default()))
+}
+/// Stored settings; one saved before the audio/video split keeps its single switch for both.
+fn parse(saved: &str) -> Option<Settings> {
+    let value: serde_json::Value = serde_json::from_str(saved).ok()?;
+    let legacy = value
+        .get("transcodingEnabled")
+        .and_then(serde_json::Value::as_bool)
+        .filter(|_| value.get("audioTranscodingEnabled").is_none());
+    let mut settings: Settings = serde_json::from_value(value).ok()?;
+    if let Some(enabled) = legacy {
+        settings.audio_transcoding_enabled = enabled;
+    }
+    Some(settings)
 }
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -346,9 +366,12 @@ async fn write(
         watch_together_enabled: input
             .watch_together_enabled
             .unwrap_or(previous.watch_together_enabled),
-        transcoding_enabled: input
-            .transcoding_enabled
-            .unwrap_or(previous.transcoding_enabled),
+        video_transcoding_enabled: input
+            .video_transcoding_enabled
+            .unwrap_or(previous.video_transcoding_enabled),
+        audio_transcoding_enabled: input
+            .audio_transcoding_enabled
+            .unwrap_or(previous.audio_transcoding_enabled),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)
@@ -533,11 +556,26 @@ mod tests {
         assert!(parsed.chapter_images_enabled && parsed.intro_detection_enabled);
         assert_eq!(parsed.marker_min_confidence, 80);
         assert!(parsed.watch_together_enabled);
-        assert!(parsed.transcoding_enabled);
+        assert!(parsed.video_transcoding_enabled && parsed.audio_transcoding_enabled);
         assert_eq!(
             parsed.media_defaults(),
             crate::library_options::GlobalMediaDefaults::default()
         );
+    }
+
+    #[test]
+    fn single_transcoding_switch_covers_audio_and_video() {
+        let base = r#""serverName":"A","welcomeMessage":"""#;
+        let off = parse(&format!("{{{base},\"transcodingEnabled\":false}}")).unwrap();
+        assert!(!off.video_transcoding_enabled && !off.audio_transcoding_enabled);
+        let split = parse(&format!(
+            "{{{base},\"videoTranscodingEnabled\":false,\"audioTranscodingEnabled\":true}}"
+        ))
+        .unwrap();
+        assert!(!split.video_transcoding_enabled && split.audio_transcoding_enabled);
+        let saved = serde_json::to_string(&split).unwrap();
+        let again = parse(&saved).unwrap();
+        assert!(!again.video_transcoding_enabled && again.audio_transcoding_enabled);
     }
 
     #[test]

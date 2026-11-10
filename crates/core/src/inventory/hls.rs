@@ -325,12 +325,18 @@ pub(crate) fn subtitle_playlist(stem: &str, duration: f64) -> String {
     )
 }
 
-/// `transcode` (the administrator allows encoding): also offer AAC conversions
-/// of the tracks native players cannot decode, and reduced H.264 variants
-/// after the original one.
+/// What the administrator lets the Node encode for HLS.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Encodes {
+    /// AAC conversions of the tracks native players cannot decode.
+    pub audio: bool,
+    /// Reduced H.264 variants after the original one.
+    pub video: bool,
+}
+
 pub(crate) fn master_playlist(
     probe: &Probe,
-    transcode: bool,
+    transcode: Encodes,
     subtitles: &[SubtitleRendition],
 ) -> Result<String, &'static str> {
     let video = probe
@@ -338,7 +344,7 @@ pub(crate) fn master_playlist(
         .iter()
         .find(|t| is_video(t))
         .ok_or("hls_video_unsupported")?;
-    let audios = renditions_audio(probe, transcode);
+    let audios = renditions_audio(probe, transcode.audio);
     let default = audios.iter().position(|t| flag(t, "default")).unwrap_or(0);
     let mut out = String::from("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n");
     let mut names: Vec<String> = Vec::new();
@@ -449,7 +455,7 @@ pub(crate) fn master_playlist(
         number(video, "width").zip(number(video, "height")),
         &format!("hls-v{}.m3u8", video.index),
     );
-    if transcode {
+    if transcode.video {
         for offered in reduced(probe, video, &audios) {
             let request = media_node::hls::HlsRequest {
                 video: video.index,
@@ -564,10 +570,14 @@ pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) 
         Ok(loaded) => loaded,
         Err(response) => return *response,
     };
-    // AAC conversions and reduced variants spend Node CPU: they follow the transcoding setting.
+    // AAC conversions and reduced variants spend Node CPU: they follow the transcoding settings.
     let transcode = crate::server_settings::load(store)
         .await
-        .is_ok_and(|settings| settings.transcoding_enabled);
+        .map(|settings| Encodes {
+            audio: settings.audio_transcoding_enabled,
+            video: settings.video_transcoding_enabled,
+        })
+        .unwrap_or_default();
     match master_playlist(&probe, transcode, &subtitles) {
         Ok(text) => playlist_response(text, method),
         Err(code) => crate::error(StatusCode::UNPROCESSABLE_ENTITY, code),
@@ -578,6 +588,11 @@ pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) 
 mod tests {
     use super::*;
     use serde_json::json;
+
+    const BOTH: Encodes = Encodes {
+        audio: true,
+        video: true,
+    };
 
     fn track(value: serde_json::Value) -> Track {
         serde_json::from_value(value).unwrap()
@@ -600,7 +615,7 @@ mod tests {
             json!({"index":4,"codec_type":"video","codec_name":"mjpeg","disposition":{"attached_pic":1}}),
         ]);
         // With transcoding allowed, the DTS track is offered as AAC 5.1.
-        let converted = master_playlist(&probe, true, &[]).unwrap();
+        let converted = master_playlist(&probe, BOTH, &[]).unwrap();
         assert!(
             converted.contains(r#"CHANNELS="6",URI="hls-v0-aac3.m3u8""#),
             "{converted}"
@@ -609,7 +624,7 @@ mod tests {
             converted.contains(r#"CODECS="hvc1.2.4.L150.B0,ec-3,mp4a.40.2""#),
             "{converted}"
         );
-        let text = master_playlist(&probe, false, &[]).unwrap();
+        let text = master_playlist(&probe, Encodes::default(), &[]).unwrap();
         assert!(text.contains("NAME=\"Français VFF\",LANGUAGE=\"fre\",DEFAULT=NO,AUTOSELECT=YES,CHANNELS=\"6\",URI=\"hls-v0-a1.m3u8\""));
         assert!(text.contains("NAME=\"ENG\",LANGUAGE=\"eng\",DEFAULT=YES,AUTOSELECT=YES,CHANNELS=\"2\",URI=\"hls-v0-a2.m3u8\""));
         assert!(!text.contains("a3.m3u8"), "DTS is not offered: {text}");
@@ -637,7 +652,7 @@ mod tests {
         let subs = subtitle_renditions(&probe, |c| c != Some("ass"), &[sidecar]);
         let stems: Vec<&str> = subs.iter().map(|s| s.stem.as_str()).collect();
         assert_eq!(stems, ["hls-s1", "hls-x0"]);
-        let text = master_playlist(&probe, false, &subs).unwrap();
+        let text = master_playlist(&probe, Encodes::default(), &subs).unwrap();
         assert!(text.contains("#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"FRE\",LANGUAGE=\"fre\",DEFAULT=NO,AUTOSELECT=YES,FORCED=YES,URI=\"hls-s1.m3u8\"\n"), "{text}");
         assert!(text.contains("NAME=\"English\",LANGUAGE=\"en\",DEFAULT=NO,AUTOSELECT=NO,FORCED=NO,URI=\"hls-x0.m3u8\""), "{text}");
         assert!(
@@ -663,7 +678,7 @@ mod tests {
             json!({"index":1,"codec_type":"audio","codec_name":"eac3","channels":6,"tags":{"BPS":"768000"}}),
             json!({"index":2,"codec_type":"audio","codec_name":"truehd","channels":8}),
         ]);
-        let text = master_playlist(&uhd, true, &[]).unwrap();
+        let text = master_playlist(&uhd, BOTH, &[]).unwrap();
         let expected = "#EXT-X-STREAM-INF:BANDWIDTH=12000000,CODECS=\"hvc1.2.4.L153.B0,ec-3,mp4a.40.2\",RESOLUTION=3840x1600,AUDIO=\"audio\"\nhls-v0.m3u8\n\
              #EXT-X-STREAM-INF:BANDWIDTH=10368000,CODECS=\"avc1.640029,ec-3,mp4a.40.2\",RESOLUTION=1920x800,AUDIO=\"audio\"\nhls-v0-h1080.m3u8\n\
              #EXT-X-STREAM-INF:BANDWIDTH=5568000,CODECS=\"avc1.640029,ec-3,mp4a.40.2\",RESOLUTION=1280x534,AUDIO=\"audio\"\nhls-v0-h720.m3u8\n";
@@ -676,14 +691,35 @@ mod tests {
             "SDR is not tone mapped"
         );
         // Encoding is the administrator's call.
-        let plain = master_playlist(&uhd, false, &[]).unwrap();
+        let plain = master_playlist(&uhd, Encodes::default(), &[]).unwrap();
         assert!(!plain.contains("h1080") && plain.ends_with("hls-v0.m3u8\n"));
+        // Each kind of encode has its own switch.
+        let audio_only = master_playlist(
+            &uhd,
+            Encodes {
+                audio: true,
+                video: false,
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(audio_only.contains("aac2.m3u8") && !audio_only.contains("h1080"));
+        let video_only = master_playlist(
+            &uhd,
+            Encodes {
+                audio: false,
+                video: true,
+            },
+            &[],
+        )
+        .unwrap();
+        assert!(!video_only.contains("aac2") && video_only.contains("h1080"));
         // HDR10 is tone mapped; Dolby Vision 5 has nothing to map from.
         let mut hdr = uhd.clone();
         hdr.streams[0]
             .details
             .insert("color_transfer".into(), json!("smpte2084"));
-        let text = master_playlist(&hdr, true, &[]).unwrap();
+        let text = master_playlist(&hdr, BOTH, &[]).unwrap();
         assert!(text.contains("hls-v0-t1080.m3u8\n") && !text.contains("-h1080"));
         assert!(offered(&hdr, "hls-v0-t1080-init.mp4") && !offered(&hdr, "hls-v0-h1080.m3u8"));
         let mut dovi = uhd.clone();
@@ -692,7 +728,7 @@ mod tests {
             json!([{"side_data_type":"DOVI configuration record","dv_profile":5}]),
         );
         assert!(
-            !master_playlist(&dovi, true, &[])
+            !master_playlist(&dovi, BOTH, &[])
                 .unwrap()
                 .contains("-t1080")
         );
@@ -701,7 +737,7 @@ mod tests {
         let full_hd = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"h264","profile":"High","level":41,"width":1920,"height":1080}),
         ]);
-        let text = master_playlist(&full_hd, true, &[]).unwrap();
+        let text = master_playlist(&full_hd, BOTH, &[]).unwrap();
         assert!(
             !text.contains("h1080") && text.contains("RESOLUTION=1280x720\nhls-v0-h720.m3u8\n"),
             "{text}"
@@ -709,7 +745,7 @@ mod tests {
         assert!(!offered(&full_hd, "hls-v0-h1080.m3u8"));
         let mut light = full_hd.clone();
         light.format.insert("bit_rate".into(), json!("3000000"));
-        assert!(!master_playlist(&light, true, &[]).unwrap().contains("h720"));
+        assert!(!master_playlist(&light, BOTH, &[]).unwrap().contains("h720"));
         assert!(!offered(&light, "hls-v0-h720.m3u8"));
     }
 
@@ -727,7 +763,7 @@ mod tests {
         let odd = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"h264","profile":"High 4:4:4"}),
         ]);
-        let text = master_playlist(&odd, true, &[]).unwrap();
+        let text = master_playlist(&odd, BOTH, &[]).unwrap();
         assert!(
             !text.contains("CODECS") && !text.contains("AUDIO="),
             "{text}"
@@ -736,7 +772,7 @@ mod tests {
             json!({"index":0,"codec_type":"video","codec_name":"mpeg2video"}),
         ]);
         assert_eq!(
-            master_playlist(&mpeg2, true, &[]),
+            master_playlist(&mpeg2, BOTH, &[]),
             Err("hls_video_unsupported")
         );
         let request = media_node::hls::request("hls-v0-a3.m3u8").unwrap();

@@ -395,10 +395,17 @@ async fn descriptor_for_asset(
     let library_id: String = row.get("library_id");
     let node_id: String = row.get("node_id");
     let library_options = playback_library_options(store, &library_id).await?;
-    // Fallback transcoding is a server choice; an unreadable setting offers none.
-    let transcoding = crate::server_settings::load(store)
-        .await
-        .is_ok_and(|settings| settings.transcoding_enabled);
+    // Fallback transcoding is a server choice, audio and video apart; an unreadable
+    // setting offers none.
+    let (audio_transcoding, video_transcoding) =
+        crate::server_settings::load(store)
+            .await
+            .map_or((false, false), |settings| {
+                (
+                    settings.audio_transcoding_enabled,
+                    settings.video_transcoding_enabled,
+                )
+            });
     let node_rec = crate::nodes::load_node(store, &node_id).await?;
     let direct_info = if node_status == "connected" {
         node_rec.as_ref().and_then(|n| {
@@ -560,7 +567,7 @@ async fn descriptor_for_asset(
                 && (matches!(
                     t.codec_name.as_deref(),
                     Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text" | "hdmv_pgs_subtitle")
-                ) || transcoding && matches!(t.codec_name.as_deref(), Some("dvd_subtitle" | "dvb_subtitle")))
+                ) || video_transcoding && matches!(t.codec_name.as_deref(), Some("dvd_subtitle" | "dvb_subtitle")))
         }) {
             let language = track
                 .tags
@@ -610,12 +617,12 @@ async fn descriptor_for_asset(
                 "forced": forced, "sdh": sdh, "sourceFormat": track.codec_name,
                 "url": url,
                 "image": image,
-                "burnIndex": (image.is_some() && transcoding).then_some(track.index),
+                "burnIndex": (image.is_some() && video_transcoding).then_some(track.index),
                 "assUrl": matches!(track.codec_name.as_deref(), Some("ass" | "ssa")).then(|| format!("/api/v1/assets/{asset_id}/prepared/subtitle-ass-{}",track.index)) }));
     }
     // Every other embedded audio track becomes selectable through fallback transcoding
     // (video copied when the browser decodes it): direct play only reaches the default one.
-    if transcoding && original_audio.len() > 1 {
+    if audio_transcoding && original_audio.len() > 1 {
         // The track a browser plays from the original (flagged default, else the first)
         // stays direct play: its source is the original itself, with a known language.
         let browser_default = original_audio
@@ -862,7 +869,9 @@ async fn descriptor_for_asset(
                 .and_then(Value::as_i64)
                 != Some(1)
     });
-    if transcoding && let (Some(video), Some(duration)) = (picture, total_dur) {
+    if (audio_transcoding || video_transcoding)
+        && let (Some(video), Some(duration)) = (picture, total_dur)
+    {
         let bitrate = probe
             .format
             .get("bit_rate")
@@ -879,6 +888,8 @@ async fn descriptor_for_asset(
             "durationSeconds": duration,
             "dynamicRange": super::resources::video_dynamic_range(video),
             "copyVideoMime": av1_video_mime(video).or_else(|| h264_video_mime(video)),
+            "audio": audio_transcoding,
+            "video": video_transcoding,
         });
     }
     if let Some(orig) = failover_from {

@@ -155,7 +155,7 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |
 | `MEDIA_LIBRARY_ROOT` | optionnelle | Restriction explicite à une racine ; sinon découverte des montages de dossiers Linux |
-| `MEDIA_TRANSCODE_ENABLED` | `true` | `false` coupe le transcodage de secours sur ce Media Node (le réglage serveur *Autoriser le transcodage de secours* s'applique aussi) |
+| `MEDIA_TRANSCODE_ENABLED` | `true` | `false` coupe le transcodage de secours sur ce Media Node (les réglages serveur *Autoriser le transcodage vidéo* et *audio sur le serveur* s’appliquent aussi) |
 | `MEDIA_TRANSCODE_HARDWARE` | `none` | `nvenc` (NVIDIA), `vaapi` (Intel QuickSync et AMD sous Linux), `qsv`/`amf` (FFmpeg personnalisé) ; encodeur absent : repli logiciel x264 journalisé |
 | `MEDIA_TRANSCODE_VAAPI_DEVICE` | `/dev/dri/renderD128` | Nœud de rendu VA-API, sous `/dev/dri/` uniquement |
 | `MEDIA_TRANSCODE_MAX_SESSIONS` | `2` | Transcodages simultanés (1 à 16) ; au-delà, `transcode_capacity_reached` |

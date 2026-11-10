@@ -197,7 +197,7 @@
   const title = $derived(menu === 'audio' ? $t('audio') : menu === 'subtitles' ? $t('subtitles') : menu === 'video' ? $t('version') : menu === 'quality' ? $t('quality') : menu === 'speed' ? $t('speed') : menu === 'sleep' ? $t('sleep_timer') : menu === 'settings' ? $t('player_settings') : menuTitle(menu));
   const sourceHeight = $derived(media.transcode?.height ?? videoTracks[0]?.height ?? 0);
   // Heights above the original are never offered: transcoding only ever scales down.
-  const qualityHeights = $derived(media.transcode ? LADDER.map(item => item.height).filter(height => height < Math.max(sourceHeight, 361)) : []);
+  const qualityHeights = $derived(media.transcode && media.transcode.video !== false ? LADDER.map(item => item.height).filter(height => height < Math.max(sourceHeight, 361)) : []);
   const qualityOptions = $derived<QualityChoice[]>(['auto', 'original', ...qualityHeights as QualityChoice[]]);
   const enhancementLabel = (value: AudioEnhancement) => value === 'night' ? $t('night_mode') : value === 'normalize' ? $t('volume_levelling') : $t('none');
   const bitrateLabel = (kbps: number) => kbps === 0 ? $t('bitrate_unlimited') : $t('bitrate_mbps', { value: kbps / 1000 });
@@ -208,7 +208,7 @@
     ...(selectableAudio.length > 1 ? [{ id: 'audio', label: $t('audio') }] : []),
     { id: 'subtitles', label: $t('subtitles') },
     { id: 'video', label: $t('version') },
-    ...(media.transcode ? [{ id: 'quality', label: $t('quality') }] : []),
+    ...(media.transcode && media.transcode.video !== false ? [{ id: 'quality', label: $t('quality') }] : []),
     { id: 'speed', label: $t('speed') },
     { id: 'settings', label: $t('player_settings') }
   ]) as { id: Exclude<Menu, null>; label: string }[]);

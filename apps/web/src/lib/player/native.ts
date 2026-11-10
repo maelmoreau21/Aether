@@ -93,7 +93,7 @@ export class NativePlayer implements Player {
   }
   // Automatic quality: repeated or long stalls while playing step the ceiling down.
   private adaptiveWaiting = () => {
-    if (this.busy || this.destroyed || this.video.seeking || this.video.paused || this.streamOptions.quality !== 'auto' || !this.media?.transcode) return;
+    if (this.busy || this.destroyed || this.video.seeking || this.video.paused || this.streamOptions.quality !== 'auto' || !this.media?.transcode || this.media.transcode.video === false) return;
     if (this.stallMonitor.waiting(Date.now())) { void this.adapt(); return; }
     clearInterval(this.stuckTimer);
     this.stuckTimer = setInterval(() => {

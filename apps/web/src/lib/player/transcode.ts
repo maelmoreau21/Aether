@@ -39,6 +39,9 @@ export interface TranscodeOffer {
   dynamicRange?: string | null;
   /** MSE type of the original video when it can be copied (AV1, H.264). */
   copyVideoMime?: string | null;
+  /** Server switches: `false` when the administrator forbids encoding that stream kind. */
+  audio?: boolean;
+  video?: boolean;
 }
 
 export interface TranscodeOptions {
@@ -157,6 +160,9 @@ function h264Codec(height: number) {
   return height <= 1080 ? 'avc1.640029' : height <= 1440 ? 'avc1.640032' : 'avc1.640033';
 }
 
+/** Audio the Node may copy into fragmented MP4 instead of encoding it. */
+const COPY_AUDIO: Record<string, string> = { aac: 'mp4a.40.2', ac3: 'ac-3', eac3: 'ec-3', opus: 'opus', flac: 'flac' };
+
 function videoCodecs(mime: string): string | undefined {
   return /codecs="([^"]+)"/.exec(mime)?.[1];
 }
@@ -177,14 +183,19 @@ export function planTranscode(media: Media, source: Source, reason: TranscodeRea
     const passthrough = options.audioChannels === 'passthrough' && (codec === 'eac3' || codec === 'ac3')
       && Boolean(environment.canPlay(`audio/mp4; codecs="${codec === 'eac3' ? 'ec-3' : 'ac-3'}"`));
     if (passthrough && !options.serverAudio) { flags |= FLAG_COPY_AUDIO; audioCodec = codec === 'eac3' ? 'ec-3' : 'ac-3'; }
-    else {
+    else if (offer.audio === false) {
+      // Audio encoding is off on this server: only a copy of the original track remains.
+      audioCodec = codec ? COPY_AUDIO[codec] : undefined;
+      if (!audioCodec) return undefined;
+      flags |= FLAG_COPY_AUDIO;
+    } else {
       audioCodec = 'mp4a.40.2';
       if ((options.audioChannels === 'surround' || options.audioChannels === 'passthrough') && (track?.channels ?? 0) >= 6) flags |= FLAG_SURROUND;
       if (options.serverAudio === 'normalize') flags |= FLAG_NORMALIZE;
       if (options.serverAudio === 'night') flags |= FLAG_NIGHT;
     }
   }
-  const tonemap = needsToneMapping(offer, options, environment);
+  const tonemap = offer.video !== false && needsToneMapping(offer, options, environment);
   const audioPart = audioCodec ? `,${audioCodec}` : '';
   // Audio-only conversions keep the original picture when the browser decodes it.
   const copyCodecs = offer.copyVideoMime ? videoCodecs(offer.copyVideoMime) : undefined;
@@ -192,6 +203,8 @@ export function planTranscode(media: Media, source: Source, reason: TranscodeRea
     && copyCodecs !== undefined && environment.mse(`video/mp4; codecs="${copyCodecs}${audioPart}"`);
   const target = rung(offer, options);
   const height = canCopy ? 0 : target.height;
+  // Video encoding is off on this server: nothing but a copied picture can be offered.
+  if (height !== 0 && offer.video === false) return undefined;
   if (height !== 0 && tonemap) flags |= FLAG_TONEMAP;
   const mime = `video/mp4; codecs="${canCopy ? copyCodecs : h264Codec(height)}${audioPart}"`;
   if (!environment.mse(mime)) return undefined;

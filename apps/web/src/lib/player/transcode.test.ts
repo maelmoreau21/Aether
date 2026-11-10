@@ -65,6 +65,18 @@ describe('fallback transcoding plan', () => {
     expect(planTranscode(av1, second, 'audio', options, { ...sdr, mse: () => false })).toBeUndefined();
   });
 
+  it('follows the server audio and video transcoding switches', () => {
+    const noVideo = { ...media, transcode: { ...offer, video: false } };
+    expect(planTranscode(noVideo, original, 'quality', { ...options, quality: 1080 }, sdr)).toBeUndefined();
+    const noAudio = { ...media, transcode: { ...offer, audio: false } };
+    // The original track is copied when fragmented MP4 takes it, never encoded.
+    const copied = planTranscode(noAudio, original, 'quality', { ...options, quality: 1080, serverAudio: 'night' }, sdr)!;
+    expect(copied.flags & FLAG_COPY_AUDIO).toBeTruthy();
+    expect(copied.flags & FLAG_NIGHT).toBe(0);
+    expect(copied.mime).toBe('video/mp4; codecs="avc1.640029,ec-3"');
+    expect(planTranscode(noAudio, second, 'audio', options, sdr)).toBeUndefined();
+  });
+
   it('fits the ladder to the source height and every ceiling', () => {
     expect(rung(offer, options)).toEqual({ height: 2160, kbps: 20000 });
     expect(rung(offer, { ...options, maxKbps: 4256 })).toEqual({ height: 720, kbps: 4000 });

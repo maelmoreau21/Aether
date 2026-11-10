@@ -1,0 +1,33 @@
+[package]
+name = "aether-desktop"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Aether desktop application (GPUI, playback through libmpv)"
+publish = false
+
+[[bin]]
+name = "aether-desktop"
+path = "src/main.rs"
+
+[dependencies]
+aether-client = { path = "../../crates/client" }
+gpui = "0.2.2"
+# Frames handed to GPUI: same `image` major as gpui itself.
+image = { version = "0.25", default-features = false }
+smallvec = "1"
+futures = "0.3"
+# libmpv is opened at run time: the application builds without its headers or
+# import library, and explains how to install it when it is missing.
+libloading = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+# Remote control channel; TLS through the same ring-based rustls as aether-client.
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["connect", "handshake", "__rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+uuid = { version = "1", features = ["v4"] }
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"

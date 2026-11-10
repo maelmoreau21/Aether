@@ -171,6 +171,34 @@ pub struct Progress {
     pub revision: i64,
 }
 
+/// One entry of `Client::recent_progress`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentProgress {
+    pub work_id: String,
+    #[serde(default)]
+    pub title: String,
+    /// `film` or `episode`.
+    #[serde(default)]
+    pub kind: String,
+    /// The series of an episode.
+    #[serde(default)]
+    pub series_id: Option<String>,
+    pub position: f64,
+    pub duration: f64,
+    #[serde(default)]
+    pub watched: bool,
+    /// Unix seconds.
+    #[serde(default)]
+    pub updated_at: i64,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct RecentProgressPage {
+    #[serde(default)]
+    pub items: Vec<RecentProgress>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProgressUpdate {
     pub position: f64,

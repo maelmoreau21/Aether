@@ -166,6 +166,13 @@ jobs:
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
         uses: ./.github/actions/setup-ffmpeg
 
+      - name: Installer les bibliothèques de l'application de bureau (GPUI, libmpv)
+        # `--workspace` compile apps/desktop ; libmpv sert à son test de lecture réelle.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libmpv2
+
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
         shell: pwsh

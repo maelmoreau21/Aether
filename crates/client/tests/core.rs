@@ -183,6 +183,23 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
         .await
         .unwrap();
     assert_eq!((stale.position, stale.revision), (42.0, 2));
+    let recent = phone.recent_progress().await.unwrap();
+    let entry = recent.iter().find(|p| p.work_id == film.id).unwrap();
+    assert_eq!(
+        (entry.title.as_str(), entry.position),
+        ("Client Film", 42.0)
+    );
+
+    // Direct play of the original with the token, ranges included.
+    let original = reqwest::Client::new()
+        .get(phone.content_url(&asset.id).unwrap())
+        .bearer_auth(phone.token().unwrap().access)
+        .header("range", "bytes=0-15")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(original.status(), 206);
+    assert_eq!(original.bytes().await.unwrap().len(), 16);
 
     // A TV pairs by QR code, approved from the phone.
     let tv = Client::new(&origin, "Salon TV").unwrap();

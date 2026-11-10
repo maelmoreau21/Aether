@@ -70,8 +70,47 @@ pub async fn search(server: &Server, kind: &str, q: &str) -> Result<Vec<Value>, 
         })
         .collect())
 }
+/// A poster path that can only name an image file on a fixed artwork host.
+pub fn valid_poster_path(path: &str) -> bool {
+    path.len() <= 200
+        && path.starts_with('/')
+        && !path.contains("..")
+        && !path.contains("//")
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+        && matches!(
+            path.rsplit('.').next(),
+            Some("jpg" | "jpeg" | "png" | "webp")
+        )
+}
+/// The artwork source and path of a lookup result's poster, when it is hosted by one of the
+/// fixed providers (TMDB for films, TheTVDB for series).
+pub(super) fn poster_source(v: &Value) -> Option<(&'static str, String)> {
+    let address = v["remotePoster"].as_str().or_else(|| {
+        v["images"]
+            .as_array()?
+            .iter()
+            .find(|image| image["coverType"].as_str() == Some("poster"))?["remoteUrl"]
+            .as_str()
+    })?;
+    let url = url::Url::parse(address).ok()?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return None;
+    }
+    let found = match url.host_str()? {
+        "image.tmdb.org" => {
+            let (_size, rest) = url.path().strip_prefix("/t/p/")?.split_once('/')?;
+            ("tmdb", format!("/{rest}"))
+        }
+        "artworks.thetvdb.com" => ("tvdb", url.path().strip_prefix("/banners")?.to_owned()),
+        _ => return None,
+    };
+    valid_poster_path(&found.1).then_some(found)
+}
 /// Bounded, display-only facts from a lookup result. Remote image URLs are not
-/// forwarded: the interface only loads images served by Aether.
+/// forwarded: the interface only loads images served by Aether. A poster is reduced to a fixed
+/// artwork source and a plain path that `GET /requests/poster` can fetch and re-serve.
 fn describe(result: &mut Value, v: &Value, kind: &str) {
     let text = |value: &Value, max: usize| {
         value.as_str().map(|s| {
@@ -100,6 +139,11 @@ fn describe(result: &mut Value, v: &Value, kind: &str) {
     result["runtime"] = json!(v["runtime"].as_i64().filter(|m| (1..=2000).contains(m)));
     // A positive id means the item is already tracked by this server.
     result["onServer"] = json!(v["id"].as_i64().is_some_and(|id| id > 0));
+    if matches!(kind, "film" | "series")
+        && let Some((source, path)) = poster_source(v)
+    {
+        result["poster"] = json!({"src":source,"path":path});
+    }
     match kind {
         "series" => {
             let mut seasons: Vec<Value> = v["seasons"]

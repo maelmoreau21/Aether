@@ -1,5 +1,6 @@
 //! Optional requests application: administrator-owned connections and durable acquisitions.
 mod http;
+mod policy;
 mod remote;
 mod singles;
 pub mod transport;

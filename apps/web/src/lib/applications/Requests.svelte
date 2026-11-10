@@ -5,8 +5,8 @@
   import {
     applicationRequest, dateLabel, errorMessage, features, groupCount, kindLabels, loadFeatures, parseSelection,
     rejectReasonLabels, rejectReasons, requestGroups, requestPayload, requestStep, requestSteps, seasonRanges,
-    statusLabels, statusTone, workHref, type MediaRequest, type RequestGroup, type RequestKind, type RequestSelection,
-    type SearchResult
+    statusLabels, statusTone, workHref, loadMyPolicy, posterUrl, type MediaRequest, type RequestGroup, type RequestKind, type RequestSelection,
+    type SearchResult, type MyPolicy
   } from './api';
   import './applications.css';
   import { t } from '../i18n';
@@ -50,9 +50,12 @@
   let picked = $state<string[]>([]);
   let rejecting = $state<{ ids: string[]; reason: string } | null>(null);
   let brokenArt = $state<string[]>([]);
+  let myPolicy = $state<MyPolicy | null>(null);
 
   const isAdmin = $derived($session?.user.role === 'administrator');
   const kinds = Object.keys(kindLabels) as RequestKind[];
+  const currentClass = $derived(kind === 'film' ? 'film' : kind === 'series' ? 'series' : 'music');
+  const currentGrant = $derived(myPolicy?.classes?.[currentClass]);
   const service = (value: string | undefined) => value === 'film' ? 'radarr' : value === 'series' ? 'sonarr' : 'lidarr';
   const destinationsFor = (value: string | undefined) => destinations.filter(server => server.kind === service(value));
   const pendingIds = $derived(requests.filter(item => item.status === 'pending').map(item => item.id));
@@ -93,8 +96,12 @@
       try {
         const available = await loadFeatures(true);
         if (available.requests) {
-          await refresh();
-          destinations = (await applicationRequest<{ servers: Destination[] }>('/api/v1/requests/destinations')).servers;
+          const [policyData] = await Promise.all([
+            loadMyPolicy().catch(() => null),
+            refresh(),
+            applicationRequest<{ servers: Destination[] }>('/api/v1/requests/destinations').then(d => { destinations = d.servers; })
+          ]);
+          myPolicy = policyData;
         }
       } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
       finally { loading = false; }
@@ -122,6 +129,8 @@
   function blocked(result: SearchResult): string {
     if (result.kind === 'film' && result.inLibrary) return $t('rq_already_available');
     if (result.request && result.kind !== 'series') return $t('rq_already_requested_short');
+    if (result.canRequest === false || currentGrant?.allow === false) return $t('err_request_permission');
+    if (currentGrant?.quota && currentGrant.quota.remaining <= 0) return $t('rq_quota_depleted');
     return '';
   }
   async function choose(result: SearchResult) {
@@ -158,6 +167,7 @@
       message = $t('rq_request_created', { title: created.title ?? target.title, status: statusLabels[created.status] ?? created.status });
       results = results.map(item => item === target ? { ...item, request: { status: created.status, mine: true, id: created.id } } : item);
       await refresh();
+      myPolicy = await loadMyPolicy().catch(() => myPolicy);
     }, $t('request_impossible'));
   }
 
@@ -274,6 +284,24 @@
         {/if}
         <button type="submit" class="primary" disabled={searching} aria-busy={searching}>{searching ? $t('searching') : $t('search_action')}</button>
       </form>
+      {#if currentGrant}
+        <div class="rights-banner">
+          <span class="rights-tag" class:auto={currentGrant.autoApprove} class:denied={!currentGrant.allow}>
+            {#if !currentGrant.allow}
+              {$t('rq_banner_denied', { kind: kindLabels[kind] })}
+            {:else if currentGrant.autoApprove}
+              {$t('rq_banner_auto_approved', { kind: kindLabels[kind] })}
+            {:else}
+              {$t('rq_banner_needs_review', { kind: kindLabels[kind] })}
+            {/if}
+          </span>
+          {#if currentGrant.quota}
+            <span class="quota-tag" class:depleted={currentGrant.quota.remaining <= 0}>
+              {$t('rq_quota_remaining_label', { remaining: currentGrant.quota.remaining, limit: currentGrant.quota.limit, days: currentGrant.quota.days })}
+            </span>
+          {/if}
+        </div>
+      {/if}
       {#if kind === 'track'}<p class="muted small">{$t('request_failed_lidarr')}</p>{/if}
       {#if kind === 'artist'}<p class="muted small">{$t('artist_album_note')}</p>{/if}
       {#each searchErrors as failure, itemIndex (itemIndex)}<p class="feedback error">{failure}</p>{/each}
@@ -284,7 +312,7 @@
             {@const reason = blocked(result)}
             <li class="result-card">
               <div class="art" aria-hidden="true">
-                {#if art(result.inLibrary?.workId)}<img src={art(result.inLibrary?.workId)} alt="" loading="lazy" onerror={() => brokenArt = [...brokenArt, result.inLibrary?.workId ?? '']} />{:else}<span>{initial(result.title)}</span>{/if}
+                {#if art(result.inLibrary?.workId)}<img src={art(result.inLibrary?.workId)} alt="" loading="lazy" onerror={() => brokenArt = [...brokenArt, result.inLibrary?.workId ?? '']} />{:else if result.poster}<img src={posterUrl(result.poster)} alt="" loading="lazy" />{:else}<span>{initial(result.title)}</span>{/if}
               </div>
               <div class="result-body">
                 <h3>{result.title}{#if result.year}<span class="year">{result.year}</span>{/if}</h3>
@@ -432,6 +460,14 @@
         <p class="muted small">{metaLine(selected)}{#if selected.year} · {selected.year}{/if}</p>
       </header>
       {#if error}<p role="alert" class="feedback error">{error}</p>{/if}
+      <p class="dialog-mode-hint" class:auto={selected.autoApprove ?? currentGrant?.autoApprove}>
+        {(selected.autoApprove ?? currentGrant?.autoApprove) ? $t('rq_confirm_dialog_auto') : $t('rq_confirm_dialog_manual')}
+      </p>
+      {#if currentGrant?.quota}
+        <p class="muted small">
+          {$t('rq_quota_remaining_label', { remaining: currentGrant.quota.remaining, limit: currentGrant.quota.limit, days: currentGrant.quota.days })}
+        </p>
+      {/if}
       {#if selected.inLibrary}<p class="feedback">{$t('rq_dialog_in_library')}</p>{/if}
       {#if selected.kind === 'series'}
         <fieldset class="stack">

@@ -98,6 +98,37 @@ Les résultats externes n'ont pas toujours une classification fiable : les compt
 soumis à une politique parentale sont actuellement refusés sur cette recherche,
 plutôt que d'exposer des titres sans classification vérifiée.
 
+### Découverte intégrée au catalogue et affiches distantes
+
+Lors d'une recherche dans le catalogue global (`/films`, `/series`, `/music`), si la requête
+correspond à des œuvres absentes de la bibliothèque, une étagère dédiée « Disponibles à la demande »
+apparaît en dessous des résultats locaux.
+- Le Core interroge simultanément les serveurs de recherche configurés (`GET /requests/discover?q=...`),
+  déduplique par identifiant externe, supprime les œuvres déjà présentes en bibliothèque (`inLibrary`)
+  et indique l'état d'éventuelles demandes existantes.
+- Les affiches proviennent exclusivement de TMDb (`image.tmdb.org`) et TheTVDB (`artworks.thetvdb.com`),
+  mises en cache et relayées par le Core (`GET /requests/poster?src=...&path=...`) avec protection
+  stricte contre les rebonds DNS et les attaques SSRF (IP publique épinglée, chemins sanitaires).
+- La modale de demande en 1 clic s'ouvre directement depuis le catalogue pour renseigner les saisons
+  souhaitées et soumettre la demande sans quitter la navigation.
+
+### Moteur de droits et quotas de demandes (style Seerr)
+
+Chaque compte hérite d'une politique de demandes résolue par couches successives :
+1. **Surcharge utilisateur** : règle explicite définie par l'administrateur pour un compte spécifique.
+2. **Politiques de groupes (additives)** : si un utilisateur appartient à plusieurs groupes, les autorisations
+   s'additionnent (un groupe autorisant l'auto-approbation l'accorde) et le quota le plus généreux est retenu.
+3. **Politique par défaut du serveur** : configuration par classe (`film`, `series`, `music`).
+4. **Commutateur global** : réglages serveur généraux en l'absence de règle fine.
+
+Chaque classe de média définit indépendamment :
+- `allow` (booléen) : droit de soumettre des demandes pour cette classe.
+- `autoApprove` (booléen) : approbation automatique directe sans intervention d'un administrateur.
+- `quota` (`limit` sur une fenêtre glissante en `days`) : nombre maximum de demandes autorisées sur la période.
+
+L'administrateur peut visualiser et éditer ces règles sur `/requests/admin`, et tester les droits effectifs
+d'un utilisateur via l'inspecteur intégré.
+
 ## Signalements
 
 `/reports` permet de consulter ses signalements, commenter et suivre leur état.
@@ -147,10 +178,18 @@ Principales routes, sous `/api/v1` :
 |---|---|
 | `GET /extensions/features` | Disponibilité des deux applications pour la session |
 | `GET /requests/search` | Recherche par type et serveur |
+| `GET /requests/discover` | Découverte unifiée de médias absents avec droits et affiches |
+| `GET /requests/poster` | Proxy d'affiche sécurisé (TMDb / TVDB) avec mise en cache locale |
+| `GET /requests/policy` | Droits et quotas effectifs du compte courant |
 | `GET, POST /requests` | Liste et création de demandes |
 | `GET /requests/{id}` | Détail, sélection et historique |
 | `POST /requests/{id}/action` | Valider, refuser, reprendre ou annuler |
-| `GET, PUT /admin/acquisition/settings` | Validation et limites |
+| `GET, PUT /admin/acquisition/settings` | Validation globale et limites |
+| `GET /admin/acquisition/policies` | Vue d'ensemble des règles par défaut, groupes et comptes |
+| `PUT /admin/acquisition/policies/default` | Règle par défaut du serveur (film, série, musique) |
+| `PUT, DELETE /admin/acquisition/policies/groups/{id}` | Règle additive par groupe d'utilisateurs |
+| `PUT, DELETE /admin/acquisition/policies/users/{id}` | Règle prioritaire spécifique par utilisateur |
+| `GET /admin/acquisition/policies/users/{id}/effective` | Inspection des droits effectifs et quota glissant d'un compte |
 | `GET /admin/acquisition/locations` | Emplacements physiques des bibliothèques |
 | `GET, POST /admin/acquisition/servers` | Configuration multi-serveurs |
 | `PUT, DELETE /admin/acquisition/servers/{id}` | Modification/suppression de connexion |

@@ -3,7 +3,7 @@
 //! (`media_node::hls`). Relative URIs keep the capability path they came from.
 use super::decode;
 use crate::{
-    database::query_scalar,
+    database::query,
     identity::IdentityStore,
     media::{Probe, Track},
 };
@@ -12,6 +12,7 @@ use axum::{
     http::{Method, StatusCode, header},
     response::Response,
 };
+use sqlx::Row;
 use std::fmt::Write;
 
 /// Copied as-is into fMP4 and decoded natively by AVPlayer, ExoPlayer and Cast.
@@ -135,8 +136,101 @@ fn quoted(value: &str) -> String {
         .collect()
 }
 
+/// Embedded subtitle formats the Node extracts to WebVTT.
+const TEXT_SUBTITLE_CODECS: [&str; 5] = ["subrip", "webvtt", "ass", "ssa", "mov_text"];
+
+/// A WebVTT rendition: `hls-s{index}` for an embedded text track, `hls-x{n}`
+/// for a sidecar file. Image subtitles (PGS, DVD) have no HLS form.
+#[derive(Debug, PartialEq)]
+pub(crate) struct SubtitleRendition {
+    pub stem: String,
+    pub name: String,
+    pub language: Option<String>,
+    pub forced: bool,
+}
+
+/// `allowed`: the library policy on embedded subtitles, by codec.
+pub(crate) fn subtitle_renditions(
+    probe: &Probe,
+    allowed: impl Fn(Option<&str>) -> bool,
+    sidecars: &[media_contracts::inventory::ExternalSubtitle],
+) -> Vec<SubtitleRendition> {
+    let mut out: Vec<SubtitleRendition> = probe
+        .streams
+        .iter()
+        .filter(|t| {
+            t.codec_type.as_deref() == Some("subtitle")
+                && t.codec_name
+                    .as_deref()
+                    .is_some_and(|c| TEXT_SUBTITLE_CODECS.contains(&c))
+                && allowed(t.codec_name.as_deref())
+        })
+        .map(|t| {
+            let language = t
+                .tags
+                .get("language")
+                .and_then(serde_json::Value::as_str)
+                .filter(|l| !l.is_empty() && *l != "und")
+                .map(str::to_lowercase);
+            let title = t.tags.get("title").and_then(serde_json::Value::as_str);
+            SubtitleRendition {
+                stem: format!("hls-s{}", t.index),
+                name: title
+                    .map(str::to_owned)
+                    .or_else(|| language.as_deref().map(str::to_uppercase))
+                    .unwrap_or_else(|| format!("Sous-titres {}", t.index)),
+                language,
+                forced: flag(t, "forced"),
+            }
+        })
+        .collect();
+    out.extend(sidecars.iter().enumerate().map(|(n, s)| SubtitleRendition {
+        stem: format!("hls-x{n}"),
+        name: s.label.clone(),
+        language: Some(s.language.to_lowercase()).filter(|l| !l.is_empty() && l != "und"),
+        forced: s.forced,
+    }));
+    out
+}
+
+/// A subtitle component of the HLS path: (embedded?, index, playlist?).
+pub fn subtitle_component(component: &str) -> Option<(bool, usize, bool)> {
+    let (embedded, rest) = if let Some(rest) = component.strip_prefix("hls-s") {
+        (true, rest)
+    } else {
+        (false, component.strip_prefix("hls-x")?)
+    };
+    let (index, playlist) = if let Some(index) = rest.strip_suffix(".m3u8") {
+        (index, true)
+    } else {
+        (rest.strip_suffix(".vtt")?, false)
+    };
+    // Digits only: no sign, no leading `+`.
+    if index.is_empty() || !index.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some((embedded, index.parse().ok()?, playlist))
+}
+
+/// One segment holding the whole WebVTT file: players fetch it once.
+pub(crate) fn subtitle_playlist(stem: &str, duration: f64) -> String {
+    let duration = if duration.is_finite() && duration > 0.0 {
+        duration
+    } else {
+        86_400.0
+    };
+    format!(
+        "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-TARGETDURATION:{}\n#EXT-X-MEDIA-SEQUENCE:0\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:{duration:.3},\n{stem}.vtt\n#EXT-X-ENDLIST\n",
+        duration.ceil() as u64
+    )
+}
+
 /// `convert`: also offer AAC conversions of the tracks native players cannot decode.
-pub(crate) fn master_playlist(probe: &Probe, convert: bool) -> Result<String, &'static str> {
+pub(crate) fn master_playlist(
+    probe: &Probe,
+    convert: bool,
+    subtitles: &[SubtitleRendition],
+) -> Result<String, &'static str> {
     let video = probe
         .streams
         .iter()
@@ -190,6 +284,32 @@ pub(crate) fn master_playlist(probe: &Probe, convert: bool) -> Result<String, &'
             video.index, track.index
         );
     }
+    let mut names: Vec<String> = Vec::new();
+    for (position, subtitle) in subtitles.iter().enumerate() {
+        let mut name = quoted(&subtitle.name);
+        if name.is_empty() || names.contains(&name) {
+            name = format!("{name} ({})", position + 1);
+        }
+        names.push(name.clone());
+        let _ = write!(
+            out,
+            "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"{name}\""
+        );
+        if let Some(language) = &subtitle.language {
+            let _ = write!(out, ",LANGUAGE=\"{}\"", quoted(language));
+        }
+        // Forced tracks follow the audio language on their own; others wait for the user.
+        let (autoselect, forced) = if subtitle.forced {
+            ("YES", "YES")
+        } else {
+            ("NO", "NO")
+        };
+        let _ = writeln!(
+            out,
+            ",DEFAULT=NO,AUTOSELECT={autoselect},FORCED={forced},URI=\"{}.m3u8\"",
+            subtitle.stem
+        );
+    }
     let bandwidth = probe
         .format
         .get("bit_rate")
@@ -218,29 +338,58 @@ pub(crate) fn master_playlist(probe: &Probe, convert: bool) -> Result<String, &'
     if !audios.is_empty() {
         out.push_str(",AUDIO=\"audio\"");
     }
+    if !subtitles.is_empty() {
+        out.push_str(",SUBTITLES=\"subs\"");
+    }
     let _ = writeln!(out, "\nhls-v{}.m3u8", video.index);
     Ok(out)
 }
 
-pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) -> Response {
-    let probe: Result<Option<String>, _> = query_scalar("SELECT a.probe_json FROM inventory_assets a JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.available=1 AND l.enabled=1")
+/// Probe, then subtitle renditions the library policy allows.
+async fn load(
+    store: &IdentityStore,
+    asset_id: &str,
+) -> Result<(Probe, Vec<SubtitleRendition>), Response> {
+    let row = query("SELECT a.probe_json,a.library_id,t.subtitles_json FROM inventory_assets a JOIN libraries l ON l.id=a.library_id LEFT JOIN inventory_subtitles t ON t.asset_id=a.id WHERE a.id=? AND a.available=1 AND l.enabled=1")
         .bind(asset_id)
         .fetch_optional(&store.pool)
         .await;
-    let probe = match probe {
-        Ok(Some(json)) => decode(&json),
-        Ok(None) => return crate::error(StatusCode::NOT_FOUND, "asset_unavailable"),
-        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+    let row = match row {
+        Ok(Some(row)) => row,
+        Ok(None) => return Err(crate::error(StatusCode::NOT_FOUND, "asset_unavailable")),
+        Err(_) => {
+            return Err(crate::error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "inventory_unavailable",
+            ));
+        }
     };
-    // AAC conversions spend Node CPU: they follow the transcoding setting.
-    let convert = crate::server_settings::load(store)
-        .await
-        .is_ok_and(|settings| settings.transcoding_enabled);
-    let text = match probe.as_ref().map(|probe| master_playlist(probe, convert)) {
-        Ok(Ok(text)) => text,
-        Ok(Err(code)) => return crate::error(StatusCode::UNPROCESSABLE_ENTITY, code),
-        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
-    };
+    let probe = decode(row.get("probe_json"))
+        .map_err(|_| crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"))?;
+    let options = super::playback::playback_library_options(
+        store,
+        row.get::<String, _>("library_id").as_str(),
+    )
+    .await
+    .map_err(|_| {
+        crate::error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "library_options_unavailable",
+        )
+    })?;
+    let sidecars: Vec<media_contracts::inventory::ExternalSubtitle> = row
+        .get::<Option<String>, _>("subtitles_json")
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    let subtitles = subtitle_renditions(
+        &probe,
+        |codec| options.embedded_subtitle_allowed(codec),
+        &sidecars,
+    );
+    Ok((probe, subtitles))
+}
+
+fn playlist_response(text: String, method: &Method) -> Response {
     let length = text.len();
     Response::builder()
         .header(header::CONTENT_TYPE, "application/vnd.apple.mpegurl")
@@ -252,6 +401,43 @@ pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) 
             Body::from(text)
         })
         .unwrap_or_else(|_| crate::error(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"))
+}
+
+/// Media playlist of one subtitle rendition, or `None` when it is not offered.
+pub async fn hls_subtitle_playlist(
+    store: &IdentityStore,
+    asset_id: &str,
+    stem: &str,
+    method: &Method,
+) -> Response {
+    let (probe, subtitles) = match load(store, asset_id).await {
+        Ok(loaded) => loaded,
+        Err(response) => return response,
+    };
+    if !subtitles.iter().any(|s| s.stem == stem) {
+        return crate::error(StatusCode::NOT_FOUND, "unknown_subtitle");
+    }
+    let duration = probe
+        .format
+        .get("duration")
+        .and_then(|v| v.as_str()?.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    playlist_response(subtitle_playlist(stem, duration), method)
+}
+
+pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) -> Response {
+    let (probe, subtitles) = match load(store, asset_id).await {
+        Ok(loaded) => loaded,
+        Err(response) => return response,
+    };
+    // AAC conversions spend Node CPU: they follow the transcoding setting.
+    let convert = crate::server_settings::load(store)
+        .await
+        .is_ok_and(|settings| settings.transcoding_enabled);
+    match master_playlist(&probe, convert, &subtitles) {
+        Ok(text) => playlist_response(text, method),
+        Err(code) => crate::error(StatusCode::UNPROCESSABLE_ENTITY, code),
+    }
 }
 
 #[cfg(test)]
@@ -280,7 +466,7 @@ mod tests {
             json!({"index":4,"codec_type":"video","codec_name":"mjpeg","disposition":{"attached_pic":1}}),
         ]);
         // With transcoding allowed, the DTS track is offered as AAC 5.1.
-        let converted = master_playlist(&probe, true).unwrap();
+        let converted = master_playlist(&probe, true, &[]).unwrap();
         assert!(
             converted.contains(r#"CHANNELS="6",URI="hls-v0-aac3.m3u8""#),
             "{converted}"
@@ -289,11 +475,51 @@ mod tests {
             converted.contains(r#"CODECS="hvc1.2.4.L150.B0,ec-3,mp4a.40.2""#),
             "{converted}"
         );
-        let text = master_playlist(&probe, false).unwrap();
+        let text = master_playlist(&probe, false, &[]).unwrap();
         assert!(text.contains("NAME=\"Français VFF\",LANGUAGE=\"fre\",DEFAULT=NO,AUTOSELECT=YES,CHANNELS=\"6\",URI=\"hls-v0-a1.m3u8\""));
         assert!(text.contains("NAME=\"ENG\",LANGUAGE=\"eng\",DEFAULT=YES,AUTOSELECT=YES,CHANNELS=\"2\",URI=\"hls-v0-a2.m3u8\""));
         assert!(!text.contains("a3.m3u8"), "DTS is not offered: {text}");
         assert!(text.contains("#EXT-X-STREAM-INF:BANDWIDTH=12000000,CODECS=\"hvc1.2.4.L150.B0,ec-3,mp4a.40.2\",RESOLUTION=3840x2160,AUDIO=\"audio\"\nhls-v0.m3u8\n"));
+    }
+
+    #[test]
+    fn subtitles_become_webvtt_renditions() {
+        let probe = probe(vec![
+            json!({"index":0,"codec_type":"video","codec_name":"h264"}),
+            json!({"index":1,"codec_type":"subtitle","codec_name":"subrip","tags":{"language":"FRE"},"disposition":{"forced":1}}),
+            json!({"index":2,"codec_type":"subtitle","codec_name":"hdmv_pgs_subtitle"}),
+            json!({"index":3,"codec_type":"subtitle","codec_name":"ass","tags":{"title":"Signs"}}),
+        ]);
+        let sidecar = media_contracts::inventory::ExternalSubtitle {
+            language: "en".into(),
+            label: "English".into(),
+            forced: false,
+            sdh: false,
+            source_format: "srt".into(),
+            webvtt: "WEBVTT\n".into(),
+            ass: None,
+        };
+        // The library refuses ASS: only SubRip and the sidecar remain; PGS has no HLS form.
+        let subs = subtitle_renditions(&probe, |c| c != Some("ass"), &[sidecar]);
+        let stems: Vec<&str> = subs.iter().map(|s| s.stem.as_str()).collect();
+        assert_eq!(stems, ["hls-s1", "hls-x0"]);
+        let text = master_playlist(&probe, false, &subs).unwrap();
+        assert!(text.contains("#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"FRE\",LANGUAGE=\"fre\",DEFAULT=NO,AUTOSELECT=YES,FORCED=YES,URI=\"hls-s1.m3u8\"\n"), "{text}");
+        assert!(text.contains("NAME=\"English\",LANGUAGE=\"en\",DEFAULT=NO,AUTOSELECT=NO,FORCED=NO,URI=\"hls-x0.m3u8\""), "{text}");
+        assert!(
+            text.contains(",SUBTITLES=\"subs\"\nhls-v0.m3u8\n"),
+            "{text}"
+        );
+        assert_eq!(subtitle_component("hls-s12.m3u8"), Some((true, 12, true)));
+        assert_eq!(subtitle_component("hls-x0.vtt"), Some((false, 0, false)));
+        assert_eq!(subtitle_component("hls-s+1.vtt"), None);
+        assert_eq!(subtitle_component("hls-v0.m3u8"), None);
+        let media = subtitle_playlist("hls-s1", 5400.25);
+        assert!(media.contains("#EXT-X-TARGETDURATION:5401\n"), "{media}");
+        assert!(
+            media.contains("#EXTINF:5400.250,\nhls-s1.vtt\n#EXT-X-ENDLIST\n"),
+            "{media}"
+        );
     }
 
     #[test]
@@ -310,7 +536,7 @@ mod tests {
         let odd = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"h264","profile":"High 4:4:4"}),
         ]);
-        let text = master_playlist(&odd, true).unwrap();
+        let text = master_playlist(&odd, true, &[]).unwrap();
         assert!(
             !text.contains("CODECS") && !text.contains("AUDIO="),
             "{text}"
@@ -318,7 +544,10 @@ mod tests {
         let mpeg2 = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"mpeg2video"}),
         ]);
-        assert_eq!(master_playlist(&mpeg2, true), Err("hls_video_unsupported"));
+        assert_eq!(
+            master_playlist(&mpeg2, true, &[]),
+            Err("hls_video_unsupported")
+        );
         let request = media_node::hls::request("hls-v0-a3.m3u8").unwrap();
         let with_dts = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"h264"}),

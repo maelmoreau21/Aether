@@ -432,6 +432,19 @@ async fn indexed_hls(
     if component == "master.m3u8" {
         return inventory::hls_master(&store, &id, request.method()).await;
     }
+    if let Some((embedded, index, playlist)) = inventory::hls_subtitle_component(&component) {
+        if playlist {
+            let stem = component.trim_end_matches(".m3u8");
+            return inventory::hls_subtitle_playlist(&store, &id, stem, request.method()).await;
+        }
+        // Same handlers, same library policy as the browser player.
+        return if embedded {
+            let prepared = format!("subtitle-{index}");
+            inventory::prepared(&store, &preparations, &id, &prepared, request).await
+        } else {
+            inventory::subtitle(&store, &id, index, request).await
+        };
+    }
     if media_node::hls::request(&component).is_none() {
         return error(axum::http::StatusCode::NOT_FOUND, "hls_component_unknown");
     }

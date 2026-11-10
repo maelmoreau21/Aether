@@ -581,6 +581,10 @@ private fun PlayerScreen(model: AetherViewModel, work: Work, startAt: Double?) {
                 }
             }
         }
-        AndroidView(factory = { PlayerView(it).apply { this.player = player } }, modifier = Modifier.fillMaxSize())
+        AndroidView(factory = { PlayerView(it).apply {
+            this.player = player
+            // The Core's HLS carries WebVTT renditions; forced ones are picked on their own.
+            setShowSubtitleButton(true)
+        } }, modifier = Modifier.fillMaxSize())
     }
 }

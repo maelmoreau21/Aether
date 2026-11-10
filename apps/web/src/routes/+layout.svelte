@@ -15,6 +15,7 @@
   import { readSession } from '../lib/auth/session';
   import { preloadCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
+  import RemotePanel from '../lib/remote/RemotePanel.svelte';
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
   import { rememberPendingParty } from '../lib/syncplay/launch';
 
@@ -80,7 +81,7 @@
 {#if verified}
   {#if $preferenceSyncError}<p class="preference-error" role="alert">{$preferenceSyncError}</p>{/if}
   {@render children()}
-  {#if !isLogin && !isDownloads}<MusicPlayer />{/if}
+  {#if !isLogin && !isDownloads}<MusicPlayer /><RemotePanel />{/if}
 {:else if error}
   <main class="session-status"><p role="alert">{error}</p><button onclick={() => window.location.reload()}>{$t('request_retry')}</button></main>
 {:else}

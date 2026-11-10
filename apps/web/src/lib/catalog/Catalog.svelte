@@ -10,6 +10,7 @@
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
+  import { remote } from '../remote/remote.svelte';
   import type { Media, PlayerFactory } from '../player/types';
   import { accessibleLibraries } from './libraries';
   import Navbar from '../ui/Navbar.svelte';
@@ -290,7 +291,7 @@
     }
   }
 
-  async function openPlayer(): Promise<void> {
+  async function openPlayer(startAt?: number): Promise<void> {
     const current = playableMedia.find(item => item.id === selected) ?? playableMedia[0];
     const targetId = current?.id ?? (allowedIds.includes(selected) ? selected : allowedIds[0]);
     if (!targetId) return;
@@ -312,7 +313,7 @@
       await loadPlayer();
       await tick();
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
-      immersive?.open(descriptor);
+      immersive?.open(descriptor, startAt);
       const item = await descriptor;
       if (controller.signal.aborted || launchGen !== getSessionGeneration()) return;
       media = [...media.filter(m => m.id !== item.id), item];
@@ -334,7 +335,16 @@
   }
 
   provideQuickPlay(work => handleDirectPlay(work));
-  async function handleDirectPlay(work: Work): Promise<void> {
+  // "Open" from another device, or "Resume here": plays at the handed-over position.
+  onMount(() => { remote.catalogs++; return () => { remote.catalogs--; }; });
+  $effect(() => {
+    const pending = remote.pendingOpen;
+    if (!pending) return;
+    remote.pendingOpen = null;
+    immersive?.close();
+    void handleDirectPlay({ id: pending.workId } as Work, pending.position);
+  });
+  async function handleDirectPlay(work: Work, startAt?: number): Promise<void> {
     if (work.kind === 'series') {
       // detailUrl already applies SvelteKit resolve to the route and base.
       // eslint-disable-next-line svelte/no-navigation-without-resolve
@@ -357,7 +367,7 @@
       // The player opens over the current page; the page itself does not change.
       quickWork = detail?.id === full.id ? null : full;
       selected = targetId;
-      await openPlayer();
+      await openPlayer(startAt);
     } catch {
       // detailUrl already applies SvelteKit resolve to the route and base.
       // eslint-disable-next-line svelte/no-navigation-without-resolve

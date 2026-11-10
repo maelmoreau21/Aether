@@ -29,6 +29,7 @@
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { t } from '../i18n';
   import { watchTogetherEnabled } from '../config/presentation';
+  import { remote, type RemoteCommand, type RemoteDevice } from '../remote/remote.svelte';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
     /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
@@ -138,6 +139,31 @@
   let previousVolume = 1;
   let triedMediaIds = new SvelteSet<string>();
   let resumeTarget = 0;
+  /** Position handed over by another device ("open" command or "Send to"). */
+  let handoffPosition: number | undefined;
+  let sendMenu = $state(false);
+  const sendTargets = $derived(remote.devices);
+  function reportRemote(force = false) {
+    const item = active;
+    if (!opened || !item?.workId || item.synthetic) return;
+    remote.report({ workId: item.workId, title: item.title, position: playback.position, duration: playback.duration || null, paused }, force);
+  }
+  function remoteCommand(command: RemoteCommand) {
+    if (!opened || !engine || command.action === 'open') return;
+    if (syncClient) { notice = $t('remote_ignored_in_party'); return; }
+    notice = $t('remote_command_from', { name: command.fromName });
+    if (command.action === 'stop') { close(); return; }
+    if (command.action === 'seek' && command.position !== undefined) { seek(command.position); reportRemote(true); return; }
+    if ((command.action === 'play') === paused) togglePlayback();
+  }
+  /** Hands this title over to another device at the current position. */
+  function sendTo(device: RemoteDevice) {
+    const item = active;
+    if (!item?.workId) return;
+    sendMenu = false;
+    remote.send(device.deviceId, 'open', playback.position, item.workId);
+    close();
+  }
   let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;
@@ -147,7 +173,7 @@
     bufferedUntil = bufferedEnd(playback.position);
     const running = engine.transcodeState?.() ?? null;
     transcodeInfo = running ? { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap } : null;
-    if (!busy) progressTracker?.save(playback);
+    if (!busy) { progressTracker?.save(playback); reportRemote(); }
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
       const correction = syncClient.evaluateDrift(playback.position);
@@ -366,7 +392,8 @@
       if (current !== generation) return;
       await engine.setStreamOptions?.({ ...streamOptions(), burnSubtitle: undefined, adaptiveKbps: undefined });
       engine.setSubtitlePosition?.(subtitleLine(subtitleStyle));
-      await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
+      const handoff = handoffPosition; handoffPosition = undefined;
+      await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? handoff ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? $t('automatically_switched_to_an_available_node') : '');
       notice = autoFailoverMsg || preferenceNotice;
@@ -507,8 +534,9 @@
     } catch (error) { markerError = error instanceof Error ? error.message : $t('correction_unavailable'); }
     finally { markerSaving = false; }
   }
-  export function open(media: Media | Promise<Media>) {
+  export function open(media: Media | Promise<Media>, startAt?: number) {
     if (opened) return false;
+    handoffPosition = startAt !== undefined && Number.isFinite(startAt) && startAt >= 0 ? startAt : undefined;
     generation++; const current = generation;
     manualAudio = undefined; manualSubtitle = undefined; manualForeignSubtitle = undefined;
     triedMediaIds.clear();
@@ -539,6 +567,7 @@
     if (engine) progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
     presence?.stop();presence=undefined;
+    remote.report(null, true); sendMenu = false;
     opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null;
     const returnTarget = opener;
     const restoreNavigation = () => {
@@ -789,7 +818,8 @@
   onMount(() => {
     const change = () => { fullscreen = document.fullscreenElement === surface; wake(); };
     document.addEventListener('fullscreenchange', change);
-    return () => { close(); document.removeEventListener('fullscreenchange', change); clearTimeout(idle); };
+    const unsubscribe = remote.onCommand(remoteCommand);
+    return () => { unsubscribe(); close(); document.removeEventListener('fullscreenchange', change); clearTimeout(idle); };
   });
 </script>
 
@@ -828,6 +858,16 @@
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
       {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
       {#if $watchTogetherEnabled && active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
+      {#if active?.workId && !active.synthetic && !syncClient && sendTargets.length}
+        <div class="send-to">
+          <button type="button" class="watch-together" aria-expanded={sendMenu} aria-haspopup="menu" title={$t('send_to_device')} onclick={() => { menu = null; sendMenu = !sendMenu; }}><Icon name="tv" size={20} /><span>{$t('send_to')}</span></button>
+          {#if sendMenu}
+            <div class="send-menu" role="menu" aria-label={$t('send_to_device')}>
+              {#each sendTargets as device (device.deviceId)}<button type="button" role="menuitem" onclick={() => sendTo(device)}>{device.name}</button>{/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
       {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>{$t('fix_markers')}</button>{/if}
     </div>
     {#if markerEditor && active?.episode}
@@ -1107,6 +1147,10 @@
   .watch-together:hover { background: rgb(255 255 255 / 0.22); }
   .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
   @media (max-width: 640px) { .watch-together span { display: none; } .watch-together { padding: 0 10px; } }
+  .send-to { position: relative; }
+  .send-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: grid; min-width: 200px; padding: 6px; border-radius: 14px; background: rgb(18 20 26 / 0.94); box-shadow: 0 12px 32px rgb(0 0 0 / 0.4); }
+  .send-menu button { min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: #f4f6fb; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+  .send-menu button:hover, .send-menu button:focus-visible { background: rgb(255 255 255 / 0.14); outline: none; }
   .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
   .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
   .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }

@@ -24,7 +24,32 @@ lecteur existant.
 
 Codecs proposés : vidéo H.264, HEVC (étiqueté `hvc1`, exigé par Apple), AV1 ;
 audio AAC, AC-3, E-AC-3, FLAC, ALAC, MP3, Opus. Une vidéo d'un autre codec
-renvoie `422 hls_video_unsupported` ; une piste DTS ou TrueHD n'est pas listée.
+renvoie `422 hls_video_unsupported`.
+
+Une piste audio que les lecteurs natifs ne décodent pas (DTS, TrueHD, PCM…)
+est proposée convertie en AAC (`hls-v{v}-aac{a}…`, 5.1 au plus, 320 kb/s)
+quand le transcodage est activé dans les réglages serveur ; sinon elle n'est
+pas listée. La piste entière est encodée **une seule fois** dans le cache de
+préparation du Node, en arrière-plan dès la demande de sa playlist : l'amorçage
+AAC n'a lieu qu'au tout début, pas à chaque segment, et les segments sont
+ensuite copiés depuis ce fichier comme pour une piste native. Le premier
+segment attend la fin de l'encodage (de l'ordre de la minute pour un film sur
+un NAS) ; les lectures suivantes sont immédiates. L'encodage occupe l'unique
+emplacement de préparation du Node pendant ce temps.
+
+Chromecast : le récepteur standard lit ces URL si l'application précise des
+segments fMP4 (`HlsSegmentFormat.FMP4`, `HlsVideoSegmentFormat.FMP4`) ; la page du
+récepteur étant servie en HTTPS, le Core doit l'être aussi pour le Chromecast.
+
+## Télécommande entre appareils
+
+`GET /api/v1/remote/ws` (cookie ou jeton d'appareil) relie les appareils
+connectés d'un même compte (`crates/core/src/remote.rs`) : liste des autres
+appareils et de ce qu'ils lisent, commandes `play`, `pause`, `seek`, `stop` et
+`open` (œuvre et position, pour « reprendre sur… »). Messages validés et bornés,
+16 appareils et 10 commandes par seconde au plus, aucune commande vers un autre
+compte. Registre en mémoire du Core : deux Core d'un déploiement multi-Core ne
+partagent pas leurs appareils. Vérifié par `tests/remote_control.rs`.
 
 ## Découpage (Node, `crates/node/src/hls/`)
 
@@ -70,7 +95,11 @@ Chromecast.
   playlist maîtresse avec CORS pour une origine Chromecast, playlist média,
   refus sur un autre asset, survie au renouvellement et fin à la déconnexion,
   sur SQLite et PostgreSQL 18.
+- Le test `converted_audio_rendition_is_continuous_aac_over_the_whole_film`
+  convertit une piste Opus, sert la rendition AAC dans le désordre et vérifie
+  des trames AAC jointives (21,3 ms d'écart, ni trou ni chevauchement) sur
+  toute la durée du film.
 
 Non vérifié : lecture réelle sur iPhone, Apple TV, Android, Chromecast et
-AirPlay ; HEVC à GOP ouvert ; Dolby Vision. Une piste audio DTS/TrueHD seule
-demandera une conversion AAC, non faite.
+AirPlay ; HEVC à GOP ouvert ; Dolby Vision ; conversion d'une vraie piste DTS
+ou TrueHD (testée sur Opus).

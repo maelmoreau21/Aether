@@ -113,7 +113,7 @@ mod tests {
                     .await
                     .unwrap();
                 let response = streams
-                    .serve(opened, "fixture".into(), request, Method::GET)
+                    .serve(opened, "fixture".into(), request, Method::GET, None)
                     .await
                     .unwrap();
                 assert_eq!(response.status(), http::StatusCode::OK);
@@ -243,6 +243,94 @@ mod tests {
             }
             rebuild_matches_source(temp.path().to_owned(), name, 1).await;
         }
+    }
+
+    /// A track native players cannot decode is encoded once to AAC, then copied:
+    /// the joined rendition is continuous AAC covering the whole film.
+    #[tokio::test]
+    #[ignore = "requires the Node image's FFmpeg"]
+    async fn converted_audio_rendition_is_continuous_aac_over_the_whole_film() {
+        use http::Method;
+        use http_body_util::BodyExt;
+        let root = fixture("representative");
+        let name = std::path::Path::new("representative.mkv");
+        let preparations = std::sync::Arc::new(crate::packaging::Preparations::default());
+        let get = |component: String| {
+            let preparations = preparations.clone();
+            let root = root.clone();
+            async move {
+                let opened = crate::OpenedFile::open_in_root(&root, name).await.unwrap();
+                let (size, mtime) = (opened.size(), opened.modified_ns().to_owned());
+                let response = preparations
+                    .serve_hls(
+                        opened,
+                        &root,
+                        name,
+                        size,
+                        &mtime,
+                        "fixture".into(),
+                        request(&component).unwrap(),
+                        Method::GET,
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(response.status(), http::StatusCode::OK, "{component}");
+                response
+                    .into_body()
+                    .collect()
+                    .await
+                    .unwrap()
+                    .to_bytes()
+                    .to_vec()
+            }
+        };
+        let playlist = String::from_utf8(get("hls-v0-aac1.m3u8".into()).await).unwrap();
+        let count = playlist.lines().filter(|l| l.ends_with(".m4s")).count();
+        let mut joined = get("hls-v0-aac1-init.mp4".into()).await;
+        let mut parts = Vec::new();
+        for i in (0..count).rev() {
+            parts.push((i, get(format!("hls-v0-aac1-{i}.m4s")).await));
+        }
+        parts.sort_by_key(|(i, _)| *i);
+        parts.into_iter().for_each(|(_, part)| joined.extend(part));
+        let temp = tempfile::tempdir().unwrap();
+        let out = temp.path().join("audio.mp4");
+        std::fs::write(&out, &joined).unwrap();
+        let probe = tokio::process::Command::new("ffprobe")
+            .args(["-v", "error", "-select_streams", "a:0", "-show_entries"])
+            .args(["stream=codec_name:packet=pts_time", "-of", "csv=p=0"])
+            .arg(&out)
+            .output()
+            .await
+            .unwrap();
+        let text = String::from_utf8(probe.stdout).unwrap();
+        // ffprobe lists the packets, then the stream.
+        assert!(
+            text.lines().any(|l| l.trim_end_matches(',') == "aac"),
+            "{text}"
+        );
+        let times: Vec<f64> = text
+            .lines()
+            .filter_map(|l| l.trim_end_matches(',').parse().ok())
+            .collect();
+        // One AAC frame is 1024 samples (21.3 ms at 48 kHz): no gap, no overlap.
+        for pair in times.windows(2) {
+            let step = pair[1] - pair[0];
+            assert!(
+                (0.015..0.03).contains(&step),
+                "join at {}: step {step}",
+                pair[0]
+            );
+        }
+        let covered = times.last().unwrap() - times.first().unwrap();
+        let film = read("representative/representative.mkv", 0)
+            .unwrap()
+            .duration_ms as f64
+            / 1000.0;
+        assert!(
+            (covered - film).abs() < 0.2,
+            "{covered} s of audio for a {film} s film"
+        );
     }
 
     #[test]

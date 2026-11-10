@@ -51,14 +51,17 @@ pub struct HlsRequest {
     pub video: u32,
     /// `Some` for an audio rendition (that stream index), `None` for the video one.
     pub audio: Option<u32>,
+    /// The audio track is served from its AAC conversion (`hls-v{v}-aac{a}…`).
+    pub convert: bool,
     pub resource: Resource,
 }
 
 impl HlsRequest {
     fn profile(&self) -> String {
-        match self.audio {
-            Some(audio) => format!("hls-v{}-a{audio}", self.video),
-            None => format!("hls-v{}", self.video),
+        match (self.audio, self.convert) {
+            (Some(audio), true) => format!("hls-v{}-aac{audio}", self.video),
+            (Some(audio), false) => format!("hls-v{}-a{audio}", self.video),
+            (None, _) => format!("hls-v{}", self.video),
         }
     }
     /// The canonical component name; parsing only accepts this spelling.
@@ -82,7 +85,11 @@ fn number(raw: &str, max_digits: usize) -> Option<(u32, &str)> {
 
 pub fn request(raw: &str) -> Option<HlsRequest> {
     let (video, rest) = number(raw.strip_prefix("hls-v")?, 4)?;
-    let (audio, rest) = match rest.strip_prefix("-a") {
+    let (convert, after) = match rest.strip_prefix("-aac") {
+        Some(after) => (true, Some(after)),
+        None => (false, rest.strip_prefix("-a")),
+    };
+    let (audio, rest) = match after {
         Some(after) => {
             let (audio, rest) = number(after, 4)?;
             (Some(audio), rest)
@@ -103,6 +110,7 @@ pub fn request(raw: &str) -> Option<HlsRequest> {
     let parsed = HlsRequest {
         video,
         audio,
+        convert,
         resource,
     };
     (parsed.component() == raw).then_some(parsed)
@@ -160,9 +168,11 @@ pub fn arguments(request: &HlsRequest, segment: Segment, last: bool, hevc: bool)
             }
             // Audio decode and presentation times coincide: dropping packets
             // before the start and stopping at the end partitions them exactly.
+            // A converted track is the only stream of its prepared AAC file.
+            let stream = if request.convert { 0 } else { audio };
             args.extend(owned(&[
                 "-map",
-                &format!("0:{audio}"),
+                &format!("0:{stream}"),
                 "-vn",
                 "-copypriorss",
                 "0",
@@ -310,12 +320,15 @@ impl HlsStreams {
     }
 
     /// `source` identifies this version of the file (asset, size, mtime).
+    /// `converted` is the prepared AAC file of a converted audio rendition:
+    /// segments are copied from it, while the original still gives the cuts.
     pub async fn serve(
         &self,
         opened: OpenedFile,
         source: String,
         request: HlsRequest,
         method: Method,
+        converted: Option<OpenedFile>,
     ) -> io::Result<Response<BoxStreamBody>> {
         if method != Method::GET && method != Method::HEAD {
             return Response::builder()
@@ -325,6 +338,10 @@ impl HlsStreams {
         }
         opened.verify_unchanged_sync()?;
         let frames = self.keyframes(&opened, &source, request.video).await?;
+        if request.convert && converted.is_none() && request.resource != Resource::Playlist {
+            return Err(coded(io::ErrorKind::Unsupported, "hls_conversion_missing"));
+        }
+        let opened = converted.unwrap_or(opened);
         let cut = playlist::segments(&frames, playlist::TARGET_MS);
         let profile = request.profile();
         match request.resource {
@@ -419,10 +436,27 @@ mod tests {
             let expected = HlsRequest {
                 video,
                 audio,
+                convert: false,
                 resource,
             };
             assert_eq!(request(raw), Some(expected), "{raw}");
         };
+        let converted = request("hls-v0-aac3-7.m4s").unwrap();
+        assert!(converted.convert && converted.audio == Some(3));
+        assert_eq!(converted.resource, Resource::Segment(7));
+        assert_eq!(converted.component(), "hls-v0-aac3-7.m4s");
+        for raw in ["hls-v0-aac.m3u8", "hls-v0-aac03.m3u8", "hls-v0-aaca1.m3u8"] {
+            assert_eq!(request(raw), None, "{raw}");
+        }
+        let segment = Segment {
+            start_ms: 0,
+            end_ms: 6_000,
+        };
+        assert!(
+            arguments(&converted, segment, false, false)
+                .join(" ")
+                .contains("-map 0:0 -vn")
+        );
         ok("hls-v0.m3u8", 0, None, Resource::Playlist);
         ok("hls-v0-a1.m3u8", 0, Some(1), Resource::Playlist);
         ok("hls-v2-init.mp4", 2, None, Resource::Init);

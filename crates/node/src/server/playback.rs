@@ -155,8 +155,16 @@ pub(super) async fn prepare_asset(
             let source = format!("{id}:{}:{}", entry.size, entry.modified_ns);
             state
                 .preparations
-                .hls()
-                .serve(opened, source, hls, req.method().clone())
+                .serve_hls(
+                    opened,
+                    Path::new(&entry.root_snapshot),
+                    Path::new(&entry.relative_path),
+                    entry.size,
+                    &entry.modified_ns,
+                    source,
+                    hls,
+                    req.method().clone(),
+                )
                 .await
         } else {
             state

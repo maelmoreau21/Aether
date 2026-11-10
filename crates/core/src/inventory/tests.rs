@@ -97,7 +97,7 @@ async fn embedded_subtitle_preferences_apply_locally_and_before_remote_relay() {
         .execute(&store.pool)
         .await
         .unwrap();
-    let preparations = media_node::packaging::Preparations::default();
+    let preparations = std::sync::Arc::new(media_node::packaging::Preparations::default());
     for node in ["local", "remote"] {
         query("UPDATE libraries SET node_id=? WHERE id='lib'")
             .bind(node)

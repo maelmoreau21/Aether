@@ -106,12 +106,24 @@ fn is_audio(track: &Track) -> bool {
             .is_some_and(|c| AUDIO_CODECS.contains(&c))
 }
 
+/// An audio track native players cannot decode (DTS, TrueHD, PCM…): offered
+/// as an AAC conversion when the administrator allows transcoding.
+fn is_convertible_audio(track: &Track) -> bool {
+    track.codec_type.as_deref() == Some("audio") && track.codec_name.is_some() && !is_audio(track)
+}
+
 /// Whether a Node HLS component names streams this asset can serve that way.
+/// A conversion is only accepted for a track that needs one.
 pub(crate) fn allowed(probe: &Probe, request: &media_node::hls::HlsRequest) -> bool {
     let has = |index: u32, test: fn(&Track) -> bool| {
         probe.streams.iter().any(|t| t.index == index && test(t))
     };
-    has(request.video, is_video) && request.audio.is_none_or(|audio| has(audio, is_audio))
+    let audio_ok: fn(&Track) -> bool = if request.convert {
+        is_convertible_audio
+    } else {
+        is_audio
+    };
+    has(request.video, is_video) && request.audio.is_none_or(|audio| has(audio, audio_ok))
 }
 
 /// Quoted-string attribute: no quote, no control character, bounded length.
@@ -123,13 +135,18 @@ fn quoted(value: &str) -> String {
         .collect()
 }
 
-pub(crate) fn master_playlist(probe: &Probe) -> Result<String, &'static str> {
+/// `convert`: also offer AAC conversions of the tracks native players cannot decode.
+pub(crate) fn master_playlist(probe: &Probe, convert: bool) -> Result<String, &'static str> {
     let video = probe
         .streams
         .iter()
         .find(|t| is_video(t))
         .ok_or("hls_video_unsupported")?;
-    let audios: Vec<&Track> = probe.streams.iter().filter(|t| is_audio(t)).collect();
+    let audios: Vec<&Track> = probe
+        .streams
+        .iter()
+        .filter(|t| is_audio(t) || (convert && is_convertible_audio(t)))
+        .collect();
     let default = audios.iter().position(|t| flag(t, "default")).unwrap_or(0);
     let mut out = String::from("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n");
     let mut names: Vec<String> = Vec::new();
@@ -160,10 +177,18 @@ pub(crate) fn master_playlist(probe: &Probe) -> Result<String, &'static str> {
         }
         let yes = if position == default { "YES" } else { "NO" };
         let _ = write!(out, ",DEFAULT={yes},AUTOSELECT=YES");
+        let converted = !is_audio(track);
         if let Some(channels) = number(track, "channels").filter(|c| *c > 0) {
+            // The conversion keeps 5.1 at most (7.1 is folded down).
+            let channels = if converted { channels.min(6) } else { channels };
             let _ = write!(out, ",CHANNELS=\"{channels}\"");
         }
-        let _ = writeln!(out, ",URI=\"hls-v{}-a{}.m3u8\"", video.index, track.index);
+        let kind = if converted { "aac" } else { "a" };
+        let _ = writeln!(
+            out,
+            ",URI=\"hls-v{}-{kind}{}.m3u8\"",
+            video.index, track.index
+        );
     }
     let bandwidth = probe
         .format
@@ -175,7 +200,11 @@ pub(crate) fn master_playlist(probe: &Probe) -> Result<String, &'static str> {
     // CODECS lists every format of the variant, or is left out rather than guessed.
     let mut codecs = vec![video_codec(video)];
     for track in &audios {
-        let codec = audio_codec(track).map(str::to_owned);
+        let codec = if is_audio(track) {
+            audio_codec(track).map(str::to_owned)
+        } else {
+            Some("mp4a.40.2".to_owned())
+        };
         if !codecs.contains(&codec) {
             codecs.push(codec);
         }
@@ -203,7 +232,11 @@ pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) 
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "asset_unavailable"),
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
     };
-    let text = match probe.as_ref().map(master_playlist) {
+    // AAC conversions spend Node CPU: they follow the transcoding setting.
+    let convert = crate::server_settings::load(store)
+        .await
+        .is_ok_and(|settings| settings.transcoding_enabled);
+    let text = match probe.as_ref().map(|probe| master_playlist(probe, convert)) {
         Ok(Ok(text)) => text,
         Ok(Err(code)) => return crate::error(StatusCode::UNPROCESSABLE_ENTITY, code),
         Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"),
@@ -246,7 +279,17 @@ mod tests {
             json!({"index":3,"codec_type":"audio","codec_name":"dts","channels":6}),
             json!({"index":4,"codec_type":"video","codec_name":"mjpeg","disposition":{"attached_pic":1}}),
         ]);
-        let text = master_playlist(&probe).unwrap();
+        // With transcoding allowed, the DTS track is offered as AAC 5.1.
+        let converted = master_playlist(&probe, true).unwrap();
+        assert!(
+            converted.contains(r#"CHANNELS="6",URI="hls-v0-aac3.m3u8""#),
+            "{converted}"
+        );
+        assert!(
+            converted.contains(r#"CODECS="hvc1.2.4.L150.B0,ec-3,mp4a.40.2""#),
+            "{converted}"
+        );
+        let text = master_playlist(&probe, false).unwrap();
         assert!(text.contains("NAME=\"Français VFF\",LANGUAGE=\"fre\",DEFAULT=NO,AUTOSELECT=YES,CHANNELS=\"6\",URI=\"hls-v0-a1.m3u8\""));
         assert!(text.contains("NAME=\"ENG\",LANGUAGE=\"eng\",DEFAULT=YES,AUTOSELECT=YES,CHANNELS=\"2\",URI=\"hls-v0-a2.m3u8\""));
         assert!(!text.contains("a3.m3u8"), "DTS is not offered: {text}");
@@ -267,7 +310,7 @@ mod tests {
         let odd = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"h264","profile":"High 4:4:4"}),
         ]);
-        let text = master_playlist(&odd).unwrap();
+        let text = master_playlist(&odd, true).unwrap();
         assert!(
             !text.contains("CODECS") && !text.contains("AUDIO="),
             "{text}"
@@ -275,13 +318,20 @@ mod tests {
         let mpeg2 = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"mpeg2video"}),
         ]);
-        assert_eq!(master_playlist(&mpeg2), Err("hls_video_unsupported"));
+        assert_eq!(master_playlist(&mpeg2, true), Err("hls_video_unsupported"));
         let request = media_node::hls::request("hls-v0-a3.m3u8").unwrap();
         let with_dts = probe(vec![
             json!({"index":0,"codec_type":"video","codec_name":"h264"}),
             json!({"index":3,"codec_type":"audio","codec_name":"dts"}),
         ]);
         assert!(!allowed(&with_dts, &request));
+        let conversion = media_node::hls::request("hls-v0-aac3.m3u8").unwrap();
+        assert!(allowed(&with_dts, &conversion));
+        let of_video = media_node::hls::request("hls-v0-aac0.m3u8").unwrap();
+        assert!(
+            !allowed(&with_dts, &of_video),
+            "only audio that needs it is converted"
+        );
         assert!(allowed(
             &with_dts,
             &media_node::hls::request("hls-v0.m3u8").unwrap()

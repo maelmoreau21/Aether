@@ -195,6 +195,9 @@ pub enum Component {
     AssSubtitle(u32),
     /// Blu-ray PGS bitmaps copied as a `.sup` stream for the browser renderer.
     PgsSubtitle(u32),
+    /// A whole audio track that native players cannot decode (DTS, TrueHD…)
+    /// encoded once to AAC, then served as an HLS rendition by packet copy.
+    AacAudio(u32),
 }
 impl Component {
     pub fn mime(self) -> &'static str {
@@ -205,6 +208,7 @@ impl Component {
             Self::Subtitle(_) => "text/vtt; charset=utf-8",
             Self::AssSubtitle(_) => "text/plain; charset=utf-8",
             Self::PgsSubtitle(_) => "application/octet-stream",
+            Self::AacAudio(_) => "audio/mp4",
         }
     }
 }
@@ -268,6 +272,42 @@ impl Preparations {
     }
     pub fn hls(&self) -> &crate::hls::HlsStreams {
         &self.hls
+    }
+    /// HLS entry point. A converted audio rendition is encoded once into the
+    /// preparation cache: its playlist starts the encode in the background,
+    /// its initialization section and segments wait for it, then copy from it.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn serve_hls(
+        self: &Arc<Self>,
+        opened: OpenedFile,
+        root: &Path,
+        relative: &Path,
+        size: u64,
+        mtime: &str,
+        source: String,
+        request: crate::hls::HlsRequest,
+        method: http::Method,
+    ) -> io::Result<http::Response<crate::BoxStreamBody>> {
+        let converted = request.audio.filter(|_| request.convert);
+        let audio = match (converted, request.resource) {
+            (Some(index), crate::hls::service::Resource::Playlist) => {
+                let preparations = Arc::clone(self);
+                let (root, relative, mtime) =
+                    (root.to_owned(), relative.to_owned(), mtime.to_owned());
+                tokio::spawn(async move {
+                    let _ = preparations
+                        .prepare(&root, &relative, size, &mtime, Component::AacAudio(index))
+                        .await;
+                });
+                None
+            }
+            (Some(index), _) => Some(
+                self.prepare(root, relative, size, mtime, Component::AacAudio(index))
+                    .await?,
+            ),
+            (None, _) => None,
+        };
+        self.hls.serve(opened, source, request, method, audio).await
     }
 
     pub async fn prepare(
@@ -411,6 +451,7 @@ impl Preparations {
             Component::Subtitle(_) | Component::AssSubtitle(_) => 4 * 1024 * 1024,
             // Bitmaps: a feature film's PGS track usually weighs 1 to 40 MiB.
             Component::PgsSubtitle(_) => 96 * 1024 * 1024,
+            Component::AacAudio(_) => limits.audio,
         });
         let mut file = input.try_clone_std()?;
         std::io::Seek::rewind(&mut file)?;
@@ -526,6 +567,33 @@ impl Preparations {
                     "copy",
                     "-f",
                     "sup",
+                ]);
+            }
+            Component::AacAudio(index) => {
+                // One continuous encode: AAC priming happens once, at the very
+                // start, instead of at every segment. The source timeline is
+                // kept so the rendition stays in sync with the copied video.
+                command.args([
+                    "-copyts",
+                    "-map",
+                    &format!("0:{index}"),
+                    "-vn",
+                    "-sn",
+                    "-dn",
+                    "-af",
+                    "aformat=channel_layouts=5.1|stereo|mono",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "320k",
+                    "-avoid_negative_ts",
+                    "disabled",
+                    "-movflags",
+                    "frag_keyframe+empty_moov+default_base_moof",
+                    "-frag_duration",
+                    "2000000",
+                    "-f",
+                    "mp4",
                 ]);
             }
         }

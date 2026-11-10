@@ -189,6 +189,17 @@ jobs:
               --notes-file changelog.md
           fi
 
+  clients:
+    name: Applications clientes de la Release
+    needs: [calculate-and-tag, create-github-release]
+    if: needs.calculate-and-tag.outputs.has_release == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/clients.yml
+    with:
+      release_tag: ${{ needs.calculate-and-tag.outputs.next_tag }}
+    secrets: inherit
+
   prepare-next-cycle:
     name: Préparation du prochain cycle sur develop
     needs: [calculate-and-tag, create-github-release]

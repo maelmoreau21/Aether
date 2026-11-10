@@ -1,0 +1,25 @@
+[package]
+name = "aether-client"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Aether client core shared by the native applications (mobile, TV, desktop)"
+publish = false
+
+[dependencies]
+# Bring-your-own rustls (ring + Mozilla roots): builds for Android and iOS
+# without CMake (aws-lc) or the JNI set-up of the platform verifier.
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "json"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+url = "2.5"
+
+[dev-dependencies]
+axum = "0.8.9"
+media-poc = { path = "../core" }
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+zeroize = "1"

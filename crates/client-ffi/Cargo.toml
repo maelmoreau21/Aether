@@ -1,0 +1,21 @@
+[package]
+name = "aether-client-ffi"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "UniFFI bindings of aether-client for Kotlin (Android) and Swift (iOS)"
+publish = false
+
+[lib]
+name = "aether_ffi"
+crate-type = ["cdylib", "lib"]
+
+[[bin]]
+# `cargo run -p aether-client-ffi --bin uniffi-bindgen -- generate --library <lib> --language kotlin`
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+aether-client = { path = "../client" }
+thiserror = "2"
+uniffi = { version = "0.29", features = ["tokio", "cli"] }

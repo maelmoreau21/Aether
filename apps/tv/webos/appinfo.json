@@ -1,0 +1,16 @@
+{
+  "id": "io.github.maelmoreau21.aether",
+  "version": "1.0.0",
+  "vendor": "Aether",
+  "type": "web",
+  "main": "index.html",
+  "title": "Aether",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "bgColor": "#0B0E18",
+  "iconColor": "#0B0E18",
+  "resolution": "1920x1080",
+  "disableBackHistoryAPI": true,
+  "requiredMemory": 300,
+  "requiredACG": []
+}

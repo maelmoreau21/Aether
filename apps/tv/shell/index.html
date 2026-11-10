@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=1920, initial-scale=1" />
+  <title>Aether</title>
+  <link rel="stylesheet" href="shell.css" />
+</head>
+<body>
+  <main class="shell">
+    <img class="mark" src="logo.svg" alt="" width="120" height="120" />
+    <h1>Aether</h1>
+    <form id="connect" novalidate>
+      <label for="address" data-text="label">Adresse de votre serveur Aether</label>
+      <input id="address" name="address" type="url" inputmode="url" autocomplete="url" spellcheck="false" autocapitalize="off" placeholder="https://aether.maison.lan" />
+      <p class="hint" data-text="hint">Le serveur doit être joignable en HTTPS depuis ce téléviseur.</p>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+      <div class="actions">
+        <button id="submit" type="submit" class="primary" data-text="connect">Se connecter</button>
+        <button id="change" type="button" class="secondary" hidden data-text="change">Changer de serveur</button>
+      </div>
+    </form>
+  </main>
+  <script src="shell.js"></script>
+</body>
+</html>

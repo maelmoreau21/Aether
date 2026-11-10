@@ -38,11 +38,14 @@ COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
 # and placeholder sources only let Cargo load the whole workspace.
 COPY crates/client/Cargo.toml ./crates/client/
 COPY crates/client-ffi/Cargo.toml ./crates/client-ffi/
+COPY apps/desktop/Cargo.toml ./apps/desktop/
+COPY apps/desktop/vendor/ ./apps/desktop/vendor/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist
 RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests \
-             crates/client/src crates/client-ffi/src/bin && \
+             crates/client/src crates/client-ffi/src/bin apps/desktop/src && \
+    echo 'fn main() {}' > apps/desktop/src/main.rs && \
     echo 'pub fn dummy() {}' > crates/client/src/lib.rs && \
     echo 'pub fn dummy() {}' > crates/client-ffi/src/lib.rs && \
     echo 'fn main() {}' > crates/client-ffi/src/bin/uniffi-bindgen.rs && \

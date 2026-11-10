@@ -1,6 +1,8 @@
 [workspace]
-members = ["crates/core", "crates/node", "crates/shared", "crates/extension-sdk", "crates/client", "crates/client-ffi", "tests/fixtures/extension-sdk"]
+members = ["crates/core", "crates/node", "crates/shared", "crates/extension-sdk", "crates/client", "crates/client-ffi", "apps/desktop", "tests/fixtures/extension-sdk"]
 resolver = "3"
+# Patched third-party sources are not workspace members (no fmt/clippy on them).
+exclude = ["apps/desktop/vendor"]
 
 [workspace.package]
 edition = "2024"
@@ -21,3 +23,8 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# GPUI (apps/desktop) reaches xattr 0.2 through zed-async-tar; that release no
+# longer builds against libc >= 0.2.190. See apps/desktop/vendor/xattr/README.md.
+[patch.crates-io]
+xattr = { path = "apps/desktop/vendor/xattr" }

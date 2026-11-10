@@ -61,8 +61,10 @@ fn user_agent(device: &str) -> String {
 
 /// Mozilla's roots through `ring`: identical on every platform, no native
 /// verifier to initialize. A self-signed Core is not trusted (use a real
-/// certificate, or plain HTTP on a private network).
-fn tls() -> Result<rustls::ClientConfig> {
+/// certificate, or plain HTTP on a private network). Public so that an
+/// application's other connections (the remote-control WebSocket) trust the
+/// same roots.
+pub fn tls_config() -> Result<rustls::ClientConfig> {
     let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
     let roots = rustls::RootCertStore {
         roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
@@ -93,7 +95,7 @@ impl Client {
         base.set_fragment(None);
         let http = reqwest::Client::builder()
             .user_agent(user_agent(device))
-            .tls_backend_preconfigured(tls()?)
+            .tls_backend_preconfigured(tls_config()?)
             .build()?;
         Ok(Self {
             base,
@@ -270,6 +272,32 @@ impl Client {
             .map_err(|_| Error::InvalidUrl)?
             .to_string())
     }
+    /// Bytes of a server-relative image (a poster), fetched with the token from
+    /// this server only. Versioned URLs never change: cache them for good.
+    pub async fn image(&self, path: &str) -> Result<Vec<u8>> {
+        let url = self.url(path)?;
+        let token = self.token().ok_or(Error::SignedOut)?;
+        let response = self
+            .http
+            .get(url)
+            .header(header::AUTHORIZATION, format!("Bearer {}", token.access))
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(Error::Server {
+                status: status.as_u16(),
+                code: String::new(),
+            });
+        }
+        Ok(response.bytes().await?.to_vec())
+    }
+    /// URL of an asset's original file, for direct play by a player that can
+    /// send `Authorization: Bearer` itself (libmpv on the desktop). Range
+    /// requests are supported; nothing is transcoded.
+    pub fn content_url(&self, asset_id: &str) -> Result<String> {
+        self.url(&format!("/api/v1/assets/{}/content", segment(asset_id)))
+    }
     /// The playable file of a work (a film, an episode) or of an asset id.
     pub async fn media(&self, id: &str) -> Result<Media> {
         self.get(&format!("/api/v1/media/{}", segment(id))).await
@@ -284,6 +312,12 @@ impl Client {
 
     // ---- Progress -----------------------------------------------------------
 
+    /// The account's latest positions, most recent first (at most 100), for a
+    /// "Continue watching" row; finished and untouched items are included.
+    pub async fn recent_progress(&self) -> Result<Vec<RecentProgress>> {
+        let page: RecentProgressPage = self.get("/api/v1/progress").await?;
+        Ok(page.items)
+    }
     pub async fn progress(&self, work_id: &str) -> Result<Progress> {
         self.get(&format!("/api/v1/progress/{}", segment(work_id)))
             .await
@@ -350,6 +384,10 @@ mod tests {
         assert_eq!(
             client.url("/api/v1/assets/i/image?v=1-2").unwrap(),
             "https://media.example/api/v1/assets/i/image?v=1-2"
+        );
+        assert_eq!(
+            client.content_url("a/b").unwrap(),
+            "https://media.example/api/v1/assets/ab/content"
         );
         for foreign in ["https://evil.example/x", "//evil.example/x", "x"] {
             assert!(client.url(foreign).is_err(), "{foreign}");

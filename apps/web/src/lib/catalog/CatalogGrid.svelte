@@ -183,7 +183,6 @@
 
   // On-demand discovery state
   let discoverResults = $state<SearchResult[]>([]);
-  let discoverLoading = $state(false);
   const discoverMissing = $derived.by(() => {
     return discoverResults.filter(r => !r.inLibrary && (selectedKindFilter === 'all' || selectedKindFilter === r.kind));
   });
@@ -203,16 +202,12 @@
       return;
     }
     const controller = new AbortController();
-    discoverLoading = true;
     void discoverRequests(trimmed, controller.signal)
       .then(data => {
         discoverResults = data.results ?? [];
       })
       .catch(() => {
         discoverResults = [];
-      })
-      .finally(() => {
-        discoverLoading = false;
       });
     return () => controller.abort();
   });

@@ -6,7 +6,7 @@
     applicationRequest, features, loadFeatures, type RemoteServer,
     loadPolicyOverview, saveDefaultPolicy, saveGroupPolicy, deleteGroupPolicy,
     saveUserPolicy, deleteUserPolicy, loadUserEffectivePolicy,
-    type PolicyOverview, type PolicyRule, type MyPolicy, type ClassRule
+    type PolicyOverview, type PolicyRule, type MyPolicy
   } from './api';
   import LegacyImport from './LegacyImport.svelte';
   import './applications.css';
@@ -240,7 +240,7 @@
           <p class="muted small">{$t('rq_policy_default_desc')}</p>
 
           <div class="policy-classes-grid">
-            {#each ['film', 'series', 'music'] as const as mediaClass}
+            {#each ['film', 'series', 'music'] as const as mediaClass (mediaClass)}
               {@const classRule = defaultRule[mediaClass] ?? { allow: true, autoApprove: false }}
               <div class="policy-card">
                 <h4>{$t(mediaClass === 'film' ? 'kind_movie' : mediaClass === 'series' ? 'kind_series' : 'audio')}</h4>
@@ -315,7 +315,7 @@
                   {#if editingGroup?.id === grp.id}
                     <div class="detail stack">
                       <div class="policy-classes-grid">
-                        {#each ['film', 'series', 'music'] as const as mediaClass}
+                        {#each ['film', 'series', 'music'] as const as mediaClass (mediaClass)}
                           {@const gRule = editingGroup.rule[mediaClass] ?? {}}
                           <div class="policy-card">
                             <h5>{$t(mediaClass === 'film' ? 'kind_movie' : mediaClass === 'series' ? 'kind_series' : 'audio')}</h5>
@@ -396,7 +396,7 @@
                   {#if editingUser?.id === usr.id}
                     <div class="detail stack">
                       <div class="policy-classes-grid">
-                        {#each ['film', 'series', 'music'] as const as mediaClass}
+                        {#each ['film', 'series', 'music'] as const as mediaClass (mediaClass)}
                           {@const uRule = editingUser.rule[mediaClass] ?? {}}
                           <div class="policy-card">
                             <h5>{$t(mediaClass === 'film' ? 'kind_movie' : mediaClass === 'series' ? 'kind_series' : 'audio')}</h5>
@@ -464,7 +464,7 @@
         <p class="feedback error">{$t('rq_policy_user_restricted')}</p>
       {/if}
       <div class="policy-classes-grid">
-        {#each ['film', 'series', 'music'] as const as mediaClass}
+        {#each ['film', 'series', 'music'] as const as mediaClass (mediaClass)}
           {@const eff = inspectModal.effective.classes[mediaClass]}
           <div class="policy-card">
             <h4>{$t(mediaClass === 'film' ? 'kind_movie' : mediaClass === 'series' ? 'kind_series' : 'audio')}</h4>

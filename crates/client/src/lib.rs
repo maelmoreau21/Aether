@@ -163,6 +163,20 @@ impl Client {
 
     // ---- Sign-in -------------------------------------------------------------
 
+    /// Which sign-in methods this Core offers, and the SSO button label. A Core
+    /// too old to answer is treated as password-only; a network failure is an error.
+    pub async fn sign_in_options(&self) -> Result<SignInOptions> {
+        match self
+            .call(Method::GET, "/api/v1/auth/oidc/status", None, false)
+            .await
+        {
+            Ok((_, value)) => Ok(serde_json::from_value(value).unwrap_or_default()),
+            Err(Error::Server {
+                status: 404 | 405, ..
+            }) => Ok(SignInOptions::default()),
+            Err(error) => Err(error),
+        }
+    }
     /// Local account sign-in; stores the device token.
     pub async fn login(&self, login: &str, password: &str) -> Result<User> {
         let body = json!({"login": login, "password": password, "tokenType": "bearer"});

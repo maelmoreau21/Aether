@@ -140,6 +140,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $short = git rev-parse --short HEAD
+
+          # GPUI loads icon resource 1 for the window (title bar, taskbar):
+          # fail the build if the executable does not carry it.
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class IconCheck {
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            static extern IntPtr LoadLibraryExW(string file, IntPtr handle, uint flags);
+            [DllImport("kernel32.dll", SetLastError = true)]
+            static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+            public static bool HasWindowIcon(string path) {
+              IntPtr module = LoadLibraryExW(path, IntPtr.Zero, 0x22);
+              if (module == IntPtr.Zero) throw new Exception("cannot open " + path);
+              return FindResourceW(module, (IntPtr)1, (IntPtr)14) != IntPtr.Zero;
+            }
+          }
+          "@
+          $exe = (Resolve-Path target/release/aether-desktop.exe).Path
+          if (-not [IconCheck]::HasWindowIcon($exe)) { throw "aether-desktop.exe has no icon resource 1" }
+          Write-Host "Icon resource present in aether-desktop.exe"
+
           New-Item -ItemType Directory -Force dist, stage | Out-Null
           Copy-Item target/release/aether-desktop.exe stage/
           Copy-Item apps/desktop/README.md stage/

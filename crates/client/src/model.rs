@@ -21,6 +21,49 @@ pub struct User {
     pub display_name: Option<String>,
 }
 
+/// How this Core lets people sign in, read before any account is known
+/// (`GET /api/v1/auth/oidc/status`, public).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInOptions {
+    /// An OpenID Connect provider (SSO) is configured.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Local identifier and password sign-in is allowed.
+    #[serde(default = "yes")]
+    pub local_login_enabled: bool,
+    /// Label of the SSO button, chosen by the administrator of the Core.
+    #[serde(default)]
+    pub button_label: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for SignInOptions {
+    /// What to assume when a Core cannot say (an older one): no SSO, passwords allowed.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            local_login_enabled: true,
+            button_label: None,
+        }
+    }
+}
+
+impl SignInOptions {
+    /// The SSO button text, with a default when the Core sets none.
+    pub fn sso_label(&self) -> String {
+        self.button_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or("Se connecter avec SSO")
+            .to_owned()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pairing {
@@ -214,4 +257,31 @@ pub(crate) struct ProgressWrite {
     pub duration: f64,
     pub watched: bool,
     pub expected_revision: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SignInOptions;
+    use serde_json::json;
+
+    #[test]
+    fn sign_in_options_follow_the_core_and_default_safely() {
+        let sso: SignInOptions = serde_json::from_value(json!({
+            "enabled": true, "provider": "Authentik",
+            "localLoginEnabled": false, "buttonLabel": "Entrer avec Authentik"
+        }))
+        .unwrap();
+        assert!(sso.enabled && !sso.local_login_enabled);
+        assert_eq!(sso.sso_label(), "Entrer avec Authentik");
+
+        // A Core that says nothing: passwords allowed, no SSO, default label.
+        let bare: SignInOptions = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(bare, SignInOptions::default());
+        assert!(bare.local_login_enabled && !bare.enabled);
+        let blank = SignInOptions {
+            button_label: Some("  ".into()),
+            ..SignInOptions::default()
+        };
+        assert_eq!(blank.sso_label(), "Se connecter avec SSO");
+    }
 }

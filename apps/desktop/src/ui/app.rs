@@ -12,7 +12,9 @@ use crate::{
     state::{self, LibraryKind, LibraryState, Loadable, Navigator, Route},
     store::{self, Settings},
 };
-use aether_client::{Client, Error, Pairing, RecentProgress, User, Work, WorkDetail};
+use aether_client::{
+    Client, Error, Pairing, RecentProgress, SignInOptions, User, Work, WorkDetail,
+};
 use futures::StreamExt;
 use gpui::{
     AnyElement, Context, Entity, FocusHandle, Focusable, FontWeight, Image, ImageFormat,
@@ -46,6 +48,15 @@ enum SignInMode {
     Sso,
 }
 
+/// The sign-in screen has two pages: the server address first, then the ways
+/// to sign in that this server offers (SSO with the label its administrator
+/// chose, identifiers, Quick Connect).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SignInStep {
+    Server,
+    Account,
+}
+
 /// The Aether logo, shown on the sign-in screen and in the top bar.
 const LOGO: &[u8] = include_bytes!("../../assets/aether-logo.png");
 
@@ -53,6 +64,9 @@ struct SignIn {
     server: Entity<TextField>,
     login: Entity<TextField>,
     password: Entity<TextField>,
+    step: SignInStep,
+    /// What the server offers, known once the first page is validated.
+    options: SignInOptions,
     mode: SignInMode,
     busy: bool,
     error: Option<String>,
@@ -150,13 +164,8 @@ impl AetherApp {
         }
         let subscriptions = vec![
             cx.subscribe_in(&server, window, |this, _, event, window, cx| {
-                match (event, this.sign_in.mode) {
-                    (_, SignInMode::Password) => this.focus_field(Field::Login, window, cx),
-                    (FieldEvent::Submit, SignInMode::QuickConnect) => {
-                        this.start_pairing(false, window, cx)
-                    }
-                    (FieldEvent::Submit, SignInMode::Sso) => this.start_pairing(true, window, cx),
-                    (FieldEvent::Next, _) => {}
+                if matches!(event, FieldEvent::Submit) {
+                    this.continue_to_account(window, cx);
                 }
             }),
             cx.subscribe_in(&login, window, |this, _, _, window, cx| {
@@ -183,6 +192,8 @@ impl AetherApp {
                 server,
                 login,
                 password,
+                step: SignInStep::Server,
+                options: SignInOptions::default(),
                 mode: SignInMode::Password,
                 busy: false,
                 error: None,
@@ -318,12 +329,77 @@ impl AetherApp {
         self.phase = Phase::SignIn;
         self.sign_in.busy = false;
         self.sign_in.error = error;
-        let field = if self.sign_in.server.read(cx).text().is_empty() {
-            Field::Server
-        } else {
-            Field::Login
+        let field = match self.sign_in.step {
+            SignInStep::Server => Field::Server,
+            SignInStep::Account => Field::Login,
         };
         self.focus_field(field, window, cx);
+        cx.notify();
+    }
+
+    /// Page 1 → page 2: checks that the server answers and asks which sign-in
+    /// methods it offers (and the SSO button label its administrator set).
+    fn continue_to_account(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sign_in.busy || self.sign_in.step != SignInStep::Server {
+            return;
+        }
+        if self.sign_in.server.read(cx).text().trim().is_empty() {
+            self.sign_in.error = Some("Indiquez l'adresse de votre serveur.".into());
+            cx.notify();
+            return;
+        }
+        let Some((_, client)) = self.typed_client(cx) else {
+            return;
+        };
+        self.sign_in.busy = true;
+        self.sign_in.error = None;
+        cx.notify();
+        let request = self.net.run(async move { client.sign_in_options().await });
+        self.after(request, window, cx, |this, result, window, cx| {
+            this.sign_in.busy = false;
+            match result {
+                Ok(options) => {
+                    this.sign_in.mode = if options.local_login_enabled {
+                        SignInMode::Password
+                    } else {
+                        SignInMode::QuickConnect
+                    };
+                    this.sign_in.options = options;
+                    this.sign_in.step = SignInStep::Account;
+                    this.sign_in.pairing = None;
+                    this.sign_in.pairing_task = None;
+                    this.focus_field(Field::Login, window, cx);
+                }
+                Err(error) => this.sign_in.error = Some(describe(&error)),
+            }
+        });
+    }
+
+    /// Back to page 1 to change the server.
+    fn change_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sign_in.step = SignInStep::Server;
+        self.sign_in.error = None;
+        self.sign_in.busy = false;
+        self.sign_in.pairing = None;
+        self.sign_in.pairing_task = None;
+        self.focus_field(Field::Server, window, cx);
+        cx.notify();
+    }
+
+    /// Leaves the SSO / Quick Connect waiting view for the usual sign-in methods.
+    fn cancel_pairing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sign_in.pairing = None;
+        self.sign_in.pairing_task = None;
+        self.sign_in.busy = false;
+        self.sign_in.error = None;
+        self.sign_in.mode = if self.sign_in.options.local_login_enabled {
+            SignInMode::Password
+        } else {
+            SignInMode::QuickConnect
+        };
+        if self.sign_in.mode == SignInMode::Password {
+            self.focus_field(Field::Login, window, cx);
+        }
         cx.notify();
     }
 
@@ -923,9 +999,160 @@ fn qr_code(pairing: &Pairing) -> impl IntoElement {
 }
 
 impl AetherApp {
+    /// Logo, name and a line of context, at the top of both sign-in pages.
+    fn sign_in_header(&self, subtitle: impl Into<SharedString>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(img(self.logo.clone()).size(px(40.)).rounded_md())
+                    .child(
+                        div()
+                            .text_2xl()
+                            .font_weight(FontWeight::BOLD)
+                            .child("Aether"),
+                    ),
+            )
+            .child(muted(subtitle))
+    }
+
     fn render_sign_in(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let card = || {
+            div()
+                .w(px(380.))
+                .p_6()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .rounded_lg()
+                .bg(theme::SURFACE)
+                .border_1()
+                .border_color(theme::BORDER)
+        };
+        let mut form = match self.sign_in.step {
+            SignInStep::Server => self.render_server_page(card(), cx),
+            SignInStep::Account => self.render_account_page(card(), cx),
+        };
+        if let Some(error) = &self.sign_in.error {
+            form = form.child(error_text(error.clone()));
+        }
+        if self.sign_in.can_retry {
+            form = form.child(button(
+                "retry",
+                "Réessayer avec la session enregistrée",
+                Tone::Secondary,
+                cx.listener(|this, _, window, cx| this.restore(window, cx)),
+            ));
+        }
+        centered(form)
+    }
+
+    /// Page 1: the address of the server.
+    fn render_server_page(&self, card: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
         let sign_in = &self.sign_in;
+        card.child(self.sign_in_header("Connectez cet ordinateur à votre serveur Aether."))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(muted("Adresse du serveur"))
+                    .child(sign_in.server.clone()),
+            )
+            .child(button(
+                "continue",
+                if sign_in.busy {
+                    "Vérification…"
+                } else {
+                    "Continuer"
+                },
+                Tone::Primary,
+                cx.listener(|this, _, window, cx| this.continue_to_account(window, cx)),
+            ))
+    }
+
+    /// Page 2: the ways to sign in that this server offers.
+    fn render_account_page(&self, card: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+        let sign_in = &self.sign_in;
+        let options = &sign_in.options;
         let mode = sign_in.mode;
+        let address = store::normalize_server(sign_in.server.read(cx).text());
+        let mut form = card
+            .child(self.sign_in_header("Choisissez comment vous connecter."))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(muted(address))
+                    .child(button(
+                        "change-server",
+                        "Changer",
+                        Tone::Quiet,
+                        cx.listener(|this, _, window, cx| this.change_server(window, cx)),
+                    )),
+            );
+
+        // SSO: waiting for the person to finish in the browser.
+        if mode == SignInMode::Sso {
+            form = match &sign_in.pairing {
+                Some(pairing) => {
+                    let url = pairing.url.clone();
+                    form.child(muted(
+                        "Terminez la connexion dans votre navigateur avec votre compte, puis validez cet ordinateur. Code :",
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_center()
+                            .text_3xl()
+                            .font_weight(FontWeight::BOLD)
+                            .child(pairing.code.clone()),
+                    )
+                    .child(button(
+                        "sso-reopen",
+                        "Rouvrir le navigateur",
+                        Tone::Secondary,
+                        cx.listener(move |_, _, _, cx| open_in_browser(&url, cx)),
+                    ))
+                    .child(muted("En attente de validation…"))
+                }
+                None => form.child(muted("Ouverture du navigateur…")),
+            };
+            return form.child(button(
+                "sso-cancel",
+                "Annuler",
+                Tone::Quiet,
+                cx.listener(|this, _, window, cx| this.cancel_pairing(window, cx)),
+            ));
+        }
+
+        // SSO button, labelled by the administrator of the server.
+        if options.enabled {
+            form = form.child(button(
+                "sso",
+                options.sso_label(),
+                Tone::Primary,
+                cx.listener(|this, _, window, cx| {
+                    this.sign_in.mode = SignInMode::Sso;
+                    this.start_pairing(true, window, cx);
+                }),
+            ));
+            form = form.child(div().flex().justify_center().child(muted(
+                if options.local_login_enabled {
+                    "ou"
+                } else {
+                    "ou avec un code"
+                },
+            )));
+        }
+
         let tab =
             |id: &'static str, label: &'static str, target: SignInMode, cx: &mut Context<Self>| {
                 let active = mode == target;
@@ -954,45 +1181,8 @@ impl AetherApp {
                     }))
                     .child(label)
             };
-        let mut form = div()
-            .w(px(380.))
-            .p_6()
-            .flex()
-            .flex_col()
-            .gap_4()
-            .rounded_lg()
-            .bg(theme::SURFACE)
-            .border_1()
-            .border_color(theme::BORDER)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_3()
-                            .child(img(self.logo.clone()).size(px(40.)).rounded_md())
-                            .child(
-                                div()
-                                    .text_2xl()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child("Aether"),
-                            ),
-                    )
-                    .child(muted("Connectez cet ordinateur à votre serveur.")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(muted("Adresse du serveur"))
-                    .child(sign_in.server.clone()),
-            )
-            .child(
+        if options.local_login_enabled {
+            form = form.child(
                 div()
                     .flex()
                     .p_1()
@@ -1005,7 +1195,6 @@ impl AetherApp {
                         SignInMode::Password,
                         cx,
                     ))
-                    .child(tab("mode-sso", "SSO", SignInMode::Sso, cx))
                     .child(tab(
                         "mode-quick",
                         "Quick Connect",
@@ -1013,17 +1202,27 @@ impl AetherApp {
                         cx,
                     )),
             );
-        form = match mode {
+        }
+
+        match mode {
             SignInMode::Password => form
                 .child(sign_in.login.clone())
                 .child(sign_in.password.clone())
                 .child(button(
                     "sign-in",
-                    if sign_in.busy { "Connexion…" } else { "Se connecter" },
-                    Tone::Primary,
+                    if sign_in.busy {
+                        "Connexion…"
+                    } else {
+                        "Se connecter"
+                    },
+                    if options.enabled {
+                        Tone::Secondary
+                    } else {
+                        Tone::Primary
+                    },
                     cx.listener(|this, _, window, cx| this.sign_in_with_password(window, cx)),
                 )),
-            SignInMode::QuickConnect => match &sign_in.pairing {
+            SignInMode::QuickConnect | SignInMode::Sso => match &sign_in.pairing {
                 Some(pairing) => form
                     .child(muted(
                         "Sur un appareil déjà connecté, ouvrez Quick Connect et saisissez ce code, ou scannez le QR code.",
@@ -1044,57 +1243,16 @@ impl AetherApp {
                     ))
                     .child(button(
                         "pairing",
-                        if sign_in.busy { "Demande…" } else { "Obtenir un code" },
-                        Tone::Primary,
+                        if sign_in.busy {
+                            "Demande…"
+                        } else {
+                            "Obtenir un code"
+                        },
+                        Tone::Secondary,
                         cx.listener(|this, _, window, cx| this.start_pairing(false, window, cx)),
                     )),
             },
-            SignInMode::Sso => match &sign_in.pairing {
-                Some(pairing) => {
-                    let url = pairing.url.clone();
-                    form.child(muted(
-                        "Terminez la connexion dans votre navigateur avec votre compte SSO, puis validez cet ordinateur. Code :",
-                    ))
-                    .child(
-                        div()
-                            .flex()
-                            .justify_center()
-                            .text_3xl()
-                            .font_weight(FontWeight::BOLD)
-                            .child(pairing.code.clone()),
-                    )
-                    .child(button(
-                        "sso-reopen",
-                        "Rouvrir le navigateur",
-                        Tone::Secondary,
-                        cx.listener(move |_, _, _, cx| open_in_browser(&url, cx)),
-                    ))
-                    .child(muted("En attente de validation…"))
-                }
-                None => form
-                    .child(muted(
-                        "Ouvre votre navigateur pour vous connecter avec le fournisseur d'identité de votre serveur (SSO).",
-                    ))
-                    .child(button(
-                        "sso",
-                        if sign_in.busy { "Ouverture…" } else { "Se connecter avec SSO" },
-                        Tone::Primary,
-                        cx.listener(|this, _, window, cx| this.start_pairing(true, window, cx)),
-                    )),
-            },
-        };
-        if let Some(error) = &sign_in.error {
-            form = form.child(error_text(error.clone()));
         }
-        if sign_in.can_retry {
-            form = form.child(button(
-                "retry",
-                "Réessayer avec la session enregistrée",
-                Tone::Secondary,
-                cx.listener(|this, _, window, cx| this.restore(window, cx)),
-            ));
-        }
-        centered(form)
     }
 
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

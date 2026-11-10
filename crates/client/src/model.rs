@@ -55,6 +55,44 @@ pub struct Work {
     pub year: Option<i64>,
     #[serde(default)]
     pub description: String,
+    /// Server-relative and versioned (`/api/v1/assets/…/image?v=…`): cache it
+    /// forever, fetch it with the token (`Client::url` makes it absolute).
+    #[serde(default)]
+    pub poster_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Episode {
+    /// The episode's own work id: play it with `Client::media`.
+    pub id: String,
+    #[serde(default)]
+    pub number: Option<i64>,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Season {
+    pub id: String,
+    #[serde(default)]
+    pub number: Option<i64>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub episodes: Vec<Episode>,
+}
+
+/// A work with its seasons (empty for a film).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkDetail {
+    #[serde(flatten)]
+    pub work: Work,
+    #[serde(default)]
+    pub seasons: Vec<Season>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]

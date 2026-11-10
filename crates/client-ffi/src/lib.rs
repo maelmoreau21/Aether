@@ -70,6 +70,27 @@ pub struct Work {
     pub title: String,
     pub year: Option<i64>,
     pub description: String,
+    /// Server-relative; make it absolute with `AetherClient::url`.
+    pub poster_url: Option<String>,
+}
+#[derive(uniffi::Record)]
+pub struct Episode {
+    pub id: String,
+    pub number: Option<i64>,
+    pub title: String,
+    pub description: String,
+}
+#[derive(uniffi::Record)]
+pub struct Season {
+    pub id: String,
+    pub number: Option<i64>,
+    pub title: String,
+    pub episodes: Vec<Episode>,
+}
+#[derive(uniffi::Record)]
+pub struct WorkDetail {
+    pub work: Work,
+    pub seasons: Vec<Season>,
 }
 #[derive(uniffi::Record)]
 pub struct CatalogPage {
@@ -95,6 +116,19 @@ pub struct Progress {
     pub duration: f64,
     pub watched: bool,
     pub revision: i64,
+}
+
+impl From<core::Work> for Work {
+    fn from(w: core::Work) -> Self {
+        Self {
+            id: w.id,
+            kind: w.kind,
+            title: w.title,
+            year: w.year,
+            description: w.description,
+            poster_url: w.poster_url,
+        }
+    }
 }
 
 impl From<core::User> for User {
@@ -200,20 +234,40 @@ impl AetherClient {
             })
             .await?;
         Ok(CatalogPage {
-            items: page
-                .items
-                .into_iter()
-                .map(|w| Work {
-                    id: w.id,
-                    kind: w.kind,
-                    title: w.title,
-                    year: w.year,
-                    description: w.description,
-                })
-                .collect(),
+            items: page.items.into_iter().map(Into::into).collect(),
             has_more: page.has_more,
             total: page.total.map(|t| t as u64),
         })
+    }
+    /// A work with its seasons and episodes (no seasons for a film).
+    pub async fn work(&self, id: String) -> Result<WorkDetail> {
+        let detail = self.inner.work(&id).await?;
+        Ok(WorkDetail {
+            work: detail.work.into(),
+            seasons: detail
+                .seasons
+                .into_iter()
+                .map(|season| Season {
+                    id: season.id,
+                    number: season.number,
+                    title: season.title,
+                    episodes: season
+                        .episodes
+                        .into_iter()
+                        .map(|e| Episode {
+                            id: e.id,
+                            number: e.number,
+                            title: e.title,
+                            description: e.description,
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
+    }
+    /// Absolute URL of a server-relative path such as a poster.
+    pub fn url(&self, path: String) -> Result<String> {
+        Ok(self.inner.url(&path)?)
     }
     pub async fn media(&self, id: String) -> Result<Media> {
         let m = self.inner.media(&id).await?;

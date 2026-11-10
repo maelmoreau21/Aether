@@ -254,6 +254,22 @@ impl Client {
         let path = format!("{}?{}", url.path(), url.query().unwrap_or(""));
         self.get(&path).await
     }
+    /// A work with its seasons and episodes.
+    pub async fn work(&self, id: &str) -> Result<WorkDetail> {
+        self.get(&format!("/api/v1/catalog/{}", segment(id))).await
+    }
+    /// Absolute URL of a server-relative path (posters). Images need the token:
+    /// send it as `Authorization: Bearer`, to this server only.
+    pub fn url(&self, path: &str) -> Result<String> {
+        if !path.starts_with('/') || path.starts_with("//") {
+            return Err(Error::InvalidUrl);
+        }
+        Ok(self
+            .base
+            .join(&path[1..])
+            .map_err(|_| Error::InvalidUrl)?
+            .to_string())
+    }
     /// The playable file of a work (a film, an episode) or of an asset id.
     pub async fn media(&self, id: &str) -> Result<Media> {
         self.get(&format!("/api/v1/media/{}", segment(id))).await
@@ -331,5 +347,12 @@ mod tests {
             );
         }
         assert_eq!(segment("a/../b?c#d"), "a..bcd");
+        assert_eq!(
+            client.url("/api/v1/assets/i/image?v=1-2").unwrap(),
+            "https://media.example/api/v1/assets/i/image?v=1-2"
+        );
+        for foreign in ["https://evil.example/x", "//evil.example/x", "x"] {
+            assert!(client.url(foreign).is_err(), "{foreign}");
+        }
     }
 }

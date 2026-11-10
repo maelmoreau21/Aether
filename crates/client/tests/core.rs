@@ -20,6 +20,9 @@ async fn serve() -> (tempfile::TempDir, String, PathBuf) {
     let film = media.join("Films/Client Film (2026)/film.mp4");
     std::fs::create_dir_all(film.parent().unwrap()).unwrap();
     std::fs::copy(fixture(), &film).unwrap();
+    let episode = media.join("Series/Client Series (2026)/Season 01/Client Series S01E01.mp4");
+    std::fs::create_dir_all(episode.parent().unwrap()).unwrap();
+    std::fs::copy(fixture(), &episode).unwrap();
     let store = IdentityStore::open(&temp.path().join("core.sqlite3"))
         .await
         .unwrap();
@@ -89,23 +92,46 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
     );
     assert_eq!(phone.me().await.unwrap(), user);
 
-    // A film library, created and scanned with the same token.
-    let library = admin(&origin, &phone, reqwest::Method::POST, "/api/v1/admin/libraries",
-        json!({"name":"Films","kind":"films","nodeId":"local","root":media.join("Films").to_string_lossy(),"enabled":true,"userIds":[]})).await;
-    let scan = format!(
-        "/api/v1/admin/libraries/{}/scan",
-        library["id"].as_str().unwrap()
+    // Film and series libraries, created and scanned with the same token.
+    for (kind, folder) in [("films", "Films"), ("series", "Series")] {
+        let library = admin(&origin, &phone, reqwest::Method::POST, "/api/v1/admin/libraries",
+            json!({"name":folder,"kind":kind,"nodeId":"local","root":media.join(folder).to_string_lossy(),"enabled":true,"userIds":[]})).await;
+        let scan = format!(
+            "/api/v1/admin/libraries/{}/scan",
+            library["id"].as_str().unwrap()
+        );
+        admin(&origin, &phone, reqwest::Method::POST, &scan, Value::Null).await;
+        tokio::time::timeout(Duration::from_secs(45), async {
+            while admin(&origin, &phone, reqwest::Method::GET, &scan, Value::Null).await["status"]
+                != "completed"
+            {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    // A series opens on its seasons; an episode plays like a film.
+    let series_query = CatalogQuery {
+        kind: Some("series".into()),
+        limit: 20,
+        ..Default::default()
+    };
+    let series_page = phone.catalog(&series_query).await.unwrap();
+    let series = series_page
+        .items
+        .iter()
+        .find(|w| w.title == "Client Series")
+        .unwrap_or_else(|| panic!("{series_page:?}"));
+    let detail = phone.work(&series.id).await.unwrap();
+    assert_eq!(detail.work.id, series.id);
+    let episode = &detail.seasons[0].episodes[0];
+    assert_eq!(
+        (detail.seasons[0].number, episode.number),
+        (Some(1), Some(1))
     );
-    admin(&origin, &phone, reqwest::Method::POST, &scan, Value::Null).await;
-    tokio::time::timeout(Duration::from_secs(45), async {
-        while admin(&origin, &phone, reqwest::Method::GET, &scan, Value::Null).await["status"]
-            != "completed"
-        {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .unwrap();
+    assert!(phone.media(&episode.id).await.unwrap().available);
 
     // Browse, then play through an HLS URL that needs no credential.
     let query = CatalogQuery {
@@ -129,6 +155,7 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
         .await
         .unwrap();
     assert!(searched.items.is_empty());
+    assert!(phone.work(&film.id).await.unwrap().seasons.is_empty());
     let asset = phone.media(&film.id).await.unwrap();
     assert!(asset.available);
     let playback = phone.playback_url(&asset.id).await.unwrap();

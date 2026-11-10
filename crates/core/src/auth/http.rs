@@ -286,6 +286,16 @@ async fn login(
     let Some((id, _)) = row.filter(|_| verified) else {
         return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
     };
+    issue_session(&state, &headers, &id, token_type == TokenType::Bearer).await
+}
+/// Opens a fresh session for an already-verified user: a cookie for the browser,
+/// or a bearer grant for a native application. Shared by login and profile switching.
+pub(crate) async fn issue_session(
+    state: &AuthState,
+    headers: &HeaderMap,
+    id: &str,
+    bearer: bool,
+) -> Response {
     let raw = random_token();
     // Opportunistic bounded-state cleanup; no secret material is persisted.
     if crate::database::query(
@@ -298,13 +308,13 @@ async fn login(
     {
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
     }
-    if crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
+    if crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
     let _ = crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
-        .bind(device_label(&headers))
+        .bind(device_label(headers))
         .bind(hash(&raw))
         .execute(&state.store.pool)
         .await;
-    if token_type == TokenType::Bearer {
+    if bearer {
         return match state.session_from_hash(&hash(&raw)).await {
             Ok(user) => bearer_grant(user, &raw, None),
             Err(s) => failure(s, "invalid_credentials"),

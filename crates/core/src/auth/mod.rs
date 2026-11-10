@@ -19,6 +19,7 @@ mod util;
 mod tests;
 
 pub use config::{is_http_bootstrap_disabled, is_local_login_enabled};
+pub(crate) use http::issue_session;
 pub use http::{authenticate, router};
 pub use state::{AuthConfigError, AuthState, AuthUser, Authenticated};
 pub use touch::SessionTouchStats;

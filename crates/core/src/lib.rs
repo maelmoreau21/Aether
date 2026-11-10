@@ -66,6 +66,7 @@ pub mod permissions;
 pub mod playlists;
 pub mod preferences;
 pub mod product;
+pub mod profiles;
 pub mod progress;
 mod provider_download;
 pub mod recommendations;
@@ -286,6 +287,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(notifications::router(auth.clone()))
             .merge(preferences::router(auth.clone()))
             .merge(account::router(auth.clone()))
+            .merge(profiles::router(auth.clone()))
             .merge(applications::router(auth.clone()))
             .merge(acquisition::router(auth.clone()))
             .merge(reports::router(auth.clone()))

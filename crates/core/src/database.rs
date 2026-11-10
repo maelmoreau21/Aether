@@ -275,6 +275,10 @@ const IDEMPOTENT_STEPS: &[(&str, &str)] = &[
         "playback_grants",
         include_str!("../migrations/playback_grants.sql"),
     ),
+    (
+        "account_profiles",
+        include_str!("../migrations/account_profiles.sql"),
+    ),
 ];
 /// Depend on the role-group seed that Rust performs between the two lists.
 const IDEMPOTENT_STEPS_AFTER_GROUPS: &[(&str, &str)] = &[

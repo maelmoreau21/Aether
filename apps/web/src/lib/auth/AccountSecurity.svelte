@@ -3,6 +3,7 @@
   import { session } from './session';
   import DeviceSessions from './DeviceSessions.svelte';
   import QuickConnectApprove from './QuickConnectApprove.svelte';
+  import TwoFactorSettings from './TwoFactorSettings.svelte';
   import { t } from '../i18n';
   let { mode = 'security' }: { mode?: 'security' | 'devices' } = $props();
   let canCreate=$state(false),login=$state('');
@@ -42,6 +43,7 @@
   <label>{$t('confirm_the_new_password')}<input type="password" autocomplete="new-password" required minlength="15" maxlength="128" bind:value={confirmation} disabled={busy} /></label>
   {#if !$session?.user.sso}<p>{$t('all_your_sessions_will_be_signed')}</p>{/if}<button disabled={busy}>{$session?.user.sso ? $t('create_my_local_credentials') : $t('change_the_password')}</button>
 </form>{/if}
+{#if !$session?.user.sso}<TwoFactorSettings />{/if}
 {:else}<QuickConnectApprove /><DeviceSessions />
 {/if}
 {#if error}<p role="alert">{error}</p>{/if}</section>

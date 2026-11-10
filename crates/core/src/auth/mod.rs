@@ -10,11 +10,15 @@
 mod config;
 mod grants;
 mod http;
+mod mfa;
+mod passkey;
 mod quick_connect;
 mod state;
 mod touch;
 mod util;
 
+#[cfg(test)]
+mod mfa_tests;
 #[cfg(test)]
 mod tests;
 

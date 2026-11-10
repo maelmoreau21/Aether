@@ -304,6 +304,7 @@ const IDEMPOTENT_STEPS_AFTER_GROUPS: &[(&str, &str)] = &[
         "content_fingerprints",
         include_str!("../migrations/content_fingerprints.sql"),
     ),
+    ("account_mfa", include_str!("../migrations/account_mfa.sql")),
 ];
 /// Journal text for the Rust-coded constraint upgrades in `task_schema`.
 const COMPAT_TASK_CONSTRAINTS: &str =

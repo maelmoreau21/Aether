@@ -66,6 +66,8 @@ struct IdentityResponse {
 pub fn router(state: AuthState) -> Router {
     Router::new()
         .merge(super::quick_connect::router())
+        .merge(super::mfa::router())
+        .merge(super::passkey::router())
         .route("/api/v1/auth/bootstrap/status", get(bootstrap_status))
         .route("/api/v1/auth/bootstrap", post(bootstrap))
         .route("/api/v1/auth/login", post(login))
@@ -286,7 +288,13 @@ async fn login(
     let Some((id, _)) = row.filter(|_| verified) else {
         return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
     };
-    issue_session(&state, &headers, &id, token_type == TokenType::Bearer).await
+    let bearer = token_type == TokenType::Bearer;
+    // An account with TOTP or a passkey gets a single-use mfaToken instead of a session.
+    match super::mfa::second_factor_challenge(&state, &id, bearer).await {
+        Ok(None) => issue_session(&state, &headers, &id, bearer).await,
+        Ok(Some(challenge)) => challenge,
+        Err(error) => error.into_response(),
+    }
 }
 /// Opens a fresh session for an already-verified user: a cookie for the browser,
 /// or a bearer grant for a native application. Shared by login and profile switching.

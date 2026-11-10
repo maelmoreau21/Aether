@@ -862,9 +862,19 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let transcodes = Transcodes::new(TranscodeConfig::default());
         for (raw, video, channels, transfer) in [
-            ("transcode-v0a1sxh480b1500f11-2000", "h264", 6, Some("bt709")),
+            (
+                "transcode-v0a1sxh480b1500f11-2000",
+                "h264",
+                6,
+                Some("bt709"),
+            ),
             ("transcode-v0a1sxh720b2500f4-0", "h264", 2, None),
-            ("transcode-v0a1sxh0b1500f2-1000", "hevc", 2, Some("smpte2084")),
+            (
+                "transcode-v0a1sxh0b1500f2-1000",
+                "hevc",
+                2,
+                Some("smpte2084"),
+            ),
         ] {
             let opened = OpenedFile::open_in_root(
                 source.parent().unwrap(),
@@ -881,7 +891,14 @@ mod tests {
             let output = temp.path().join("output.mp4");
             std::fs::write(&output, &bytes).unwrap();
             let probe = Command::new("ffprobe")
-                .args(["-v", "error", "-show_streams", "-show_format", "-of", "json"])
+                .args([
+                    "-v",
+                    "error",
+                    "-show_streams",
+                    "-show_format",
+                    "-of",
+                    "json",
+                ])
                 .arg(&output)
                 .output()
                 .await
@@ -897,9 +914,19 @@ mod tests {
             if let Some(transfer) = transfer {
                 assert_eq!(picture["color_transfer"], transfer, "{raw}");
             }
-            let duration: f64 = value["format"]["duration"].as_str().unwrap().parse().unwrap();
+            let duration: f64 = value["format"]["duration"]
+                .as_str()
+                .unwrap()
+                .parse()
+                .unwrap();
             assert!(duration > 2.0, "{raw}: {duration}");
-            eprintln!("{raw}: {} bytes, {} {}x{}, {duration:.2} s", bytes.len(), video, picture["width"], picture["height"]);
+            eprintln!(
+                "{raw}: {} bytes, {} {}x{}, {duration:.2} s",
+                bytes.len(),
+                video,
+                picture["width"],
+                picture["height"]
+            );
         }
     }
 

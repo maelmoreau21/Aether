@@ -35,6 +35,9 @@ pub struct SignInOptions {
     /// Label of the SSO button, chosen by the administrator of the Core.
     #[serde(default)]
     pub button_label: Option<String>,
+    /// Identity provider ("Authentik", "Keycloak"… or "SSO" when unknown).
+    #[serde(default)]
+    pub provider: Option<String>,
 }
 
 fn yes() -> bool {
@@ -48,6 +51,7 @@ impl Default for SignInOptions {
             enabled: false,
             local_login_enabled: true,
             button_label: None,
+            provider: None,
         }
     }
 }
@@ -62,6 +66,17 @@ impl SignInOptions {
             .unwrap_or("Se connecter avec SSO")
             .to_owned()
     }
+}
+
+/// What the sign-in screen shows about a server (see `Client::discover`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerInfo {
+    /// Brand name of the server, shown above the sign-in form.
+    pub name: String,
+    pub version: String,
+    pub sign_in: SignInOptions,
+    /// No administrator exists yet: the server must be set up from its web page.
+    pub needs_bootstrap: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]

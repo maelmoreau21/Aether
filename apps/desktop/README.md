@@ -3,12 +3,12 @@
 Application de bureau d'Aether (Windows, macOS, Linux) : interface en GPUI,
 lecture par libmpv, API de la Core via le cœur client partagé `aether-client`.
 
-- Connexion en deux pages : l'adresse du serveur, puis les méthodes qu'il propose
-  (SSO, identifiants, Quick Connect — code + QR). Le bouton SSO porte le libellé
-  choisi par l'administrateur de la Core (`/api/v1/auth/oidc/status`) ; il ouvre le
-  navigateur sur la page de validation de la Core, où l'on se connecte avec le
-  fournisseur d'identité, puis la validation connecte l'application. Les
-  identifiants n'apparaissent que si la Core autorise la connexion locale.
+- Connexion en deux pages, même présentation que la page de connexion du web
+  (palette Halo). Page 1 : l'adresse du serveur ; « Continuer » vérifie que c'est
+  bien un serveur Aether (`/api/v1/config`, `/api/v1/auth/oidc/status`) et refuse
+  toute autre adresse. Page 2 : comme le web, le bouton SSO (libellé choisi par
+  l'administrateur de la Core ; il ouvre le navigateur sur la page de validation),
+  le compte local (si la Core l'autorise) puis Quick Connect (code + QR).
   Le jeton d'appareil est rangé dans le trousseau système (Credential Manager,
   Keychain, Secret Service) ; seuls l'adresse et l'identifiant de télécommande
   vont dans `settings.json` (`%APPDATA%\Aether`, `~/Library/Application Support/Aether`,

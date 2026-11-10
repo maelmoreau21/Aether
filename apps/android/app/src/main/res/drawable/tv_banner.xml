@@ -1,14 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 320×180 home-screen banner for Android TV, Google TV and Fire TV. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="320dp"
     android:height="180dp"
     android:viewportWidth="320"
     android:viewportHeight="180">
     <path
-        android:fillColor="#10131A"
+        android:fillColor="#111827"
         android:pathData="M0,0h320v180h-320z" />
-    <path
-        android:fillColor="#7C9CFF"
-        android:pathData="M160,40 L205,140 H185 L175,116 H145 L135,140 H115 Z M151,100 H169 L160,78 Z" />
+    <group
+        android:translateX="90"
+        android:translateY="30"
+        android:scaleX="0.5"
+        android:scaleY="0.5">
+        <path
+            android:pathData="M64,192 V48 L216,128 L116,180"
+            android:strokeWidth="30"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient
+                    android:type="linear"
+                    android:startX="64"
+                    android:startY="48"
+                    android:endX="216"
+                    android:endY="192">
+                    <item android:offset="0" android:color="#F59E0B" />
+                    <item android:offset="1" android:color="#EF4444" />
+                </gradient>
+            </aapt:attr>
+        </path>
+    </group>
 </vector>

@@ -20,6 +20,9 @@ pub enum ClientError {
     Network { detail: String },
     #[error("invalid server address")]
     InvalidUrl,
+    /// The address answers, but not like an Aether server.
+    #[error("not an Aether server")]
+    NotAether,
 }
 
 impl From<core::Error> for ClientError {
@@ -32,6 +35,7 @@ impl From<core::Error> for ClientError {
         match error {
             core::Error::InvalidUrl => Self::InvalidUrl,
             core::Error::PairingExpired => Self::PairingExpired,
+            core::Error::NotAether => Self::NotAether,
             core::Error::Server { status, code } => Self::Server { status, code },
             other => Self::Network {
                 detail: other.to_string(),
@@ -62,6 +66,23 @@ pub struct Pairing {
     pub expires_in: i64,
     pub qr_width: u32,
     pub qr_modules: Vec<bool>,
+}
+/// What the sign-in screen needs, read before any account is known.
+#[derive(uniffi::Record)]
+pub struct ServerInfo {
+    /// Brand name of the server.
+    pub name: String,
+    pub version: String,
+    /// An SSO provider is configured.
+    pub sso_enabled: bool,
+    /// Label of the SSO button, set by the administrator of the server.
+    pub sso_label: String,
+    /// "Authentik", "Keycloak"… or empty when unknown.
+    pub sso_provider: String,
+    /// Identifier + password sign-in is allowed.
+    pub local_login_enabled: bool,
+    /// No administrator yet: the server must be set up from its web page.
+    pub needs_bootstrap: bool,
 }
 #[derive(uniffi::Record)]
 pub struct Work {
@@ -192,6 +213,24 @@ impl AetherClient {
         self.inner.token().map(|t| Token {
             access: t.access,
             expires_at: t.expires_at,
+        })
+    }
+    /// Checks that the address is an Aether server (`NotAether` otherwise) and
+    /// reads how it lets people sign in. No account needed.
+    pub async fn discover(&self) -> Result<ServerInfo> {
+        let info = self.inner.discover().await?;
+        Ok(ServerInfo {
+            name: info.name,
+            version: info.version,
+            sso_enabled: info.sign_in.enabled,
+            sso_label: info.sign_in.sso_label(),
+            sso_provider: info
+                .sign_in
+                .provider
+                .filter(|provider| provider != "SSO")
+                .unwrap_or_default(),
+            local_login_enabled: info.sign_in.local_login_enabled,
+            needs_bootstrap: info.needs_bootstrap,
         })
     }
     pub async fn login(&self, login: String, password: String) -> Result<User> {

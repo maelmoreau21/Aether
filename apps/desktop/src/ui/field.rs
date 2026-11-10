@@ -3,8 +3,8 @@
 //! (server addresses, logins and passwords do not need it).
 use super::theme;
 use gpui::{
-    App, Context, EventEmitter, FocusHandle, Focusable, KeyDownEvent, SharedString, Window, div,
-    prelude::*, px,
+    App, Context, EventEmitter, FocusHandle, Focusable, KeyDownEvent, Rgba, SharedString, Window,
+    div, prelude::*, px,
 };
 
 pub enum FieldEvent {
@@ -122,25 +122,29 @@ impl Render for TextField {
             .on_key_down(cx.listener(Self::on_key))
             .on_click(cx.listener(|this, _, window, _| window.focus(&this.focus)))
             .w_full()
-            .h(px(40.))
-            .px_3()
+            .h(px(46.))
+            .px(px(14.))
             .flex()
             .items_center()
-            .rounded_md()
+            .rounded(px(12.))
             .border_1()
             .border_color(if focused {
                 theme::ACCENT
             } else {
-                theme::BORDER
+                Rgba {
+                    a: 0.0,
+                    ..theme::BORDER
+                }
             })
-            .bg(theme::SURFACE)
+            .bg(if focused { theme::RAISED } else { theme::PANEL })
+            .hover(|field| field.bg(theme::PANEL_2))
             .cursor_text()
             .overflow_hidden()
             .child(
                 div()
                     .whitespace_nowrap()
                     .text_color(if self.value.is_empty() {
-                        theme::MUTED
+                        theme::MUTED_2
                     } else {
                         theme::TEXT
                     })

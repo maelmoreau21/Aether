@@ -264,3 +264,54 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
         "the phone keeps its own session"
     );
 }
+
+/// An address that answers like any other web server is refused, and a closed
+/// port is a network error: the sign-in screen tells them apart.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_address_that_is_not_an_aether_server_is_refused() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let page = axum::Router::new()
+        .fallback(|| async { axum::response::Html("<!doctype html><title>Not Aether</title>") });
+    tokio::spawn(async move { axum::serve(listener, page).await.unwrap() });
+    let client = Client::new(&format!("http://{address}"), "Salon").unwrap();
+    assert!(matches!(client.discover().await, Err(Error::NotAether)));
+
+    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let client = Client::new(&format!("http://127.0.0.1:{port}"), "Salon").unwrap();
+    assert!(matches!(client.discover().await, Err(Error::Network(_))));
+}
+
+/// The sign-in screen first checks that the address is an Aether server and
+/// reads how it lets people sign in (needs no media).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn discovery_reads_a_real_core_before_any_sign_in() {
+    let temp = tempfile::tempdir().unwrap();
+    let media = temp.path().join("media");
+    std::fs::create_dir_all(&media).unwrap();
+    let store = IdentityStore::open(&temp.path().join("core.sqlite3"))
+        .await
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let origin = format!("http://{address}");
+    let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
+    let app = media_poc::secure_app(Inventory::local(media).await.unwrap(), address.port(), auth)
+        .await
+        .unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = Client::new(&origin, "Salon").unwrap();
+
+    let fresh = client.discover().await.unwrap();
+    assert_eq!(fresh.name, "Aether");
+    assert!(fresh.sign_in.local_login_enabled && !fresh.sign_in.enabled);
+    assert!(fresh.needs_bootstrap, "no administrator yet");
+
+    store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.clone()))
+        .await
+        .unwrap();
+    assert!(!client.discover().await.unwrap().needs_bootstrap);
+}

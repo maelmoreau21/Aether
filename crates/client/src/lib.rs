@@ -27,6 +27,10 @@ pub enum Error {
     SignedOut,
     #[error("the pairing request expired")]
     PairingExpired,
+    /// The address answers, but not like an Aether server (another service, or
+    /// a web page): nothing to sign in to.
+    #[error("not an Aether server")]
+    NotAether,
     /// The Core answered with an error status and, usually, an error code.
     #[error("server refused the request: {status} {code}")]
     Server { status: u16, code: String },
@@ -163,19 +167,49 @@ impl Client {
 
     // ---- Sign-in -------------------------------------------------------------
 
-    /// Which sign-in methods this Core offers, and the SSO button label. A Core
-    /// too old to answer is treated as password-only; a network failure is an error.
-    pub async fn sign_in_options(&self) -> Result<SignInOptions> {
-        match self
+    /// Checks that the address is an Aether server and reads what the sign-in
+    /// screen needs: its name, version and sign-in methods (with the SSO button
+    /// label its administrator chose). Public endpoints only, no account needed.
+    /// A service that is not Aether is [`Error::NotAether`]; an unreachable one
+    /// is a network error.
+    pub async fn discover(&self) -> Result<ServerInfo> {
+        let identify = |error: Error| match error {
+            Error::Server { .. } => Error::NotAether,
+            other => other,
+        };
+        let (_, config) = self
+            .call(Method::GET, "/api/v1/config", None, false)
+            .await
+            .map_err(identify)?;
+        let text = |key: &str| config[key].as_str().map(str::to_owned);
+        let (Some(name), Some(version), Some(_mode)) =
+            (text("name"), text("version"), text("mode"))
+        else {
+            return Err(Error::NotAether);
+        };
+        let (_, status) = self
             .call(Method::GET, "/api/v1/auth/oidc/status", None, false)
             .await
-        {
-            Ok((_, value)) => Ok(serde_json::from_value(value).unwrap_or_default()),
-            Err(Error::Server {
-                status: 404 | 405, ..
-            }) => Ok(SignInOptions::default()),
-            Err(error) => Err(error),
+            .map_err(identify)?;
+        if !status["enabled"].is_boolean() || !status["localLoginEnabled"].is_boolean() {
+            return Err(Error::NotAether);
         }
+        let sign_in: SignInOptions =
+            serde_json::from_value(status).map_err(|_| Error::NotAether)?;
+        // First start: no administrator yet. Best effort, never blocks.
+        let needs_bootstrap = match self
+            .call(Method::GET, "/api/v1/auth/bootstrap/status", None, false)
+            .await
+        {
+            Ok((_, value)) => value["needsBootstrap"].as_bool().unwrap_or(false),
+            Err(_) => false,
+        };
+        Ok(ServerInfo {
+            name,
+            version,
+            sign_in,
+            needs_bootstrap,
+        })
     }
     /// Local account sign-in; stores the device token.
     pub async fn login(&self, login: &str, password: &str) -> Result<User> {

@@ -20,21 +20,50 @@ pub mod theme {
         }
     }
 
-    pub const BACKGROUND: Rgba = hex(0x0d0f14);
-    pub const SURFACE: Rgba = hex(0x161a22);
-    pub const RAISED: Rgba = hex(0x1f2430);
-    pub const BORDER: Rgba = hex(0x2b3140);
-    pub const TEXT: Rgba = hex(0xeef1f6);
-    pub const MUTED: Rgba = hex(0x8d95a5);
-    pub const ACCENT: Rgba = hex(0x7c8cff);
-    pub const ACCENT_TEXT: Rgba = hex(0x0d0f14);
-    pub const DANGER: Rgba = hex(0xff7a7a);
+    // Halo palette (apps/web/src/lib/styles/halo.css, dark theme).
+    pub const BACKGROUND: Rgba = hex(0x0b0e18);
+    pub const SURFACE: Rgba = hex(0x11151f);
+    pub const RAISED: Rgba = hex(0x171c28);
+    pub const BORDER: Rgba = white(0.09);
+    pub const PANEL: Rgba = white(0.055);
+    pub const PANEL_2: Rgba = white(0.09);
+    pub const PANEL_3: Rgba = white(0.14);
+    pub const TEXT: Rgba = hex(0xeef1f8);
+    pub const MUTED: Rgba = hex(0xa2a9ba);
+    pub const MUTED_2: Rgba = hex(0x8189a0);
+    pub const ACCENT: Rgba = hex(0xff7b47);
+    pub const ACCENT_SOFT: Rgba = Rgba {
+        r: 1.0,
+        g: 123.0 / 255.0,
+        b: 71.0 / 255.0,
+        a: 0.16,
+    };
+    /// Primary buttons are light, as on the web (`--btn`).
+    pub const BUTTON: Rgba = hex(0xeef1f8);
+    pub const BUTTON_TEXT: Rgba = hex(0x0b0e18);
+    pub const BUTTON_HOVER: Rgba = hex(0xd9dde8);
+    pub const DANGER: Rgba = hex(0xff6b6b);
+    pub const DANGER_SOFT: Rgba = Rgba {
+        r: 1.0,
+        g: 107.0 / 255.0,
+        b: 107.0 / 255.0,
+        a: 0.14,
+    };
     pub const OVERLAY: Rgba = Rgba {
         r: 0.0,
         g: 0.0,
         b: 0.0,
         a: 0.65,
     };
+
+    const fn white(alpha: f32) -> Rgba {
+        Rgba {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: alpha,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -52,15 +81,15 @@ pub fn button(
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let (background, text, hover): (Rgba, Rgba, Rgba) = match tone {
-        Tone::Primary => (theme::ACCENT, theme::ACCENT_TEXT, theme::TEXT),
-        Tone::Secondary => (theme::RAISED, theme::TEXT, theme::BORDER),
+        Tone::Primary => (theme::BUTTON, theme::BUTTON_TEXT, theme::BUTTON_HOVER),
+        Tone::Secondary => (theme::PANEL_2, theme::TEXT, theme::PANEL_3),
         Tone::Quiet => (
             Rgba {
                 a: 0.0,
                 ..theme::BACKGROUND
             },
             theme::TEXT,
-            theme::RAISED,
+            theme::PANEL_2,
         ),
     };
     div()
@@ -80,6 +109,39 @@ pub fn button(
         .hover(move |style| style.bg(hover))
         .on_click(on_click)
         .child(label.into())
+}
+
+/// The large full-width button of the sign-in screens (48 px, rounded like the
+/// web's `btn-submit`), with the arrow of the web design on the primary one.
+pub fn wide_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    tone: Tone,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let (background, text, hover): (Rgba, Rgba, Rgba) = match tone {
+        Tone::Primary => (theme::BUTTON, theme::BUTTON_TEXT, theme::BUTTON_HOVER),
+        Tone::Secondary | Tone::Quiet => (theme::PANEL, theme::TEXT, theme::PANEL_2),
+    };
+    div()
+        .id(id.into())
+        .w_full()
+        .h(px(48.))
+        .px_5()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .gap_2()
+        .rounded(px(16.))
+        .bg(background)
+        .text_color(text)
+        .font_weight(FontWeight::BOLD)
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .on_click(on_click)
+        .child(label.into())
+        .when(tone == Tone::Primary, |button| button.child("→"))
 }
 
 /// A thin progress bar, `fraction` in 0..=1.

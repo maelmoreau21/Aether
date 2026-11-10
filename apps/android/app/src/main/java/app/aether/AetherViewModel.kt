@@ -3,6 +3,7 @@
 package app.aether
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import androidx.media3.common.MimeTypes
@@ -28,6 +29,7 @@ import kotlinx.coroutines.withContext
 import uniffi.aether_ffi.AetherClient
 import uniffi.aether_ffi.ClientException
 import uniffi.aether_ffi.Pairing
+import uniffi.aether_ffi.ServerInfo
 import uniffi.aether_ffi.Work
 import uniffi.aether_ffi.WorkDetail
 
@@ -45,6 +47,9 @@ data class DownloadQuality(val original: Boolean, val height: Int, val bitrate: 
 
 /** A download waiting for its quality to be chosen. */
 data class DownloadChoice(val work: Work, val assetId: String, val url: String, val qualities: List<DownloadQuality>)
+
+/** What a pairing request in progress is for: SSO opens the browser, Quick Connect shows a QR code. */
+enum class PairingKind { Sso, QuickConnect }
 
 sealed interface Screen {
     data object Server : Screen
@@ -71,6 +76,17 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     val error: StateFlow<String?> = _error
     private val _pairing = MutableStateFlow<Pairing?>(null)
     val pairing: StateFlow<Pairing?> = _pairing
+    /** Address of the Core in use, shown on the sign-in page. */
+    val serverAddress: String? get() = store.server
+    private val _serverInfo = MutableStateFlow<ServerInfo?>(null)
+    /** How the server lets people sign in (SSO label, local account), once checked. */
+    val serverInfo: StateFlow<ServerInfo?> = _serverInfo
+    private val _checking = MutableStateFlow(false)
+    val checking: StateFlow<Boolean> = _checking
+    private val _pairingKind = MutableStateFlow<PairingKind?>(null)
+    val pairingKind: StateFlow<PairingKind?> = _pairingKind
+    private val _signingIn = MutableStateFlow(false)
+    val signingIn: StateFlow<Boolean> = _signingIn
     private val _works = MutableStateFlow<List<Work>>(emptyList())
     val works: StateFlow<List<Work>> = _works
     private val _detail = MutableStateFlow<WorkDetail?>(null)
@@ -95,12 +111,12 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
             _screen.value = Screen.Server
             return
         }
-        client = created
-        store.server = address
         if (saved == null) {
-            showSignIn()
+            checkServer(created, address)
             return
         }
+        client = created
+        store.server = address
         viewModelScope.launch {
             try {
                 created.refreshIfDue(REFRESH_MARGIN_SECONDS)
@@ -119,14 +135,37 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** First page: the address must be an Aether server before any sign-in is offered. */
+    private fun checkServer(created: AetherClient, address: String) {
+        _checking.value = true
+        viewModelScope.launch {
+            try {
+                _serverInfo.value = created.discover()
+                client = created
+                store.server = address
+                _screen.value = Screen.SignIn
+            } catch (e: ClientException.NotAether) {
+                _error.value = getApplication<Application>().getString(R.string.error_not_aether)
+                _screen.value = Screen.Server
+            } catch (e: ClientException) {
+                _error.value = e.message
+                _screen.value = Screen.Server
+            } finally {
+                _checking.value = false
+            }
+        }
+    }
+
     fun changeServer() {
-        pairingJob?.cancel()
+        cancelPairing()
         client = null
+        _serverInfo.value = null
         _screen.value = Screen.Server
     }
 
     fun login(login: String, password: String) {
         val client = client ?: return
+        _signingIn.value = true
         viewModelScope.launch {
             try {
                 client.login(login, password)
@@ -135,50 +174,86 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
                 _error.value = getApplication<Application>().getString(R.string.error_credentials)
             } catch (e: ClientException) {
                 _error.value = e.message
+            } finally {
+                _signingIn.value = false
             }
         }
     }
 
     private fun showSignIn() {
         _screen.value = Screen.SignIn
-        startPairing()
+        // A saved session that expired: the page still needs the server's sign-in methods.
+        if (_serverInfo.value == null) {
+            val current = client ?: return
+            viewModelScope.launch {
+                runCatching { current.discover() }.getOrNull()?.let { _serverInfo.value = it }
+            }
+        }
     }
 
-    /** Shows a QR code and polls until a signed-in device approves it. */
-    private fun startPairing() {
+    /** SSO: opens the browser on the server's approval page, then polls like Quick Connect. */
+    fun startSso() = startPairing(PairingKind.Sso)
+
+    fun startQuickConnect() = startPairing(PairingKind.QuickConnect)
+
+    fun cancelPairing() {
+        pairingJob?.cancel()
+        _pairing.value = null
+        _pairingKind.value = null
+    }
+
+    fun reopenBrowser() {
+        _pairing.value?.let { openBrowser(it.url) }
+    }
+
+    /** Only web addresses are ever handed to the system. */
+    private fun openBrowser(url: String) {
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { getApplication<Application>().startActivity(intent) }
+    }
+
+    /** Requests a code, then polls until a signed-in device (or the browser, for SSO) approves it. */
+    private fun startPairing(kind: PairingKind) {
         val client = client ?: return
         pairingJob?.cancel()
+        _pairing.value = null
+        _pairingKind.value = kind
         pairingJob = viewModelScope.launch {
-            while (isActive && _screen.value == Screen.SignIn) {
-                val pairing = try {
-                    client.startPairing()
-                } catch (e: ClientException) {
-                    _error.value = e.message
-                    delay(10_000)
-                    continue
-                }
-                _pairing.value = pairing
-                val deadline = System.currentTimeMillis() + pairing.expiresIn * 1000
-                try {
-                    while (isActive && System.currentTimeMillis() < deadline) {
-                        delay(POLL_MILLIS)
-                        if (client.pollPairing(pairing) != null) {
-                            signedIn()
-                            return@launch
-                        }
-                    }
-                } catch (e: ClientException.PairingExpired) {
-                    // A fresh code is requested on the next turn.
-                } catch (e: ClientException) {
-                    _error.value = e.message
-                }
+            val expired = getApplication<Application>().getString(R.string.code_expired)
+            val pairing = try {
+                client.startPairing()
+            } catch (e: ClientException) {
+                _error.value = e.message
+                _pairingKind.value = null
+                return@launch
             }
+            _pairing.value = pairing
+            if (kind == PairingKind.Sso) openBrowser(pairing.url)
+            val deadline = System.currentTimeMillis() + pairing.expiresIn * 1000
+            try {
+                while (isActive && System.currentTimeMillis() < deadline) {
+                    delay(POLL_MILLIS)
+                    if (client.pollPairing(pairing) != null) {
+                        signedIn()
+                        return@launch
+                    }
+                }
+                _error.value = expired
+            } catch (e: ClientException.PairingExpired) {
+                _error.value = expired
+            } catch (e: ClientException) {
+                _error.value = e.message
+            }
+            _pairing.value = null
+            _pairingKind.value = null
         }
     }
 
     private fun signedIn() {
         pairingJob?.cancel()
         _pairing.value = null
+        _pairingKind.value = null
         store.save(client?.token())
         TokenRefresh.schedule(getApplication())
         showCatalog()

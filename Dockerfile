@@ -234,9 +234,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libzimg2 \
         libva2 \
         libva-drm2 \
-        mesa-va-drivers \
     && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
-        apt-get install -y --no-install-recommends intel-media-va-driver; fi \
+        apt-get install -y --no-install-recommends mesa-va-drivers intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
@@ -280,12 +279,15 @@ CMD ["aether-node"]
 # ==============================================================================
 FROM backup-runtime AS runtime
 
-# Fallback transcoding: x264, zimg and VA-API (Mesa for AMD, Intel media driver on amd64).
+# Fallback transcoding: x264, zimg and VA-API. The VA-API drivers (Mesa for AMD,
+# Intel media driver) only matter on amd64 hosts; on arm64 Mesa's LLVM alone
+# would add ~130 MB for GPUs that ARM NAS and boards do not have. FFmpeg links
+# libva only and loads drivers at run time, so software x264 still works there.
 # NVENC/NVDEC libraries come from the NVIDIA container toolkit at run time.
 RUN apt-get update && apt-get install -y --no-install-recommends libdav1d6 libwebp7 libwebpmux3 \
-        libx264-164 libzimg2 libva2 libva-drm2 mesa-va-drivers \
+        libx264-164 libzimg2 libva2 libva-drm2 \
     && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
-        apt-get install -y --no-install-recommends intel-media-va-driver; fi \
+        apt-get install -y --no-install-recommends mesa-va-drivers intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg

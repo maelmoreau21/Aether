@@ -102,7 +102,7 @@ fs.mkdirSync(out, {recursive: true});
     await card.waitFor();
     await page.locator('.page-indicator').filter({hasText:/^Page 1(?: sur 1)?$/}).waitFor();
     assert.equal(await page.getByRole('link',{name:'Page suivante →',exact:true}).count(),0);
-    assert.equal(await page.locator('.media-card').count(), 1);
+    assert.equal(await page.locator('.media-card:not(.metadata-link)').count(), 1); // one per card
 
     // Record media URLs requested before clicking card
     const mediaCallsBeforeDetail = requestedMediaUrls.length;

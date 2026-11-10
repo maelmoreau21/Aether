@@ -41,7 +41,13 @@ enum Phase {
 enum SignInMode {
     Password,
     QuickConnect,
+    /// SSO (OpenID Connect): the web page of the Core signs the person in with
+    /// the identity provider, then approves this computer like Quick Connect.
+    Sso,
 }
+
+/// The Aether logo, shown on the sign-in screen and in the top bar.
+const LOGO: &[u8] = include_bytes!("../../assets/aether-logo.png");
 
 struct SignIn {
     server: Entity<TextField>,
@@ -68,6 +74,7 @@ pub struct AetherApp {
     settings: Settings,
     device_name: String,
     focus: FocusHandle,
+    logo: Arc<Image>,
     phase: Phase,
     sign_in: SignIn,
     session: Option<Session>,
@@ -146,9 +153,10 @@ impl AetherApp {
                 match (event, this.sign_in.mode) {
                     (_, SignInMode::Password) => this.focus_field(Field::Login, window, cx),
                     (FieldEvent::Submit, SignInMode::QuickConnect) => {
-                        this.start_pairing(window, cx)
+                        this.start_pairing(false, window, cx)
                     }
-                    (FieldEvent::Next, SignInMode::QuickConnect) => {}
+                    (FieldEvent::Submit, SignInMode::Sso) => this.start_pairing(true, window, cx),
+                    (FieldEvent::Next, _) => {}
                 }
             }),
             cx.subscribe_in(&login, window, |this, _, _, window, cx| {
@@ -169,6 +177,7 @@ impl AetherApp {
             settings,
             device_name: store::device_name(env),
             focus: cx.focus_handle(),
+            logo: Arc::new(Image::from_bytes(ImageFormat::Png, LOGO.to_vec())),
             phase: Phase::SignIn,
             sign_in: SignIn {
                 server,
@@ -368,8 +377,10 @@ impl AetherApp {
     }
 
     /// Quick Connect: shows a code and a QR code, approved from a signed-in
-    /// phone or the web, and polls until then.
-    fn start_pairing(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// phone or the web, and polls until then. With `open_browser` (SSO), the
+    /// approval page of the Core also opens in the default browser, where the
+    /// person signs in with the identity provider.
+    fn start_pairing(&mut self, open_browser: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some((server, client)) = self.typed_client(cx) else {
             return;
         };
@@ -395,6 +406,9 @@ impl AetherApp {
             let _ = this.update(cx, |this, cx| {
                 this.sign_in.busy = false;
                 this.sign_in.pairing = Some(pairing.clone());
+                if open_browser {
+                    open_in_browser(&pairing.url, cx);
+                }
                 cx.notify();
             });
             loop {
@@ -866,6 +880,14 @@ fn error_text(text: impl Into<SharedString>) -> impl IntoElement {
     div().text_sm().text_color(theme::DANGER).child(text.into())
 }
 
+/// Opens a page of the Core in the default browser; only web addresses are
+/// ever handed to the system.
+fn open_in_browser(url: &str, cx: &mut gpui::App) {
+    if url.starts_with("https://") || url.starts_with("http://") {
+        cx.open_url(url);
+    }
+}
+
 /// A Quick Connect QR code, drawn module by module.
 fn qr_code(pairing: &Pairing) -> impl IntoElement {
     let width = pairing.qr_width;
@@ -949,9 +971,16 @@ impl AetherApp {
                     .gap_1()
                     .child(
                         div()
-                            .text_2xl()
-                            .font_weight(FontWeight::BOLD)
-                            .child("Aether"),
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(img(self.logo.clone()).size(px(40.)).rounded_md())
+                            .child(
+                                div()
+                                    .text_2xl()
+                                    .font_weight(FontWeight::BOLD)
+                                    .child("Aether"),
+                            ),
                     )
                     .child(muted("Connectez cet ordinateur à votre serveur.")),
             )
@@ -976,6 +1005,7 @@ impl AetherApp {
                         SignInMode::Password,
                         cx,
                     ))
+                    .child(tab("mode-sso", "SSO", SignInMode::Sso, cx))
                     .child(tab(
                         "mode-quick",
                         "Quick Connect",
@@ -1016,7 +1046,40 @@ impl AetherApp {
                         "pairing",
                         if sign_in.busy { "Demande…" } else { "Obtenir un code" },
                         Tone::Primary,
-                        cx.listener(|this, _, window, cx| this.start_pairing(window, cx)),
+                        cx.listener(|this, _, window, cx| this.start_pairing(false, window, cx)),
+                    )),
+            },
+            SignInMode::Sso => match &sign_in.pairing {
+                Some(pairing) => {
+                    let url = pairing.url.clone();
+                    form.child(muted(
+                        "Terminez la connexion dans votre navigateur avec votre compte SSO, puis validez cet ordinateur. Code :",
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_center()
+                            .text_3xl()
+                            .font_weight(FontWeight::BOLD)
+                            .child(pairing.code.clone()),
+                    )
+                    .child(button(
+                        "sso-reopen",
+                        "Rouvrir le navigateur",
+                        Tone::Secondary,
+                        cx.listener(move |_, _, _, cx| open_in_browser(&url, cx)),
+                    ))
+                    .child(muted("En attente de validation…"))
+                }
+                None => form
+                    .child(muted(
+                        "Ouvre votre navigateur pour vous connecter avec le fournisseur d'identité de votre serveur (SSO).",
+                    ))
+                    .child(button(
+                        "sso",
+                        if sign_in.busy { "Ouverture…" } else { "Se connecter avec SSO" },
+                        Tone::Primary,
+                        cx.listener(|this, _, window, cx| this.start_pairing(true, window, cx)),
                     )),
             },
         };
@@ -1120,9 +1183,16 @@ impl AetherApp {
             .child(
                 div()
                     .mr_4()
-                    .text_lg()
-                    .font_weight(FontWeight::BOLD)
-                    .child("Aether"),
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(img(self.logo.clone()).size(px(28.)).rounded_md())
+                    .child(
+                        div()
+                            .text_lg()
+                            .font_weight(FontWeight::BOLD)
+                            .child("Aether"),
+                    ),
             )
             .child(tab("tab-home", "Accueil", Route::Home, cx))
             .child(tab(

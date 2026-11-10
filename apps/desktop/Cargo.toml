@@ -29,5 +29,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 webpki-roots = "1"
 uuid = { version = "1", features = ["v4"] }
 
+[build-dependencies]
+# Windows icon resource; already pulled in by gpui.
+embed-resource = "3"
+
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"

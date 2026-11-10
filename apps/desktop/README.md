@@ -3,7 +3,9 @@
 Application de bureau d'Aether (Windows, macOS, Linux) : interface en GPUI,
 lecture par libmpv, API de la Core via le cœur client partagé `aether-client`.
 
-- Connexion : adresse du serveur, identifiants ou Quick Connect (code + QR).
+- Connexion : adresse du serveur, identifiants, SSO ou Quick Connect (code + QR).
+  Le bouton SSO ouvre le navigateur sur la page de validation de la Core : on s'y
+  connecte avec le fournisseur d'identité, puis la validation connecte l'application.
   Le jeton d'appareil est rangé dans le trousseau système (Credential Manager,
   Keychain, Secret Service) ; seuls l'adresse et l'identifiant de télécommande
   vont dans `settings.json` (`%APPDATA%\Aether`, `~/Library/Application Support/Aether`,
@@ -14,6 +16,14 @@ lecture par libmpv, API de la Core via le cœur client partagé `aether-client`.
   position. Clavier : espace, ←/→ (±10 s), ↑/↓ (volume), F (plein écran), Échap.
 - Télécommande : `/api/v1/remote/ws` en `kind: "desktop"` (lecture, pause,
   avance, arrêt, ouverture ; « Reprendre ici » depuis un autre appareil).
+
+## Installer (Windows)
+
+Les releases contiennent `Aether-Setup-windows-x64.exe` : un installateur (Inno
+Setup, `installer/aether.iss`) qui installe l'application pour l'utilisateur
+courant, crée le raccourci du menu Démarrer (et du Bureau, au choix) et un
+désinstalleur. `libmpv-2.dll` y est incluse. Le zip reste disponible pour une
+utilisation portable.
 
 ## Construire
 

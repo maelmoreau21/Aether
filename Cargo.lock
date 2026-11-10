@@ -52,6 +52,7 @@ name = "aether-desktop"
 version = "0.1.0"
 dependencies = [
  "aether-client",
+ "embed-resource",
  "futures",
  "gpui",
  "image",

@@ -105,6 +105,11 @@ async fn upgrade(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
+    match crate::server_settings::load(&state.auth.store).await {
+        Ok(settings) if settings.remote_control_enabled => {}
+        Ok(_) => return crate::error(axum::http::StatusCode::FORBIDDEN, "remote_control_disabled"),
+        Err(status) => return crate::error(status, "settings_unavailable"),
+    }
     match state.auth.authenticate(&headers).await {
         Ok(identity) => ws
             .max_message_size(MAX_MESSAGE_BYTES)

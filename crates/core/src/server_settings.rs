@@ -76,6 +76,21 @@ pub struct Settings {
     /// When off, the Core refuses every audio encode; copied audio stays allowed.
     #[serde(default = "default_true")]
     pub audio_transcoding_enabled: bool,
+    /// HDR to SDR conversion while transcoding (heavy on the Node's CPU or GPU).
+    #[serde(default = "default_true")]
+    pub tone_mapping_enabled: bool,
+    /// Image subtitles (PGS, VobSub, DVB) burnt into a re-encoded picture.
+    #[serde(default = "default_true")]
+    pub subtitle_burn_in_enabled: bool,
+    /// Video bit rate ceiling of any encode, in kbit/s; 0 leaves it unlimited.
+    #[serde(default)]
+    pub max_transcode_kbps: u32,
+    /// "Send to" and the remote: off closes the remote-control socket.
+    #[serde(default = "default_true")]
+    pub remote_control_enabled: bool,
+    /// Offline downloads of original files.
+    #[serde(default = "default_true")]
+    pub downloads_enabled: bool,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -100,6 +115,10 @@ fn default_metadata_language() -> String {
 }
 fn default_metadata_country() -> String {
     "FR".into()
+}
+/// 0 (unlimited) or 500 kbit/s to 120 Mbit/s, the range the web player accepts.
+pub(crate) fn valid_max_transcode_kbps(kbps: u32) -> bool {
+    kbps == 0 || (500..=120_000).contains(&kbps)
 }
 fn default_true() -> bool {
     true
@@ -156,6 +175,11 @@ struct SettingsInput {
     watch_together_enabled: Option<bool>,
     video_transcoding_enabled: Option<bool>,
     audio_transcoding_enabled: Option<bool>,
+    tone_mapping_enabled: Option<bool>,
+    subtitle_burn_in_enabled: Option<bool>,
+    max_transcode_kbps: Option<u32>,
+    remote_control_enabled: Option<bool>,
+    downloads_enabled: Option<bool>,
 }
 
 impl Default for Settings {
@@ -188,6 +212,11 @@ impl Default for Settings {
             watch_together_enabled: true,
             video_transcoding_enabled: true,
             audio_transcoding_enabled: true,
+            tone_mapping_enabled: true,
+            subtitle_burn_in_enabled: true,
+            max_transcode_kbps: 0,
+            remote_control_enabled: true,
+            downloads_enabled: true,
         }
     }
 }
@@ -372,6 +401,22 @@ async fn write(
         audio_transcoding_enabled: input
             .audio_transcoding_enabled
             .unwrap_or(previous.audio_transcoding_enabled),
+        tone_mapping_enabled: input
+            .tone_mapping_enabled
+            .unwrap_or(previous.tone_mapping_enabled),
+        subtitle_burn_in_enabled: input
+            .subtitle_burn_in_enabled
+            .unwrap_or(previous.subtitle_burn_in_enabled),
+        max_transcode_kbps: input
+            .max_transcode_kbps
+            .filter(|&kbps| valid_max_transcode_kbps(kbps))
+            .unwrap_or(previous.max_transcode_kbps),
+        remote_control_enabled: input
+            .remote_control_enabled
+            .unwrap_or(previous.remote_control_enabled),
+        downloads_enabled: input
+            .downloads_enabled
+            .unwrap_or(previous.downloads_enabled),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)

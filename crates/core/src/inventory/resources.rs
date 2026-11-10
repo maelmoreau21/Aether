@@ -80,20 +80,22 @@ pub async fn prepared(
         (None, None) => (false, false),
     };
     if encodes_audio || encodes_video {
-        match crate::server_settings::load(store).await {
-            Ok(settings)
-                if (!encodes_audio || settings.audio_transcoding_enabled)
-                    && (!encodes_video || settings.video_transcoding_enabled) => {}
-            Ok(_) => {
-                let mut response =
-                    crate::error(StatusCode::UNPROCESSABLE_ENTITY, "transcode_disabled");
-                response.headers_mut().insert(
-                    "x-media-preparation-error",
-                    axum::http::HeaderValue::from_static("transcode_disabled"),
-                );
-                return response;
-            }
+        let settings = match crate::server_settings::load(store).await {
+            Ok(settings) => settings,
             Err(status) => return crate::error(status, "settings_unavailable"),
+        };
+        if let Some(code) = encode_refusal(
+            &settings,
+            (encodes_audio, encodes_video),
+            transcode.as_ref(),
+            hls.as_ref(),
+        ) {
+            let mut response = crate::error(StatusCode::UNPROCESSABLE_ENTITY, code);
+            response.headers_mut().insert(
+                "x-media-preparation-error",
+                axum::http::HeaderValue::from_static(code),
+            );
+            return response;
         }
     }
     let selected = if let Some(request) = hls {
@@ -844,6 +846,43 @@ pub(crate) fn video_dynamic_range(video: &media_contracts::media::Track) -> Opti
         Some("arib-std-b67") => Some("hlg".to_owned()),
         _ => None,
     }
+}
+
+/// Why the server settings refuse this encode, or `None`. `encodes` is (audio, video).
+fn encode_refusal(
+    settings: &crate::server_settings::Settings,
+    encodes: (bool, bool),
+    transcode: Option<&media_node::transcode::TranscodeRequest>,
+    hls: Option<&media_node::hls::HlsRequest>,
+) -> Option<&'static str> {
+    if (encodes.0 && !settings.audio_transcoding_enabled)
+        || (encodes.1 && !settings.video_transcoding_enabled)
+    {
+        return Some("transcode_disabled");
+    }
+    if let Some(request) = transcode.filter(|request| !request.copies_video()) {
+        if request.has(media_node::transcode::FLAG_TONEMAP) && !settings.tone_mapping_enabled {
+            return Some("tonemap_disabled");
+        }
+        if request.subtitle.is_some() && !settings.subtitle_burn_in_enabled {
+            return Some("burn_in_disabled");
+        }
+        if settings.max_transcode_kbps != 0 && request.kbps > settings.max_transcode_kbps {
+            return Some("transcode_bitrate_limited");
+        }
+    }
+    if let Some(encode) = hls.and_then(|request| request.encode) {
+        let kbps =
+            media_node::hls::renditions::rendition(encode.height).map_or(u32::MAX, |r| r.kbps);
+        if !super::hls::Encodes::from_settings(settings).allows(kbps, encode.tonemap) {
+            return Some(if encode.tonemap && !settings.tone_mapping_enabled {
+                "tonemap_disabled"
+            } else {
+                "transcode_bitrate_limited"
+            });
+        }
+    }
+    None
 }
 
 #[cfg(test)]

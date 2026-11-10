@@ -85,6 +85,9 @@ describe('fallback transcoding plan', () => {
     expect(rung({ ...offer, height: 800 }, { ...options, quality: 1080 }).height).toBe(1080);
     expect(rung({ ...offer, height: 800 }, options).height).toBe(1080);
     expect(rung(offer, { ...options, maxKbps: 20000, adaptiveKbps: 1756 }).height).toBe(480);
+    // The server ceiling caps the video rate of any encode.
+    expect(rung({ ...offer, maxKbps: 5000 }, options)).toEqual({ height: 720, kbps: 4000 });
+    expect(rung({ ...offer, maxKbps: 7000 }, options)).toEqual({ height: 1080, kbps: 7000 });
   });
 
   it('steps down one rung at a time and stops at the bottom', () => {

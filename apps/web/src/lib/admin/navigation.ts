@@ -19,6 +19,7 @@ const logTabs: AdminDestination[] = [
 ];
 const serverTabs: AdminDestination[] = [
   { hash: '#general-section', label: 'Général', labelKey: 'admin_general', icon: 'settings' },
+  { hash: '#playback-section', label: 'Lecture et transcodage', labelKey: 'admin_playback', icon: 'film' },
   { hash: '#network-section', label: 'Réseau', labelKey: 'admin_network', icon: 'globe' }
 ];
 
@@ -93,6 +94,7 @@ export const adminSearchKeywords: Record<string, readonly string[]> = {
   '#requests-section': ['Demandes', 'Valider une demande', 'Acquisition', 'Épingler les demandes'],
   '#acquisition-section': ['Serveurs d’acquisition', 'Radarr', 'Sonarr', 'Lidarr', 'Imports', 'Règles de validation'],
   '#reports-section': ['Signalements', 'Problèmes de lecture', 'Résoudre un signalement', 'Épingler les signalements'],
+  '#playback-section': ['Transcodage', 'Transcodage vidéo', 'Transcodage audio', 'Tone mapping', 'HDR', 'Sous-titres incrustés', 'Débit maximal', 'Télécommande', 'Envoyer vers', 'Téléchargements', 'Regarder ensemble'],
   '#general-section': ['Nom du serveur', 'Message d’accueil', 'Texte du bouton de connexion SSO', 'OIDC', 'SSO', 'Identifiants locaux', 'Reprise de lecture', 'Considéré comme vu', 'Durée minimale pour reprendre', 'Empreintes audio', 'Journal des extensions', 'Origines CORS autorisées', 'Partage des playlists'],
   '#network-section': ['Adresse publique', 'MEDIA_PUBLIC_URL', 'Interface Web', 'API', 'Cookies sécurisés', 'Cookies de session sécurisés (HTTPS)', 'HTTPS']
 };
@@ -120,6 +122,7 @@ export const adminSearchKeywordsEn: Record<string, readonly string[]> = {
   '#requests-section': ['Requests', 'Approve a request', 'Acquisition', 'Pin requests'],
   '#acquisition-section': ['Acquisition servers', 'Radarr', 'Sonarr', 'Lidarr', 'Imports', 'Approval rules'],
   '#reports-section': ['Reports', 'Playback problems', 'Resolve a report', 'Pin reports'],
+  '#playback-section': ['Transcoding', 'Video transcoding', 'Audio transcoding', 'Tone mapping', 'HDR', 'Burnt-in subtitles', 'Maximum bit rate', 'Remote control', 'Send to', 'Downloads', 'Watch together'],
   '#general-section': ['Server name', 'Welcome message', 'SSO sign-in button text', 'OIDC', 'SSO', 'Local credentials', 'Playback resume', 'Counted as watched', 'Minimum time to resume', 'Audio fingerprints', 'Extension log', 'Allowed CORS origins', 'Playlist sharing'],
   '#network-section': ['Public address', 'MEDIA_PUBLIC_URL', 'Web interface', 'API', 'Secure cookies', 'Secure session cookies (HTTPS)', 'HTTPS']
 };

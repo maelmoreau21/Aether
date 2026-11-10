@@ -1,12 +1,12 @@
 <script lang="ts">
   // The account's other devices that are playing: drive them from here, or
   // take their title over at the same position ("Resume here").
-  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
   import { remote, type RemoteDevice } from './remote.svelte';
+  import { remoteControlEnabled } from '../config/presentation';
 
   let open = $state(false);
   const playing = $derived(remote.devices.filter(device => device.playing));
@@ -33,7 +33,9 @@
     playHere(now.workId, now.position);
   }
 
-  onMount(() => {
+  // Off on this server: no socket at all (the Core would refuse it).
+  $effect(() => {
+    if (!$remoteControlEnabled) return;
     remote.start();
     // "Open" sent by another device: play it here.
     const unsubscribe = remote.onCommand(command => {

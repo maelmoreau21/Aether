@@ -42,6 +42,10 @@ export interface TranscodeOffer {
   /** Server switches: `false` when the administrator forbids encoding that stream kind. */
   audio?: boolean;
   video?: boolean;
+  /** `false` when the server refuses HDR to SDR conversion. */
+  toneMapping?: boolean;
+  /** Server video bit rate ceiling of an encode in kbit/s; 0 or absent for none. */
+  maxKbps?: number;
 }
 
 export interface TranscodeOptions {
@@ -130,12 +134,15 @@ export function rung(offer: TranscodeOffer, options: TranscodeOptions): { height
   // 1920×800 film asked at "1080" keeps its 800 lines instead of dropping to 720.
   const top = LADDER.filter(item => item.height >= sourceHeight).at(-1)?.height ?? LADDER[0].height;
   const ceilings = [options.maxKbps, options.adaptiveKbps ?? 0].filter(value => value > 0);
+  // The server ceiling bounds the video rate itself, the audio comes on top.
+  const server = offer.maxKbps && offer.maxKbps > 0 ? offer.maxKbps : Infinity;
   const budget = ceilings.length ? Math.max(200, Math.min(...ceilings) - AUDIO_KBPS) : Infinity;
   const wanted = typeof options.quality === 'number' ? options.quality : Infinity;
   const fits = LADDER.filter(item => item.height <= top && item.height <= wanted);
   // A rung may be squeezed to three quarters of its nominal rate before dropping a step.
-  const chosen = fits.find(item => item.kbps * 0.75 <= budget) ?? fits.at(-1) ?? LADDER.at(-1)!;
-  return { height: chosen.height, kbps: Math.round(Math.min(chosen.kbps, budget)) };
+  const limit = Math.min(budget, server);
+  const chosen = fits.find(item => item.kbps * 0.75 <= limit) ?? fits.at(-1) ?? LADDER.at(-1)!;
+  return { height: chosen.height, kbps: Math.round(Math.min(chosen.kbps, limit)) };
 }
 
 /** Why this source cannot be played as it is, or `undefined` for direct play. */
@@ -195,7 +202,7 @@ export function planTranscode(media: Media, source: Source, reason: TranscodeRea
       if (options.serverAudio === 'night') flags |= FLAG_NIGHT;
     }
   }
-  const tonemap = offer.video !== false && needsToneMapping(offer, options, environment);
+  const tonemap = offer.video !== false && offer.toneMapping !== false && needsToneMapping(offer, options, environment);
   const audioPart = audioCodec ? `,${audioCodec}` : '';
   // Audio-only conversions keep the original picture when the browser decodes it.
   const copyCodecs = offer.copyVideoMime ? videoCodecs(offer.copyVideoMime) : undefined;

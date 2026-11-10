@@ -397,15 +397,18 @@ async fn descriptor_for_asset(
     let library_options = playback_library_options(store, &library_id).await?;
     // Fallback transcoding is a server choice, audio and video apart; an unreadable
     // setting offers none.
-    let (audio_transcoding, video_transcoding) =
-        crate::server_settings::load(store)
-            .await
-            .map_or((false, false), |settings| {
-                (
-                    settings.audio_transcoding_enabled,
-                    settings.video_transcoding_enabled,
-                )
-            });
+    let encodes = crate::server_settings::load(store)
+        .await
+        .map(|settings| {
+            (
+                super::hls::Encodes::from_settings(&settings),
+                settings.subtitle_burn_in_enabled,
+            )
+        })
+        .unwrap_or_default();
+    let (audio_transcoding, video_transcoding) = (encodes.0.audio, encodes.0.video);
+    // Image subtitles burnt into the picture need a video encode and their own switch.
+    let burn_in = video_transcoding && encodes.1;
     let node_rec = crate::nodes::load_node(store, &node_id).await?;
     let direct_info = if node_status == "connected" {
         node_rec.as_ref().and_then(|n| {
@@ -567,7 +570,7 @@ async fn descriptor_for_asset(
                 && (matches!(
                     t.codec_name.as_deref(),
                     Some("subrip" | "webvtt" | "ass" | "ssa" | "mov_text" | "hdmv_pgs_subtitle")
-                ) || video_transcoding && matches!(t.codec_name.as_deref(), Some("dvd_subtitle" | "dvb_subtitle")))
+                ) || burn_in && matches!(t.codec_name.as_deref(), Some("dvd_subtitle" | "dvb_subtitle")))
         }) {
             let language = track
                 .tags
@@ -617,7 +620,7 @@ async fn descriptor_for_asset(
                 "forced": forced, "sdh": sdh, "sourceFormat": track.codec_name,
                 "url": url,
                 "image": image,
-                "burnIndex": (image.is_some() && video_transcoding).then_some(track.index),
+                "burnIndex": (image.is_some() && burn_in).then_some(track.index),
                 "assUrl": matches!(track.codec_name.as_deref(), Some("ass" | "ssa")).then(|| format!("/api/v1/assets/{asset_id}/prepared/subtitle-ass-{}",track.index)) }));
     }
     // Every other embedded audio track becomes selectable through fallback transcoding
@@ -890,6 +893,8 @@ async fn descriptor_for_asset(
             "copyVideoMime": av1_video_mime(video).or_else(|| h264_video_mime(video)),
             "audio": audio_transcoding,
             "video": video_transcoding,
+            "toneMapping": encodes.0.tonemap,
+            "maxKbps": encodes.0.max_kbps,
         });
     }
     if let Some(orig) = failover_from {

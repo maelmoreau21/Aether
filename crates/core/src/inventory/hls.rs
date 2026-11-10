@@ -186,6 +186,7 @@ fn audio_peak(audios: &[&Track]) -> u64 {
 #[derive(Debug, PartialEq, Eq)]
 struct Reduced {
     encode: media_node::hls::Encode,
+    kbps: u32,
     width: u32,
     height: u32,
     bandwidth: u64,
@@ -219,6 +220,7 @@ fn reduced(probe: &Probe, video: &Track, audios: &[&Track]) -> Vec<Reduced> {
                     height: rendition.height,
                     tonemap: range.is_some(),
                 },
+                kbps: rendition.kbps,
                 width: w,
                 height: h,
                 bandwidth,
@@ -332,6 +334,24 @@ pub(crate) struct Encodes {
     pub audio: bool,
     /// Reduced H.264 variants after the original one.
     pub video: bool,
+    /// HDR sources may be tone mapped into SDR variants.
+    pub tonemap: bool,
+    /// Video bit rate ceiling of a reduced variant in kbit/s, 0 for none.
+    pub max_kbps: u32,
+}
+impl Encodes {
+    pub(crate) fn from_settings(settings: &crate::server_settings::Settings) -> Self {
+        Self {
+            audio: settings.audio_transcoding_enabled,
+            video: settings.video_transcoding_enabled,
+            tonemap: settings.tone_mapping_enabled,
+            max_kbps: settings.max_transcode_kbps,
+        }
+    }
+    /// Whether a reduced variant of this height and range may be encoded.
+    pub(crate) fn allows(&self, kbps: u32, tonemap: bool) -> bool {
+        self.video && (!tonemap || self.tonemap) && (self.max_kbps == 0 || kbps <= self.max_kbps)
+    }
 }
 
 pub(crate) fn master_playlist(
@@ -455,23 +475,24 @@ pub(crate) fn master_playlist(
         number(video, "width").zip(number(video, "height")),
         &format!("hls-v{}.m3u8", video.index),
     );
-    if transcode.video {
-        for offered in reduced(probe, video, &audios) {
-            let request = media_node::hls::HlsRequest {
-                video: video.index,
-                audio: None,
-                convert: false,
-                encode: Some(offered.encode),
-                resource: media_node::hls::service::Resource::Playlist,
-            };
-            variant(
-                &mut out,
-                offered.bandwidth,
-                Some(media_node::transcode::h264_codec(offered.encode.height).to_owned()),
-                Some((i64::from(offered.width), i64::from(offered.height))),
-                &request.component(),
-            );
-        }
+    for offered in reduced(probe, video, &audios)
+        .into_iter()
+        .filter(|offered| transcode.allows(offered.kbps, offered.encode.tonemap))
+    {
+        let request = media_node::hls::HlsRequest {
+            video: video.index,
+            audio: None,
+            convert: false,
+            encode: Some(offered.encode),
+            resource: media_node::hls::service::Resource::Playlist,
+        };
+        variant(
+            &mut out,
+            offered.bandwidth,
+            Some(media_node::transcode::h264_codec(offered.encode.height).to_owned()),
+            Some((i64::from(offered.width), i64::from(offered.height))),
+            &request.component(),
+        );
     }
     Ok(out)
 }
@@ -573,10 +594,7 @@ pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) 
     // AAC conversions and reduced variants spend Node CPU: they follow the transcoding settings.
     let transcode = crate::server_settings::load(store)
         .await
-        .map(|settings| Encodes {
-            audio: settings.audio_transcoding_enabled,
-            video: settings.video_transcoding_enabled,
-        })
+        .map(|settings| Encodes::from_settings(&settings))
         .unwrap_or_default();
     match master_playlist(&probe, transcode, &subtitles) {
         Ok(text) => playlist_response(text, method),
@@ -592,6 +610,8 @@ mod tests {
     const BOTH: Encodes = Encodes {
         audio: true,
         video: true,
+        tonemap: true,
+        max_kbps: 0,
     };
 
     fn track(value: serde_json::Value) -> Track {
@@ -697,8 +717,8 @@ mod tests {
         let audio_only = master_playlist(
             &uhd,
             Encodes {
-                audio: true,
                 video: false,
+                ..BOTH
             },
             &[],
         )
@@ -708,7 +728,7 @@ mod tests {
             &uhd,
             Encodes {
                 audio: false,
-                video: true,
+                ..BOTH
             },
             &[],
         )
@@ -722,6 +742,23 @@ mod tests {
         let text = master_playlist(&hdr, BOTH, &[]).unwrap();
         assert!(text.contains("hls-v0-t1080.m3u8\n") && !text.contains("-h1080"));
         assert!(offered(&hdr, "hls-v0-t1080-init.mp4") && !offered(&hdr, "hls-v0-h1080.m3u8"));
+        // No tone mapping on this server: HDR keeps its original variant only.
+        let unmapped = Encodes {
+            tonemap: false,
+            ..BOTH
+        };
+        assert!(
+            !master_playlist(&hdr, unmapped, &[])
+                .unwrap()
+                .contains("-t1080")
+        );
+        // A bit rate ceiling drops the heavier variants.
+        let capped = Encodes {
+            max_kbps: 5_000,
+            ..BOTH
+        };
+        let capped = master_playlist(&uhd, capped, &[]).unwrap();
+        assert!(!capped.contains("h1080") && capped.contains("h720"));
         let mut dovi = uhd.clone();
         dovi.streams[0].details.insert(
             "side_data_list".into(),

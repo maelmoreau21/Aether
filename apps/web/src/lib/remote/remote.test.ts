@@ -50,6 +50,20 @@ describe('remote control client', () => {
     ]);
   });
 
+  it('announces a TV as a TV, named after its platform', () => {
+    vi.stubGlobal('document', { documentElement: { dataset: { tv: 'true' } } });
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (SMART-TV; LINUX; Tizen 7.0) AppleWebKit/537.36 Chrome/94.0 TV Safari/537.36' });
+    remote.start();
+    const socket = FakeSocket.sockets[0];
+    socket.onopen?.();
+    expect(socket.sent()[0]).toMatchObject({ type: 'hello', kind: 'tv', name: 'Samsung TV · Tizen' });
+    remote.stop();
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 (Web0S; Linux/SmartTV) AppleWebKit/537.36 Chrome/108.0 Safari/537.36 WebAppManager' });
+    remote.start();
+    FakeSocket.sockets[1].onopen?.();
+    expect(FakeSocket.sockets[1].sent()[0]).toMatchObject({ kind: 'tv', name: 'LG TV · webOS' });
+  });
+
   it('throttles playback reports and sends commands to a device', () => {
     remote.start();
     const socket = FakeSocket.sockets[0];

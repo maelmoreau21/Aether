@@ -9,6 +9,7 @@
   "lib/catalog/ImageManager.svelte": 2,
   "lib/player/ImmersivePlayer.svelte": 1,
   "lib/player/subtitle-style.ts": 2,
+  "lib/remote/remote.svelte.ts": 3,
   "lib/syncplay/WatchPartyModal.svelte": 2,
   "lib/ui/MediaShelf.svelte": 1,
   "routes/login/+page.svelte": 1,

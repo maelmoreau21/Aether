@@ -1,6 +1,6 @@
 <script lang="ts">
   import ReportButton from '../applications/ReportButton.svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
@@ -30,6 +30,8 @@
   import { t } from '../i18n';
   import { watchTogetherEnabled } from '../config/presentation';
   import { remote, type RemoteCommand, type RemoteDevice } from '../remote/remote.svelte';
+  import { isDirection, tvActive, tvKey, type TvKey } from '../tv/keys';
+  import { moveFocus } from '../tv/navigation';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
     /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
@@ -758,19 +760,68 @@
       selectSubtitle(preferred ?? active.subtitles[0]?.id ?? null);
     }
   }
+  /** Media keys of keyboards and TV remotes, whatever has the focus. */
+  function mediaKey(key: TvKey | null): boolean {
+    if (key === 'playPause' || (key === 'play' && paused) || (key === 'pause' && !paused)) togglePlayback();
+    else if (key === 'play' || key === 'pause') wake();
+    else if (key === 'stop') close();
+    else if (key === 'forward') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
+    else if (key === 'rewind') seek(Math.max(0, playback.position - skipBackSeconds));
+    else if (key === 'next' && onNext && !syncClient) onNext();
+    else if (key === 'previous') seek(0);
+    else return false;
+    return true;
+  }
+  /**
+   * TV remote: the arrows move between the controls once one has the focus; on the picture, left and
+   * right seek, up and down bring the controls back with the focus on play (the TV owns the volume),
+   * and OK plays or pauses.
+   */
+  function remoteKeyboard(event: KeyboardEvent, key: TvKey | null, target: HTMLElement | null): boolean {
+    if (isDirection(key)) {
+      const bar = target?.closest<HTMLElement>('.player-controls');
+      if (bar && target !== surface) {
+        if (target instanceof HTMLInputElement && target.type === 'range' && (key === 'left' || key === 'right')) return true;
+        event.preventDefault();
+        moveFocus(key, bar);
+        return true;
+      }
+      if (key === 'up' || key === 'down') {
+        event.preventDefault();
+        wake();
+        void tick().then(() => surface?.querySelector<HTMLElement>('.player-controls .play-btn')?.focus());
+        return true;
+      }
+      return false;
+    }
+    if (key === 'enter' && !target?.closest('button, a, input, select, textarea')) {
+      event.preventDefault();
+      togglePlayback();
+      return true;
+    }
+    return false;
+  }
   function keyboard(event: KeyboardEvent) {
     if (!opened) return;
-    keyboardPinned = true; wake();
-    if (event.key === 'Escape') {
+    const tv = tvActive();
+    // On a TV every key comes from the remote: the controls hide again on their own.
+    keyboardPinned = !tv; wake();
+    const remoteKey = tvKey(event);
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const editing = Boolean(target?.closest('input:not([type="range"]), textarea'));
+    if (remoteKey === 'back' || (tv && event.key === 'Backspace' && !editing)) {
       event.preventDefault();
       if (statistics) { statistics = false; return; }
       if (menu) controls?.closeMenu();
-      else if (document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
+      // A TV is always full screen: Back leaves the player at once.
+      else if (!tv && document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
       else close();
       return;
     }
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('input, select, textarea, [role="menu"]')) return;
+    if (!editing && mediaKey(remoteKey)) { event.preventDefault(); return; }
+    if (target?.closest('[role="menu"]')) return;
+    if (tv && remoteKeyboard(event, remoteKey, target)) return;
+    if (target?.closest('input, select, textarea')) return;
     if ((event.key === ' ' || event.key === 'Enter') && target?.closest('button, a')) return;
     const key = event.key.toLowerCase();
     const isControlKey = [' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm', 'f', 'k', 'j', 'l', 'c', '0'].includes(key)
@@ -825,10 +876,10 @@
 
 <svelte:window onkeydown={windowKeyboard} />
 
-<dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label={$t('immersive_player')} oncancel={cancel} onclose={close}>
+<dialog id="player" bind:this={dialog} class="immersive-dialog" data-tv-nav="self" aria-label={$t('immersive_player')} oncancel={cancel} onclose={close}>
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
+  <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = !tvActive(); wake(); }} onkeydown={keyboard}
     onpointermove={pointerMoved} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
     <video
       bind:this={video}

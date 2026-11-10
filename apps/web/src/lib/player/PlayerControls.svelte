@@ -4,6 +4,7 @@
   import { tick } from 'svelte';
 
   import Icon from '../ui/Icon.svelte';
+  import { tvActive } from '../tv/keys';
   import { audioLabel, videoLabel, videoResolutionBadge, containerLabel } from './track-labels';
   import { audioChoices } from './available-audio';
   import type { Media, PlaybackState } from './types';
@@ -140,6 +141,8 @@
   let keyPreviewTimer: ReturnType<typeof setTimeout> | undefined;
   function seekKeyboard(event: KeyboardEvent) {
     if (!playback.duration) return;
+    // With a TV remote, up and down leave the bar for the other controls.
+    if (tvActive() && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) return;
     const position = playback.position;
     let target: number | null = null;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') target = position - skipBackSeconds;

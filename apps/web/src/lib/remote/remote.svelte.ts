@@ -9,6 +9,8 @@ export type RemoteDevice = { deviceId: string; name: string; kind: string; playi
 export type RemoteAction = 'play' | 'pause' | 'seek' | 'stop' | 'open';
 export type RemoteCommand = { fromName: string; action: RemoteAction; position?: number; workId?: string };
 
+import { tvActive } from '../tv/keys';
+
 const DEVICE_KEY = 'aether.remote.device';
 const ACTIONS: readonly string[] = ['play', 'pause', 'seek', 'stop', 'open'];
 
@@ -27,6 +29,14 @@ function browserName(): string {
   const browser = /Edg\//.test(agent) ? 'Edge' : /Firefox\//.test(agent) ? 'Firefox' : /Chrome\//.test(agent) ? 'Chrome' : /Safari\//.test(agent) ? 'Safari' : 'Navigateur';
   const system = /Windows/.test(agent) ? 'Windows' : /Mac OS/.test(agent) ? 'Mac' : /Android/.test(agent) ? 'Android' : /Linux/.test(agent) ? 'Linux' : '';
   return system ? `${browser} · ${system}` : browser;
+}
+
+/** A TV (Tizen, webOS, or the TV layout forced on) announces itself as one, like the Android TV app. */
+export function deviceIdentity(): { name: string; kind: 'tv' | 'web' } {
+  if (!tvActive()) return { name: browserName(), kind: 'web' };
+  const agent = navigator.userAgent;
+  const name = /Tizen/i.test(agent) ? 'Samsung TV · Tizen' : /Web0S|webOS/i.test(agent) ? 'LG TV · webOS' : `Téléviseur · ${browserName()}`;
+  return { name, kind: 'tv' };
 }
 
 function parseCommand(raw: Record<string, unknown>): RemoteCommand | null {
@@ -75,7 +85,7 @@ class RemoteControl {
     socket.onopen = () => {
       this.#backoff = 2000;
       this.connected = true;
-      socket.send(JSON.stringify({ type: 'hello', deviceId: deviceId(), name: browserName(), kind: 'web' }));
+      socket.send(JSON.stringify({ type: 'hello', deviceId: deviceId(), ...deviceIdentity() }));
       socket.send(this.#state);
     };
     socket.onmessage = event => {

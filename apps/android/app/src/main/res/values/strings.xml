@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aether</string>
+    <string name="server_title">Votre serveur Aether</string>
+    <string name="server_hint">Adresse, par exemple https://media.exemple.fr</string>
+    <string name="continue_action">Continuer</string>
+    <string name="sign_in_title">Connexion</string>
+    <string name="login">Identifiant</string>
+    <string name="password">Mot de passe</string>
+    <string name="sign_in">Se connecter</string>
+    <string name="pair_title">Ou scannez ce code avec un appareil déjà connecté</string>
+    <string name="pair_code">Code : %1$s</string>
+    <string name="pair_expired">Code expiré, un nouveau est affiché.</string>
+    <string name="change_server">Changer de serveur</string>
+    <string name="search">Rechercher</string>
+    <string name="films">Films</string>
+    <string name="series">Séries</string>
+    <string name="empty">Aucun titre</string>
+    <string name="sign_out">Se déconnecter</string>
+    <string name="error_network">Serveur injoignable : %1$s</string>
+    <string name="error_credentials">Identifiant ou mot de passe incorrect</string>
+    <string name="error_unavailable">Ce titre n’est pas lisible ici (%1$s)</string>
+    <string name="back">Retour</string>
+</resources>

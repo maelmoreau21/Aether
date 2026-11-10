@@ -1,0 +1,6 @@
+.gradle/
+build/
+app/build/
+local.properties
+# Built by scripts/build.sh from crates/client-ffi.
+app/src/main/jniLibs/

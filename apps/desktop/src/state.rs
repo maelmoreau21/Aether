@@ -136,6 +136,7 @@ impl LibraryState {
             search: None,
             offset: self.items.len(),
             limit: LIBRARY_PAGE,
+            ..CatalogQuery::default()
         })
     }
     pub fn start(&mut self) {

@@ -287,17 +287,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
-      issues: write
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
+      # cargo audit direct : échoue sur une vulnérabilité ; les crates non
+      # maintenues (dépendances de GPUI) restent des avertissements. L'action
+      # rustsec/audit-check échouait en publiant ces avertissements (« Not Found »).
+      - name: Installer cargo-audit
+        run: cargo install cargo-audit --locked
+
       - name: Audit de sécurité des dépendances RustSec
-        uses: rustsec/audit-check@v1.4.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          ignore: RUSTSEC-2026-0459
+        run: cargo audit --ignore RUSTSEC-2026-0459
 
   # =========================================================================
   # 3. Vérifications et tests Frontend (SvelteKit)

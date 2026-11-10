@@ -110,8 +110,8 @@ async fn list(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<
     let owner = owner_of(&auth, &current).await?;
     let rows: Vec<(String, String, i64, i64)> = query_as(
         "SELECT u.id, COALESCE(u.display_name, c.login, u.sso_username, u.id) AS name, \
-           CAST((p.pin_hash IS NOT NULL) AS BIGINT) AS has_pin, \
-           CAST(EXISTS(SELECT 1 FROM parental_policies pp WHERE pp.user_id=u.id) AS BIGINT) AS restricted \
+           CAST(CASE WHEN p.pin_hash IS NOT NULL THEN 1 ELSE 0 END AS BIGINT) AS has_pin, \
+           CAST(CASE WHEN EXISTS(SELECT 1 FROM parental_policies pp WHERE pp.user_id=u.id) THEN 1 ELSE 0 END AS BIGINT) AS restricted \
          FROM users u \
          LEFT JOIN account_profiles p ON p.user_id=u.id \
          LEFT JOIN local_credentials c ON c.user_id=u.id \

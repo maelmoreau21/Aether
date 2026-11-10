@@ -21,7 +21,7 @@
   import ChapterImages from './ChapterImages.svelte';
   import { t } from '../i18n';
   import MediaStatistics from '../statistics/MediaStatistics.svelte';
-  import { statisticsVisible } from '../statistics/visibility';
+  import { titleStatisticsVisible } from '../statistics/visibility';
   import { st } from '../statistics/i18n';
 
   let { work, playableMedia = [], allowedIds = [], selected = $bindable(''), mediaError = '', similarCandidates = [], onPlay }: {
@@ -38,7 +38,7 @@
   const tabs = $derived([
     { id: 'details', label: $t('detail_tab_details') },
     ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : []),
-    ...($statisticsVisible && !work.synthetic ? [{ id: 'stats', label: $st('media_tab') }] : [])
+    ...($titleStatisticsVisible && !work.synthetic ? [{ id: 'stats', label: $st('media_tab') }] : [])
   ]);
   let tab = $state('details');
   // `?section=stats` (links from the statistics page) opens the audience tab.
@@ -128,7 +128,7 @@
     >
       {#if tab === 'cast' && hasCast}
         <EditorialCredits {work} />
-      {:else if tab === 'stats' && $statisticsVisible && !work.synthetic}
+      {:else if tab === 'stats' && $titleStatisticsVisible && !work.synthetic}
         <MediaStatistics mediaId={work.id} kind="film" />
       {:else}
         <WorkDetails {work}>

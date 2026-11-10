@@ -13,6 +13,18 @@ leur parcours existant ; « Lire les titres musicaux » lance les morceaux dans 
 lecteur global. L'enchaînement automatique d'une liste mêlant vidéo et musique
 n'est pas fourni.
 
+**Playlists automatiques.** Par défaut, les films et les séries marqués d'un cœur
+sont rassemblés dans deux playlists en lecture seule, « Films favoris » et « Séries
+favorites » (`auto-favorites-film`, `auto-favorites-series`). Elles sont calculées à
+chaque consultation, propres au compte, et n'accordent aucun accès : les droits de
+bibliothèque et le contrôle parental s'appliquent comme dans le catalogue. Chaque
+compte peut les désactiver dans **Paramètres → Affichage → Playlists automatiques**
+(préférence `autoPlaylists`, activée tant qu'elle n'est pas mise à `false`).
+
+**Sans accès à la musique.** Un compte qui n'a aucune bibliothèque musicale ne voit
+ni la recherche de morceaux, ni « Lire les titres musicaux », ni le libellé musique
+dans la page Playlists.
+
 Les playlists sont privées par défaut. Dans **Administration → Général**,
 l'administrateur peut autoriser le partage nominatif et la visibilité publique.
 « Publique » signifie uniquement visible par les comptes connectés : aucun accès

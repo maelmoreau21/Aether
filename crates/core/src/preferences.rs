@@ -45,6 +45,9 @@ struct Preferences {
     play_default_audio_track: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     hide_played_in_latest: Option<bool>,
+    /// Playlists built from the favourites; on unless `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_playlists: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     subtitles: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

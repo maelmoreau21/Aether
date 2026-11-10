@@ -70,6 +70,8 @@
   let playDefaultAudioTrack = $state(trackPreferences(preferences()).playDefaultAudioTrack);
   let selectionEdited = false;
   let hidePlayedInLatest = $state(preferences().hidePlayedInLatest === true);
+  let autoPlaylists = $state(preferences().autoPlaylists !== false);
+  let autoPlaylistsEdited = false;
   // Streaming: quality, remote ceiling, HDR, channels, night mode, accessibility tracks.
   const readStreaming = (saved: ReturnType<typeof preferences>) => ({
     streamingQuality: saved.streamingQuality ?? 'auto',
@@ -96,6 +98,10 @@
   async function saveLatestPreference() {
     latestEdited = true;
     if (await savePreferences({ hidePlayedInLatest })) invalidateLatestCatalog();
+  }
+  function saveAutoPlaylists() {
+    autoPlaylistsEdited = true;
+    void savePreferences({ autoPlaylists });
   }
   function savePlaybackDefaults() {
     playbackEdited = true;
@@ -147,6 +153,7 @@
         playDefaultAudioTrack = policy.playDefaultAudioTrack;
       }
       if (!latestEdited) hidePlayedInLatest = saved.hidePlayedInLatest === true;
+      if (!autoPlaylistsEdited) autoPlaylists = saved.autoPlaylists !== false;
       if (!streamingEdited) streaming = readStreaming(saved);
       if (!offsetsEdited) {
         audioOffset = saved.offsets?.audio ?? 0;
@@ -277,6 +284,11 @@
         <section class="card" aria-labelledby="home-preferences-heading">
           <h2 id="home-preferences-heading">{$t('home_preferences')}</h2>
           <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> {$t('hide_watched_new')}</label>
+        </section>
+        <section class="card" aria-labelledby="auto-playlists-heading">
+          <h2 id="auto-playlists-heading">{$t('auto_playlists_title')}</h2>
+          <p class="muted">{$t('auto_playlists_note')}</p>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoPlaylists} onchange={saveAutoPlaylists} /> {$t('auto_playlists_label')}</label>
         </section>
         <form class="card offsets" onsubmit={saveArtworkRotation}>
           <h2>{$t('artwork_rotation')}</h2>

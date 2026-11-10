@@ -1,7 +1,7 @@
 // Whether the signed-in account may read statistics (collection on, and personal
 // consultation allowed or administrator). Cached per session generation.
-import { readable, type Readable } from 'svelte/store';
-import { getSessionGeneration, onSessionGenerationChange } from '../auth/session';
+import { derived, readable, type Readable } from 'svelte/store';
+import { getSessionGeneration, onSessionGenerationChange, session } from '../auth/session';
 
 let cached: { generation: number; value: Promise<boolean> } | undefined;
 
@@ -25,3 +25,9 @@ export const statisticsVisible: Readable<boolean> = readable(false, set => {
   if (typeof window !== 'undefined') window.addEventListener('statistics-settings-changed', refresh);
   return () => { disposed = true; off(); if (typeof window !== 'undefined') window.removeEventListener('statistics-settings-changed', refresh); };
 });
+
+/** The audience tab of a title (film or series page): administrators only, never regular users. */
+export const titleStatisticsVisible: Readable<boolean> = derived(
+  [statisticsVisible, session],
+  ([visible, account]) => visible && account?.user.role === 'administrator'
+);

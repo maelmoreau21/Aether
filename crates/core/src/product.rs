@@ -136,6 +136,80 @@ async fn automatic_collections(
     Ok(collections)
 }
 
+/// Whether the account wants playlists built from its favourites: on unless it
+/// switched `autoPlaylists` off in its settings.
+async fn auto_playlists_enabled(auth: &AuthState, user: &str) -> Result<bool, Error> {
+    let raw: Option<String> =
+        query_scalar("SELECT preferences_json FROM user_preferences WHERE user_id=?")
+            .bind(user)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(raw
+        .and_then(|json| serde_json::from_str::<Value>(&json).ok())
+        .and_then(|preferences| preferences["autoPlaylists"].as_bool())
+        .unwrap_or(true))
+}
+
+const FAVORITE_FILMS: &str = "auto-favorites-film";
+const FAVORITE_SERIES: &str = "auto-favorites-series";
+
+/// Extra fields of an automatic list: the favourites carry a key the interface
+/// translates, collections carry nothing more.
+fn automatic_extras(id: &str) -> Value {
+    match id {
+        FAVORITE_FILMS => json!({"favorites":true,"systemKey":"favorites-film"}),
+        FAVORITE_SERIES => json!({"favorites":true,"systemKey":"favorites-series"}),
+        _ => json!({}),
+    }
+}
+
+/// The titles the account marked with a heart, one list per type. Derived on
+/// every call, private to the account, never granting access: the library
+/// permissions and the parental policy apply exactly as in the catalogue.
+async fn automatic_favorites(
+    auth: &AuthState,
+    actor: &Authenticated,
+) -> Result<std::collections::BTreeMap<String, (String, Vec<Value>)>, Error> {
+    let mut lists = std::collections::BTreeMap::<String, (String, Vec<Value>)>::new();
+    if !auto_playlists_enabled(auth, &actor.user.id).await? {
+        return Ok(lists);
+    }
+    let rows: Vec<(String, String, String)> = query_as("SELECT w.id,w.title,w.kind FROM work_feedback f JOIN inventory_works w ON w.id=f.work_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE f.user_id=? AND f.favorite=1 AND w.kind IN ('film','series') AND w.has_available_asset=1 AND l.enabled=1 AND n.status!='revoked' AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) ORDER BY w.title_sort,w.id LIMIT 10000")
+        .bind(&actor.user.id)
+        .bind(actor.user.role.as_str())
+        .bind(&actor.user.id)
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    for (work, title, kind) in rows {
+        if !parental_allowed(&auth.store, &actor.user.id, &work).await? {
+            continue;
+        }
+        let (id, name) = if kind == "series" {
+            (FAVORITE_SERIES, "Séries favorites")
+        } else {
+            (FAVORITE_FILMS, "Films favoris")
+        };
+        lists
+            .entry(id.to_owned())
+            .or_insert_with(|| (name.to_owned(), Vec::new()))
+            .1
+            .push(json!({"id":work,"title":title,"kind":kind}));
+    }
+    Ok(lists)
+}
+
+/// Every automatic list of the account: derived collections, then favourites.
+async fn automatic_lists(
+    auth: &AuthState,
+    actor: &Authenticated,
+) -> Result<std::collections::BTreeMap<String, (String, Vec<Value>)>, Error> {
+    let mut lists = automatic_collections(auth, actor).await?;
+    lists.extend(automatic_favorites(auth, actor).await?);
+    Ok(lists)
+}
+
 async fn lists(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json<Value>, Error> {
     let actor = auth.authenticate(&headers).await?;
     let rows: Vec<(String, String,String,String)> =
@@ -145,8 +219,14 @@ async fn lists(State(auth): State<AuthState>, headers: HeaderMap) -> Result<Json
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let mut lists:Vec<Value> = rows.into_iter().map(|(id,name,visibility,user)|json!({"id":id,"name":name,"visibility":visibility,"owned":user==actor.user.id})).collect();
-    for (id, (name, works)) in automatic_collections(&auth, &actor).await? {
-        lists.push(json!({"id":id,"name":name,"visibility":"collection","owned":false,"automatic":true,"itemCount":works.len()}));
+    for (id, (name, works)) in automatic_lists(&auth, &actor).await? {
+        let mut list = json!({"id":id,"name":name,"visibility":"collection","owned":false,"automatic":true,"itemCount":works.len()});
+        if let (Some(fields), Some(extra)) =
+            (list.as_object_mut(), automatic_extras(&id).as_object())
+        {
+            fields.extend(extra.clone());
+        }
+        lists.push(list);
     }
     Ok(Json(json!({"lists":lists})))
 }
@@ -195,9 +275,9 @@ async fn list(
     Path(id): Path<String>,
     Query(view): Query<ListView>,
 ) -> Result<Json<Value>, Error> {
-    if id.starts_with("auto-collection-") {
+    if id.starts_with("auto-") {
         let actor = auth.authenticate(&headers).await?;
-        let Some((name, works)) = automatic_collections(&auth, &actor).await?.remove(&id) else {
+        let Some((name, works)) = automatic_lists(&auth, &actor).await?.remove(&id) else {
             return Err(StatusCode::NOT_FOUND);
         };
         let mut items = Vec::new();
@@ -219,9 +299,13 @@ async fn list(
             }
         }
         let entries:Vec<Value>=items.iter().enumerate().map(|(position,media)|json!({"kind":"work","id":media["id"],"position":position,"media":media})).collect();
-        return Ok(Json(
-            json!({"id":id,"name":name,"visibility":"collection","owned":false,"automatic":true,"items":items,"entries":entries,"shares":[]}),
-        ));
+        let mut detail = json!({"id":id,"name":name,"visibility":"collection","owned":false,"automatic":true,"items":items,"entries":entries,"shares":[]});
+        if let (Some(fields), Some(extra)) =
+            (detail.as_object_mut(), automatic_extras(&id).as_object())
+        {
+            fields.extend(extra.clone());
+        }
+        return Ok(Json(detail));
     }
     let actor = crate::playlists::access(&auth, &headers, &id, false).await?;
     let (name, visibility, user): (String, String, String) =
@@ -1784,6 +1868,106 @@ mod automatic_collection_tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+    #[tokio::test]
+    async fn favourites_become_one_list_per_type_and_can_be_switched_off() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("favourites.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO users(id,role) VALUES('reader','user')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let token = "d".repeat(64);
+        query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'reader',unixepoch(),unixepoch(),unixepoch()+3600)").bind(crate::auth::hash(&token)).execute(store.pool()).await.unwrap();
+        for (library, kind) in [("films", "films"), ("shows", "series")] {
+            query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES(?,?,?,'local',?,1,'{}')")
+                .bind(library).bind(library).bind(kind).bind(format!("/synthetic-{library}")).execute(store.pool()).await.unwrap();
+            query("INSERT INTO library_permissions(library_id,user_id) VALUES(?,'reader')")
+                .bind(library)
+                .execute(store.pool())
+                .await
+                .unwrap();
+        }
+        for (id, library, kind, favorite) in [
+            ("loved-film", "films", "film", 1),
+            ("plain-film", "films", "film", 0),
+            ("loved-show", "shows", "series", 1),
+        ] {
+            query("INSERT INTO inventory_works(id,library_id,identity_key,title,kind,external_ids_json,editorial_json,has_available_asset) VALUES(?,?,?,?,?,'{}','{}',1)")
+                .bind(id).bind(library).bind(id).bind(id).bind(kind).execute(store.pool()).await.unwrap();
+            query("INSERT INTO work_feedback(user_id,work_id,favorite) VALUES('reader',?,?)")
+                .bind(id)
+                .bind(favorite)
+                .execute(store.pool())
+                .await
+                .unwrap();
+        }
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            format!("media_session={token}").parse().unwrap(),
+        );
+        let actor = auth.authenticate(&headers).await.unwrap();
+
+        // On by default: one list per type, hearts only.
+        let lists = automatic_favorites(&auth, &actor).await.unwrap();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[FAVORITE_FILMS].1.len(), 1);
+        assert_eq!(lists[FAVORITE_FILMS].1[0]["id"], "loved-film");
+        assert_eq!(lists[FAVORITE_SERIES].1[0]["id"], "loved-show");
+
+        // Served through the same routes as the other lists, with a translatable key.
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let request = |path: &str| {
+            axum::http::Request::builder()
+                .uri(path)
+                .header(header::COOKIE, format!("media_session={token}"))
+                .body(axum::body::Body::empty())
+                .unwrap()
+        };
+        let response = router(auth.clone())
+            .oneshot(request("/api/v1/lists"))
+            .await
+            .unwrap();
+        let payload: Value =
+            serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let favourite = payload["lists"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|list| list["id"] == FAVORITE_FILMS)
+            .unwrap();
+        assert_eq!(favourite["systemKey"], "favorites-film");
+        assert_eq!(favourite["owned"], false);
+        let response = router(auth.clone())
+            .oneshot(request(&format!(
+                "/api/v1/lists/{FAVORITE_FILMS}?compact=true"
+            )))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // A library the account lost never leaks through its hearts.
+        query("DELETE FROM library_permissions WHERE library_id='shows'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let lists = automatic_favorites(&auth, &actor).await.unwrap();
+        assert!(lists.contains_key(FAVORITE_FILMS) && !lists.contains_key(FAVORITE_SERIES));
+
+        // Switched off in the settings: nothing is derived.
+        query("INSERT INTO user_preferences(user_id,preferences_json) VALUES('reader','{\"autoPlaylists\":false}')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert!(automatic_favorites(&auth, &actor).await.unwrap().is_empty());
     }
 }
 

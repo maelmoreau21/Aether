@@ -29,13 +29,43 @@ renvoie `422 hls_video_unsupported`.
 Une piste audio que les lecteurs natifs ne décodent pas (DTS, TrueHD, PCM…)
 est proposée convertie en AAC (`hls-v{v}-aac{a}…`, 5.1 au plus, 320 kb/s)
 quand le transcodage est activé dans les réglages serveur ; sinon elle n'est
-pas listée. La piste entière est encodée **une seule fois** dans le cache de
-préparation du Node, en arrière-plan dès la demande de sa playlist : l'amorçage
-AAC n'a lieu qu'au tout début, pas à chaque segment, et les segments sont
-ensuite copiés depuis ce fichier comme pour une piste native. Le premier
-segment attend la fin de l'encodage (de l'ordre de la minute pour un film sur
-un NAS) ; les lectures suivantes sont immédiates. L'encodage occupe l'unique
-emplacement de préparation du Node pendant ce temps.
+pas listée. Chaque segment est converti **seul, à la demande**, sur les mêmes
+bornes que la vidéo : la lecture démarre en quelques secondes, sans attendre
+la conversion du film entier ni rien écrire sur disque. Pour que les segments
+encodés séparément se recollent comme un seul encodage, les trames AAC (1024
+échantillons à 48 kHz) suivent une grille commune depuis le début du film :
+chaque segment encode à partir d'un point de la grille une demi-seconde plus
+tôt (l'encodeur est « chaud » à la jonction, sans amorçage audible), puis le
+filtre de flux `noise=drop=…` ne garde que les trames
+`[début, fin)` du segment arrondis à la grille. Aucune trame en double ni
+manquante d'un segment à l'autre.
+
+### Variantes réduites (H.264)
+
+Quand le transcodage est activé, la playlist maîtresse liste après l'original
+des variantes réencodées en H.264 High (AAC ou pistes d'origine via les mêmes
+renditions audio) : `hls-v{v}-h1080…` (cadre 1920×1080, 8 Mb/s) et
+`hls-v{v}-h720…` (1280×720, 4 Mb/s). Une source HDR10/HLG est convertie en
+SDR (`hls-v{v}-t{hauteur}…`) ; Dolby Vision profil 5, sans base HDR10, n'en a
+pas. Une variante n'est listée que si l'image dépasse son cadre (rapport
+d'aspect conservé : un 3840×1600 donne 1920×800) et si elle est plus légère
+que l'original ; `RESOLUTION` est celle que produit FFmpeg. Le Core refuse
+tout autre nom de variante pour cet asset, et les segments suivent le même
+contrôle d'accès et le même réglage de transcodage que les conversions audio.
+
+Chaque segment est encodé seul, à la demande, sur les mêmes bornes que la
+copie : décodage depuis son image clé, arrêt (`-to`) avant celle du segment
+suivant, donc une image IDR en tête et exactement les images affichées dans
+la fenêtre ; `-copyts` et le décalage commun gardent la chronologie de la
+source. L'encodeur est celui du transcodage de secours (NVENC, QSV, VAAPI ou
+AMF si configuré, sinon libx264 `veryfast`), et les encodages partagent ses
+`MEDIA_TRANSCODE_MAX_SESSIONS` ; un segment attend jusqu'à 20 s qu'un
+encodeur se libère. Un Node qui refuse le transcodage répond
+`transcode_disabled` dès la playlist de la variante.
+
+L'application Android propose ces variantes au téléchargement (clés de flux
+Media3 : la variante choisie et toutes les renditions audio) : un film 4K de
+deux heures, environ 50 Go, en garde de l'ordre de 8 Go en 1080p.
 
 Chromecast : le récepteur standard lit ces URL si l'application précise des
 segments fMP4 (`HlsSegmentFormat.FMP4`, `HlsVideoSegmentFormat.FMP4`) ; la page du
@@ -95,10 +125,16 @@ Chromecast.
   playlist maîtresse avec CORS pour une origine Chromecast, playlist média,
   refus sur un autre asset, survie au renouvellement et fin à la déconnexion,
   sur SQLite et PostgreSQL 18.
+- Le test `reduced_rendition_segments_join_into_the_source_frames` encode une
+  variante 720p d'une source 1920×800 à B-frames, segments servis dans le
+  désordre : chaque image d'origine une fois à son instant, une image clé en
+  tête de chaque segment, instants de décodage croissants aux jonctions,
+  décodage sans erreur, taille annoncée par la playlist maîtresse.
 - Le test `converted_audio_rendition_is_continuous_aac_over_the_whole_film`
-  convertit une piste Opus, sert la rendition AAC dans le désordre et vérifie
-  des trames AAC jointives (21,3 ms d'écart, ni trou ni chevauchement) sur
-  toute la durée du film.
+  convertit une piste Opus segment par segment, servis dans le désordre, et
+  vérifie des trames AAC exactement sur la grille (21,3 ms d'écart, ni trou ni
+  chevauchement) sur toute la durée du film, puis compare le son décodé à la
+  source : l'écart autour de chaque jonction ne dépasse pas celui du reste.
 
 Non vérifié : lecture réelle sur iPhone, Apple TV, Android, Chromecast et
 AirPlay ; HEVC à GOP ouvert ; Dolby Vision ; conversion d'une vraie piste DTS

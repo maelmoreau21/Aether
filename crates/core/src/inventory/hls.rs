@@ -114,7 +114,8 @@ fn is_convertible_audio(track: &Track) -> bool {
 }
 
 /// Whether a Node HLS component names streams this asset can serve that way.
-/// A conversion is only accepted for a track that needs one.
+/// A conversion is only accepted for a track that needs one, a reduced
+/// rendition only when the master playlist offers it for this video.
 pub(crate) fn allowed(probe: &Probe, request: &media_node::hls::HlsRequest) -> bool {
     let has = |index: u32, test: fn(&Track) -> bool| {
         probe.streams.iter().any(|t| t.index == index && test(t))
@@ -124,7 +125,106 @@ pub(crate) fn allowed(probe: &Probe, request: &media_node::hls::HlsRequest) -> b
     } else {
         is_audio
     };
-    has(request.video, is_video) && request.audio.is_none_or(|audio| has(audio, audio_ok))
+    let encode_ok = request.encode.is_none_or(|encode| {
+        probe
+            .streams
+            .iter()
+            .find(|t| t.index == request.video && is_video(t))
+            .is_some_and(|video| {
+                let audios = renditions_audio(probe, true);
+                reduced(probe, video, &audios)
+                    .iter()
+                    .any(|offered| offered.encode == encode)
+            })
+    });
+    has(request.video, is_video)
+        && request.audio.is_none_or(|audio| has(audio, audio_ok))
+        && encode_ok
+}
+
+/// Audio renditions of the master playlist, in order.
+fn renditions_audio(probe: &Probe, convert: bool) -> Vec<&Track> {
+    probe
+        .streams
+        .iter()
+        .filter(|t| is_audio(t) || (convert && is_convertible_audio(t)))
+        .collect()
+}
+
+/// Peak bitrate of the original variant: the whole file, with a margin.
+fn original_bandwidth(probe: &Probe, video: &Track) -> u64 {
+    probe
+        .format
+        .get("bit_rate")
+        .and_then(|v| v.as_str()?.parse::<u64>().ok())
+        .or_else(|| number(video, "bit_rate").map(|b| b as u64))
+        .map_or(DEFAULT_BANDWIDTH, |b| b.saturating_mul(6) / 5)
+}
+
+/// The heaviest audio rendition a reduced variant may be played with.
+fn audio_peak(audios: &[&Track]) -> u64 {
+    audios
+        .iter()
+        .map(|track| {
+            if !is_audio(track) {
+                return 320_000; // the Node's AAC conversion
+            }
+            number(track, "bit_rate")
+                .or_else(|| {
+                    let tags = &track.tags;
+                    let bps = tags.get("BPS").or_else(|| tags.get("BPS-eng"))?;
+                    bps.as_str()?.parse().ok()
+                })
+                .filter(|b| *b > 0)
+                .map_or(640_000, |b| b as u64)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// A reduced H.264 variant offered for a video stream.
+#[derive(Debug, PartialEq, Eq)]
+struct Reduced {
+    encode: media_node::hls::Encode,
+    width: u32,
+    height: u32,
+    bandwidth: u64,
+}
+
+/// Reduced variants for `video`: only for a picture larger than the
+/// rendition's box, lighter than the original, and of a dynamic range the
+/// Node turns into SDR (Dolby Vision profile 5 has no HDR10 base to tone map).
+fn reduced(probe: &Probe, video: &Track, audios: &[&Track]) -> Vec<Reduced> {
+    let range = super::resources::video_dynamic_range(video);
+    if range.as_deref() == Some("dolby_vision_5") {
+        return Vec::new();
+    }
+    let (Some(width), Some(height)) = (number(video, "width"), number(video, "height")) else {
+        return Vec::new();
+    };
+    let (Ok(width), Ok(height)) = (u32::try_from(width), u32::try_from(height)) else {
+        return Vec::new();
+    };
+    let original = original_bandwidth(probe, video);
+    let audio = audio_peak(audios);
+    media_node::hls::RENDITIONS
+        .into_iter()
+        .filter(|r| width > r.width || height > r.height)
+        .filter_map(|rendition| {
+            let (w, h) = media_node::hls::renditions::fit(width, height, rendition)?;
+            // Rate control peaks at `maxrate`; the same margin as the original.
+            let bandwidth = u64::from(rendition.kbps) * 1000 * 6 / 5 + audio;
+            (bandwidth < original).then_some(Reduced {
+                encode: media_node::hls::Encode {
+                    height: rendition.height,
+                    tonemap: range.is_some(),
+                },
+                width: w,
+                height: h,
+                bandwidth,
+            })
+        })
+        .collect()
 }
 
 /// Quoted-string attribute: no quote, no control character, bounded length.
@@ -225,10 +325,12 @@ pub(crate) fn subtitle_playlist(stem: &str, duration: f64) -> String {
     )
 }
 
-/// `convert`: also offer AAC conversions of the tracks native players cannot decode.
+/// `transcode` (the administrator allows encoding): also offer AAC conversions
+/// of the tracks native players cannot decode, and reduced H.264 variants
+/// after the original one.
 pub(crate) fn master_playlist(
     probe: &Probe,
-    convert: bool,
+    transcode: bool,
     subtitles: &[SubtitleRendition],
 ) -> Result<String, &'static str> {
     let video = probe
@@ -236,11 +338,7 @@ pub(crate) fn master_playlist(
         .iter()
         .find(|t| is_video(t))
         .ok_or("hls_video_unsupported")?;
-    let audios: Vec<&Track> = probe
-        .streams
-        .iter()
-        .filter(|t| is_audio(t) || (convert && is_convertible_audio(t)))
-        .collect();
+    let audios = renditions_audio(probe, transcode);
     let default = audios.iter().position(|t| flag(t, "default")).unwrap_or(0);
     let mut out = String::from("#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n");
     let mut names: Vec<String> = Vec::new();
@@ -310,38 +408,65 @@ pub(crate) fn master_playlist(
             subtitle.stem
         );
     }
-    let bandwidth = probe
-        .format
-        .get("bit_rate")
-        .and_then(|v| v.as_str()?.parse::<u64>().ok())
-        .or_else(|| number(video, "bit_rate").map(|b| b as u64))
-        .map_or(DEFAULT_BANDWIDTH, |b| b.saturating_mul(6) / 5);
-    let _ = write!(out, "#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}");
     // CODECS lists every format of the variant, or is left out rather than guessed.
-    let mut codecs = vec![video_codec(video)];
+    let mut audio_codecs = Vec::new();
     for track in &audios {
         let codec = if is_audio(track) {
             audio_codec(track).map(str::to_owned)
         } else {
             Some("mp4a.40.2".to_owned())
         };
-        if !codecs.contains(&codec) {
-            codecs.push(codec);
+        if !audio_codecs.contains(&codec) {
+            audio_codecs.push(codec);
         }
     }
-    if let Some(codecs) = codecs.into_iter().collect::<Option<Vec<_>>>() {
-        let _ = write!(out, ",CODECS=\"{}\"", codecs.join(","));
+    let variant = |out: &mut String,
+                   bandwidth: u64,
+                   video_codec: Option<String>,
+                   size: Option<(i64, i64)>,
+                   uri: &str| {
+        let _ = write!(out, "#EXT-X-STREAM-INF:BANDWIDTH={bandwidth}");
+        let codecs = std::iter::once(video_codec).chain(audio_codecs.iter().cloned());
+        if let Some(codecs) = codecs.collect::<Option<Vec<_>>>() {
+            let _ = write!(out, ",CODECS=\"{}\"", codecs.join(","));
+        }
+        if let Some((width, height)) = size {
+            let _ = write!(out, ",RESOLUTION={width}x{height}");
+        }
+        if !audios.is_empty() {
+            out.push_str(",AUDIO=\"audio\"");
+        }
+        if !subtitles.is_empty() {
+            out.push_str(",SUBTITLES=\"subs\"");
+        }
+        let _ = writeln!(out, "\n{uri}");
+    };
+    // The original first: players start on the first variant listed.
+    variant(
+        &mut out,
+        original_bandwidth(probe, video),
+        video_codec(video),
+        number(video, "width").zip(number(video, "height")),
+        &format!("hls-v{}.m3u8", video.index),
+    );
+    if transcode {
+        for offered in reduced(probe, video, &audios) {
+            let request = media_node::hls::HlsRequest {
+                video: video.index,
+                audio: None,
+                convert: false,
+                encode: Some(offered.encode),
+                resource: media_node::hls::service::Resource::Playlist,
+            };
+            variant(
+                &mut out,
+                offered.bandwidth,
+                Some(media_node::transcode::h264_codec(offered.encode.height).to_owned()),
+                Some((i64::from(offered.width), i64::from(offered.height))),
+                &request.component(),
+            );
+        }
     }
-    if let (Some(width), Some(height)) = (number(video, "width"), number(video, "height")) {
-        let _ = write!(out, ",RESOLUTION={width}x{height}");
-    }
-    if !audios.is_empty() {
-        out.push_str(",AUDIO=\"audio\"");
-    }
-    if !subtitles.is_empty() {
-        out.push_str(",SUBTITLES=\"subs\"");
-    }
-    let _ = writeln!(out, "\nhls-v{}.m3u8", video.index);
     Ok(out)
 }
 
@@ -430,11 +555,11 @@ pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) 
         Ok(loaded) => loaded,
         Err(response) => return response,
     };
-    // AAC conversions spend Node CPU: they follow the transcoding setting.
-    let convert = crate::server_settings::load(store)
+    // AAC conversions and reduced variants spend Node CPU: they follow the transcoding setting.
+    let transcode = crate::server_settings::load(store)
         .await
         .is_ok_and(|settings| settings.transcoding_enabled);
-    match master_playlist(&probe, convert, &subtitles) {
+    match master_playlist(&probe, transcode, &subtitles) {
         Ok(text) => playlist_response(text, method),
         Err(code) => crate::error(StatusCode::UNPROCESSABLE_ENTITY, code),
     }
@@ -520,6 +645,63 @@ mod tests {
             media.contains("#EXTINF:5400.250,\nhls-s1.vtt\n#EXT-X-ENDLIST\n"),
             "{media}"
         );
+    }
+
+    #[test]
+    fn reduced_variants_follow_the_original_below_its_size() {
+        let uhd = probe(vec![
+            json!({"index":0,"codec_type":"video","codec_name":"hevc","profile":"Main 10","level":153,"width":3840,"height":1600}),
+            json!({"index":1,"codec_type":"audio","codec_name":"eac3","channels":6,"tags":{"BPS":"768000"}}),
+            json!({"index":2,"codec_type":"audio","codec_name":"truehd","channels":8}),
+        ]);
+        let text = master_playlist(&uhd, true, &[]).unwrap();
+        let expected = "#EXT-X-STREAM-INF:BANDWIDTH=12000000,CODECS=\"hvc1.2.4.L153.B0,ec-3,mp4a.40.2\",RESOLUTION=3840x1600,AUDIO=\"audio\"\nhls-v0.m3u8\n\
+             #EXT-X-STREAM-INF:BANDWIDTH=10368000,CODECS=\"avc1.640029,ec-3,mp4a.40.2\",RESOLUTION=1920x800,AUDIO=\"audio\"\nhls-v0-h1080.m3u8\n\
+             #EXT-X-STREAM-INF:BANDWIDTH=5568000,CODECS=\"avc1.640029,ec-3,mp4a.40.2\",RESOLUTION=1280x534,AUDIO=\"audio\"\nhls-v0-h720.m3u8\n";
+        assert!(text.ends_with(expected), "{text}");
+        let offered =
+            |probe: &Probe, raw: &str| allowed(probe, &media_node::hls::request(raw).unwrap());
+        assert!(offered(&uhd, "hls-v0-h720-3.m4s"));
+        assert!(
+            !offered(&uhd, "hls-v0-t720-3.m4s"),
+            "SDR is not tone mapped"
+        );
+        // Encoding is the administrator's call.
+        let plain = master_playlist(&uhd, false, &[]).unwrap();
+        assert!(!plain.contains("h1080") && plain.ends_with("hls-v0.m3u8\n"));
+        // HDR10 is tone mapped; Dolby Vision 5 has nothing to map from.
+        let mut hdr = uhd.clone();
+        hdr.streams[0]
+            .details
+            .insert("color_transfer".into(), json!("smpte2084"));
+        let text = master_playlist(&hdr, true, &[]).unwrap();
+        assert!(text.contains("hls-v0-t1080.m3u8\n") && !text.contains("-h1080"));
+        assert!(offered(&hdr, "hls-v0-t1080-init.mp4") && !offered(&hdr, "hls-v0-h1080.m3u8"));
+        let mut dovi = uhd.clone();
+        dovi.streams[0].details.insert(
+            "side_data_list".into(),
+            json!([{"side_data_type":"DOVI configuration record","dv_profile":5}]),
+        );
+        assert!(
+            !master_playlist(&dovi, true, &[])
+                .unwrap()
+                .contains("-t1080")
+        );
+        assert!(!offered(&dovi, "hls-v0-t720.m3u8"));
+        // A 1080p source gets 720p only; a light one nothing at all.
+        let full_hd = probe(vec![
+            json!({"index":0,"codec_type":"video","codec_name":"h264","profile":"High","level":41,"width":1920,"height":1080}),
+        ]);
+        let text = master_playlist(&full_hd, true, &[]).unwrap();
+        assert!(
+            !text.contains("h1080") && text.contains("RESOLUTION=1280x720\nhls-v0-h720.m3u8\n"),
+            "{text}"
+        );
+        assert!(!offered(&full_hd, "hls-v0-h1080.m3u8"));
+        let mut light = full_hd.clone();
+        light.format.insert("bit_rate".into(), json!("3000000"));
+        assert!(!master_playlist(&light, true, &[]).unwrap().contains("h720"));
+        assert!(!offered(&light, "hls-v0-h720.m3u8"));
     }
 
     #[test]

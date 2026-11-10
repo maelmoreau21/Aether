@@ -6,6 +6,9 @@ import android.app.Application
 import android.net.Uri
 import android.os.Build
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.StreamKey
+import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
+import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParser
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadRequest
@@ -32,6 +35,16 @@ import uniffi.aether_ffi.WorkDetail
 data class OfflineItem(val id: String, val title: String, val state: Int, val percent: Float) {
     val complete get() = state == Download.STATE_COMPLETED
 }
+
+/**
+ * A video variant of the master playlist an offline copy can keep: the
+ * original, or a reduced H.264 encode when the server allows transcoding.
+ * `keys` select that variant and every audio rendition.
+ */
+data class DownloadQuality(val original: Boolean, val height: Int, val bitrate: Int, val keys: List<StreamKey>)
+
+/** A download waiting for its quality to be chosen. */
+data class DownloadChoice(val work: Work, val assetId: String, val url: String, val qualities: List<DownloadQuality>)
 
 sealed interface Screen {
     data object Server : Screen
@@ -356,33 +369,84 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     private fun title(download: Download) = String(download.request.data).substringAfter('\n')
     private fun assetId(download: Download) = String(download.request.data).substringBefore('\n')
 
-    private fun request(id: String, assetId: String, title: String, url: String) {
+    /** `keys` empty keeps every variant of the master playlist. */
+    private fun request(id: String, assetId: String, title: String, url: String, keys: List<StreamKey>) {
         val request = DownloadRequest.Builder(id, Uri.parse(url))
             .setMimeType(MimeTypes.APPLICATION_M3U8)
+            .setStreamKeys(keys)
             .setData("$assetId\n$title".toByteArray())
             .build()
         // Same id: Media3 merges the request, so a renewal keeps every segment.
         DownloadService.sendAddDownload(getApplication(), AetherDownloadService::class.java, request, false)
     }
 
-    /** Copies the film or episode for offline viewing (original quality, every audio track). */
+    private val _downloadChoice = MutableStateFlow<DownloadChoice?>(null)
+    /** Set while the quality of a new offline copy is being chosen. */
+    val downloadChoice: StateFlow<DownloadChoice?> = _downloadChoice
+
+    /**
+     * Copies the film or episode for offline viewing, every audio track. When
+     * the server offers reduced variants (a 4K original is ~50 GB), the user
+     * picks one first.
+     */
     fun download(work: Work) {
         val client = client ?: return
         viewModelScope.launch {
             try {
                 val media = client.media(work.id)
-                request(work.id, media.id, work.title, client.playbackUrl(media.id).url)
+                val url = client.playbackUrl(media.id).url
+                val qualities = withContext(Dispatchers.IO) { runCatching { qualities(url) }.getOrDefault(emptyList()) }
+                if (qualities.size > 1) {
+                    _downloadChoice.value = DownloadChoice(work, media.id, url, qualities)
+                } else {
+                    request(work.id, media.id, work.title, url, qualities.firstOrNull()?.keys.orEmpty())
+                }
             } catch (e: ClientException) {
                 _error.value = e.message
             }
         }
     }
 
+    /** `null` cancels the pending download. */
+    fun chooseDownload(quality: DownloadQuality?) {
+        val choice = _downloadChoice.value ?: return
+        _downloadChoice.value = null
+        quality ?: return
+        request(choice.work.id, choice.assetId, choice.work.title, choice.url, quality.keys)
+    }
+
+    /** The variants of a master playlist, in its order (the original first). */
+    private fun qualities(url: String): List<DownloadQuality> {
+        val uri = Uri.parse(url)
+        val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        connection.connectTimeout = 10_000
+        connection.readTimeout = 10_000
+        connection.instanceFollowRedirects = false
+        val playlist = try {
+            connection.inputStream.use { HlsPlaylistParser().parse(uri, it) }
+        } finally {
+            connection.disconnect()
+        }
+        if (playlist !is HlsMultivariantPlaylist) return emptyList()
+        val audio = playlist.audios.indices.map { StreamKey(HlsMultivariantPlaylist.GROUP_INDEX_AUDIO, it) }
+        return playlist.variants.mapIndexed { index, variant ->
+            DownloadQuality(
+                original = index == 0,
+                height = variant.format.height,
+                bitrate = variant.format.bitrate,
+                keys = listOf(StreamKey(HlsMultivariantPlaylist.GROUP_INDEX_VARIANT, index)) + audio,
+            )
+        }
+    }
+
     private fun renew(download: Download) {
         val client = client ?: return
         viewModelScope.launch {
+            // The same keys: a renewal must not widen the copy to every variant.
             runCatching { client.playbackUrl(assetId(download)) }
-                .onSuccess { request(download.request.id, assetId(download), title(download), it.url) }
+                .onSuccess {
+                    request(download.request.id, assetId(download), title(download), it.url, download.request.streamKeys)
+                }
         }
     }
 

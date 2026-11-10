@@ -70,7 +70,7 @@ pub async fn prepared(
         }
     }
     let stream_position = media_node::video_stream::position(component);
-    if transcode.is_some() || hls.is_some_and(|request| request.convert) {
+    if transcode.is_some() || hls.is_some_and(|request| request.encodes()) {
         match crate::server_settings::load(store).await {
             Ok(settings) if settings.transcoding_enabled => {}
             Ok(_) => {
@@ -311,16 +311,7 @@ pub async fn prepared(
                 row.get::<String, _>("modified_ns")
             );
             preparations
-                .serve_hls(
-                    opened,
-                    Path::new(&row.get::<String, _>("root")),
-                    Path::new(&row.get::<String, _>("relative_path")),
-                    row.get::<i64, _>("size") as u64,
-                    &row.get::<String, _>("modified_ns"),
-                    source,
-                    hls,
-                    request.method().clone(),
-                )
+                .serve_hls(opened, source, hls, request.method().clone())
                 .await
         } else {
             preparations

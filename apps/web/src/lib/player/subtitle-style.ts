@@ -1,10 +1,12 @@
 export interface SubtitleStyle {
-  fontSize?: 'small' | 'medium' | 'large';
+  fontSize?: 'small' | 'medium' | 'large' | 'x-large';
   fontFamily?: 'sans-serif' | 'serif' | 'monospace';
   textColor?: string;
   backgroundColor?: string;
   backgroundOpacity?: number; // 0 to 100
   textShadow?: 'none' | 'outline' | 'drop-shadow';
+  /** Distance from the bottom of the picture, percent of its height (0 to 40). */
+  position?: number;
 }
 
 export const DEFAULT_SUBTITLE_STYLE: Required<SubtitleStyle> = {
@@ -13,7 +15,8 @@ export const DEFAULT_SUBTITLE_STYLE: Required<SubtitleStyle> = {
   textColor: '#ffffff',
   backgroundColor: '#000000',
   backgroundOpacity: 0, // no ugly box background by default!
-  textShadow: 'drop-shadow'
+  textShadow: 'drop-shadow',
+  position: 10
 };
 
 export function sanitizeSubtitleStyle(input?: unknown): SubtitleStyle {
@@ -21,7 +24,7 @@ export function sanitizeSubtitleStyle(input?: unknown): SubtitleStyle {
   const data = input as Record<string, unknown>;
   const style: SubtitleStyle = {};
 
-  if (data.fontSize === 'small' || data.fontSize === 'medium' || data.fontSize === 'large') {
+  if (data.fontSize === 'small' || data.fontSize === 'medium' || data.fontSize === 'large' || data.fontSize === 'x-large') {
     style.fontSize = data.fontSize;
   }
   if (data.fontFamily === 'sans-serif' || data.fontFamily === 'serif' || data.fontFamily === 'monospace') {
@@ -39,6 +42,9 @@ export function sanitizeSubtitleStyle(input?: unknown): SubtitleStyle {
   if (data.textShadow === 'none' || data.textShadow === 'outline' || data.textShadow === 'drop-shadow') {
     style.textShadow = data.textShadow;
   }
+  if (typeof data.position === 'number' && Number.isFinite(data.position) && data.position >= 0 && data.position <= 40) {
+    style.position = Math.round(data.position);
+  }
 
   return style;
 }
@@ -55,7 +61,8 @@ export function subtitleStyleToCss(style?: SubtitleStyle): {
   const fontSizeMap = {
     small: 'clamp(15px, 1.6vw, 22px)',
     medium: 'clamp(18px, 2.2vw, 30px)',
-    large: 'clamp(22px, 2.8vw, 38px)'
+    large: 'clamp(22px, 2.8vw, 38px)',
+    'x-large': 'clamp(26px, 3.4vw, 48px)'
   };
 
   const fontFamilyMap = {
@@ -88,4 +95,10 @@ export function subtitleStyleToCss(style?: SubtitleStyle): {
     backgroundColor: bgRgba,
     textShadow: textShadowMap[merged.textShadow]
   };
+}
+
+/** WebVTT cue line (percent from the top) for the chosen distance from the bottom. */
+export function subtitleLine(style?: SubtitleStyle): number {
+  const position = sanitizeSubtitleStyle(style).position ?? DEFAULT_SUBTITLE_STYLE.position;
+  return 100 - position;
 }

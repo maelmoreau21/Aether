@@ -120,89 +120,150 @@ impl VideoStreams {
                 "mp4",
                 "pipe:1",
             ]);
-            let mut child = child
-                .stdin(Stdio::from(file))
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .kill_on_drop(true)
-                .spawn()?;
-            let mut stdout = child
-                .stdout
-                .take()
-                .ok_or_else(|| io::Error::other("video pipe missing"))?;
-            let mut first = vec![0; 65_536];
-            let read = tokio::time::timeout(Duration::from_secs(10), stdout.read(&mut first))
-                .await
-                .map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "video stream initialization timeout",
-                    )
-                })??;
-            if read == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::Unsupported,
-                    "video packet copy failed",
-                ));
-            }
-            first.truncate(read);
-            opened.verify_unchanged_sync()?;
-            let (sender, receiver) = mpsc::channel(1);
-            let task = tokio::spawn(async move {
-                let _permit = permit;
-                let _opened = opened;
-                if sender.send(Ok(Bytes::from(first))).await.is_err() {
-                    return;
-                }
-                loop {
-                    let mut bytes = vec![0; 65_536];
-                    let result = tokio::select! {
-                        _ = sender.closed() => return,
-                        result = tokio::time::timeout(Duration::from_secs(30), stdout.read(&mut bytes)) => result,
-                    };
-                    match result {
-                        Ok(Ok(0)) => {
-                            match child.wait().await {
-                                Ok(status) if status.success() => {}
-                                _ => {
-                                    let _ = sender
-                                        .send(Err(io::Error::other(
-                                            "video packet copy interrupted",
-                                        )))
-                                        .await;
-                                }
-                            }
-                            return;
-                        }
-                        Ok(Ok(read)) => {
-                            bytes.truncate(read);
-                            if sender.send(Ok(Bytes::from(bytes))).await.is_err() {
-                                return;
-                            }
-                        }
-                        Ok(Err(error)) => {
-                            let _ = sender.send(Err(error)).await;
-                            return;
-                        }
-                        Err(_) => {
-                            let _ = sender
-                                .send(Err(io::Error::new(
-                                    io::ErrorKind::TimedOut,
-                                    "video packet copy stalled",
-                                )))
-                                .await;
-                            return;
-                        }
-                    }
-                }
-            });
-            response
-                .body(PipeBody { receiver, task }.boxed())
-                .map_err(io::Error::other)
+            let body = spawn_pipe(
+                opened,
+                file,
+                permit,
+                child,
+                PipeLabels {
+                    initialization: Duration::from_secs(10),
+                    timeout: "video stream initialization timeout",
+                    failed: "video packet copy failed",
+                    interrupted: "video packet copy interrupted",
+                    stalled: "video packet copy stalled",
+                    diagnostics: None,
+                },
+            )
+            .await?;
+            response.body(body.boxed()).map_err(io::Error::other)
         }
     }
 }
-struct PipeBody {
+
+/// Messages and bounds for one FFmpeg pipe. `diagnostics` names the event under
+/// which the retained stderr tail is logged when the process fails; FFmpeg only
+/// ever sees `fd:` as its input name, so no path reaches the log.
+pub(crate) struct PipeLabels {
+    pub initialization: Duration,
+    pub timeout: &'static str,
+    pub failed: &'static str,
+    pub interrupted: &'static str,
+    pub stalled: &'static str,
+    pub diagnostics: Option<&'static str>,
+}
+
+/// Runs `command` on the confined source descriptor and streams its stdout with
+/// bounded backpressure. The child is killed when the body is dropped.
+pub(crate) async fn spawn_pipe(
+    opened: OpenedFile,
+    file: std::fs::File,
+    permit: tokio::sync::OwnedSemaphorePermit,
+    mut command: Command,
+    labels: PipeLabels,
+) -> io::Result<PipeBody> {
+    let mut child = command
+        .stdin(Stdio::from(file))
+        .stdout(Stdio::piped())
+        .stderr(if labels.diagnostics.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .kill_on_drop(true)
+        .spawn()?;
+    let diagnostics = child.stderr.take().map(|mut stderr| {
+        tokio::spawn(async move {
+            let mut retained = Vec::new();
+            let mut buffer = [0; 2048];
+            while let Ok(read) = stderr.read(&mut buffer).await {
+                if read == 0 {
+                    break;
+                }
+                retained.extend_from_slice(&buffer[..read]);
+                if retained.len() > 4096 {
+                    retained.drain(..retained.len() - 4096);
+                }
+            }
+            String::from_utf8_lossy(&retained).into_owned()
+        })
+    });
+    let event = labels.diagnostics;
+    let report = move |diagnostics: Option<tokio::task::JoinHandle<String>>| async move {
+        if let (Some(event), Some(handle)) = (event, diagnostics)
+            && let Ok(Ok(tail)) = tokio::time::timeout(Duration::from_secs(2), handle).await
+        {
+            eprintln!("{}", serde_json::json!({"event": event, "stderr": tail}));
+        }
+    };
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("video pipe missing"))?;
+    let mut first = vec![0; 65_536];
+    let read = match tokio::time::timeout(labels.initialization, stdout.read(&mut first)).await {
+        Ok(Ok(read)) => read,
+        Ok(Err(error)) => return Err(error),
+        Err(_) => {
+            let _ = child.kill().await;
+            report(diagnostics).await;
+            return Err(io::Error::new(io::ErrorKind::TimedOut, labels.timeout));
+        }
+    };
+    if read == 0 {
+        let _ = child.wait().await;
+        report(diagnostics).await;
+        return Err(io::Error::new(io::ErrorKind::Unsupported, labels.failed));
+    }
+    first.truncate(read);
+    opened.verify_unchanged_sync()?;
+    let (sender, receiver) = mpsc::channel(1);
+    let interrupted = labels.interrupted;
+    let stalled = labels.stalled;
+    let task = tokio::spawn(async move {
+        let _permit = permit;
+        let _opened = opened;
+        if sender.send(Ok(Bytes::from(first))).await.is_err() {
+            return;
+        }
+        loop {
+            let mut bytes = vec![0; 65_536];
+            let result = tokio::select! {
+                _ = sender.closed() => return,
+                result = tokio::time::timeout(Duration::from_secs(30), stdout.read(&mut bytes)) => result,
+            };
+            match result {
+                Ok(Ok(0)) => {
+                    match child.wait().await {
+                        Ok(status) if status.success() => {}
+                        _ => {
+                            report(diagnostics).await;
+                            let _ = sender.send(Err(io::Error::other(interrupted))).await;
+                        }
+                    }
+                    return;
+                }
+                Ok(Ok(read)) => {
+                    bytes.truncate(read);
+                    if sender.send(Ok(Bytes::from(bytes))).await.is_err() {
+                        return;
+                    }
+                }
+                Ok(Err(error)) => {
+                    let _ = sender.send(Err(error)).await;
+                    return;
+                }
+                Err(_) => {
+                    let _ = sender
+                        .send(Err(io::Error::new(io::ErrorKind::TimedOut, stalled)))
+                        .await;
+                    return;
+                }
+            }
+        }
+    });
+    Ok(PipeBody { receiver, task })
+}
+pub(crate) struct PipeBody {
     receiver: mpsc::Receiver<io::Result<Bytes>>,
     task: tokio::task::JoinHandle<()>,
 }

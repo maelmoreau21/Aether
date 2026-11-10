@@ -4,6 +4,7 @@
   import { tick } from 'svelte';
 
   import Icon from '../ui/Icon.svelte';
+  import { tvActive } from '../tv/keys';
   import { audioLabel, videoLabel, videoResolutionBadge, containerLabel } from './track-labels';
   import { audioChoices } from './available-audio';
   import type { Media, PlaybackState } from './types';
@@ -17,8 +18,16 @@
   } from './chapters';
   import { clampHoverPosition } from './trickplay';
   import { TrickplayPreview } from './trickplay.svelte';
+  import { preferences } from '../preferences';
   import { focusMenuItem, menuItems, nextMenuIndex } from './menu-navigation';
+  import { LADDER, type QualityChoice } from './transcode';
+  import { AUDIO_ENHANCEMENTS, type AudioEnhancement } from './audio-enhancement';
+  import { SLEEP_MINUTES, sleepLabel, type SleepChoice } from './sleep-timer';
   import { t } from '../i18n';
+
+  /** Bit rate ceilings offered for remote viewing, kbit/s (0: unlimited). */
+  const BITRATES = [0, 40000, 20000, 10000, 8000, 4000, 2000, 1000];
+  export type TranscodeInfo = { height: number; kbps: number; reason: string; encoder?: string; tonemap?: string } | null;
 
   export type Menu = ControlsMenu;
 
@@ -46,8 +55,16 @@
     skipBackSeconds = 10, skipForwardSeconds = 10,
     onWake,
     buffered = 0,
-    hideCreditsSkip = false
+    hideCreditsSkip = false,
+    quality = 'auto', maxKbps = 0, onQuality, onMaxKbps, transcode = null,
+    enhancement = 'off', onEnhancement, sleep = null, onSleep
   }: {
+    quality?: QualityChoice; maxKbps?: number; onQuality?: (value: QualityChoice) => void; onMaxKbps?: (value: number) => void;
+    /** Active fallback transcode, `null` for direct play. */
+    transcode?: TranscodeInfo;
+    enhancement?: AudioEnhancement; onEnhancement?: (value: AudioEnhancement) => void;
+    /** Seconds before sleep, `'end'` at the end of this media, `null` when off. */
+    sleep?: number | 'end' | null; onSleep?: (value: SleepChoice | null) => void;
     audioOffset?: number; subtitleOffset?: number; onAudioOffset?: (value: number) => void; onSubtitleOffset?: (value: number) => void;
     skipBackSeconds?: number; skipForwardSeconds?: number;
     state: PlaybackState;
@@ -85,7 +102,7 @@
   let isSeeking = $state(false);
 
   // Vignettes de survol : état, chargement et préchargement dans trickplay.svelte.ts.
-  const preview = new TrickplayPreview({ media: () => media, duration: () => playback.duration });
+  const preview = new TrickplayPreview({ media: () => media, duration: () => playback.duration, enabled: () => preferences().trickplayPreviews !== false });
   const previewFrame = $derived(preview.frame);
 
   function updateHoverPosition(clientX: number, target: HTMLElement) {
@@ -124,6 +141,8 @@
   let keyPreviewTimer: ReturnType<typeof setTimeout> | undefined;
   function seekKeyboard(event: KeyboardEvent) {
     if (!playback.duration) return;
+    // With a TV remote, up and down leave the bar for the other controls.
+    if (tvActive() && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) return;
     const position = playback.position;
     let target: number | null = null;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') target = position - skipBackSeconds;
@@ -175,12 +194,21 @@
     if (target !== null) onSeek(target);
   }
 
-  const title = $derived(menu === 'audio' ? $t('audio') : menu === 'subtitles' ? $t('subtitles') : menu === 'video' ? $t('version') : menu === 'speed' ? $t('speed') : menu === 'settings' ? $t('player_settings') : menuTitle(menu));
+  const title = $derived(menu === 'audio' ? $t('audio') : menu === 'subtitles' ? $t('subtitles') : menu === 'video' ? $t('version') : menu === 'quality' ? $t('quality') : menu === 'speed' ? $t('speed') : menu === 'sleep' ? $t('sleep_timer') : menu === 'settings' ? $t('player_settings') : menuTitle(menu));
+  const sourceHeight = $derived(media.transcode?.height ?? videoTracks[0]?.height ?? 0);
+  // Heights above the original are never offered: transcoding only ever scales down.
+  const qualityHeights = $derived(media.transcode && media.transcode.video !== false ? LADDER.map(item => item.height).filter(height => height < Math.max(sourceHeight, 361)) : []);
+  const qualityOptions = $derived<QualityChoice[]>(['auto', 'original', ...qualityHeights as QualityChoice[]]);
+  const enhancementLabel = (value: AudioEnhancement) => value === 'night' ? $t('night_mode') : value === 'normalize' ? $t('volume_levelling') : $t('none');
+  const bitrateLabel = (kbps: number) => kbps === 0 ? $t('bitrate_unlimited') : $t('bitrate_mbps', { value: kbps / 1000 });
+  const sleepSetting = $derived(sleep === null ? $t('none') : sleep === 'end' ? $t('sleep_end_of_media') : sleepLabel(sleep));
+  const nudge = (value: number, step: number) => Math.round(Math.max(-30, Math.min(30, value + step)) * 100) / 100;
 
   const menuTabs = $derived(([
     ...(selectableAudio.length > 1 ? [{ id: 'audio', label: $t('audio') }] : []),
     { id: 'subtitles', label: $t('subtitles') },
     { id: 'video', label: $t('version') },
+    ...(media.transcode && media.transcode.video !== false ? [{ id: 'quality', label: $t('quality') }] : []),
     { id: 'speed', label: $t('speed') },
     { id: 'settings', label: $t('player_settings') }
   ]) as { id: Exclude<Menu, null>; label: string }[]);
@@ -244,7 +272,7 @@
       onkeydown={navigateMenu}
     >
       <div class="menu-heading" role="none">
-        {#if menu === 'speed'}
+        {#if menu === 'speed' || menu === 'sleep'}
           <button type="button" class="menu-back" aria-label={$t('return_to_settings')} tabindex="-1" onclick={() => menu = 'settings'}>
             <Icon name="back" size={18} />
           </button>
@@ -278,8 +306,13 @@
         </div>
         <button role="menuitem" tabindex="-1" disabled={busy || !source?.externalAudioUrl} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>{$t('audio_offset_action')}</button>
         <label class="offset-control">{$t('audio_offset')}
-          <input aria-label={$t('audio_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} onchange={(e) => onAudioOffset?.(e.currentTarget.valueAsNumber)} />
+          <span class="offset-stepper">
+            <button type="button" tabindex="-1" aria-label={$t('offset_earlier')} disabled={busy || !source?.externalAudioUrl} onclick={() => onAudioOffset?.(nudge(audioOffset, -0.1))}>−</button>
+            <input aria-label={$t('audio_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} onchange={(e) => onAudioOffset?.(e.currentTarget.valueAsNumber)} />
+            <button type="button" tabindex="-1" aria-label={$t('offset_later')} disabled={busy || !source?.externalAudioUrl} onclick={() => onAudioOffset?.(nudge(audioOffset, 0.1))}>+</button>
+          </span>
         </label>
+        {#if !source?.externalAudioUrl}<p class="menu-note">{$t('audio_offset_separate_tracks_only')}</p>{/if}
         <p class="menu-note">{$t('positive_delays')}</p>
       {:else if menu === 'subtitles'}
         <div role="group" aria-label={$t('subtitle_tracks')}>
@@ -305,7 +338,7 @@
               disabled={busy}
               onclick={() => choose(() => onSubtitle(item.id))}
             >
-              <span>{item.label}<small>{$t('webvtt', { value: item.language.toUpperCase() })}</small></span>
+              <span>{item.label}<small>{item.image ? $t('subtitle_image_format', { value: item.language.toUpperCase() }) : $t('webvtt', { value: item.language.toUpperCase() })}</small></span>
               {#if item.id === subtitle}
                 <Icon name="check" size={18} />
               {/if}
@@ -314,7 +347,11 @@
         </div>
         <button role="menuitem" tabindex="-1" disabled={busy} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>{$t('subtitle_offset_action')}</button>
         <label class="offset-control">{$t('subtitle_offset')}
-          <input aria-label={$t('subtitle_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
+          <span class="offset-stepper">
+            <button type="button" tabindex="-1" aria-label={$t('offset_earlier')} disabled={busy} onclick={() => onSubtitleOffset?.(nudge(subtitleOffset, -0.1))}>−</button>
+            <input aria-label={$t('subtitle_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
+            <button type="button" tabindex="-1" aria-label={$t('offset_later')} disabled={busy} onclick={() => onSubtitleOffset?.(nudge(subtitleOffset, 0.1))}>+</button>
+          </span>
         </label>
       {:else if menu === 'video'}
         <div role="group" aria-label={$t('active_video_source')}>
@@ -355,6 +392,51 @@
           {/each}
         </div>
         {/if}
+      {:else if menu === 'quality'}
+        <div role="group" aria-label={$t('quality')}>
+          {#each qualityOptions as choice (choice)}
+            <button
+              data-quality={choice}
+              role="menuitemradio"
+              tabindex={quality === choice ? 0 : -1}
+              aria-checked={quality === choice}
+              disabled={busy}
+              onclick={() => choose(() => onQuality?.(choice))}
+            >
+              <span>{choice === 'auto' ? $t('quality_auto') : choice === 'original' ? $t('quality_original') : `${choice}p`}{#if choice === 'auto'}<small>{$t('quality_auto_note')}</small>{/if}</span>
+              {#if quality === choice}<Icon name="check" size={18} />{/if}
+            </button>
+          {/each}
+        </div>
+        <div role="separator" class="menu-separator"></div>
+        <div role="group" aria-label={$t('max_bitrate')}>
+          <p class="menu-section" role="presentation">{$t('max_bitrate')}</p>
+          {#each BITRATES as kbps (kbps)}
+            <button data-bitrate={kbps} role="menuitemradio" tabindex={maxKbps === kbps ? 0 : -1} aria-checked={maxKbps === kbps} disabled={busy} onclick={() => choose(() => onMaxKbps?.(kbps))}>
+              <span>{bitrateLabel(kbps)}</span>
+              {#if maxKbps === kbps}<Icon name="check" size={18} />{/if}
+            </button>
+          {/each}
+        </div>
+        <p class="menu-note" role="note">
+          {#if transcode}
+            {transcode.height ? $t('transcoding_active', { height: transcode.height, mbps: (transcode.kbps / 1000).toFixed(1) }) : $t('transcoding_audio_only')}
+            {#if transcode.encoder} · {transcode.encoder}{/if}{#if transcode.tonemap === 'on'} · {$t('hdr_to_sdr')}{:else if transcode.tonemap === 'unavailable'} · {$t('hdr_to_sdr_unavailable')}{/if}
+          {:else}{$t('direct_play_active')}{/if}
+        </p>
+      {:else if menu === 'sleep'}
+        <div role="group" aria-label={$t('sleep_timer')}>
+          <button role="menuitemradio" tabindex={sleep === null ? 0 : -1} aria-checked={sleep === null} onclick={() => choose(() => onSleep?.(null))}>
+            <span>{$t('none')}</span>{#if sleep === null}<Icon name="check" size={18} />{/if}
+          </button>
+          {#each SLEEP_MINUTES as minutes (minutes)}
+            <button role="menuitemradio" tabindex="-1" aria-checked="false" onclick={() => choose(() => onSleep?.(minutes))}><span>{$t('sleep_in_minutes', { count: minutes })}</span></button>
+          {/each}
+          <button role="menuitemradio" tabindex={sleep === 'end' ? 0 : -1} aria-checked={sleep === 'end'} onclick={() => choose(() => onSleep?.('end'))}>
+            <span>{$t('sleep_end_of_media')}</span>{#if sleep === 'end'}<Icon name="check" size={18} />{/if}
+          </button>
+        </div>
+        {#if typeof sleep === 'number'}<p class="menu-note" role="status">{$t('sleep_remaining', { value: sleepLabel(sleep) })}</p>{/if}
       {:else if menu === 'speed'}
         <div role="group" aria-label={$t('playback_speeds')}>
           {#each SPEEDS as speed (speed)}
@@ -392,6 +474,18 @@
           >
             <span>{$t('playback_speed')}</span>
             <span class="setting-value">{speedSettingLabel(playback.speed)}</span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onclick={() => onEnhancement?.(AUDIO_ENHANCEMENTS[(AUDIO_ENHANCEMENTS.indexOf(enhancement) + 1) % AUDIO_ENHANCEMENTS.length])}
+          >
+            <span>{$t('audio_enhancement')}</span>
+            <span class="setting-value">{enhancementLabel(enhancement)}</span>
+          </button>
+          <button type="button" role="menuitem" onclick={() => menu = 'sleep'}>
+            <span>{$t('sleep_timer')}</span>
+            <span class="setting-value">{sleepSetting}</span>
           </button>
           <button
             type="button"
@@ -1074,6 +1168,8 @@
     font-size: 13px;
   }
   .offset-control input:focus { outline: none; border-color: var(--ac); }
+  .offset-stepper { display: inline-flex; align-items: center; gap: 6px; }
+  .offset-stepper button { min-width: 32px; min-height: 32px; padding: 0; border-radius: var(--r-pill, 999px); justify-content: center; }
   @media (min-width: 769px) {
     .floating-menu {
       position: fixed;

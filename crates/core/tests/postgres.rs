@@ -79,6 +79,183 @@ async fn request(
         cookie,
     )
 }
+/// A native application: no Origin, no cookie, optional `Authorization: Bearer`.
+async fn native(
+    app: &Router,
+    method: &str,
+    uri: &str,
+    token: &str,
+    body: Value,
+) -> (StatusCode, Value) {
+    let mut req = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("host", "127.0.0.1:3000")
+        .header(header::CONTENT_TYPE, "application/json");
+    if !token.is_empty() {
+        req = req.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    let response = app
+        .clone()
+        .oneshot(
+            req.body(if body.is_null() {
+                Body::empty()
+            } else {
+                Body::from(body.to_string())
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        !response.headers().contains_key(header::SET_COOKIE),
+        "{method} {uri} set {:?}",
+        response.headers().get(header::SET_COOKIE)
+    );
+    let status = response.status();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+/// A cast receiver: no cookie, no Authorization, maybe a foreign Origin.
+async fn cast(
+    app: &Router,
+    path: &str,
+    origin: Option<&str>,
+) -> (StatusCode, String, Option<String>) {
+    let mut req = Request::builder()
+        .uri(path)
+        .header("host", "127.0.0.1:3000");
+    if let Some(origin) = origin {
+        req = req
+            .header("origin", origin)
+            .header("sec-fetch-site", "cross-site");
+    }
+    let response = app
+        .clone()
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = response.status();
+    let allow = response
+        .headers()
+        .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+        .map(|v| v.to_str().unwrap().to_owned());
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    (status, String::from_utf8_lossy(&bytes).into_owned(), allow)
+}
+async fn native_bearer_contract(app: &Router, asset: &str) {
+    let (status, granted) = native(
+        app,
+        "POST",
+        "/api/v1/auth/login",
+        "",
+        json!({"login":"contract-admin","password":PASSWORD,"tokenType":"bearer"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{granted}");
+    let first = granted["accessToken"].as_str().unwrap().to_owned();
+    for uri in ["/api/v1/auth/me", "/api/v1/catalog"] {
+        assert_eq!(
+            native(app, "GET", uri, &first, Value::Null).await.0,
+            StatusCode::OK,
+            "{uri}"
+        );
+    }
+
+    // HLS capability URL: issued to the device, then opened with no credential.
+    let (status, issued) = native(
+        app,
+        "POST",
+        &format!("/api/v1/assets/{asset}/hls"),
+        &first,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    let url = issued["url"].as_str().unwrap();
+    let master = url
+        .strip_prefix("http://127.0.0.1:3000")
+        .unwrap()
+        .to_owned();
+    assert!(master.ends_with("/master.m3u8"), "{url}");
+    let (status, text, allow) = cast(app, &master, Some("https://www.gstatic.com")).await;
+    assert_eq!(status, StatusCode::OK, "{text}");
+    assert_eq!(allow.as_deref(), Some("*"));
+    assert!(
+        text.starts_with("#EXTM3U") && text.contains("#EXT-X-STREAM-INF:"),
+        "{text}"
+    );
+    let variant = text
+        .lines()
+        .find(|l| l.ends_with(".m3u8") && !l.starts_with('#'))
+        .unwrap();
+    let base = master.trim_end_matches("master.m3u8");
+    let (status, media, _) = cast(app, &format!("{base}{variant}"), None).await;
+    assert_eq!(status, StatusCode::OK, "{media}");
+    assert!(
+        media.contains("#EXT-X-MAP:URI=") && media.contains("#EXT-X-ENDLIST"),
+        "{media}"
+    );
+    let grant = base.trim_end_matches('/').rsplit('/').next().unwrap();
+    for refused in [
+        format!("/api/v1/assets/another-asset/hls/{grant}/master.m3u8"),
+        format!("{base}../{}/master.m3u8", "0".repeat(64)),
+        format!("{base}not-a-component"),
+    ] {
+        assert_ne!(
+            cast(app, &refused, None).await.0,
+            StatusCode::OK,
+            "{refused}"
+        );
+    }
+    let (status, refreshed) = native(
+        app,
+        "POST",
+        "/api/v1/auth/token/refresh",
+        &first,
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    let second = refreshed["accessToken"].as_str().unwrap().to_owned();
+    assert_ne!(first, second);
+    assert_eq!(
+        native(app, "GET", "/api/v1/auth/me", &first, Value::Null)
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        native(
+            app,
+            "POST",
+            "/api/v1/auth/token/refresh",
+            &first,
+            Value::Null
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    // The grant followed the rotation; it ends with the device's logout.
+    assert_eq!(cast(app, &master, None).await.0, StatusCode::OK);
+    assert_eq!(
+        native(app, "POST", "/api/v1/auth/logout", &second, Value::Null)
+            .await
+            .0,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(cast(app, &master, None).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        native(app, "GET", "/api/v1/auth/me", &second, Value::Null)
+            .await
+            .0,
+        StatusCode::UNAUTHORIZED
+    );
+}
 async fn app(root: &Path, store: &IdentityStore) -> Router {
     media_poc::secure_app(
         Inventory::local(root.to_owned()).await.unwrap(),
@@ -512,6 +689,7 @@ async fn exercise(store: IdentityStore, root: &Path) -> (String, String, String)
         .0,
         StatusCode::UNAUTHORIZED
     );
+    native_bearer_contract(&app, &asset).await;
     drop(app);
     store.close().await;
     (admin, cookie, asset)

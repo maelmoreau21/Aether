@@ -144,11 +144,15 @@ impl Features {
 struct Signal {
     weight: f64,
     watched: bool,
+    /// Explicit positive feedback (favorite or good rating), as opposed to a recent watch.
+    liked: bool,
 }
 struct Scored {
     item: Value,
     score: f64,
     reason: String,
+    /// Localizable explanation: `{kind: "liked"|"watched", title}`; null for plain discovery.
+    because: Value,
     seed_id: Option<String>,
     genres: HashSet<String>,
 }
@@ -157,17 +161,17 @@ fn rank(
     signals: &HashMap<String, Signal>,
     exclude_watched: bool,
 ) -> (Vec<Value>, bool) {
-    let seeds: Vec<(&Value, f64, Features)> = pool
+    let seeds: Vec<(&Value, f64, Features, bool)> = pool
         .iter()
         .filter_map(|item| {
             signals
                 .get(key(item))
                 .filter(|s| s.weight != 0.0)
-                .map(|s| (item, s.weight, Features::new(item)))
+                .map(|s| (item, s.weight, Features::new(item), s.liked))
         })
         .take(100)
         .collect();
-    let personalized = seeds.iter().any(|(_, w, _)| *w > 0.0);
+    let personalized = seeds.iter().any(|(_, w, _, _)| *w > 0.0);
     let mut seen = HashSet::new();
     let mut scored: Vec<Scored> = pool
         .iter()
@@ -184,8 +188,9 @@ fn rank(
                 * 0.03;
             let mut best = 0.0;
             let mut reason = "À découvrir dans votre catalogue".to_owned();
+            let mut because = Value::Null;
             let mut seed_id = None;
-            for (seed, weight, seed_features) in &seeds {
+            for (seed, weight, seed_features, liked) in &seeds {
                 if key(seed) == key(item) {
                     continue;
                 }
@@ -199,6 +204,10 @@ fn rank(
                             .as_str()
                             .unwrap_or("un titre de votre catalogue")
                     );
+                    because = json!({
+                        "kind": if *liked { "liked" } else { "watched" },
+                        "title": seed["title"],
+                    });
                     seed_id = seed["id"].as_str().map(str::to_owned);
                 }
             }
@@ -206,6 +215,7 @@ fn rank(
                 item: item.clone(),
                 score,
                 reason,
+                because,
                 seed_id,
                 genres: features.0[0].clone(),
             }
@@ -234,6 +244,7 @@ fn rank(
             *genres.entry(genre).or_default() += 1;
         }
         chosen.item["recommendationReason"] = json!(chosen.reason);
+        chosen.item["recommendationBecause"] = chosen.because;
         chosen.item["recommendationSeedId"] = json!(chosen.seed_id);
         result.push(chosen.item);
     }
@@ -286,11 +297,13 @@ async fn recommend(
         let id: String = row.get("work_id");
         let favorite: i64 = row.get("favorite");
         let rating: Option<f64> = row.get("rating");
-        signals.entry(id).or_default().weight = if rating.is_some_and(|n| n <= 2.0) {
+        let signal = signals.entry(id).or_default();
+        signal.weight = if rating.is_some_and(|n| n <= 2.0) {
             -2.0
         } else {
             f64::from(favorite as i32) * 3.0 + rating.filter(|n| *n >= 3.5).unwrap_or(0.0) * 0.5
         };
+        signal.liked = signal.weight > 0.0;
     }
     let history = signal_rows(&auth, &actor.user.id, &pool, true).await?;
     let cutoff = media_contracts::protocol::unix_now() - i64::from(options.history_days) * 86400;
@@ -318,6 +331,7 @@ async fn recommend(
                     .is_err()
             {
                 item["recommendationReason"] = json!("À découvrir dans votre catalogue");
+                item["recommendationBecause"] = Value::Null;
             }
             if let Some(object) = item.as_object_mut() {
                 object.remove("recommendationSeedId");
@@ -388,6 +402,7 @@ mod tests {
                 Signal {
                     weight: 3.0,
                     watched: true,
+                    liked: true,
                 },
             ),
             (
@@ -395,6 +410,7 @@ mod tests {
                 Signal {
                     weight: -2.0,
                     watched: false,
+                    liked: false,
                 },
             ),
         ]);
@@ -408,6 +424,8 @@ mod tests {
                 .unwrap()
                 .contains("Liked")
         );
+        assert_eq!(ranked[0]["recommendationBecause"]["kind"], "liked");
+        assert_eq!(ranked[0]["recommendationBecause"]["title"], "Liked");
         let (ranked, personal) = rank(&pool, &HashMap::new(), true);
         assert!(!personal);
         assert_eq!(ranked.len(), 4);

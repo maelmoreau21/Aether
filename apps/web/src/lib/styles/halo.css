@@ -163,6 +163,20 @@
 :root[data-tv='true'] :focus-visible { outline: 3px solid var(--tx); outline-offset: 4px; }
 /* Les cartes passent en 16:9 (landscape.jpg) : rails et grilles plus larges. */
 :root[data-tv='true'] { --poster-base: 260px; }
+/* Télécommande (src/lib/tv) : les flèches vont de carte en carte. Les actions de survol et les flèches
+   de défilement des rangées, inutiles sans pointeur, sortent du parcours ; la page de l'œuvre garde
+   toutes les actions. La carte focalisée grandit légèrement et porte l'anneau d'accent. */
+:root[data-tv='true'] .quick-actions,
+:root[data-tv='true'] .card-hover-overlay,
+:root[data-tv='true'] .carousel-nav { display: none; }
+:root[data-tv='true'] :is(a.media-card, .card-link) .poster { transition: transform var(--t-med, 0.2s) ease; }
+:root[data-tv='true'] :is(a.media-card, .card-link):focus-visible .poster { transform: scale(1.05); outline: 3px solid var(--ac); outline-offset: 4px; }
+:root[data-tv='true'] { scroll-padding-block: 96px; }
+/* Place pour l'agrandissement et l'anneau dans les rangées qui défilent (elles rognent leur contenu). */
+:root[data-tv='true'] .shelf-track.carousel { padding: 16px 14px 22px; margin: -16px -14px 0; scroll-padding-inline: 14px; }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-tv='true'] :is(a.media-card, .card-link):focus-visible .poster { transform: none; }
+}
 
 /* Utilitaire global, préfixé pour ne pas croiser les styles scopés existants */
 .h-sr {

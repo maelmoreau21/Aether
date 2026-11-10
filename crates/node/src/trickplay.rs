@@ -270,6 +270,25 @@ impl TrickplayManager {
         media_contracts::protocol::sha256_hex(&data)
     }
 
+    /// Delete the prepared cache of one request (sheets of a file, or one chapter image) so
+    /// the next warm-up rebuilds it. The folder name is a SHA-256 of the request, never a
+    /// client path, and only a folder directly under the cache root is removed. Returns
+    /// whether a prepared folder existed.
+    pub async fn purge(&self, request: &TrickplayRequest) -> bool {
+        let key = self.fingerprint(request);
+        if !cache_key(&key) {
+            return false;
+        }
+        let target = self.cache_root.join(&key);
+        let existed = tokio::fs::metadata(&target)
+            .await
+            .is_ok_and(|meta| meta.is_dir());
+        if existed {
+            remove_dir_tolerant(&target).await;
+        }
+        existed
+    }
+
     /// Check for an existing, completed native Aether trickplay cache.
     pub async fn check_native_cache(&self, request: &TrickplayRequest) -> Option<CacheManifest> {
         let key = self.fingerprint(request);
@@ -1666,6 +1685,48 @@ mod tests {
         }
         assert_eq!(remaining, 2);
         assert!(unrelated.join("keep.txt").exists());
+    }
+
+    #[tokio::test]
+    async fn purge_removes_only_the_prepared_folder_of_that_request() {
+        let temp = tempfile::tempdir().unwrap();
+        let manager = TrickplayManager::new(
+            temp.path().to_path_buf(),
+            1_000_000,
+            PathBuf::from("ffmpeg"),
+            true,
+            None,
+        );
+        let request = |asset: &str| TrickplayRequest {
+            asset_id: asset.into(),
+            media_root: PathBuf::from("/media"),
+            relative_path: PathBuf::from("film.mkv"),
+            duration: 60.0,
+            size: 1,
+            modified_ns: "1".into(),
+            interval_ms: Some(10_000),
+            width: Some(320),
+            quality: Some(7),
+            columns: Some(10),
+            rows: Some(10),
+            chapter_time: None,
+        };
+        let (mine, other) = (request("mine"), request("other"));
+        for r in [&mine, &other] {
+            let dir = temp.path().join(manager.fingerprint(r));
+            tokio::fs::create_dir(&dir).await.unwrap();
+            tokio::fs::write(dir.join("0.webp"), b"x").await.unwrap();
+        }
+        assert!(manager.purge(&mine).await);
+        assert!(!temp.path().join(manager.fingerprint(&mine)).exists());
+        assert!(
+            temp.path()
+                .join(manager.fingerprint(&other))
+                .join("0.webp")
+                .exists()
+        );
+        // Nothing prepared: nothing to delete, and no error.
+        assert!(!manager.purge(&mine).await);
     }
 
     #[tokio::test]

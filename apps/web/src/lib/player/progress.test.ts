@@ -49,6 +49,32 @@ describe('user progress',()=>{
     await vi.waitFor(()=>expect(error).toHaveBeenCalledOnce());tracker.save(state,true);expect(fetch).toHaveBeenCalledTimes(2);
     expect(JSON.parse(fetch.mock.calls[1][1].body).expectedRevision).toBe(7);
   });
+  it('in a watch party, rereads the revision after a conflict and keeps saving',async()=>{
+    login();vi.stubGlobal('window',{dispatchEvent:vi.fn()});const error=vi.fn();
+    const fetch=vi.fn().mockResolvedValueOnce(Response.json({workId:'work',position:4,duration:12,watched:false,revision:7}))
+      .mockResolvedValueOnce(new Response(null,{status:409}))
+      .mockResolvedValueOnce(Response.json({workId:'work',position:5,duration:12,watched:false,revision:9}))
+      .mockImplementation(async()=>Response.json({workId:'work',position:4,duration:12,watched:false,revision:10}));
+    vi.stubGlobal('fetch',fetch);
+    const tracker=new ProgressTracker('work',error,undefined,true);await tracker.load();tracker.save(state,true);
+    await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(4));
+    expect(JSON.parse(fetch.mock.calls[3][1].body).expectedRevision).toBe(9);
+    tracker.save(state,true);await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(5));
+    expect(JSON.parse(fetch.mock.calls[4][1].body).expectedRevision).toBe(10);
+    expect(error).not.toHaveBeenCalled();
+  });
+  it('reads progress only after a write of the same work has landed',async()=>{
+    login();vi.stubGlobal('window',{dispatchEvent:vi.fn()});
+    let land:(r:Response)=>void=()=>{};
+    const fetch=vi.fn().mockImplementationOnce(()=>new Promise<Response>(resolve=>{land=resolve;}))
+      .mockImplementation(async()=>Response.json({workId:'work',position:4,duration:12,watched:false,revision:2}));
+    vi.stubGlobal('fetch',fetch);
+    const write=writeProgress({workId:'work',position:4,duration:12,watched:false,revision:1});
+    const read=readProgress('work');await Promise.resolve();await Promise.resolve();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    land(Response.json({workId:'work',position:4,duration:12,watched:false,revision:2}));await write;
+    expect((await read).revision).toBe(2);expect(fetch).toHaveBeenCalledTimes(2);
+  });
   it('retries a slow progress write instead of showing "signal timed out" and stopping for the session',async()=>{
     login();vi.stubGlobal('window',{dispatchEvent:vi.fn()});const error=vi.fn();
     const timeout=()=>Promise.reject(new DOMException('signal timed out','TimeoutError'));

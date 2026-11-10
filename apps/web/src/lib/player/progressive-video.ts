@@ -23,6 +23,8 @@ export class ProgressiveVideo {
   private rejectFailure!: (error: Error) => void;
   readonly failure = new Promise<never>((_,reject)=>{this.rejectFailure=reject;});
   private failed?: Error;
+  /** What the Node reported about the stream (fallback transcoding). */
+  headers: { encoder?: string; tonemap?: string } = {};
   constructor(private video: HTMLVideoElement,private prefix: string,private duration: number,private mime: string,private onError: (message: string)=>void) {
     void this.failure.catch(()=>{});
     this.opened = new Promise<void>((resolve,reject)=>{
@@ -109,11 +111,15 @@ export class ProgressiveVideo {
           preparation_cache_limit_reached: tr('preparation_cache_limit_reached'),
           preparation_timeout: tr('preparation_delay_exceeded'),
           unsupported_preparation: tr('format_not_supported_without_re_encoding'),
-          video_stream_capacity_reached: tr('simultaneous_video_stream_capacity_reached')
+          video_stream_capacity_reached: tr('simultaneous_video_stream_capacity_reached'),
+          transcode_capacity_reached: tr('transcode_capacity_reached'),
+          transcode_unavailable: tr('transcode_unavailable_on_this_node'),
+          transcode_disabled: tr('transcode_disabled_on_this_server')
         };
         const hint = messages[detail ?? ''] ?? detail ?? tr('media_node_unavailable');
         throw new Error(tr('progressive_video_preparation_http', { status: response.status, hint }));
       }
+      this.headers={encoder:response.headers.get('x-media-transcode-encoder')??undefined,tonemap:response.headers.get('x-media-transcode-tonemap')??undefined};
       const reader=response.body?.getReader();if(!reader)throw new Error(tr('empty_progressive_video_stream'));
       let offset: number|undefined,scale=0,prefix=new Uint8Array(),appended=false,received=0,complete=false,raps:{time:number;start:number}[]=[];
       const index=new Mp4Fragments((type,bytes,start)=>{

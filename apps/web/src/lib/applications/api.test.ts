@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { session } from '../auth/session';
-import { applicationRequest, errorMessage, features, loadFeatures, parseSelection, reportPayload, requestPayload } from './api';
+import { applicationRequest, errorMessage, features, formatPosition, groupCount, loadFeatures, parseSelection, reportPayload, requestPayload, requestStep, seasonRanges, statusTone, workHref } from './api';
 
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 describe('demandes et signalements', () => {
@@ -42,5 +42,33 @@ describe('demandes et signalements', () => {
     finish(new Response(JSON.stringify({ requests: true, reports: true })));
     await expect(loading).rejects.toThrow('Votre session a changé');
     expect(get(features)).toEqual({ requests: false, reports: false });
+  });
+  it('formats playback moments and season ranges for people, not machines', () => {
+    expect(formatPosition(65)).toBe('1:05');
+    expect(formatPosition(3725.9)).toBe('1:02:05');
+    expect(formatPosition(undefined)).toBe('');
+    expect(formatPosition(-1)).toBe('');
+    expect(seasonRanges([5, 1, 2, 3, 2])).toBe('1–3, 5');
+    expect(seasonRanges([0])).toBe('0');
+  });
+  it('places a request on its progress path and counts status groups', () => {
+    expect(requestStep('pending')).toBe(0);
+    expect(requestStep('imported')).toBe(requestStep('acquiring'));
+    expect(requestStep('available')).toBe(4);
+    expect(requestStep('rejected')).toBe(-1);
+    expect(statusTone('failed')).toBe('err');
+    expect(statusTone('available')).toBe('ok');
+    expect(statusTone('cancelled')).toBe('neutral');
+    const counts = { pending: 2, acquiring: 1, available: 3, failed: 1, suspended: 1, rejected: 4 };
+    expect(groupCount(counts, 'active')).toBe(3);
+    expect(groupCount(counts, 'attention')).toBe(2);
+    expect(groupCount(counts, 'all')).toBe(12);
+  });
+  it('links only kinds that have a catalogue page and translates backend codes', () => {
+    expect(workHref('film', 'a b')).toBe('films/?work=a%20b');
+    expect(workHref('series', 'x')).toBe('series/?work=x');
+    expect(workHref('episode', 'x')).toBeNull();
+    expect(errorMessage('request_already_exists')).toBe(errorMessage('duplicate_request'));
+    expect(errorMessage('unknown_code')).toContain('unknown_code');
   });
 });

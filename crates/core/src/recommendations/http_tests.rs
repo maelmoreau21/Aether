@@ -229,6 +229,16 @@ async fn account_http_recommendations_default_on_and_respect_private_persistent_
             .unwrap()["recommendationReason"],
         "À découvrir dans votre catalogue"
     );
+    // A seed that became invisible must not leak through the structured explanation either.
+    assert!(
+        edited["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["id"] == "near")
+            .unwrap()["recommendationBecause"]
+            .is_null()
+    );
     query("DELETE FROM work_feedback WHERE user_id='reader' AND work_id='seed'")
         .execute(store.pool())
         .await

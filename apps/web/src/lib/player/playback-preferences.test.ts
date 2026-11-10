@@ -1,9 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { isForeignAudio, languageDefaults, playbackPreferences, trackPreferences, SKIP_SECONDS } from './playback-preferences';
+import {
+  isForeignAudio, languageDefaults, playbackPreferences, trackPreferences, SKIP_SECONDS,
+  segmentBehavior, segmentBehaviorPatch, skippableKinds, segmentBehaviors
+} from './playback-preferences';
+
+describe('per-segment player behaviour', () => {
+  it('offers every segment, without skipping it, until the account chose', () => {
+    for (const kind of skippableKinds) expect(segmentBehavior({}, kind)).toBe('ask');
+  });
+  it('reads the existing booleans of accounts created before the three-way choice', () => {
+    expect(segmentBehavior({ autoSkipIntro: true }, 'intro')).toBe('auto_skip');
+    expect(segmentBehavior({ skipCreditsEnabled: false, autoSkipCredits: true }, 'credits')).toBe('off');
+    expect(segmentBehavior({ skipRecapEnabled: true, autoSkipRecap: false }, 'recap')).toBe('ask');
+  });
+  it('writes a choice that reads back as itself, kind by kind', () => {
+    for (const kind of skippableKinds) {
+      for (const behavior of segmentBehaviors) {
+        expect(segmentBehavior(segmentBehaviorPatch(kind, behavior), kind)).toBe(behavior);
+      }
+    }
+    expect(segmentBehaviorPatch('intro', 'off')).toEqual({ skipIntroEnabled: false, autoSkipIntro: false });
+    expect(segmentBehaviorPatch('credits', 'auto_skip')).toEqual({ skipCreditsEnabled: true, autoSkipCredits: true });
+  });
+});
 
 describe('playback account defaults', () => {
-  it('keeps old accounts on manual episode changes and ten-second skips', () => {
-    expect(playbackPreferences({})).toEqual({ autoplayNextEpisode: false, skipBackSeconds: 10, skipForwardSeconds: 10 });
+  it('enables automatic episode chaining and ten-second skips by default', () => {
+    expect(playbackPreferences({})).toEqual({ autoplayNextEpisode: true, skipBackSeconds: 10, skipForwardSeconds: 10 });
+    expect(playbackPreferences({ autoplayNextEpisode: false })).toEqual({ autoplayNextEpisode: false, skipBackSeconds: 10, skipForwardSeconds: 10 });
   });
   it('applies independent backward and forward durations', () => {
     for (const skipBackSeconds of SKIP_SECONDS) {

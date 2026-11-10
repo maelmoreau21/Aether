@@ -14,6 +14,7 @@
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { t, fmt } from '../i18n';
+  import { watchTogetherEnabled } from '../config/presentation';
   import { startWatchParty } from '../syncplay/launch';
   import {
     audioSummary,
@@ -160,7 +161,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-{#if watchPartyOpen}
+{#if watchPartyOpen && $watchTogetherEnabled}
   <WatchPartyModal
     mediaId={work.id}
     mediaTitle={work.title}
@@ -308,6 +309,7 @@
       ></button>
 
       <div class="dropdown-menu" role="menu">
+        {#if $watchTogetherEnabled}
         <button
           type="button"
           class="menu-item"
@@ -320,6 +322,7 @@
           <Icon name="users" size={16} />
           <span>{$t('watch_together')}</span>
         </button>
+        {/if}
 
         <button
           type="button"
@@ -1101,11 +1104,6 @@
     padding: 8px 28px 24px;
   }
 
-  .form-body .modal-footer {
-    padding: 8px 0 4px;
-    justify-content: space-between;
-  }
-
   .modal-footer-right {
     display: flex;
     flex-wrap: wrap;
@@ -1480,7 +1478,7 @@
     color: var(--tx);
   }
 
-  input, textarea {
+  input {
     box-sizing: border-box;
     width: 100%;
     min-height: 46px;
@@ -1495,13 +1493,7 @@
     transition: border-color var(--t-fast) var(--ease), background-color var(--t-fast) var(--ease);
   }
 
-  textarea {
-    padding: 12px 14px;
-    line-height: 1.5;
-    resize: vertical;
-  }
-
-  input:focus, textarea:focus {
+  input:focus {
     outline: none;
     border-color: var(--ac);
     background: var(--bg-3);
@@ -1635,10 +1627,6 @@
     font-size: 13px;
   }
 
-  .candidate-row code {
-    font-family: var(--font-mono);
-  }
-
   .candidate-actions {
     display: flex;
     gap: 6px;
@@ -1679,7 +1667,6 @@
     .modal-header { padding: 20px 16px 4px; }
     .modal-body { padding: 16px; }
     .modal-footer { padding: 8px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
-    .form-body .modal-footer { padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); }
 
     .info-grid { grid-template-columns: minmax(0, 1fr); }
     .info-item.full { grid-column: auto; }

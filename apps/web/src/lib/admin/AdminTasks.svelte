@@ -7,8 +7,8 @@
   import { t, fmt } from '../i18n';
   import {
     type ScheduledTask, type TaskTrigger, type TriggerDraft, type TriggerType,
-    agoLabel, categoryLabel, categoryOrder, clockLabel, dayLabel, durationLabel, intervalLabel, intervalOptions,
-    lastRunSummary, scheduleSummary, taskName, taskStatus, timeSlots, triggerLabel, triggerPayload, weekdays
+    agoLabel, categoryLabel, categoryOrder, clockLabel, dayLabel, durationLabel, intervalLabel, intervalOptions, isMediaTask,
+    lastRunSummary, nestTasks, scheduleSummary, statsLabel, taskName, taskStatus, timeSlots, triggerLabel, triggerPayload, weekdays
   } from './task-schedule';
 
   // `scans`, `pending` and `nodes` stay accepted for the host page; the unified task API is the source of truth.
@@ -42,7 +42,7 @@
   const groups = $derived(
     [...new Set(visible.map(task => task.category))]
       .sort((a, b) => categoryOrder(a) - categoryOrder(b) || a.localeCompare(b))
-      .map(category => ({ category, tasks: visible.filter(task => task.category === category) }))
+      .map(category => ({ category, rows: nestTasks(visible.filter(task => task.category === category)) }))
   );
   const anyActive = $derived(tasks.some(task => task.state !== 'idle'));
   const filters: { id: Filter; key: 'sched_filter_all' | 'sched_filter_active' | 'sched_filter_failed' }[] = [
@@ -58,7 +58,7 @@
   function nameOf(task: ScheduledTask) { return taskName(task, task.libraryId ? libraryNames[task.libraryId] : undefined, $t); }
   function taskHref(id?: string) { return resolve(`admin/libraries/#tasks-section${id ? `?task=${encodeURIComponent(id)}` : ''}`); }
   function date(value: number) { return $fmt.dateTime(value); }
-  function running(task: ScheduledTask) { return task.state !== 'idle' || (task.libraryId !== null && pending.includes(task.libraryId)); }
+  function running(task: ScheduledTask) { return task.state !== 'idle' || (task.kind === 'scan' && task.libraryId !== null && pending.includes(task.libraryId)); }
   function message(cause: unknown) { return cause instanceof Error ? cause.message : $t('sched_action_failed'); }
   /** Short, single-line state for the list; the full message stays in the detail view. */
   function rowState(task: ScheduledTask): string {
@@ -189,6 +189,33 @@
   {/if}
 {/snippet}
 
+{#snippet taskRow(task: ScheduledTask)}
+  {@const status = running(task) ? 'running' : taskStatus(task)}
+  {@const sub = isMediaTask(task)}
+  {@const stats = statsLabel(task, $t)}
+  <div class="task-row" class:subtask={sub}>
+    <span class="status-icon" data-status={status} aria-hidden="true"><Icon name={statusIcons[status]} size={16} /></span>
+    <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
+    <a class="task-link" href={taskHref(task.id)}>
+      <span class="task-title">{nameOf(task)}</span>
+      <span class="task-meta">
+        <span class="state" data-status={status}>{rowState(task)}</span>
+        {#if stats}<span class="schedule">{stats}</span>{/if}
+        <span class="schedule">{sub ? $t(task.afterScan ? 'sched_after_scan' : 'sched_manual_only') : scheduleSummary(task.triggers, $t)}</span>
+      </span>
+      {#if task.state === 'running' && task.progress !== null}
+        <span class="progress" role="progressbar" aria-label={rowState(task)} aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${Math.max(task.progress, 2)}%`}></span></span>
+      {/if}
+    </a>
+    {#if task.nextRunAt && task.state === 'idle' && !task.reason}
+      <span class="next" title={$t('sched_next', { date: date(task.nextRunAt) })}><small>{$t('sched_next_label')}</small>{date(task.nextRunAt)}</span>
+    {:else if task.reason}
+      <span class="next unavailable" title={task.reason}><Icon name="info" size={16} />{$t('sched_unavailable')}</span>
+    {/if}
+    {@render action(task, false)}
+  </div>
+{/snippet}
+
 <section id="tasks-section" aria-labelledby="tasks-heading">
   {#if selectedId}
     <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
@@ -214,8 +241,19 @@
         <div class="card" role="region" aria-labelledby="schedule-heading">
           <header class="card-header">
             <h3 id="schedule-heading">{$t('sched_schedule')}</h3>
-            <button class="ghost" disabled={saving || !!loadError} onclick={openEditor}><span aria-hidden="true">+</span> {$t('sched_add_trigger')}</button>
+            {#if !isMediaTask(task)}<button class="ghost" disabled={saving || !!loadError} onclick={openEditor}><span aria-hidden="true">+</span> {$t('sched_add_trigger')}</button>{/if}
           </header>
+          {#if isMediaTask(task)}
+            <div class="trigger-row">
+              <Icon name="refresh" size={18} />
+              <div class="trigger-text">
+                <p>{$t(task.afterScan ? 'sched_after_scan' : 'sched_manual_only')}</p>
+                <small>{$t(task.afterScan ? 'sched_after_scan_note' : 'sched_manual_note')}</small>
+              </div>
+            </div>
+            <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
+            {#if task.parentId}<p class="card-foot"><a href={taskHref(task.parentId)}>{$t('sched_open_parent')}</a></p>{/if}
+          {/if}
           {#each task.triggers as trigger (trigger.id)}
             <div class="trigger-row" class:disabled={!trigger.enabled}>
               <Icon name="clock" size={18} />
@@ -231,7 +269,7 @@
               <button class="icon danger" disabled={saving} aria-label={$t('sched_delete_trigger')} title={$t('sched_delete_trigger')} onclick={() => void removeTrigger(task, trigger)}><Icon name="trash" size={18} /></button>
             </div>
           {:else}
-            <p class="empty">{$t('sched_no_trigger')}</p>
+            {#if !isMediaTask(task)}<p class="empty">{$t('sched_no_trigger')}</p>{/if}
           {/each}
           {#if task.kind === 'backup'}<p class="card-foot"><a href={resolve('admin/libraries/#backups-section')}>{$t('sched_backups_link')}</a></p>{/if}
         </div>
@@ -253,9 +291,10 @@
           {:else}
             <p class="empty">{$t('sched_never')}</p>
           {/if}
+          {#if task.stats}<p class="meta">{statsLabel(task, $t)}</p>{/if}
           {#if task.issues.length}
             <details>
-              <summary>{$t('sched_issues', { count: task.warningsCount || task.issues.length })}</summary>
+              <summary>{isMediaTask(task) ? $t('sched_errors', { count: task.issues.length }) : $t('sched_issues', { count: task.warningsCount || task.issues.length })}</summary>
               <ul>{#each task.issues as issue, index (index)}<li>{issue}</li>{/each}</ul>
             </details>
           {/if}
@@ -287,27 +326,16 @@
       <div class="category" role="region" aria-labelledby={`category-${group.category}`}>
         <h3 id={`category-${group.category}`}>{categoryLabel(group.category, $t)}</h3>
         <ul class="task-list">
-          {#each group.tasks as task (task.id)}
-            {@const status = running(task) ? 'running' : taskStatus(task)}
-            <li class="task-row">
-              <span class="status-icon" data-status={status} aria-hidden="true"><Icon name={statusIcons[status]} size={16} /></span>
-              <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- taskHref resolves the base path and task hash. -->
-              <a class="task-link" href={taskHref(task.id)}>
-                <span class="task-title">{nameOf(task)}</span>
-                <span class="task-meta">
-                  <span class="state" data-status={status}>{rowState(task)}</span>
-                  <span class="schedule">{scheduleSummary(task.triggers, $t)}</span>
-                </span>
-                {#if task.state === 'running' && task.progress !== null}
-                  <span class="progress" role="progressbar" aria-label={rowState(task)} aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${Math.max(task.progress, 2)}%`}></span></span>
-                {/if}
-              </a>
-              {#if task.nextRunAt && task.state === 'idle' && !task.reason}
-                <span class="next" title={$t('sched_next', { date: date(task.nextRunAt) })}><small>{$t('sched_next_label')}</small>{date(task.nextRunAt)}</span>
-              {:else if task.reason}
-                <span class="next unavailable" title={task.reason}><Icon name="info" size={16} />{$t('sched_unavailable')}</span>
+          {#each group.rows as row (row.task.id)}
+            <li class="task-item">
+              {@render taskRow(row.task)}
+              {#if row.children.length}
+                <ul class="subtask-list" aria-label={$t('sched_subtasks_label', { name: row.task.libraryId ? libraryNames[row.task.libraryId] ?? nameOf(row.task) : nameOf(row.task) })}>
+                  {#each row.children as child (child.id)}
+                    <li>{@render taskRow(child)}</li>
+                  {/each}
+                </ul>
               {/if}
-              {@render action(task, false)}
             </li>
           {/each}
         </ul>
@@ -382,8 +410,14 @@
   .category { margin-top: 20px; }
   .category > h3 { margin: 0 0 6px; padding: 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
   .task-list { display: grid; margin: 0; padding: 0; list-style: none; background: var(--color-surface); border-radius: var(--radius-md); overflow: hidden; }
-  .task-row { display: flex; align-items: center; gap: 12px; padding: 0 12px 0 16px; border-top: 1px solid var(--color-line-subtle); transition: background-color var(--transition-fast); }
-  .task-row:first-child { border-top: 0; }
+  .task-item { border-top: 1px solid var(--color-line-subtle); }
+  .task-item:first-child { border-top: 0; }
+  .task-row { display: flex; align-items: center; gap: 12px; padding: 0 12px 0 16px; transition: background-color var(--transition-fast); }
+  .subtask-list { margin: 0; padding: 0 0 4px; list-style: none; }
+  .task-row.subtask { padding-left: 40px; }
+  .task-row.subtask .task-link { padding: 8px 0; }
+  .task-row.subtask .task-title { font-size: 14px; font-weight: 500; }
+  .task-row.subtask .status-icon { width: 24px; height: 24px; }
   .task-row:hover { background: var(--color-surface-hover); }
   .task-link { display: grid; gap: 3px; flex: 1; min-width: 0; padding: 12px 0; color: inherit; text-decoration: none; }
   .task-link:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: var(--radius-sm); }
@@ -485,6 +519,7 @@
   @media (max-width: 640px) {
     h2 { font-size: 22px; }
     .task-row { gap: 10px; padding: 0 6px 0 12px; }
+    .task-row.subtask { padding-left: 24px; }
     .task-title { font-size: 14px; white-space: normal; }
     .task-meta .schedule { display: none; }
     .next:not(.unavailable) { display: none; }

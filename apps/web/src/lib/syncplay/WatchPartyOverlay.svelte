@@ -9,9 +9,12 @@
 
   let {
     client,
+    controlsVisible = true,
     onCloseParty
   }: {
     client: SyncPartyClient;
+    /** The reaction bar follows the player controls: it hides with them during playback. */
+    controlsVisible?: boolean;
     onCloseParty?: () => void;
   } = $props();
 
@@ -264,7 +267,7 @@
 </div>
 
 <!-- Bottom Quick Reactions Bar (when controls are visible or hover) -->
-{#if !isWaiting && !muteOverlay}
+{#if !isWaiting && !muteOverlay && (controlsVisible || drawerOpen)}
   <div class="quick-reactions-bar" aria-label={$t('quick_reactions')}>
     {#each quickEmojis as emoji (emoji)}
       <button

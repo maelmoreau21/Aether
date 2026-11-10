@@ -1,7 +1,7 @@
 export interface CodecTrack {
   index?: number; codec_type?: string; codec_name?: string; profile?: string; channels?: number; channel_layout?: string;
   width?: number; height?: number; pix_fmt?: string; tags?: Record<string, string>;
-  disposition?: { default?: number; comment?: number; hearing_impaired?: number };
+  disposition?: { default?: number; comment?: number; hearing_impaired?: number; visual_impaired?: number; descriptions?: number };
 }
 export interface Source {
   id: string;
@@ -29,8 +29,16 @@ export interface Source {
   videoMime?: string;
   label?: string;
   audioOffsetSeconds?: number;
+  /** Another embedded audio track, reachable only through fallback transcoding. */
+  transcodeOnly?: boolean;
 }
-export interface Subtitle { id: string; reportTrackId?: string; language: string; label: string; url: string; assUrl?: string | null; forced?: boolean; sdh?: boolean; sourceFormat?: string }
+export interface Subtitle {
+  id: string; reportTrackId?: string; language: string; label: string; url: string; assUrl?: string | null; forced?: boolean; sdh?: boolean; sourceFormat?: string;
+  /** Bitmap subtitles: `pgs` renders in the browser, `burn` needs the picture transcoded. */
+  image?: 'pgs' | 'burn' | null;
+  /** Stream index to burn into the picture when fallback transcoding is offered. */
+  burnIndex?: number | null;
+}
 /** Another copy of the same content on another Node, authorized for the current viewer. */
 export interface MediaAlternative {
   id: string;
@@ -68,6 +76,8 @@ export interface Media {
   requestedId?: string;
   sources: Source[];
   subtitles: Subtitle[];
+  /** Fallback transcoding offered by the server for this file. */
+  transcode?: import('./transcode').TranscodeOffer | null;
 }
 export interface PlaybackState { position: number; duration: number; paused: boolean; volume: number; speed: number }
 export interface Player {
@@ -83,6 +93,14 @@ export interface Player {
   setSpeed(speed: number): void;
   setAudioOffset?(seconds: number): void;
   setSubtitleOffset?(seconds: number): void;
+  /** WebVTT cue line in percent from the top (custom subtitle position). */
+  setSubtitlePosition?(line: number): void;
+  /** Browser-side night mode / loudness levelling; `false` when this playback cannot be processed. */
+  setAudioEnhancement?(mode: import('./audio-enhancement').AudioEnhancement): boolean;
+  /** Quality, bit rate ceiling, HDR and audio choices; reloads the stream when they change it. */
+  setStreamOptions?(options: Partial<import('./transcode').TranscodeOptions>): Promise<void>;
+  /** The active transcode, or `null` for direct play. */
+  transcodeState?(): { plan: import('./transcode').TranscodePlan; encoder?: string; tonemap?: string } | null;
   state(): PlaybackState;
   destroy(): void;
 }

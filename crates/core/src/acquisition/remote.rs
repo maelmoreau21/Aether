@@ -48,7 +48,7 @@ pub async fn search(server: &Server, kind: &str, q: &str) -> Result<Vec<Value>, 
         let values = result["recordings"]
             .as_array()
             .ok_or_else(|| err(StatusCode::BAD_GATEWAY, "invalid_remote_response"))?;
-        return Ok(values.iter().filter_map(|v|Some(json!({"kind":"track","title":v["title"].as_str()?,"externalId":v["id"].as_str()?,"externalProvider":"musicbrainz","serverId":server.id,"artist":v["artist-credit"][0]["name"],"acquisitionSupported":false}))).collect());
+        return Ok(values.iter().filter_map(|v|Some(json!({"kind":"track","title":v["title"].as_str()?,"externalId":v["id"].as_str()?,"externalProvider":"musicbrainz","serverId":server.id,"artist":v["artist-credit"][0]["name"],"album":v["releases"][0]["title"],"year":v["first-release-date"].as_str().and_then(|d|d.get(..4)).and_then(|y|y.parse::<i64>().ok()),"acquisitionSupported":false}))).collect());
     }
     let results = server
         .call(
@@ -58,7 +58,82 @@ pub async fn search(server: &Server, kind: &str, q: &str) -> Result<Vec<Value>, 
             None,
         )
         .await?;
-    Ok(array(&results)?.iter().take(50).filter_map(|v|Some(json!({"kind":kind,"title":title(v,kind)?,"externalId":external(v,kind)?,"externalProvider":match kind{"film"=>"tmdb","series"=>"tvdb",_=>"musicbrainz"},"serverId":server.id,"year":v["year"],"overview":v["overview"],"artist":v["artist"]["artistName"],"seasons":v["seasons"]}))).collect())
+    Ok(array(&results)?
+        .iter()
+        .take(50)
+        .filter_map(|v| {
+            let mut result = json!({"kind":kind,"title":title(v,kind)?,"externalId":external(v,kind)?,
+                "externalProvider":match kind{"film"=>"tmdb","series"=>"tvdb",_=>"musicbrainz"},
+                "serverId":server.id});
+            describe(&mut result, v, kind);
+            Some(result)
+        })
+        .collect())
+}
+/// Bounded, display-only facts from a lookup result. Remote image URLs are not
+/// forwarded: the interface only loads images served by Aether.
+fn describe(result: &mut Value, v: &Value, kind: &str) {
+    let text = |value: &Value, max: usize| {
+        value.as_str().map(|s| {
+            s.chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .take(max)
+                .collect::<String>()
+        })
+    };
+    let year = v["year"]
+        .as_i64()
+        .filter(|y| (1800..=3000).contains(y))
+        .or_else(|| {
+            v["releaseDate"]
+                .as_str()
+                .and_then(|d| d.get(..4)?.parse().ok())
+                .filter(|y: &i64| (1800..=3000).contains(y))
+        });
+    result["year"] = json!(year);
+    result["summary"] = json!(text(&v["overview"], 600));
+    let genres: Vec<String> = v["genres"]
+        .as_array()
+        .map(|g| g.iter().filter_map(|g| text(g, 40)).take(3).collect())
+        .unwrap_or_default();
+    result["genres"] = json!(genres);
+    result["runtime"] = json!(v["runtime"].as_i64().filter(|m| (1..=2000).contains(m)));
+    // A positive id means the item is already tracked by this server.
+    result["onServer"] = json!(v["id"].as_i64().is_some_and(|id| id > 0));
+    match kind {
+        "series" => {
+            let mut seasons: Vec<Value> = v["seasons"]
+                .as_array()
+                .map(|seasons| {
+                    seasons
+                        .iter()
+                        .filter_map(|s| {
+                            let number = s["seasonNumber"]
+                                .as_i64()
+                                .filter(|n| (0..=10000).contains(n))?;
+                            let episodes = s["statistics"]["totalEpisodeCount"]
+                                .as_i64()
+                                .filter(|n| *n > 0 && *n <= 100000);
+                            Some(json!({"number":number,"episodes":episodes}))
+                        })
+                        .take(200)
+                        .collect()
+                })
+                .unwrap_or_default();
+            seasons.sort_by_key(|s| s["number"].as_i64());
+            result["seasons"] = json!(seasons);
+            result["network"] = json!(text(&v["network"], 80));
+            result["ended"] = json!(v["ended"].as_bool());
+        }
+        "album" => {
+            result["artist"] = json!(text(&v["artist"]["artistName"], 200));
+            result["albumType"] = json!(text(&v["albumType"], 40));
+        }
+        "artist" => {
+            result["artistType"] = json!(text(&v["artistType"], 40));
+        }
+        _ => {}
+    }
 }
 pub async fn lookup(server: &Server, input: &RequestInput) -> Result<Value, Error> {
     if input.kind == "track" {

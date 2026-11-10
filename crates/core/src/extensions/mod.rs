@@ -19,6 +19,9 @@ use crate::{
 mod artwork_jobs;
 pub(crate) use artwork_jobs::request_automatic_check as request_artwork_check;
 pub(crate) use artwork_jobs::tick as artwork_collection_tick;
+pub(crate) use artwork_jobs::{
+    cancel_library_pass as cancel_artwork_pass, queue_library_pass as queue_artwork_pass,
+};
 #[cfg(test)]
 use axum::http::HeaderValue;
 use axum::{

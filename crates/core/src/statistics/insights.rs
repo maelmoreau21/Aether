@@ -138,6 +138,38 @@ async fn credits(auth: &AuthState, weights: &[(String, f64)]) -> Outcome<Vec<(Va
     Ok(out)
 }
 
+/// (season, episode) numbers of the episodes present in `rows`.
+async fn episode_numbers(
+    auth: &AuthState,
+    rows: &[Play],
+) -> Outcome<std::collections::HashMap<String, (i64, i64)>> {
+    let mut ids: Vec<&str> = rows
+        .iter()
+        .filter(|p| p.kind == "episode")
+        .map(|p| p.media_id.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let mut out = std::collections::HashMap::new();
+    for chunk in ids.chunks(400) {
+        let sql = format!(
+            "SELECT ep.work_id,CAST(se.season_number AS BIGINT) AS season,CAST(ep.episode_number AS BIGINT) AS episode FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id WHERE ep.work_id IN ({})",
+            placeholders(chunk.len())
+        );
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(crate::database::normalize_sql(&sql)));
+        for id in chunk {
+            q = q.bind(*id);
+        }
+        for row in q.fetch_all(&auth.store.pool).await.map_err(db)? {
+            out.insert(
+                row.get::<String, _>("work_id"),
+                (row.get::<i64, _>("season"), row.get::<i64, _>("episode")),
+            );
+        }
+    }
+    Ok(out)
+}
+
 async fn previous_totals(auth: &AuthState, selection: &Selection) -> Outcome<Totals> {
     let row = selection
         .statement(&format!("SELECT COALESCE(SUM(s.seconds),0.0) AS seconds,CAST(COALESCE(SUM(CASE WHEN {} THEN 1 ELSE 0 END),0) AS BIGINT) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.canonical_id ELSE NULL END) AS media,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed", aggregate::QUALIFIED_SQL), "")
@@ -184,6 +216,10 @@ async fn analyse(
     ));
     value["truncated"] = json!(truncated);
     value["period"] = json!({"from":from,"to":to});
+    if !f.media_id.is_empty() {
+        let numbers = episode_numbers(auth, &rows).await?;
+        value["media"] = aggregate::media(&rows, &numbers, admin);
+    }
     Ok((value, rows))
 }
 

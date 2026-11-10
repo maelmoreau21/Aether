@@ -189,6 +189,19 @@ jobs:
               --notes-file changelog.md
           fi
 
+      - name: Récupérer les applications compilées par la validation
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aether-*
+          path: apps-dist
+          merge-multiple: true
+
+      - name: Joindre les applications à la Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.calculate-and-tag.outputs.next_tag }}
+        run: gh release upload "$TAG" apps-dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
   prepare-next-cycle:
     name: Préparation du prochain cycle sur develop
     needs: [calculate-and-tag, create-github-release]

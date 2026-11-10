@@ -1,5 +1,50 @@
 # Compatibilité observée — P0 natif et limite de sélection audio
 
+## Transcodage de secours et confort de lecture — 9 novembre 2026
+
+La lecture directe reste la règle. Le transcodage n'intervient que dans ces cas, décidés
+par le navigateur à partir de l'offre `transcode` du descripteur : qualité choisie
+inférieure à l'original, débit maximal dépassé, original refusé par le navigateur (après
+la lecture directe, le flux progressif AV1 et le remux), piste audio non lisible (DTS)
+ou seulement atteignable ainsi, sous-titre image à incruster, ou conversion HDR « toujours ».
+
+- Ressource `prepared/transcode-v{vidéo}a{audio|x}s{sous-titre|x}h{hauteur}b{kb/s}f{options}-{ms}`,
+  orthographe canonique stricte (`crates/node/src/transcode.rs`). Le Core vérifie le réglage
+  serveur `videoTranscodingEnabled` (image encodée) ou `audioTranscodingEnabled` (audio encodé ; un flux copié n’exige aucun des deux), la politique de sous-titres de la bibliothèque et chaque index
+  contre le probe (`crates/core/src/inventory/resources.rs`) ; le Node ne voit jamais le probe.
+- Sortie : un fMP4 continu sur la sortie standard d'un FFmpeg par requête (même tuyau borné que
+  le flux progressif AV1 : contre-pression, annulation, aucun fichier écrit). Un seek relance le
+  flux ; `-copyts` garde la chronologie d'origine dans MSE. Vidéo H.264 High (images clés toutes
+  les 2 s) ou vidéo copiée (AV1, H.264, HEVC, VP9) quand seul l'audio doit changer ; audio AAC
+  stéréo, AAC 5.1 ou E-AC-3/AC-3 copié (« passthrough » vers un navigateur qui le décode).
+- Options : conversion HDR10/HLG → SDR BT.709 (zimg + Hable, avant l'incrustation), normalisation
+  (`dynaudnorm`), mode nuit (`acompressor`), conservation du 5.1, incrustation PGS/VobSub/DVB.
+- Encodeurs : `MEDIA_TRANSCODE_HARDWARE` = `none` (libx264, puis OpenH264), `nvenc` (décodage CUDA),
+  `vaapi` (Intel QuickSync et AMD sous Linux, `MEDIA_TRANSCODE_VAAPI_DEVICE`), `qsv` ou `amf`
+  (encodeurs présents seulement dans un FFmpeg personnalisé). Encodeur absent : repli logiciel
+  journalisé (`transcode_capabilities`). `MEDIA_TRANSCODE_MAX_SESSIONS` borne les sessions (2).
+- Qualité Auto : l'original tant que tout va bien ; trois attentes en une minute, ou une attente de
+  plus de 4 s, abaissent le plafond d'un palier (2160p 20 Mb/s … 360p 0,8 Mb/s). C'est une
+  adaptation par relance du flux, pas du HLS/DASH segmenté multi-débit.
+- Pistes : chaque audio intégrée d'un fichier multi-audio devient sélectionnable ; la piste lue
+  par défaut par le navigateur reste en lecture directe. Les sous-titres intégrés ne dépendent
+  plus de la vidéo AV1. PGS est extrait en `.sup` (`prepared/subtitle-pgs-{index}`) et dessiné
+  dans le navigateur (`apps/web/src/lib/player/pgs.ts`) ; VobSub/DVB sont incrustés.
+
+Vérifié le 9 novembre 2026 : 13 tests unitaires Rust (grammaire, plan d'encodeur, arguments,
+configuration, contrôles du Core), 256 tests web du lecteur et la construction réelle de l'étape
+FFmpeg 9.0.2 de l'image (libx264, AAC, NVENC, VAAPI, zscale, tonemap, overlay, muxer `sup`
+contrôlés à la construction). Avec ce FFmpeg, un MKV HEVC 10 bits HDR10 + AC3 5.1 synthétique
+a été transcodé en H.264 480p BT.709 + AAC 5.1 normalisé, en 720p mode nuit stéréo, et en HEVC
+copié + AAC (test ignoré `transcodes_a_real_file_to_fragmented_mp4`, variable
+`MEDIA_TRANSCODE_E2E_SOURCE`).
+
+Non vérifié : lecture de ces flux dans un navigateur réel (Chromium de Playwright ne décode pas
+H.264/AAC), encodage NVENC/VAAPI sur un GPU, incrustation PGS/VobSub (aucun encodeur de bitmap
+pour fabriquer la source de test), rendu PGS sur un vrai disque, charge sur le NAS. Dolby Vision
+profil 5 n'a pas de couche HDR10 : sa conversion n'est pas proposée (couleurs fausses sans
+libplacebo). HDR10+ est lu comme HDR10 (ses métadonnées sont par image, absentes du probe).
+
 ## Préchargement audio segmenté — 28 octobre 2026
 
 La fenêtre Opus suivante est demandée jusqu'à huit secondes avant sa limite après le chargement initial, au lieu de quatre. Les données de lecture montrent la réserve de l'audio séparé ainsi que celle de la vidéo et les images perdues. Les tests unitaires ciblés couvrent l'anticipation et la synchronisation ; aucune mesure sur Pixel 7a, NAS ou réseau réel ne démontre encore une réduction des saccades.
@@ -31,7 +76,7 @@ synthétique copié dans une bibliothèque locale, découvert/indexé puis lu da
 le lecteur natif existant. Progression temporelle, pause et seek4s vérifiés,
 ainsi que catalogue et nouvelle lecture après arrêt/relance réel du Core avec
 la même SQLite. Aucun probe au deuxième scan des deux fichiers inchangés.
-Rapports et captures : [evidence/2026-10-16/scanner/](evidence/2026-10-16/scanner/).
+Rapports et captures : générés à chaque exécution du CI dans `docs/evidence/2026-10-16/scanner/` (artefact `browser-evidence-films-series`, dossier non suivi par Git).
 Ce parcours n'ajoute pas de preuve PCM/audio physique, de compatibilité MKV
 générale, de commutation des pistes internes ou de résultat Edge/Firefox/Safari.
 Les fichiers MKV multipistes sont inspectés par les tests Node/SQLite séparés.

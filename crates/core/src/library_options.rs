@@ -17,9 +17,79 @@ pub enum EmbeddedSubtitlePolicy {
     BlockAll,
 }
 
+/// How a library treats a feature that also has a server-wide setting: follow the server
+/// (`inherit`), or force it on or off for this library alone.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FeatureMode {
+    #[default]
+    Inherit,
+    Enabled,
+    Disabled,
+}
+
+impl FeatureMode {
+    /// Stored options written before modes existed only carry a boolean: `true` was the
+    /// default (follow the server), `false` an explicit opt-out that must survive.
+    fn from_legacy(enabled: bool) -> Self {
+        if enabled {
+            Self::Inherit
+        } else {
+            Self::Disabled
+        }
+    }
+
+    fn resolve(self, global: bool) -> bool {
+        match self {
+            Self::Inherit => global,
+            Self::Enabled => true,
+            Self::Disabled => false,
+        }
+    }
+}
+
+/// Server-wide values a library in `inherit` mode follows (a subset of the server settings).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GlobalMediaDefaults {
+    pub trickplay_enabled: bool,
+    pub trickplay_auto_generate: bool,
+    pub trickplay_interval_seconds: u16,
+    pub trickplay_width: u16,
+    pub trickplay_quality: u8,
+    pub trickplay_columns: u8,
+    pub trickplay_rows: u8,
+    pub chapter_images_enabled: bool,
+    pub intro_detection_enabled: bool,
+    pub marker_min_confidence: u8,
+}
+
+impl Default for GlobalMediaDefaults {
+    fn default() -> Self {
+        Self {
+            trickplay_enabled: true,
+            trickplay_auto_generate: true,
+            trickplay_interval_seconds: 10,
+            trickplay_width: 320,
+            trickplay_quality: 7,
+            trickplay_columns: 10,
+            trickplay_rows: 10,
+            chapter_images_enabled: true,
+            intro_detection_enabled: true,
+            marker_min_confidence: 80,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, rename_all = "camelCase", deny_unknown_fields)]
 pub struct LibraryOptions {
+    /// Absent in options saved before the modes existed (see [`FeatureMode::from_legacy`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trickplay_mode: Option<FeatureMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chapter_images_mode: Option<FeatureMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intro_detection_mode: Option<FeatureMode>,
     pub preferred_metadata_language: String,
     pub metadata_country_code: String,
     pub read_local_nfo: bool,
@@ -74,7 +144,7 @@ pub struct LibraryOptions {
     pub artwork_max_images: u8,
     /// Multi-image mode: keep a pool of several images per kind (up to
     /// `artwork_max_images`), filled automatically in the background. Off, every
-    /// identified work still receives one image of each enabled kind.
+    /// identified work still receives one image of each enabled kind. On by default.
     pub artwork_pool_enabled: bool,
     /// Administrators see this library in their catalogue (management is unaffected).
     pub admin_access: bool,
@@ -84,6 +154,9 @@ pub struct LibraryOptions {
 impl Default for LibraryOptions {
     fn default() -> Self {
         Self {
+            trickplay_mode: None,
+            chapter_images_mode: None,
+            intro_detection_mode: None,
             preferred_metadata_language: "fr".into(),
             metadata_country_code: "FR".into(),
             read_local_nfo: true,
@@ -133,7 +206,7 @@ impl Default for LibraryOptions {
             artwork_languages: vec!["fr".into(), "en".into()],
             artwork_include_neutral: true,
             artwork_max_images: 12,
-            artwork_pool_enabled: false,
+            artwork_pool_enabled: true,
             admin_access: true,
             anime: false,
         }
@@ -154,6 +227,89 @@ impl LibraryOptions {
     /// Parse JSON-encoded library options or return the default settings when parsing fails.
     pub fn from_json(raw: &str) -> Self {
         serde_json::from_str(raw).unwrap_or_default()
+    }
+
+    pub fn trickplay_feature_mode(&self) -> FeatureMode {
+        self.trickplay_mode
+            .unwrap_or_else(|| FeatureMode::from_legacy(self.trickplay_enabled))
+    }
+
+    pub fn chapter_images_feature_mode(&self) -> FeatureMode {
+        self.chapter_images_mode
+            .unwrap_or_else(|| FeatureMode::from_legacy(self.chapter_images_enabled))
+    }
+
+    pub fn intro_detection_feature_mode(&self) -> FeatureMode {
+        self.intro_detection_mode
+            .unwrap_or_else(|| FeatureMode::from_legacy(self.intro_detection_enabled))
+    }
+
+    /// Writes the effective values every consumer reads (`trickplay_enabled`, the preview
+    /// profile, `chapter_images_enabled`, `intro_detection_enabled`, `marker_min_confidence`)
+    /// from each feature's mode and the server-wide defaults. Call it whenever the options or
+    /// the server-wide settings change. A library whose mode was never chosen starts on
+    /// `disabled` when it is a music library: it has no video to preview or analyse.
+    pub fn resolve(&mut self, global: &GlobalMediaDefaults, library_kind: &str) {
+        let music = library_kind.eq_ignore_ascii_case("music");
+        // Options saved before the modes existed: an enabled library that kept its own
+        // preview profile or confidence floor must not lose them to the server's, so it
+        // becomes `enabled` (own values); one that matches the server or the shipped
+        // defaults follows the server.
+        let profile = |auto, interval, width, quality, columns, rows| {
+            (auto, interval, width, quality, columns, rows)
+        };
+        let own_profile = profile(
+            self.trickplay_during_scan,
+            self.trickplay_interval_seconds,
+            self.trickplay_width,
+            self.trickplay_quality,
+            self.trickplay_columns,
+            self.trickplay_rows,
+        );
+        let follows_profile = own_profile
+            == profile(
+                global.trickplay_auto_generate,
+                global.trickplay_interval_seconds,
+                global.trickplay_width,
+                global.trickplay_quality,
+                global.trickplay_columns,
+                global.trickplay_rows,
+            )
+            || own_profile == profile(true, 10, 320, 7, 10, 10);
+        let follows_confidence = self.marker_min_confidence == global.marker_min_confidence
+            || self.marker_min_confidence == 80;
+        let initial = |mode: Option<FeatureMode>, enabled: bool, follows: bool| match mode {
+            Some(mode) => mode,
+            None if music => FeatureMode::Disabled,
+            None if enabled && !follows => FeatureMode::Enabled,
+            None => FeatureMode::from_legacy(enabled),
+        };
+        let trickplay = initial(self.trickplay_mode, self.trickplay_enabled, follows_profile);
+        let chapters = initial(self.chapter_images_mode, self.chapter_images_enabled, true);
+        let intros = initial(
+            self.intro_detection_mode,
+            self.intro_detection_enabled,
+            follows_confidence,
+        );
+        self.trickplay_mode = Some(trickplay);
+        self.chapter_images_mode = Some(chapters);
+        self.intro_detection_mode = Some(intros);
+        self.trickplay_enabled = trickplay.resolve(global.trickplay_enabled);
+        self.chapter_images_enabled = chapters.resolve(global.chapter_images_enabled);
+        self.intro_detection_enabled = intros.resolve(global.intro_detection_enabled);
+        // The preview profile and the confidence floor follow the server only while the
+        // library follows it; an explicit choice keeps the library's own values.
+        if trickplay == FeatureMode::Inherit {
+            self.trickplay_during_scan = global.trickplay_auto_generate;
+            self.trickplay_interval_seconds = global.trickplay_interval_seconds;
+            self.trickplay_width = global.trickplay_width;
+            self.trickplay_quality = global.trickplay_quality;
+            self.trickplay_columns = global.trickplay_columns;
+            self.trickplay_rows = global.trickplay_rows;
+        }
+        if intros == FeatureMode::Inherit {
+            self.marker_min_confidence = global.marker_min_confidence;
+        }
     }
 
     /// Default primary metadata provider for a library or work kind:
@@ -431,10 +587,113 @@ mod tests {
     }
 
     #[test]
+    fn inherit_follows_the_server_while_explicit_modes_do_not() {
+        let global = GlobalMediaDefaults {
+            trickplay_enabled: false,
+            trickplay_width: 480,
+            chapter_images_enabled: false,
+            intro_detection_enabled: false,
+            marker_min_confidence: 90,
+            ..Default::default()
+        };
+        let mut inherit = LibraryOptions {
+            trickplay_mode: Some(FeatureMode::Inherit),
+            chapter_images_mode: Some(FeatureMode::Inherit),
+            intro_detection_mode: Some(FeatureMode::Inherit),
+            ..Default::default()
+        };
+        inherit.resolve(&global, "films");
+        assert!(!inherit.trickplay_enabled && !inherit.chapter_images_enabled);
+        assert!(!inherit.intro_detection_enabled);
+        assert_eq!(inherit.trickplay_width, 480);
+        assert_eq!(inherit.marker_min_confidence, 90);
+
+        let mut forced = LibraryOptions {
+            trickplay_mode: Some(FeatureMode::Enabled),
+            chapter_images_mode: Some(FeatureMode::Enabled),
+            intro_detection_mode: Some(FeatureMode::Enabled),
+            trickplay_width: 640,
+            marker_min_confidence: 70,
+            ..Default::default()
+        };
+        forced.resolve(&global, "series");
+        assert!(forced.trickplay_enabled && forced.chapter_images_enabled);
+        assert!(forced.intro_detection_enabled);
+        assert_eq!(
+            (forced.trickplay_width, forced.marker_min_confidence),
+            (640, 70)
+        );
+
+        let mut off = LibraryOptions {
+            trickplay_mode: Some(FeatureMode::Disabled),
+            ..Default::default()
+        };
+        off.resolve(&GlobalMediaDefaults::default(), "films");
+        assert!(!off.trickplay_enabled);
+        assert!(off.validate());
+    }
+
+    #[test]
+    fn legacy_booleans_become_modes_without_losing_opt_outs_or_custom_values() {
+        let global = GlobalMediaDefaults::default();
+        let mut opt_out: LibraryOptions =
+            serde_json::from_str(r#"{"trickplayEnabled":false,"introDetectionEnabled":false}"#)
+                .unwrap();
+        assert_eq!(opt_out.trickplay_feature_mode(), FeatureMode::Disabled);
+        opt_out.resolve(&global, "films");
+        assert_eq!(opt_out.trickplay_mode, Some(FeatureMode::Disabled));
+        assert!(!opt_out.trickplay_enabled && !opt_out.intro_detection_enabled);
+
+        let mut stored: LibraryOptions =
+            serde_json::from_str(&serde_json::to_string(&LibraryOptions::default()).unwrap())
+                .unwrap();
+        assert_eq!(stored.trickplay_feature_mode(), FeatureMode::Inherit);
+        stored.resolve(&global, "films");
+        assert_eq!(stored.trickplay_mode, Some(FeatureMode::Inherit));
+
+        let mut custom: LibraryOptions =
+            serde_json::from_str(r#"{"trickplayWidth":640,"markerMinConfidence":95}"#).unwrap();
+        custom.resolve(&global, "films");
+        assert_eq!(custom.trickplay_mode, Some(FeatureMode::Enabled));
+        assert_eq!(custom.intro_detection_mode, Some(FeatureMode::Enabled));
+        assert_eq!(
+            (custom.trickplay_width, custom.marker_min_confidence),
+            (640, 95)
+        );
+        // Resolving twice changes nothing.
+        let once = serde_json::to_value(&custom).unwrap();
+        custom.resolve(&global, "films");
+        assert_eq!(serde_json::to_value(&custom).unwrap(), once);
+    }
+
+    #[test]
+    fn music_libraries_start_without_video_features_unless_chosen() {
+        let global = GlobalMediaDefaults::default();
+        let mut fresh = LibraryOptions::default();
+        fresh.resolve(&global, "music");
+        assert!(
+            !fresh.trickplay_enabled
+                && !fresh.chapter_images_enabled
+                && !fresh.intro_detection_enabled
+        );
+        assert_eq!(fresh.intro_detection_mode, Some(FeatureMode::Disabled));
+        let mut chosen = LibraryOptions {
+            intro_detection_mode: Some(FeatureMode::Enabled),
+            ..Default::default()
+        };
+        chosen.resolve(&global, "music");
+        assert!(chosen.intro_detection_enabled);
+        assert_eq!(
+            serde_json::to_value(FeatureMode::Inherit).unwrap(),
+            serde_json::json!("inherit")
+        );
+    }
+
+    #[test]
     fn artwork_policy_defaults_and_bounds_are_stable() {
         let defaults: LibraryOptions = serde_json::from_str("{}").unwrap();
         assert!(defaults.artwork_deduplicate);
-        assert!(!defaults.artwork_pool_enabled);
+        assert!(defaults.artwork_pool_enabled);
         assert_eq!(defaults.artwork_similarity, 5);
         assert_eq!(
             (

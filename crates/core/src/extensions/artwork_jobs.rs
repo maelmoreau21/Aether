@@ -21,6 +21,10 @@ pub(super) struct Input {
     /// kind) or `pool` (multi-image mode). Manual jobs leave it empty.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     auto: Option<String>,
+    /// Automatic pass started by an administrator from the task scheduler: every work
+    /// not handled since this instant is asked again, instead of once a month.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    since: Option<i64>,
 }
 /// A work handled by an automatic pass is asked again after this delay at most, so
 /// images published later by the providers are still picked up.
@@ -41,7 +45,9 @@ async fn next_auto_work(
     auth: &AuthState,
     job: &Job,
     mode: &str,
+    since: Option<i64>,
 ) -> Result<(Option<String>, String), Error> {
+    let handled_after = since.unwrap_or_else(|| now() - AUTO_RETRY_AFTER);
     let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(&job.library_id)
         .fetch_one(auth.store.pool())
@@ -52,7 +58,7 @@ async fn next_auto_work(
     let mut cursor = job.cursor_work.clone();
     for _ in 0..50 {
         let next: Option<String> = query_scalar("SELECT w.id FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) ORDER BY w.id LIMIT 1")
-            .bind(&job.library_id).bind(&job.library_id).bind(&cursor).bind(mode).bind(now() - AUTO_RETRY_AFTER)
+            .bind(&job.library_id).bind(&job.library_id).bind(&cursor).bind(mode).bind(handled_after)
             .fetch_optional(auth.store.pool()).await.map_err(db)?;
         let Some(work) = next else {
             return Ok((None, cursor));
@@ -106,11 +112,7 @@ pub(crate) async fn ensure_automatic(auth: &AuthState, force: bool) -> Result<()
         if !IMAGE_KINDS.iter().any(|kind| options.image_enabled(kind)) {
             continue;
         }
-        let mode = if options.artwork_pool_enabled {
-            "pool"
-        } else {
-            "single"
-        };
+        let mode = library_mode(&options);
         let pending: i64 = query_scalar("SELECT COUNT(*) FROM (SELECT 1 FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) LIMIT 1) pending")
             .bind(&library).bind(&library).bind(mode).bind(now() - AUTO_RETRY_AFTER)
             .fetch_one(auth.store.pool()).await.map_err(db)?;
@@ -130,6 +132,7 @@ pub(crate) async fn ensure_automatic(auth: &AuthState, force: bool) -> Result<()
             max_images: usize::from(options.artwork_max_images).clamp(1, 12),
             max_works: 100_000,
             auto: Some(mode.into()),
+            since: None,
         };
         let parameters = serde_json::to_string(&parameters)
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_parameters"))?;
@@ -141,6 +144,65 @@ pub(crate) async fn ensure_automatic(auth: &AuthState, force: bool) -> Result<()
     }
     query("DELETE FROM artwork_collection_jobs WHERE status IN ('completed','cancelled') AND id NOT IN (SELECT id FROM artwork_collection_jobs ORDER BY created_at DESC,id DESC LIMIT 1000)").execute(auth.store.pool()).await.map_err(db)?;
     Ok(())
+}
+/// Image mode of a library: `pool` (several images per kind) or `single`.
+fn library_mode(options: &crate::library_options::LibraryOptions) -> &'static str {
+    if options.artwork_pool_enabled {
+        "pool"
+    } else {
+        "single"
+    }
+}
+/// Queue, on an administrator's request, an automatic image pass over every identified
+/// work of a library: the library's mode (pool or one image per kind), languages and
+/// limits apply, and works handled earlier are asked again. `false` when a pass of
+/// this library is already queued or running.
+pub(crate) async fn queue_library_pass(
+    auth: &AuthState,
+    library: &str,
+    owner: &str,
+) -> Result<bool, Error> {
+    let options: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
+        .bind(library)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let options = crate::library_options::LibraryOptions::from_json(&options);
+    let parameters = Input {
+        library_id: library.to_owned(),
+        after: None,
+        languages: if options.artwork_languages.is_empty() {
+            vec!["fr".into(), "en".into()]
+        } else {
+            options.artwork_languages.clone()
+        },
+        include_neutral: options.artwork_include_neutral,
+        max_images: usize::from(options.artwork_max_images).clamp(1, 12),
+        max_works: 100_000,
+        auto: Some(library_mode(&options).into()),
+        since: Some(now()),
+    };
+    let parameters = serde_json::to_string(&parameters)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_parameters"))?;
+    let mut conn = auth.store.pool().acquire().await.map_err(db)?;
+    let mut tx = crate::database::begin_write_serialized(&mut conn, 0x4152544a4f42)
+        .await
+        .map_err(db)?;
+    let active: i64 = query_scalar("SELECT COUNT(*) FROM artwork_collection_jobs WHERE library_id=? AND status IN ('queued','running','paused')")
+        .bind(library).fetch_one(&mut *tx).await.map_err(db)?;
+    if active > 0 {
+        return Ok(false);
+    }
+    query("INSERT INTO artwork_collection_jobs(id,library_id,owner,parameters,cursor_work,created_at,updated_at) VALUES(?,?,?,?,'',?,?)")
+        .bind(uuid::Uuid::new_v4().to_string()).bind(library).bind(owner).bind(parameters).bind(now()).bind(now())
+        .execute(&mut *tx).await.map_err(db)?;
+    tx.commit().await.map_err(db)?;
+    Ok(true)
+}
+/// Stop the active image pass of a library. `false` when none is active.
+pub(crate) async fn cancel_library_pass(auth: &AuthState, library: &str) -> Result<bool, Error> {
+    Ok(query("UPDATE artwork_collection_jobs SET status='cancelled',lease_token='',lease_until=0,next_run_at=0,updated_at=? WHERE library_id=? AND status IN ('queued','running','paused')")
+        .bind(now()).bind(library).execute(auth.store.pool()).await.map_err(db)?.rows_affected() > 0)
 }
 fn default_work_limit() -> i64 {
     1000
@@ -305,7 +367,7 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_collection_parameters"))?;
     let auto = parameters.auto.clone();
     let (work, cursor) = if let Some(mode) = auto.as_deref() {
-        next_auto_work(auth, &job, mode).await?
+        next_auto_work(auth, &job, mode, parameters.since).await?
     } else {
         let work: Option<String> = query_scalar("SELECT id FROM inventory_works WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND id>? ORDER BY id LIMIT 1")
             .bind(&job.library_id).bind(&job.library_id).bind(&job.cursor_work).fetch_optional(auth.store.pool()).await.map_err(db)?;

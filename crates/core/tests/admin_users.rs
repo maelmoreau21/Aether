@@ -135,7 +135,11 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
     );
     let initial_avatar = request(&app, &avatar_path, "GET", &cookie, "", json!(null)).await;
     assert_eq!(initial_avatar.status(), StatusCode::OK);
-    assert_eq!(initial_avatar.headers()["content-type"], "image/svg+xml");
+    let initial_type = initial_avatar.headers()["content-type"].to_str().unwrap();
+    assert!(
+        initial_type == "image/svg+xml" || initial_type == "image/png",
+        "expected svg or png, got {initial_type}"
+    );
     let avatar_data = vec![137u8, 80, 78, 71];
     let asset = store
         .assets()

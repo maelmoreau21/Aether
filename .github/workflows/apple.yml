@@ -1,0 +1,105 @@
+name: Apple
+
+# Builds the iPhone/iPad and Apple TV apps without signing: the Rust core as an
+# XCFramework, its Swift bindings, the Xcode project (XcodeGen), then xcodebuild
+# for devices and simulators. Signing and distribution stay manual.
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'apps/apple/**'
+      - 'crates/client/**'
+      - 'crates/client-ffi/**'
+      - 'Cargo.lock'
+      - '.github/workflows/apple.yml'
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'apps/apple/**'
+      - 'crates/client/**'
+      - 'crates/client-ffi/**'
+      - 'Cargo.lock'
+      - '.github/workflows/apple.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: apple-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: iOS, iPadOS et tvOS (sans signature)
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      - name: Installer la toolchain Rust et les cibles Apple
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios, aarch64-apple-ios-sim, aarch64-apple-tvos, aarch64-apple-tvos-sim
+
+      - name: Cache des dépendances Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: apple
+
+      - name: Versions de Xcode et SDK disponibles
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Construire le XCFramework Rust et les liaisons Swift
+        run: sh apps/apple/scripts/build-xcframework.sh
+
+      - name: Générer le projet Xcode (XcodeGen)
+        run: |
+          brew install xcodegen
+          cd apps/apple && xcodegen generate
+
+      - name: Compiler l'app iPhone et iPad (appareil)
+        run: >
+          xcodebuild build -project apps/apple/Aether.xcodeproj -scheme Aether
+          -configuration Release -destination 'generic/platform=iOS'
+          -derivedDataPath build/apple CODE_SIGNING_ALLOWED=NO
+
+      - name: Compiler l'app iPhone et iPad (simulateur)
+        run: >
+          xcodebuild build -project apps/apple/Aether.xcodeproj -scheme Aether
+          -configuration Debug -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath build/apple CODE_SIGNING_ALLOWED=NO
+
+      - name: Compiler l'app Apple TV (appareil)
+        run: >
+          xcodebuild build -project apps/apple/Aether.xcodeproj -scheme AetherTV
+          -configuration Release -destination 'generic/platform=tvOS'
+          -derivedDataPath build/apple CODE_SIGNING_ALLOWED=NO
+
+      - name: Compiler l'app Apple TV (simulateur)
+        run: >
+          xcodebuild build -project apps/apple/Aether.xcodeproj -scheme AetherTV
+          -configuration Debug -destination 'generic/platform=tvOS Simulator'
+          -derivedDataPath build/apple CODE_SIGNING_ALLOWED=NO
+
+      - name: Archiver les apps non signées
+        run: |
+          mkdir -p dist
+          for app in build/apple/Build/Products/Release-iphoneos/Aether.app build/apple/Build/Products/Release-appletvos/Aether.app; do
+            platform=$(basename "$(dirname "$app")")
+            ditto -c -k --keepParent "$app" "dist/Aether-$platform-unsigned.zip"
+          done
+          ls -l dist
+
+      - name: Publier les apps non signées
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-apple-unsigned
+          path: dist/*.zip
+          retention-days: 14

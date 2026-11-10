@@ -66,6 +66,31 @@ pub(super) fn csrf(raw: &str) -> String {
 pub(super) fn constant_equal(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |d, (a, b)| d | (a ^ b)) == 0
 }
+/// How a sign-in hands its session back: a browser cookie (default) or, for
+/// native applications, a token in the JSON body sent later as `Authorization: Bearer`.
+#[derive(Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum TokenType {
+    #[default]
+    Cookie,
+    Bearer,
+}
+/// A single `Authorization: Bearer <session token>` header. Anything else (another
+/// scheme, a reverse proxy's JWT, repeated headers) is ignored rather than rejected,
+/// so it can never break cookie authentication behind such a proxy.
+pub(super) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let mut values = headers.get_all(header::AUTHORIZATION).iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    let (scheme, token) = value.to_str().ok()?.split_once(' ')?;
+    let token = token.trim();
+    (scheme.eq_ignore_ascii_case("bearer")
+        && token.len() == 64
+        && token.bytes().all(|b| b.is_ascii_hexdigit()))
+    .then_some(token)
+}
 pub(super) fn session_token(headers: &HeaderMap) -> Option<&str> {
     let mut found = None;
     for value in headers.get_all(header::COOKIE) {

@@ -15,11 +15,20 @@
   let { work, duration, children, facts }: { work: Work; duration?: number; children: Snippet; facts?: Snippet } = $props();
   const artwork = $derived(selectArtwork(work, $session));
   // backdrop.jpg est l'image de fond ; landscape.jpg un repli large.
-  const wideArtwork = $derived(artwork.backdrop || artwork.landscape || artwork.poster);
   // Sans image large, l'affiche floutée sert de fond d'ambiance (jamais rognée en net).
   const ambient = $derived(!artwork.backdrop && !artwork.landscape && Boolean(artwork.poster));
-  const previewBackdrop = $derived(imagePreviewUrl(wideArtwork, 1280));
-  const backdrop = $derived([previewBackdrop, wideArtwork ?? ''].find(url => url && !failedBackdrops.includes(url)) ?? '');
+  // Pleine résolution pour le vrai backdrop en priorité, avec repli vers l'aperçu 1280px ou l'affiche.
+  const backdropCandidates = $derived(
+    ambient
+      ? [imagePreviewUrl(artwork.poster, 1280), artwork.poster ?? ''].filter(Boolean)
+      : [
+          artwork.backdrop,
+          artwork.landscape,
+          imagePreviewUrl(artwork.backdrop || artwork.landscape, 1280),
+          artwork.poster ? imagePreviewUrl(artwork.poster, 1280) : ''
+        ].filter(Boolean) as string[]
+  );
+  const backdrop = $derived(backdropCandidates.find(url => url && !failedBackdrops.includes(url)) ?? '');
   const logo = $derived(imagePreviewUrl(artwork.logo, 640));
   const clearart = $derived(imagePreviewUrl(artwork.illustration, 640));
   let failedBackdrops = $state<string[]>([]);

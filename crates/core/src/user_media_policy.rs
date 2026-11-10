@@ -75,7 +75,15 @@ pub fn router(auth: AuthState) -> Router {
         .layer(DefaultBodyLimit::max(4096))
         .with_state(auth)
 }
+/// Downloads need both the server switch and the user's own permission.
 pub async fn can_download(store: &IdentityStore, user: &str) -> Result<bool, StatusCode> {
+    if !crate::server_settings::load(store).await?.downloads_enabled {
+        return Ok(false);
+    }
+    user_flag(store, user).await
+}
+/// The user's own permission, as the administrator edits it.
+async fn user_flag(store: &IdentityStore, user: &str) -> Result<bool, StatusCode> {
     let flag: Option<i64> =
         query_scalar("SELECT allow_media_download FROM user_media_policies WHERE user_id=?")
             .bind(user)
@@ -131,7 +139,7 @@ async fn read(
     admin(&auth, &headers, false).await?;
     exists(&auth.store, &id).await?;
     Ok(Json(Policy {
-        allow_media_download: can_download(&auth.store, &id).await?,
+        allow_media_download: user_flag(&auth.store, &id).await?,
         allowed_kinds: Some(own_kinds(&auth.store, &id).await?),
         effective_kinds: Some(effective_kinds(&auth.store, &id).await?),
     }))

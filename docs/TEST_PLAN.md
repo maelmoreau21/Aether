@@ -603,7 +603,7 @@ Aucun NAS ni ingestion/scanner ; pas de nouvelle preuve audio/codec.
   scan initial puis0 probe/2 réutilisés, une carte/deux versions, lecture MP4,
   pause/seek4s et vrai redémarrage du binaire même base. Chrome155 Windows headless.
   Preuves [rapport initial](evidence/2026-10-16/scanner/report.json) et
-  [après redémarrage](evidence/2026-10-16/scanner/report-restart.json).
+  [après redémarrage](evidence/2026-10-16/scanner/report-restart.json) (fichiers régénérés par le CI, artefact `browser-evidence-films-series`, non suivis par Git).
 - `cargo test --locked --test browser_auth -- --ignored --nocapture` :1/1 réussi,
   non-régression session/administration/lecteur aux largeurs390/1440, aucun JS/CSP.
 - scanner_flow : MKV AV1 10bits/Opus FR5.1+EN2/sous-titres internes, MP4 AV1/Opus,

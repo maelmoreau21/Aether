@@ -4,6 +4,7 @@
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login, bootstrapAdmin } from '../../lib/auth/session';
+  import { PROFILES_AFTER_LOGIN } from '../../lib/auth/profiles';
   import Icon from '../../lib/ui/Icon.svelte';
   import QuickConnect from '../../lib/auth/QuickConnect.svelte';
   import { t } from '../../lib/i18n';
@@ -96,7 +97,9 @@
     try {
       await login(identifier, password);
       password = '';
-      await goto(resolve('/'), { replaceState: true });
+      // "Who's watching?" forwards straight to the catalogue when the account has a single profile.
+      sessionStorage.setItem(PROFILES_AFTER_LOGIN, '1');
+      await goto(resolve('profiles/'), { replaceState: true });
     } catch (failure) {
       error = failure instanceof Error ? failure.message : $t('sign_in_is_unavailable_try_again');
     } finally {

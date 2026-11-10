@@ -16,12 +16,13 @@
   const gridClass = $derived(layout ? `rows-${layout.grids.desktop.featureRows} cols-${layout.grids.desktop.columns} tablet-cols-${layout.grids.tablet.columns} phone-cols-${layout.grids.phone.columns}` : '');
   let failedImages = $state<string[]>([]);
 
-  // Vedette 16:9 : landscape.jpg puis backdrop ; affiches 2:3 : l'affiche. Un repli d'un autre
+  // Vedette 16:9 : landscape.jpg puis backdrop (pleine résolution si disponible) ; affiches 2:3 : l'affiche. Un repli d'un autre
   // format est affiché sans recadrage abusif par fitArtwork (image entière sur fond flouté).
   function tileImage(work: Work, feature: boolean): string {
     const artwork = selectArtwork(work, $session);
+    const wide = artwork.landscape || artwork.backdrop;
     return feature
-      ? imagePreviewUrl(artwork.landscape || artwork.backdrop || artwork.poster, 1280)
+      ? (wide || imagePreviewUrl(artwork.poster, 1280))
       : imagePreviewUrl(artwork.poster || artwork.landscape || artwork.backdrop, 640);
   }
 </script>

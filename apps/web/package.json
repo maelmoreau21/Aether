@@ -10,24 +10,25 @@
     "test": "vitest run",
     "i18n:check": "vitest run src/lib/i18n",
     "i18n:baseline": "node scripts/i18n/baseline.mjs",
-    "test:i18n-ui": "node scripts/test-i18n-ui.mjs"
+    "test:i18n-ui": "node scripts/test-i18n-ui.mjs",
+    "test:tv-ui": "node scripts/test-tv-ui.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^4.0.1",
     "@sveltejs/kit": "^3.1.1",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "eslint": "^10.14.0",
-    "eslint-plugin-svelte": "^3.23.1",
-    "playwright": "^1.64.1",
+    "eslint-plugin-svelte": "^3.24.1",
+    "playwright": "^1.65.0",
     "svelte": "^5.57.3",
     "svelte-check": "^4.7.8",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.72.1",
-    "vite": "8.3.5",
-    "vitest": "^5.0.5"
+    "vite": "8.3.6",
+    "vitest": "^5.1.0"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",
-    "jassub": "2.5.23"
+    "jassub": "2.5.37"
   }
 }

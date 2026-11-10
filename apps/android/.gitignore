@@ -1,0 +1,10 @@
+.gradle/
+build/
+app/build/
+local.properties
+# Release signing secrets stay on the build machine.
+keystore.properties
+*.jks
+*.keystore
+# Built by scripts/build.sh from crates/client-ffi.
+app/src/main/jniLibs/

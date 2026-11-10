@@ -1,5 +1,39 @@
 > Le moteur persistant décrit dans [DISTRIBUTED_TASKS.md](DISTRIBUTED_TASKS.md) remplace le dispatch globalement sériel historique : leases par Node, reprises bornées, priorités, états persistants et suivi collectif des dossiers. Les routes des plans ci-dessous sont conservées.
 
+# Étapes médias de chaque bibliothèque — 9 novembre 2026
+
+Sous l'analyse de chaque bibliothèque de films ou de séries, le planificateur affiche trois
+sous-tâches (`library_media_tasks.rs`), chacune liée à son propre réglage de bibliothèque :
+
+| Identifiant | Travail | Réglage qui la coupe |
+|---|---|---|
+| `trickplay-<bibliothèque>` | vignettes de la barre de lecture et images de chapitres (`durable_tasks`, catégorie `trickplay`) | aperçus **et** images de chapitres désactivés |
+| `intros-<bibliothèque>` | chapitres, empreintes audio, mesure de la fin des films, extension de marqueurs | détection des intros désactivée, ou aucune extension `playback.markers` activée |
+| `artwork-<bibliothèque>` | images des œuvres identifiées (une par type, ou réserve multi-image) | aucun type d'image activé |
+
+- Chacune se lance seule comme avant (aperçus à la publication du scan, intros à la lecture des
+  chapitres, images après l'identification) ; « Lancer » la relance à la main sur toute la
+  bibliothèque, « Arrêter » annule ses travaux en attente. Elles n'ont pas de déclencheur propre
+  (`trigger_unsupported`) : on programme l'analyse de la bibliothèque. `afterScan` dit si l'étape
+  suit vraiment chaque analyse : les aperçus n'y sont préparés que si « pendant l'analyse » est
+  coché pour les vignettes ou les images de chapitres ; sinon l'étape s'affiche « Manuelle ».
+- Une analyse ne date une nouvelle exécution des aperçus que si aucune n'était en cours **avant**
+  qu'elle mette ses propres travaux en file (y compris ceux qu'un « Tout réanalyser » réarme).
+- La liste montre l'état, l'avancement et les compteurs de l'exécution en cours ou de la
+  dernière (`stats` : terminés, en échec, en attente ; œuvres et images pour les images) et
+  les dernières erreurs. `library_media_task_runs` date l'exécution suivie.
+- Un lancement manuel des aperçus utilise les propriétaires `library-*-manual` : il prépare les
+  aperçus même quand la bibliothèque ne les prépare pas pendant les scans, jamais quand ils sont
+  désactivés. Le Node garde un aperçu encore en cache et recrée celui qui manque.
+- **« Tout réanalyser »** (mode `full`) remet aussi en file les aperçus déjà terminés : avant,
+  un aperçu supprimé du cache n'était jamais recréé, la tâche terminée gardant sa clé.
+- Un lancement manuel des images redemande toutes les œuvres, sans attendre le délai de 30 jours
+  des passes automatiques. La réserve multi-image est désormais **activée par défaut** pour les
+  bibliothèques dont le réglage n'a jamais été enregistré.
+
+Tests : `trickplay::background_tests` (réarmement en mode `full`, lancement et vue des
+sous-tâches), `library_media_tasks::tests`, `apps/web/src/lib/admin/task-schedule.test.ts`.
+
 # Planificateur de tâches — refonte du 8 novembre 2026
 
 **Une seule source de vérité.** Les déclencheurs (`task_triggers` : quotidien, hebdomadaire,

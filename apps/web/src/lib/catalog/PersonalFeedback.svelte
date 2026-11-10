@@ -84,16 +84,6 @@
         </span>
       {/each}
     </div>
-    <!-- The compact pill keeps the value's room even with no rating: rating or previewing a
-         star never changes its width, so the actions around it never reflow under the pointer
-         (in a bottom-aligned hero, a reflow would move the stars away from it). -->
-    {#if shownRating}
-      <span class="rating-value">{$fmt.number(shownRating)}</span>
-    {:else if compact}
-      <span class="rating-value" aria-hidden="true"></span>
-    {:else}
-      <span class="rating-placeholder">{$t('rate')}</span>
-    {/if}
   </div>
   {#if error}<span class="feedback-error" role="alert">{error}</span>{/if}
 </div>
@@ -178,15 +168,12 @@
   }
 
   .personal-feedback.compact { gap: 10px; flex-wrap: nowrap; }
-  .personal-feedback.compact .rating-pill { padding: 0 12px 0 8px; }
-  .personal-feedback.compact .star { width: 22px; font-size: 19px; }
 
   .rating-pill {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
     min-height: 44px;
-    padding: 0 14px 0 8px;
+    padding: 0 12px;
     border-radius: 14px;
     background: var(--pn);
   }
@@ -199,9 +186,9 @@
   .star {
     position: relative;
     display: flex;
-    width: 26px;
+    width: 28px;
     height: 40px;
-    font-size: 21px;
+    font-size: 25px;
     line-height: 40px;
   }
 
@@ -240,20 +227,6 @@
   }
 
   .rating-pill.rated { background: var(--ac-soft); }
-
-  .rating-value {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--tx);
-    font-variant-numeric: tabular-nums;
-    min-width: 32px;
-  }
-
-  .rating-placeholder {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--mu);
-  }
 
   .feedback-error {
     flex-basis: 100%;

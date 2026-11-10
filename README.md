@@ -30,7 +30,7 @@
 
 Aether vise à offrir une expérience de médiathèque moderne sans dépendre d'un service de streaming propriétaire. Les fichiers restent **sur vos disques**, et l'application ne modifie pas vos bibliothèques : les volumes médias sont montés en **lecture seule**.
 
-Le projet privilégie la **lecture directe** et évite d'imposer un transcodage vidéo côté serveur. Il peut cohabiter avec une installation Jellyfin existante, sans être un fork ni nécessiter Jellyfin pour fonctionner.
+Le projet privilégie la **lecture directe** et n'impose aucun transcodage vidéo ; un transcodage de secours optionnel (H.264/AAC, accélération NVENC/VAAPI, conversion HDR → SDR) prend le relais quand un navigateur ne décode pas un fichier ou pour une qualité réduite à distance. Il peut cohabiter avec une installation Jellyfin existante, sans être un fork ni nécessiter Jellyfin pour fonctionner.
 
 ## Fonctionnalités
 
@@ -46,7 +46,7 @@ Le projet privilégie la **lecture directe** et évite d'imposer un transcodage 
 | **Sauvegardes** | Sauvegardes administratives planifiables sans chiffrement, restauration hors ligne |
 | **Distribution** | Mode autonome ou Core central avec un ou plusieurs Media Nodes |
 
-**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Aucun transcodage vidéo universel n'est proposé comme solution de repli.
+**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Le transcodage de secours se relance à chaque changement de position ou de qualité : ce n'est pas un streaming HLS/DASH segmenté multi-débit.
 
 ## Technologies
 

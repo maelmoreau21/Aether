@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { get } from 'svelte/store';
 import { t } from '../i18n';
-import { agoLabel, categoryOrder, clockLabel, durationLabel, lastRunSummary, scheduleSummary, taskStatus, timeSlots, triggerLabel, triggerPayload, type TaskLastRun } from './task-schedule';
+import { agoLabel, categoryOrder, clockLabel, durationLabel, lastRunSummary, nestTasks, scheduleSummary, statsLabel, taskName, taskStatus, timeSlots, triggerLabel, triggerPayload, type TaskLastRun } from './task-schedule';
 
 const fr = get(t);
 
@@ -59,5 +59,25 @@ describe('scheduled task summaries', () => {
     expect(agoLabel(now - 3 * 86400, now, fr)).toBe('il y a 3 j');
     expect(categoryOrder('Bibliothèques')).toBeLessThan(categoryOrder('Maintenance'));
     expect(categoryOrder('Autre')).toBeGreaterThan(categoryOrder('Extensions'));
+  });
+});
+
+describe('library media sub-tasks', () => {
+  it('lists each sub-task under the scan of its library, or alone when filtered', () => {
+    const tasks = [
+      { id: 'scan-films', parentId: null }, { id: 'trickplay-films', parentId: 'scan-films' },
+      { id: 'intros-films', parentId: 'scan-films' }, { id: 'clean-cache', parentId: null }
+    ];
+    expect(nestTasks(tasks).map(row => [row.task.id, row.children.map(child => child.id)])).toEqual([
+      ['scan-films', ['trickplay-films', 'intros-films']], ['clean-cache', []]
+    ]);
+    expect(nestTasks(tasks.slice(1, 2)).map(row => row.task.id)).toEqual(['trickplay-films']);
+  });
+  it('names sub-tasks after their library and summarises their counts', () => {
+    expect(taskName({ kind: 'trickplay', name: 'server', libraryId: 'films' }, 'Films', fr)).toBe('Générer les aperçus de Films');
+    expect(taskName({ kind: 'intros', name: 'server', libraryId: 'films' }, 'Films', fr)).toBe('Détecter les intros et génériques de Films');
+    expect(statsLabel({ kind: 'trickplay', stats: { done: 12, failed: 1, pending: 3, images: null } }, fr)).toBe('12 terminé(s) · 1 en échec · 3 en attente');
+    expect(statsLabel({ kind: 'artwork', stats: { done: 4, failed: 0, pending: 0, images: 30 } }, fr)).toBe('4 œuvre(s) · 30 image(s)');
+    expect(statsLabel({ kind: 'trickplay', stats: null }, fr)).toBe('');
   });
 });

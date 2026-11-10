@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { adminRequest } from '../admin/request';
+  import TrickplayFrame from './TrickplayFrame.svelte';
   import { t } from '../i18n';
   import {
     clampBound, effectiveSegment, fitEnd, formatClock, parseClock, planCopies, segmentKinds, segmentProblem, snapTo, suggestedSegment,
@@ -9,11 +10,13 @@
 
   // Editor of one file's segments: a timeline with draggable bounds over the file's chapters,
   // precise fields with nudges, the chapters and detections to reuse, and the actions.
-  let { episode, siblings = [], film = false, onChanged }: {
+  let { episode, siblings = [], film = false, playerPosition = null, onChanged }: {
     episode: SegmentEpisode;
     /** Other episodes of the season, to copy a correction to. */
     siblings?: SegmentEpisode[];
     film?: boolean;
+    /** Where a player showing this file is now (s): enables « position du lecteur ». */
+    playerPosition?: number | null;
     onChanged: () => Promise<void>;
   } = $props();
 
@@ -27,9 +30,16 @@
   let frozenView = $state<{ from: number; to: number } | null>(null);
 
   const kindLabel = (value: SegmentKind) => $t(`segment_kind_${value}`);
-  const start = $derived(parseClock(startText));
+  // A bound that landed on a chapter keeps the chapter's exact time (the field only shows
+  // tenths); it counts only while the field still shows what it was set to.
+  let exact = $state<{ start: number | null; end: number | null }>({ start: null, end: null });
+  const exactOf = (field: 'start' | 'end', text: string) => {
+    const value = exact[field];
+    return value !== null && text === formatClock(value, true) ? value : null;
+  };
+  const start = $derived(exactOf('start', startText) ?? parseClock(startText));
   // The end field shows tenths: one that reads back just past the end of the file is its end.
-  const end = $derived(fitEnd(parseClock(endText), episode.duration));
+  const end = $derived(exactOf('end', endText) ?? fitEnd(parseClock(endText), episode.duration));
   const duration = $derived(episode.duration ?? 0);
   // The server needs the file's length to check a correction: without it, nothing can be saved.
   const durationKnown = $derived(duration > 0);
@@ -74,6 +84,7 @@
     const source = suggestedSegment(episode, value);
     startText = filledStart = source ? formatClock(source.start, true) : '';
     endText = filledEnd = source ? formatClock(source.end, true) : '';
+    exact = { start: null, end: null };
     filledSignature = signature(value);
   }
   function selectKind(value: SegmentKind) {
@@ -90,14 +101,26 @@
     selectKind(segmentKinds[next]);
     (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
   }
-  const set = (field: 'start' | 'end', value: number) => {
+  const set = (field: 'start' | 'end', value: number, keepExact = false) => {
     const text = formatClock(Math.max(0, Math.min(duration || value, Math.round(value * 10) / 10)), true);
     if (field === 'start') startText = text; else endText = text;
+    exact[field] = keepExact ? value : null;
   };
   /** Moves a bound without letting it cross the other one. */
   const move = (field: 'start' | 'end', value: number) => set(field, clampBound(field, value, field === 'start' ? end : start));
+  /** Moves a bound, landing on a chapter (or the end of the file) within the snapping window. */
+  function snapMove(field: 'start' | 'end', value: number) {
+    const points = field === 'end' && duration ? [...chapterPoints, duration] : chapterPoints;
+    const target = snapTo(points, value, snapWindow());
+    const bound = clampBound(field, target, field === 'start' ? end : start);
+    set(field, bound, target !== value && bound === target);
+  }
   function nudge(field: 'start' | 'end', delta: number) {
     move(field, ((field === 'start' ? start : end) ?? 0) + delta);
+  }
+  /** Puts the bound at the player's position. */
+  function atPlayer(field: 'start' | 'end') {
+    if (playerPosition !== null) move(field, playerPosition);
   }
 
   // Timeline: a click places the nearer bound (or starts a segment), a drag moves a bound,
@@ -109,16 +132,17 @@
   }
   const snapWindow = () => span * 0.008;
   function trackDown(event: PointerEvent) {
-    if (busy || !duration || (event.target as HTMLElement).closest('.handle, .tick')) return;
-    const at = snapTo(chapterPoints, timeAt(event.clientX), snapWindow());
+    if (busy || !duration || (event.target as HTMLElement).closest('.handle, .tick, .band')) return;
+    const raw = timeAt(event.clientX);
+    const at = snapTo(chapterPoints, raw, snapWindow());
+    const onChapter = at !== raw;
     // No segment yet (or a crossed one typed in the fields): start a new one here.
     if (start === null || end === null || end <= start) {
-      set('start', Math.min(at, duration - 1));
+      set('start', Math.min(at, duration - 1), onChapter);
       set('end', Math.min(duration, at + (kind === 'credits' ? 120 : 90)));
       return;
     }
-    const field = Math.abs(at - start) <= Math.abs(at - end) ? 'start' : 'end';
-    move(field, at);
+    snapMove(Math.abs(at - start) <= Math.abs(at - end) ? 'start' : 'end', raw);
   }
   function handleDown(field: 'start' | 'end', event: PointerEvent) {
     if (busy) return;
@@ -127,13 +151,13 @@
     frozenView = { from: view.from, to: view.to };
     dragging = field;
   }
+  // The bound follows the pointer and lands on a chapter that is close (Alt held: no snapping,
+  // for a precise placement next to one).
   function handleMove(event: PointerEvent) {
-    if (dragging) move(dragging, timeAt(event.clientX));
+    if (!dragging) return;
+    if (event.altKey) move(dragging, timeAt(event.clientX)); else snapMove(dragging, timeAt(event.clientX));
   }
   function handleUp() {
-    if (!dragging) return;
-    const value = dragging === 'start' ? start : end;
-    if (value !== null) move(dragging, snapTo(chapterPoints, value, snapWindow()));
     dragging = null;
     frozenView = null;
   }
@@ -144,8 +168,25 @@
     else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') { event.preventDefault(); nudge(field, step); }
   }
   function chapterClick(at: number) {
-    if (start === null || end === null || at < start) set('start', at);
-    else set(Math.abs(at - start) < Math.abs(at - end) ? 'start' : 'end', at);
+    if (start === null || end === null || at < start) set('start', at, true);
+    else set(Math.abs(at - start) < Math.abs(at - end) ? 'start' : 'end', at, true);
+  }
+  /** A chapter runs to the next chapter, or to the end of the file for the last one. */
+  function chapterSpan(index: number): { start: number; end: number } | null {
+    const chapter = episode.chapters[index];
+    const next = episode.chapters[index + 1];
+    const stop = next ? next.start : episode.duration;
+    return chapter && stop !== null && stop !== undefined ? { start: chapter.start, end: stop } : null;
+  }
+  // One click: the segment takes the exact times of the chapter and is saved as a correction.
+  function useChapterAs(index: number, target: SegmentKind) {
+    const span = chapterSpan(index);
+    if (!span || busy || !durationKnown) return;
+    const to = fitEnd(span.end, episode.duration) ?? span.end;
+    const issue = segmentProblem(span.start, to, episode.duration, target);
+    if (issue) { actionError = $t(issue, { duration: formatClock(episode.duration) }); return; }
+    kind = target; applyAll = false; replaceManual = false;
+    void run(target, async () => { await send(episode.assetId, target, { enabled: true, start: span.start, end: to }); return $t('segment_from_chapter_saved', { kind: kindLabel(target) }); });
   }
 
   // Every action names its kind when it starts: the editor is locked while it runs, and the
@@ -203,10 +244,15 @@
       {@const shown = effectiveSegment(episode, value)}
       <button type="button" role="radio" aria-checked={kind === value} tabindex={kind === value ? 0 : -1} class="kind k-{value}" onclick={() => selectKind(value)} onkeydown={(event) => kindKey(event, index)}>
         {kindLabel(value)}
-        {#if shown.source === 'manual'}<span class="dot" title={$t('segment_manual_title')}>✎</span>{:else if shown.source === 'automatic'}<span class="dot" title={$t('segment_auto_title', { confidence: Math.round(shown.confidence * 100) })}>●</span>{:else if shown.source === 'disabled'}<span class="dot off">∅</span>{/if}
+        {#if shown.source === 'manual'}<span class="dot" title={$t('segment_locked_title')}>✎</span>{:else if shown.source === 'automatic'}<span class="dot" title={$t('segment_auto_title', { confidence: Math.round(shown.confidence * 100) })}>●</span>{:else if shown.source === 'disabled'}<span class="dot off">∅</span>{/if}
       </button>
     {/each}
   </div>
+
+  {#if episode.manual.some(item => item.type === kind)}
+    {@const own = episode.manual.find(item => item.type === kind)}
+    <p class="locked" role="status"><span class="badge">{$t('segment_locked')}</span>{own?.source === 'chapter' ? $t('segment_source_chapter') : $t('segment_source_manual')} · {$t('segment_locked_hint')}</p>
+  {/if}
 
   {#if duration}
     <div class="timeline-box">
@@ -219,7 +265,7 @@
         {#each segmentKinds as value (value)}
           {@const shown = effectiveSegment(episode, value)}
           {#if value !== kind && (shown.source === 'manual' || shown.source === 'automatic') && shown.end > view.from && shown.start < view.to}
-            <span class="ghost k-{value}" style:left={pos(shown.start)} style:width="calc({pos(shown.end)} - {pos(shown.start)})" title={kindLabel(value)}></span>
+            <button type="button" class="band k-{value}" class:locked-band={shown.source === 'manual'} style:left={pos(shown.start)} style:width="calc({pos(shown.end)} - {pos(shown.start)})" title="{kindLabel(value)} {formatClock(shown.start)}–{formatClock(shown.end)}" aria-label={$t('segment_select_kind', { kind: kindLabel(value) })} onclick={() => selectKind(value)}></button>
           {/if}
         {/each}
         {#each episode.chapters as chapter, index (index)}
@@ -254,34 +300,50 @@
       <div class="field">
         <label for="seg-{field}-{episode.assetId}">{field === 'start' ? $t('segment_start') : $t('segment_end')}</label>
         <div class="time">
-          <button type="button" class="nudge" aria-label={$t('segment_minus', { seconds: 5 })} onclick={() => nudge(field as 'start' | 'end', -5)}>−5</button>
-          <button type="button" class="nudge" aria-label={$t('segment_minus', { seconds: 1 })} onclick={() => nudge(field as 'start' | 'end', -1)}>−1</button>
+          <button type="button" class="nudge" aria-label={$t('segment_minus', { seconds: 1 })} onclick={() => nudge(field as 'start' | 'end', -1)}>−1 s</button>
+          <button type="button" class="nudge" aria-label={$t('segment_minus', { seconds: 0.1 })} onclick={() => nudge(field as 'start' | 'end', -0.1)}>−0.1</button>
           {#if field === 'start'}
             <input id="seg-start-{episode.assetId}" inputmode="decimal" placeholder="0:00" bind:value={startText} aria-invalid={start === null} />
           {:else}
             <input id="seg-end-{episode.assetId}" inputmode="decimal" placeholder="1:30" bind:value={endText} aria-invalid={end === null} />
           {/if}
-          <button type="button" class="nudge" aria-label={$t('segment_plus', { seconds: 1 })} onclick={() => nudge(field as 'start' | 'end', 1)}>+1</button>
-          <button type="button" class="nudge" aria-label={$t('segment_plus', { seconds: 5 })} onclick={() => nudge(field as 'start' | 'end', 5)}>+5</button>
+          <button type="button" class="nudge" aria-label={$t('segment_plus', { seconds: 0.1 })} onclick={() => nudge(field as 'start' | 'end', 0.1)}>+0.1</button>
+          <button type="button" class="nudge" aria-label={$t('segment_plus', { seconds: 1 })} onclick={() => nudge(field as 'start' | 'end', 1)}>+1 s</button>
+          {#if playerPosition !== null}
+            <button type="button" class="nudge wide" onclick={() => atPlayer(field as 'start' | 'end')}>{$t('segment_at_player')}</button>
+          {/if}
         </div>
       </div>
     {/each}
+    {#if duration}
+      <div class="previews" aria-label={$t('segment_previews')}>
+        <TrickplayFrame assetId={episode.assetId} time={start} {duration} label={$t('segment_start')} />
+        <TrickplayFrame assetId={episode.assetId} time={end} {duration} label={$t('segment_end')} />
+      </div>
+    {/if}
     <p class="hint">{$t(film ? 'segment_time_hint_film' : 'segment_time_hint', { duration: formatClock(episode.duration) })}{#if start !== null && end !== null && end > start} · {$t('segment_length', { length: formatClock(end - start, true) })}{/if}</p>
     {#if !durationKnown}<p class="banner err" role="alert">{$t('segment_duration_unknown')}</p>
     {:else if problem && startText && endText}<p class="banner err" role="alert">{$t(film && problem === 'segment_beyond_duration' ? 'segment_beyond_duration_film' : problem, { duration: formatClock(episode.duration) })}</p>{/if}
   </div>
 
   {#if episode.chapters.length}
-    <details class="chapters">
-      <summary>{$t('segment_chapters', { count: episode.chapters.length })}</summary>
+    <section class="chapters" aria-label={$t('segment_chapters', { count: episode.chapters.length })}>
+      <h4>{$t('segment_chapters', { count: episode.chapters.length })}</h4>
       <ul>
         {#each episode.chapters as chapter, index (index)}
-          <li><span>{formatClock(chapter.start)} · {chapter.title || '—'}</span>
-            <button type="button" class="link" onclick={() => set('start', chapter.start)}>{$t('segment_use_as_start')}</button>
-            <button type="button" class="link" onclick={() => set('end', chapter.start)}>{$t('segment_use_as_end')}</button></li>
+          {@const span = chapterSpan(index)}
+          <li>
+            <span class="chapter-name">{formatClock(chapter.start)}{#if span}–{formatClock(span.end)}{/if} · {chapter.title || '—'}</span>
+            <span class="chapter-actions">
+              <button type="button" class="link" disabled={!span} onclick={() => useChapterAs(index, 'intro')}>{$t('segment_use_chapter_as_intro')}</button>
+              <button type="button" class="link" disabled={!span} onclick={() => useChapterAs(index, 'credits')}>{$t('segment_use_chapter_as_credits')}</button>
+              <button type="button" class="link" onclick={() => set('start', chapter.start, true)}>{$t('segment_use_as_start')}</button>
+              <button type="button" class="link" onclick={() => set('end', chapter.start, true)}>{$t('segment_use_as_end')}</button>
+            </span>
+          </li>
         {/each}
       </ul>
-    </details>
+    </section>
   {:else}
     <p class="hint">{$t('segment_no_chapters')}</p>
   {/if}
@@ -326,7 +388,10 @@
   .timeline-box { display: flex; flex-direction: column; gap: 6px; }
   .timeline-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--mu); }
   .track { position: relative; height: 40px; border-radius: var(--r-sm); background: var(--pn-3); cursor: crosshair; touch-action: none; user-select: none; }
-  .ghost { position: absolute; top: 30px; bottom: 4px; border-radius: 2px; background: var(--seg); opacity: .55; pointer-events: none; }
+  /* Every active segment of the file is a coloured band: a click selects it for editing. */
+  .band { position: absolute; top: 26px; bottom: 3px; min-width: 4px; padding: 0; border: 0; border-radius: 3px; background: var(--seg); opacity: .7; cursor: pointer; }
+  .band:hover, .band:focus-visible { opacity: 1; outline: 2px solid var(--tx); outline-offset: 1px; }
+  .band.locked-band { box-shadow: inset 0 0 0 1px var(--tx); }
   .range { position: absolute; top: 6px; bottom: 14px; border-radius: 4px; background: color-mix(in srgb, var(--seg) 55%, transparent); outline: 1px solid var(--seg); pointer-events: none; }
   .tick { position: absolute; top: 0; bottom: 0; width: 10px; margin-left: -5px; padding: 0; border: 0; background: none; cursor: pointer; }
   .tick::after { content: ''; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: var(--mu); opacity: .7; }
@@ -337,7 +402,7 @@
   .handle::before { content: ''; position: absolute; top: -2px; bottom: -10px; left: -8px; right: -8px; }
   @media (pointer: coarse) {
     .track { height: 48px; }
-    .ghost { top: 38px; }
+    .band { top: 36px; }
     .range { bottom: 18px; }
     .handle { bottom: 14px; }
     .handle::before { bottom: -14px; }
@@ -352,7 +417,13 @@
   .time input[aria-invalid='true'] { border-color: var(--err); }
   .nudge { min-width: 36px; min-height: 40px; border: 0; border-radius: var(--r-sm); background: var(--pn-3); color: var(--tx); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
   .hint { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--mu); }
-  .chapters summary { cursor: pointer; font-size: 13px; font-weight: 700; color: var(--mu); }
+  .chapters h4 { margin: 0; font-size: 13px; font-weight: 700; color: var(--mu); }
+  .chapter-name { flex: 1 1 14ch; min-width: 0; overflow-wrap: anywhere; }
+  .chapter-actions { display: flex; flex-wrap: wrap; gap: 2px 6px; }
+  .previews { display: flex; flex-wrap: wrap; gap: 12px; flex-basis: 100%; }
+  .nudge.wide { padding: 0 10px; }
+  .locked { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 13px; color: var(--mu); }
+  .badge { padding: 2px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--seg) 22%, transparent); color: var(--tx); font-size: 12px; font-weight: 800; }
   .chapters ul, .detections { display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding: 0; list-style: none; font-size: 13px; }
   .chapters li, .detections li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .link { border: 0; background: none; color: var(--ac); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; padding: 4px; }

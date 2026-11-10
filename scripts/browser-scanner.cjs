@@ -67,9 +67,9 @@ fs.mkdirSync(out, {recursive: true});
       report.results.incremental = true;
     }
     await page.goto(origin+'/app/films/');
-    const card=page.locator('.media-card').filter({hasText:'Scanner Film'});
+    const card=page.getByRole('link',{name:'Voir Scanner Film',exact:true}); // the card's poster link; its title may be artwork only
     await card.waitFor();
-    assert.equal(await page.locator('.media-card').count(), 1);
+    assert.equal(await page.locator('.media-card:not(.metadata-link)').count(), 1); // one per card
     await card.click({position:{x:12,y:12}});
     await page.getByRole('heading',{name:'Scanner Film',exact:true}).waitFor();
     const container=restart?'MKV':'MP4';

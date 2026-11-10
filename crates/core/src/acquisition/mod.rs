@@ -255,7 +255,7 @@ pub(crate) async fn event(
     code: Option<&str>,
 ) -> Result<(), Error> {
     query("INSERT INTO acquisition_events(id,request_id,actor_id,status,code,created_at) VALUES(?,?,?,?,?,?)")
-        .bind(uuid::Uuid::new_v4().to_string()).bind(id).bind(actor).bind(status).bind(code).bind(now()).execute(&mut **tx).await.map_err(db)?;
+        .bind(uuid::Uuid::now_v7().to_string()).bind(id).bind(actor).bind(status).bind(code).bind(now()).execute(&mut **tx).await.map_err(db)?;
     Ok(())
 }
 

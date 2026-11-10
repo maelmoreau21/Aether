@@ -14,6 +14,12 @@ export interface EnrollmentToken {
 }
 
 export interface ProviderPreference { id: string; enabled: boolean }
+export type FeatureMode = 'inherit' | 'enabled' | 'disabled';
+export const featureModes: readonly FeatureMode[] = ['inherit', 'enabled', 'disabled'];
+/** The mode shown for a library: the saved one, else what its legacy boolean means. */
+export function featureMode(mode: FeatureMode | undefined, legacyEnabled: boolean | undefined): FeatureMode {
+  return mode ?? (legacyEnabled === false ? 'disabled' : 'inherit');
+}
 export interface LibraryOptions {
   preferredMetadataLanguage: string;
   metadataCountryCode: string;
@@ -28,6 +34,11 @@ export interface LibraryOptions {
   subtitleProviders: ProviderPreference[];
   onlineRefreshIntervalDays: number;
   realtimeMonitoring: boolean; automaticCollections: boolean; introDetectionEnabled: boolean;
+  /**
+   * Per feature: follow the server (`inherit`), force on or off for this library. The Core
+   * writes the matching boolean above from it; absent on options saved before the modes existed.
+   */
+  trickplayMode?: FeatureMode; chapterImagesMode?: FeatureMode; introDetectionMode?: FeatureMode;
   /** Percent (50–99): automatic markers below it are stored but not used during playback. */
   markerMinConfidence?: number;
   saveNfoToMedia: boolean; saveImagesToMedia: boolean;
@@ -58,22 +69,22 @@ export function defaultLibraryOptions(): LibraryOptions {
     fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
     automaticRefreshIntervalDays: 0, preferEmbeddedTitles: false, embeddedSubtitlePolicy: 'allow_all',
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
-    onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true, markerMinConfidence: 80,
-    saveNfoToMedia: false, saveImagesToMedia: false,
+    onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true, markerMinConfidence: 80,    saveNfoToMedia: false, saveImagesToMedia: false,
     trickplayEnabled: true, trickplayDuringScan: true, trickplaySaveToMedia: false, trickplayIntervalSeconds: 10, trickplayWidth: 320, trickplayQuality: 7, trickplayColumns: 10, trickplayRows: 10,
     chapterImagesEnabled: true, chapterImagesDuringScan: false, chapterImagesSaveToMedia: false,
     subtitleDownloadEnabled: false, subtitleLanguages: ['fr'], subtitleOnlyMissing: true, subtitleMatchAudio: false,
     subtitleRequireHash: true, saveSubtitlesToMedia: false,
     posterRotationEnabled: true, artworkDeduplicate: true, artworkSimilarity: 5,
     artworkMinPosterWidth: 0, artworkMinPosterHeight: 0,
-    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12, artworkPoolEnabled: false, adminAccess: true, anime: false };
+    artworkLanguages: ['fr', 'en'], artworkIncludeNeutral: true, artworkMaxImages: 12, artworkPoolEnabled: true, adminAccess: true, anime: false };
 }
 /** Apply the processing preset without changing language, provider scopes or media paths. */
 export function recommendedLibraryOptions(current: LibraryOptions): LibraryOptions {
   const defaults = defaultLibraryOptions();
   const processingKeys = ['realtimeMonitoring', 'automaticCollections', 'introDetectionEnabled',
     'onlineRefreshIntervalDays', 'trickplayEnabled', 'trickplayDuringScan',
-    'trickplayIntervalSeconds', 'trickplayWidth', 'trickplayQuality', 'trickplayColumns', 'trickplayRows', 'chapterImagesEnabled'] as const;
+    'trickplayIntervalSeconds', 'trickplayWidth', 'trickplayQuality', 'trickplayColumns', 'trickplayRows', 'chapterImagesEnabled',
+    'trickplayMode', 'chapterImagesMode', 'introDetectionMode'] as const;
   const next = { ...current };
   for (const key of processingKeys) Object.assign(next, { [key]: defaults[key] });
   return next;

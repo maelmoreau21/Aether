@@ -6,6 +6,8 @@
   import { onMount } from 'svelte';
   import type { LibraryOptions } from './types';
   import ProviderPriority from './ProviderPriority.svelte';
+  import FeatureModeSelect from './FeatureModeSelect.svelte';
+  import { featureMode } from './types';
   import { t } from '../i18n';
   let { options = $bindable(), kind, section, excludedPatterns = $bindable('') }: { options: LibraryOptions; kind: string; section: LibraryOptionsSection; excludedPatterns?: string } = $props();
   const languages = [{ value: 'fr', label: 'Français' }, { value: 'fr-CA', label: 'Français (Canada)' }, { value: 'en', label: 'Anglais' }, { value: 'de', label: 'Allemand' }, { value: 'es', label: 'Espagnol' }, { value: 'it', label: 'Italien' }, { value: 'pt', label: 'Portugais' }, { value: 'ja', label: 'Japonais' }, { value: 'ko', label: 'Coréen' }, { value: 'zh', label: 'Chinois' }];
@@ -31,13 +33,27 @@
     });
   });
   let providerError = $state('');
+  // Server-wide values a library in "inherit" mode follows, and whether a detection extension is on.
+  type ServerMedia = { trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean; trickplayIntervalSeconds?: number; trickplayWidth?: number; chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number };
+  let server = $state<ServerMedia | null>(null);
+  let markerExtensionActive = $state<boolean | null>(null);
+  const trickplayMode = $derived(featureMode(options.trickplayMode, options.trickplayEnabled));
+  const chapterMode = $derived(featureMode(options.chapterImagesMode, options.chapterImagesEnabled));
+  const introMode = $derived(featureMode(options.introDetectionMode, options.introDetectionEnabled));
+  const resolved = (mode: typeof trickplayMode, serverValue: boolean | undefined) => mode === 'enabled' ? true : mode === 'disabled' ? false : serverValue ?? true;
+  const trickplayOn = $derived(resolved(trickplayMode, server?.trickplayEnabled));
+  const introOn = $derived(resolved(introMode, server?.introDetectionEnabled));
   onMount(() => {
     const controller = new AbortController();
+    void fetch('/api/v1/admin/settings', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
+      .then(async response => { if (response.ok) server = await response.json(); })
+      .catch(() => {});
     void fetch('/api/v1/admin/extensions', { credentials: 'same-origin', cache: 'no-store', signal: controller.signal })
       .then(async response => {
         if (!response.ok) throw new Error();
         const data = await response.json();
-        const extensions = (data.extensions ?? []) as { manifest: { id: string; name: string; permissions?: string[] } }[];
+        const extensions = (data.extensions ?? []) as { enabled?: boolean; manifest: { id: string; name: string; permissions?: string[] } }[];
+        markerExtensionActive = extensions.some(entry => entry.enabled !== false && entry.manifest.permissions?.includes('playback.markers'));
         const having = (permission: string) => extensions.filter(entry => entry.manifest.permissions?.includes(permission)).map(entry => ({ id: entry.manifest.id, name: entry.manifest.name }));
         metadataProviders = having('metadata.read'); imageProviders = having('images'); segmentProviders = having('playback.markers'); subtitleProviders = having('subtitles');
       }).catch(() => { if (!controller.signal.aborted) providerError = $t('the_extension_list_is_unavailable_try'); });
@@ -86,11 +102,11 @@
     <div class="group">
       <h4>{$t('image_pool')}</h4>
       <p class="hint">{$t('artwork_single_image_note')}</p>
-      <label class="toggle-row"><span><strong>{$t('artwork_multi_image_mode')}</strong><small>{$t('artwork_multi_image_mode_note')}</small></span><input type="checkbox" role="switch" bind:checked={() => options.artworkPoolEnabled ?? false, value => options.artworkPoolEnabled = value} /></label>
+      <label class="toggle-row"><span><strong>{$t('artwork_multi_image_mode')}</strong><small>{$t('artwork_multi_image_mode_note')}</small></span><input type="checkbox" role="switch" bind:checked={() => options.artworkPoolEnabled ?? true, value => options.artworkPoolEnabled = value} /></label>
       <label for="artwork-languages">{$t('languages_searched_in_order')}</label>
       <input id="artwork-languages" maxlength="100" placeholder={$t('fr_en')} required bind:value={artworkLanguagesText.value} />
       <label class="check"><input type="checkbox" bind:checked={() => options.artworkIncludeNeutral ?? true, value => options.artworkIncludeNeutral = value} /><span>{$t('include_images_with_no_language_backdrops')}</span></label>
-      {#if options.artworkPoolEnabled}
+      {#if options.artworkPoolEnabled ?? true}
         <label for="artwork-max-images">{$t('images_added_per_media_item_and')}</label>
         <input id="artwork-max-images" type="number" min="1" max="12" step="1" required bind:value={() => options.artworkMaxImages ?? 12, value => options.artworkMaxImages = value} />
       {/if}
@@ -114,20 +130,34 @@
     {/if}
   {:else if section === 'playback'}
     <h3>{$t('play')}</h3><p class="lead">{$t('previews_chapters_and_intros')}</p>
+    {#if kind === 'music'}<p class="hint">{$t('feature_mode_music_note')}</p>{/if}
     <div class="group">
-      <label class="toggle-row"><span><strong>{$t('previews_in_the_playback_bar')}</strong><small>{$t('trickplay_thumbnails_to_find_a_scene')}</small></span><input type="checkbox" role="switch" bind:checked={options.trickplayEnabled} /></label>
-      {#if options.trickplayEnabled}
+      <FeatureModeSelect id="library-trickplay-mode" label={$t('previews_in_the_playback_bar')} hint={$t('trickplay_thumbnails_to_find_a_scene')} serverOn={server?.trickplayEnabled}
+        bind:value={() => trickplayMode, mode => options.trickplayMode = mode} />
+      {#if trickplayMode === 'inherit' && trickplayOn && server}
+        <p class="hint">{$t('feature_mode_server_profile', { width: server.trickplayWidth ?? 320, interval: server.trickplayIntervalSeconds ?? 10 })}</p>
+      {/if}
+      {#if trickplayMode !== 'inherit' && trickplayOn}
         <label class="check"><input type="checkbox" bind:checked={options.trickplayDuringScan} /><span>{$t('prepare_thumbnails_after_media_analysis')}</span></label>
         <div class="grid three"><div><label for="trickplay-interval">{$t('interval_s')}</label><input id="trickplay-interval" type="number" min="1" max="60" step="1" required bind:value={options.trickplayIntervalSeconds} /></div><div><label for="trickplay-width">{$t('width_px')}</label><input id="trickplay-width" type="number" min="160" max="1920" step="1" required bind:value={options.trickplayWidth} /></div><div><label for="trickplay-quality">{$t('jpeg_quality')}</label><input id="trickplay-quality" type="number" min="1" max="31" step="1" required bind:value={options.trickplayQuality} /></div></div>
         <div class="grid"><div><label for="trickplay-columns">{$t('trickplay_columns')}</label><input id="trickplay-columns" type="number" min="1" max="20" step="1" required bind:value={() => options.trickplayColumns ?? 10, value => options.trickplayColumns = value} /></div><div><label for="trickplay-rows">{$t('trickplay_rows')}</label><input id="trickplay-rows" type="number" min="1" max="20" step="1" required bind:value={() => options.trickplayRows ?? 10, value => options.trickplayRows = value} /></div></div>
         <p class="hint">{$t('n_320_px_one_preview_every_10')}</p>
       {/if}
-      <label class="check"><input type="checkbox" bind:checked={options.chapterImagesEnabled} /><span>{$t('show_chapter_images')}<small>{$t('prepared_on_demand_from_the_files')}</small></span></label>
+      <FeatureModeSelect id="library-chapters-mode" label={$t('show_chapter_images')} hint={$t('prepared_on_demand_from_the_files')} serverOn={server?.chapterImagesEnabled}
+        bind:value={() => chapterMode, mode => options.chapterImagesMode = mode} />
     </div>
     <div class="group">
       <h4>{$t('intros_credits')}</h4>
-      <label class="check"><input type="checkbox" bind:checked={options.introDetectionEnabled} /><span>{$t('detect_intros_with_enabled_extensions')}<small>{$t('extension_order_is_set_under_providers')}</small></span></label>
-      <label class="range">{$t('marker_min_confidence', { value: options.markerMinConfidence ?? 80 })}<input type="range" min="50" max="99" step="1" value={options.markerMinConfidence ?? 80} oninput={(event) => options.markerMinConfidence = Number(event.currentTarget.value)} /><small>{$t('marker_min_confidence_hint')}</small></label>
+      <FeatureModeSelect id="library-intro-mode" label={$t('detect_intros_with_enabled_extensions')} hint={$t('extension_order_is_set_under_providers')} serverOn={server?.introDetectionEnabled}
+        badge={markerExtensionActive === null ? null : markerExtensionActive ? { tone: 'ok', text: $t('feature_plugin_active') } : { tone: 'warn', text: $t('feature_plugin_not_configured') }}
+        bind:value={() => introMode, mode => options.introDetectionMode = mode} />
+      {#if introOn}
+        {#if introMode === 'inherit'}
+          <p class="hint">{$t('marker_min_confidence', { value: server?.markerMinConfidence ?? 80 })}</p>
+        {:else}
+          <label class="range">{$t('marker_min_confidence', { value: options.markerMinConfidence ?? 80 })}<input type="range" min="50" max="99" step="1" value={options.markerMinConfidence ?? 80} oninput={(event) => options.markerMinConfidence = Number(event.currentTarget.value)} /><small>{$t('marker_min_confidence_hint')}</small></label>
+        {/if}
+      {/if}
     </div>
   {:else if section === 'providers'}
     <h3>{$t('providers')}</h3><p class="lead">{$t('tick_the_extensions_to_use_and')}</p>

@@ -34,10 +34,21 @@ COPY crates/node/Cargo.toml ./crates/node/
 COPY crates/core/Cargo.toml ./crates/core/
 COPY crates/extension-sdk/ ./crates/extension-sdk/
 COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
+# Client crates (native apps) are not built into the images: their manifests
+# and placeholder sources only let Cargo load the whole workspace.
+COPY crates/client/Cargo.toml ./crates/client/
+COPY crates/client-ffi/Cargo.toml ./crates/client-ffi/
+COPY apps/desktop/Cargo.toml ./apps/desktop/
+COPY apps/desktop/vendor/ ./apps/desktop/vendor/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist
-RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests && \
+RUN mkdir -p crates/shared/src crates/node/src crates/node/src/bin crates/core/src crates/core/src/bin crates/core/tests \
+             crates/client/src crates/client-ffi/src/bin apps/desktop/src && \
+    echo 'fn main() {}' > apps/desktop/src/main.rs && \
+    echo 'pub fn dummy() {}' > crates/client/src/lib.rs && \
+    echo 'pub fn dummy() {}' > crates/client-ffi/src/lib.rs && \
+    echo 'fn main() {}' > crates/client-ffi/src/bin/uniffi-bindgen.rs && \
     echo 'pub fn dummy() {}' > crates/shared/src/lib.rs && \
     echo 'fn main() { println!("cargo:rustc-env=AETHER_APP_VERSION=0.1.0"); }' > crates/shared/build.rs && \
     echo 'pub fn dummy() {}' > crates/node/src/lib.rs && \
@@ -129,10 +140,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
         target/release/media-recover \
         target/release/media-extension-worker
 
-# FFmpeg/ffprobe 9.0.2: same verified source as CI, packet-copy runtime profile.
+# FFmpeg/ffprobe 9.0.2: same verified source as CI. Packet copy by default, plus the
+# optional fallback transcoding encoders (x264, NVENC, VAAPI) and filters.
 FROM debian:bookworm-slim AS probe-runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates cmake curl pkg-config nasm xz-utils libdav1d-dev libwebp-dev \
+        libx264-dev libzimg-dev libva-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY scripts/build-ffmpeg.sh /tmp/build-ffmpeg.sh
 RUN bash /tmp/build-ffmpeg.sh /probe runtime
@@ -220,6 +233,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libdav1d6 \
         libwebp7 \
         libwebpmux3 \
+        libx264-164 \
+        libzimg2 \
+        libva2 \
+        libva-drm2 \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        apt-get install -y --no-install-recommends mesa-va-drivers intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /usr/share/man /usr/share/doc /usr/share/locale /usr/share/info
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg
@@ -263,7 +282,15 @@ CMD ["aether-node"]
 # ==============================================================================
 FROM backup-runtime AS runtime
 
+# Fallback transcoding: x264, zimg and VA-API. The VA-API drivers (Mesa for AMD,
+# Intel media driver) only matter on amd64 hosts; on arm64 Mesa's LLVM alone
+# would add ~130 MB for GPUs that ARM NAS and boards do not have. FFmpeg links
+# libva only and loads drivers at run time, so software x264 still works there.
+# NVENC/NVDEC libraries come from the NVIDIA container toolkit at run time.
 RUN apt-get update && apt-get install -y --no-install-recommends libdav1d6 libwebp7 libwebpmux3 \
+        libx264-164 libzimg2 libva2 libva-drm2 \
+    && if [ "$(dpkg --print-architecture)" = amd64 ]; then \
+        apt-get install -y --no-install-recommends mesa-va-drivers intel-media-va-driver; fi \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=probe-runtime --chmod=0755 /probe/bin/ffmpeg /usr/local/bin/ffmpeg

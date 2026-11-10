@@ -37,6 +37,15 @@ pub struct Settings {
     pub trickplay_auto_generate: bool,
     #[serde(default = "default_trickplay_cache_mb")]
     pub trickplay_max_cache_mb: u32,
+    /// Chapter thumbnails and automatic intro/credits detection: what a library in
+    /// `inherit` mode follows (the library can force either on or off).
+    #[serde(default = "default_true")]
+    pub chapter_images_enabled: bool,
+    #[serde(default = "default_true")]
+    pub intro_detection_enabled: bool,
+    /// Lowest confidence (percent) at which an automatic marker reaches the player.
+    #[serde(default = "default_marker_min_confidence")]
+    pub marker_min_confidence: u8,
     #[serde(default = "default_min_resume_pct")]
     pub min_resume_pct: u8,
     #[serde(default = "default_max_resume_pct")]
@@ -55,6 +64,33 @@ pub struct Settings {
     pub log_level: crate::server_log::Level,
     #[serde(default = "default_log_retention")]
     pub log_retention_days: u32,
+    /// "Watch together": when off, every party route refuses and the web hides its entry points.
+    #[serde(default = "default_true")]
+    pub watch_together_enabled: bool,
+    /// Server video transcoding (re-encoded picture, reduced quality, tone mapping, burnt
+    /// subtitles). Direct play stays the default; when off, the Core refuses every encode
+    /// of the picture. Settings saved before the audio/video split used `transcodingEnabled`.
+    #[serde(default = "default_true", alias = "transcodingEnabled")]
+    pub video_transcoding_enabled: bool,
+    /// Server audio transcoding (AAC conversion, downmix, normalisation, night mode).
+    /// When off, the Core refuses every audio encode; copied audio stays allowed.
+    #[serde(default = "default_true")]
+    pub audio_transcoding_enabled: bool,
+    /// HDR to SDR conversion while transcoding (heavy on the Node's CPU or GPU).
+    #[serde(default = "default_true")]
+    pub tone_mapping_enabled: bool,
+    /// Image subtitles (PGS, VobSub, DVB) burnt into a re-encoded picture.
+    #[serde(default = "default_true")]
+    pub subtitle_burn_in_enabled: bool,
+    /// Video bit rate ceiling of any encode, in kbit/s; 0 leaves it unlimited.
+    #[serde(default)]
+    pub max_transcode_kbps: u32,
+    /// "Send to" and the remote: off closes the remote-control socket.
+    #[serde(default = "default_true")]
+    pub remote_control_enabled: bool,
+    /// Offline downloads of original files.
+    #[serde(default = "default_true")]
+    pub downloads_enabled: bool,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -62,8 +98,11 @@ fn default_log_retention() -> u32 {
 fn default_activity_retention() -> u32 {
     30
 }
+fn default_marker_min_confidence() -> u8 {
+    80
+}
 fn default_min_resume_pct() -> u8 {
-    0
+    5
 }
 fn default_max_resume_pct() -> u8 {
     90
@@ -76,6 +115,10 @@ fn default_metadata_language() -> String {
 }
 fn default_metadata_country() -> String {
     "FR".into()
+}
+/// 0 (unlimited) or 500 kbit/s to 120 Mbit/s, the range the web player accepts.
+pub(crate) fn valid_max_transcode_kbps(kbps: u32) -> bool {
+    kbps == 0 || (500..=120_000).contains(&kbps)
 }
 fn default_true() -> bool {
     true
@@ -117,6 +160,9 @@ struct SettingsInput {
     trickplay_rows: Option<u8>,
     trickplay_auto_generate: Option<bool>,
     trickplay_max_cache_mb: Option<u32>,
+    chapter_images_enabled: Option<bool>,
+    intro_detection_enabled: Option<bool>,
+    marker_min_confidence: Option<u8>,
     min_resume_pct: Option<u8>,
     max_resume_pct: Option<u8>,
     min_resume_duration_seconds: Option<u32>,
@@ -126,6 +172,14 @@ struct SettingsInput {
     cors_hosts: Option<Vec<String>>,
     log_level: Option<crate::server_log::Level>,
     log_retention_days: Option<u32>,
+    watch_together_enabled: Option<bool>,
+    video_transcoding_enabled: Option<bool>,
+    audio_transcoding_enabled: Option<bool>,
+    tone_mapping_enabled: Option<bool>,
+    subtitle_burn_in_enabled: Option<bool>,
+    max_transcode_kbps: Option<u32>,
+    remote_control_enabled: Option<bool>,
+    downloads_enabled: Option<bool>,
 }
 
 impl Default for Settings {
@@ -143,7 +197,10 @@ impl Default for Settings {
             trickplay_rows: 10,
             trickplay_auto_generate: true,
             trickplay_max_cache_mb: 5120,
-            min_resume_pct: 0,
+            chapter_images_enabled: true,
+            intro_detection_enabled: true,
+            marker_min_confidence: default_marker_min_confidence(),
+            min_resume_pct: 5,
             max_resume_pct: 90,
             min_resume_duration_seconds: 0,
             preferred_metadata_language: default_metadata_language(),
@@ -152,6 +209,31 @@ impl Default for Settings {
             cors_hosts: Vec::new(),
             log_level: crate::server_log::Level::Info,
             log_retention_days: default_log_retention(),
+            watch_together_enabled: true,
+            video_transcoding_enabled: true,
+            audio_transcoding_enabled: true,
+            tone_mapping_enabled: true,
+            subtitle_burn_in_enabled: true,
+            max_transcode_kbps: 0,
+            remote_control_enabled: true,
+            downloads_enabled: true,
+        }
+    }
+}
+impl Settings {
+    /// The values a library in `inherit` mode follows.
+    pub fn media_defaults(&self) -> crate::library_options::GlobalMediaDefaults {
+        crate::library_options::GlobalMediaDefaults {
+            trickplay_enabled: self.trickplay_enabled,
+            trickplay_auto_generate: self.trickplay_auto_generate,
+            trickplay_interval_seconds: self.trickplay_interval_seconds,
+            trickplay_width: self.trickplay_width,
+            trickplay_quality: self.trickplay_quality,
+            trickplay_columns: self.trickplay_columns,
+            trickplay_rows: self.trickplay_rows,
+            chapter_images_enabled: self.chapter_images_enabled,
+            intro_detection_enabled: self.intro_detection_enabled,
+            marker_min_confidence: self.marker_min_confidence,
         }
     }
 }
@@ -162,8 +244,21 @@ pub async fn load(store: &IdentityStore) -> Result<Settings, StatusCode> {
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     saved
-        .map(|s| serde_json::from_str(&s).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR))
+        .map(|s| parse(&s).ok_or(StatusCode::INTERNAL_SERVER_ERROR))
         .unwrap_or(Ok(Settings::default()))
+}
+/// Stored settings; one saved before the audio/video split keeps its single switch for both.
+fn parse(saved: &str) -> Option<Settings> {
+    let value: serde_json::Value = serde_json::from_str(saved).ok()?;
+    let legacy = value
+        .get("transcodingEnabled")
+        .and_then(serde_json::Value::as_bool)
+        .filter(|_| value.get("audioTranscodingEnabled").is_none());
+    let mut settings: Settings = serde_json::from_value(value).ok()?;
+    if let Some(enabled) = legacy {
+        settings.audio_transcoding_enabled = enabled;
+    }
+    Some(settings)
 }
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -205,13 +300,17 @@ async fn write(
 ) -> Result<StatusCode, StatusCode> {
     administrator(&auth, &headers, true).await?;
     let previous = load(&auth.store).await?;
+    let previous_defaults = previous.media_defaults();
     let sync_trickplay = input.trickplay_enabled.is_some()
         || input.trickplay_quality.is_some()
         || input.trickplay_width.is_some()
         || input.trickplay_interval_seconds.is_some()
         || input.trickplay_columns.is_some()
         || input.trickplay_rows.is_some()
-        || input.trickplay_auto_generate.is_some();
+        || input.trickplay_auto_generate.is_some()
+        || input.chapter_images_enabled.is_some()
+        || input.intro_detection_enabled.is_some()
+        || input.marker_min_confidence.is_some();
     let input = Settings {
         block_sso_local_accounts: input
             .block_sso_local_accounts
@@ -253,6 +352,16 @@ async fn write(
             .trickplay_max_cache_mb
             .filter(|&m| (128..=1048576).contains(&m))
             .unwrap_or(previous.trickplay_max_cache_mb),
+        chapter_images_enabled: input
+            .chapter_images_enabled
+            .unwrap_or(previous.chapter_images_enabled),
+        intro_detection_enabled: input
+            .intro_detection_enabled
+            .unwrap_or(previous.intro_detection_enabled),
+        marker_min_confidence: input
+            .marker_min_confidence
+            .filter(|percent| (50..=99).contains(percent))
+            .unwrap_or(previous.marker_min_confidence),
         min_resume_pct: input.min_resume_pct.unwrap_or(previous.min_resume_pct),
         max_resume_pct: input.max_resume_pct.unwrap_or(previous.max_resume_pct),
         min_resume_duration_seconds: input
@@ -283,6 +392,31 @@ async fn write(
             .log_retention_days
             .filter(|days| (1..=crate::server_log::MAX_RETENTION_DAYS).contains(days))
             .unwrap_or(previous.log_retention_days),
+        watch_together_enabled: input
+            .watch_together_enabled
+            .unwrap_or(previous.watch_together_enabled),
+        video_transcoding_enabled: input
+            .video_transcoding_enabled
+            .unwrap_or(previous.video_transcoding_enabled),
+        audio_transcoding_enabled: input
+            .audio_transcoding_enabled
+            .unwrap_or(previous.audio_transcoding_enabled),
+        tone_mapping_enabled: input
+            .tone_mapping_enabled
+            .unwrap_or(previous.tone_mapping_enabled),
+        subtitle_burn_in_enabled: input
+            .subtitle_burn_in_enabled
+            .unwrap_or(previous.subtitle_burn_in_enabled),
+        max_transcode_kbps: input
+            .max_transcode_kbps
+            .filter(|&kbps| valid_max_transcode_kbps(kbps))
+            .unwrap_or(previous.max_transcode_kbps),
+        remote_control_enabled: input
+            .remote_control_enabled
+            .unwrap_or(previous.remote_control_enabled),
+        downloads_enabled: input
+            .downloads_enabled
+            .unwrap_or(previous.downloads_enabled),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)
@@ -310,25 +444,26 @@ async fn write(
     query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json").bind(json).execute(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     if sync_trickplay {
         use sqlx::Row;
-        let rows = query("SELECT id, options_json FROM libraries")
+        // Libraries in `inherit` mode follow the new server values; a library that forced a
+        // feature on or off keeps its own choice and its own preview profile.
+        let defaults = input.media_defaults();
+        let rows = query("SELECT id, kind, options_json FROM libraries")
             .fetch_all(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         for row in rows {
             let id: String = row.get("id");
+            let kind: String = row.get("kind");
             let opts_raw: Option<String> = row.get("options_json");
             let mut opts = opts_raw
                 .and_then(|s| {
                     serde_json::from_str::<crate::library_options::LibraryOptions>(&s).ok()
                 })
                 .unwrap_or_default();
-            opts.trickplay_enabled = input.trickplay_enabled;
-            opts.trickplay_during_scan = input.trickplay_auto_generate;
-            opts.trickplay_quality = input.trickplay_quality;
-            opts.trickplay_width = input.trickplay_width;
-            opts.trickplay_interval_seconds = input.trickplay_interval_seconds;
-            opts.trickplay_columns = input.trickplay_columns;
-            opts.trickplay_rows = input.trickplay_rows;
+            // Options saved before the modes existed are read against the previous server
+            // values first (those are what the old push wrote), then moved to the new ones.
+            opts.resolve(&previous_defaults, &kind);
+            opts.resolve(&defaults, &kind);
             if let Ok(encoded) = serde_json::to_string(&opts) {
                 let _ = query("UPDATE libraries SET options_json=? WHERE id=?")
                     .bind(encoded)
@@ -463,6 +598,29 @@ mod tests {
         assert_eq!(parsed.trickplay_rows, 10);
         assert!(parsed.trickplay_auto_generate);
         assert_eq!(parsed.trickplay_max_cache_mb, 5120);
+        assert!(parsed.chapter_images_enabled && parsed.intro_detection_enabled);
+        assert_eq!(parsed.marker_min_confidence, 80);
+        assert!(parsed.watch_together_enabled);
+        assert!(parsed.video_transcoding_enabled && parsed.audio_transcoding_enabled);
+        assert_eq!(
+            parsed.media_defaults(),
+            crate::library_options::GlobalMediaDefaults::default()
+        );
+    }
+
+    #[test]
+    fn single_transcoding_switch_covers_audio_and_video() {
+        let base = r#""serverName":"A","welcomeMessage":"""#;
+        let off = parse(&format!("{{{base},\"transcodingEnabled\":false}}")).unwrap();
+        assert!(!off.video_transcoding_enabled && !off.audio_transcoding_enabled);
+        let split = parse(&format!(
+            "{{{base},\"videoTranscodingEnabled\":false,\"audioTranscodingEnabled\":true}}"
+        ))
+        .unwrap();
+        assert!(!split.video_transcoding_enabled && split.audio_transcoding_enabled);
+        let saved = serde_json::to_string(&split).unwrap();
+        let again = parse(&saved).unwrap();
+        assert!(!again.video_transcoding_enabled && again.audio_transcoding_enabled);
     }
 
     #[test]
@@ -475,7 +633,7 @@ mod tests {
                 s.max_resume_pct,
                 s.min_resume_duration_seconds
             ),
-            (0, 90, 0)
+            (5, 90, 0)
         );
         let legacy: Settings =
             serde_json::from_str(r#"{"serverName":"a","welcomeMessage":""}"#).unwrap();

@@ -98,11 +98,11 @@ fs.mkdirSync(out, {recursive: true});
     await page.evaluate(()=>window.scrollTo(0,0));
     // 3. Open Series catalogue
     await page.goto(origin + '/app/series/');
-    const card = page.locator('.media-card').filter({hasText:'Browser Series'});
+    const card = page.getByRole('link',{name:'Voir Browser Series',exact:true}); // the card's poster link; its title may be artwork only
     await card.waitFor();
     await page.locator('.page-indicator').filter({hasText:/^Page 1(?: sur 1)?$/}).waitFor();
     assert.equal(await page.getByRole('link',{name:'Page suivante →',exact:true}).count(),0);
-    assert.equal(await page.locator('.media-card').count(), 1);
+    assert.equal(await page.locator('.media-card:not(.metadata-link)').count(), 1); // one per card
 
     // Record media URLs requested before clicking card
     const mediaCallsBeforeDetail = requestedMediaUrls.length;
@@ -265,7 +265,7 @@ fs.mkdirSync(out, {recursive: true});
     await nextCard.waitFor({state:'detached'});
     report.results.upNextCard = true;
 
-    // Continuous playback is opt-in; the manual next-episode button is removed.
+    // Continuous playback is on by default (the account can turn it off); the manual next-episode button is removed.
     assert.equal(await page.getByRole('button',{name:/^Épisode suivant :/}).count(),0);
     const nextControl=page.getByLabel('Enchaîner automatiquement');
     const nextTitle=await nextControl.locator('..').getAttribute('title');
@@ -274,7 +274,10 @@ fs.mkdirSync(out, {recursive: true});
     assert.ok(fits,'Next episode controls must fit on mobile');
     await page.screenshot({path:`${out}/next-episode-mobile.png`});
     await page.setViewportSize({width:1440,height:900});
-    assert.equal(await page.getByLabel('Enchaîner automatiquement').isChecked(),false);
+    assert.equal(await page.getByLabel('Enchaîner automatiquement').isChecked(),true,'Continuous playback is on by default');
+    // The choice stays the account's: turned off, it is off until turned on again.
+    await nextControl.uncheck();
+    assert.equal(await nextControl.isChecked(),false);
     const initialFullscreen=await page.evaluate(()=>Boolean(document.fullscreenElement));
     const nextDescriptor = page.waitForResponse(response => response.url().includes('/api/v1/media/') && response.request().method()==='GET');
     await nextControl.check();
@@ -292,7 +295,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.evaluate(async()=>{const v=document.querySelector('video');v.currentTime=v.duration-.3;await v.play();});
     await page.waitForFunction(()=>document.querySelector('.top-bar .title>span')?.textContent==='Season Two Episode');
     await page.waitForFunction(()=>document.querySelector('video')?.currentTime>.1);
-    report.results.nextEpisode={manualButtonRemoved:true,automaticOptIn:true,crossSeason:true};
+    report.results.nextEpisode={manualButtonRemoved:true,automaticDefault:true,canBeTurnedOff:true,crossSeason:true};
 
     // Close immersive player
     const closeBtn = page.getByRole('button', {name: 'Retour à l’accueil'});
@@ -374,7 +377,7 @@ fs.mkdirSync(out, {recursive: true});
     }
     assert.ok(filmScanCompleted, 'Film scan did not complete in time');
     await page.goto(origin+'/app/films/');
-    const filmCard = page.locator('.media-card').filter({hasText:'Synthetic Film'});
+    const filmCard = page.getByRole('link',{name:'Voir Synthetic Film',exact:true}); // the card's poster link; its title may be artwork only
     await filmCard.waitFor();
     await filmCard.click({position:{x:12,y:12}});
     // Audio languages are in the masthead's quick facts; the cast is behind its tab.

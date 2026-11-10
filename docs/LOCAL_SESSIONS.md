@@ -106,7 +106,8 @@ hexadécimaux sert uniquement à autoriser ; le secret aléatoire de 64 caractè
 reste en mémoire du navigateur demandeur et dans le corps des requêtes, jamais
 dans le QR, une URL ou localStorage. La base ne contient que leurs SHA-256.
 Le code public est dans le fragment du lien, absent des URLs HTTP et Referer.
-Les quatre opérations exigent une origine autorisée ; inspecter et approuver
+Les quatre opérations exigent une origine autorisée (sauf le parcours natif décrit
+ci-dessous) ; inspecter et approuver
 exigent aussi une session vivante et un jeton CSRF. Création : dix demandes par
 minute/client, plafond global de 256 ; inspection/approbation : dix essais par
 minute/session, compteurs persistants. La consommation est transactionnelle et
@@ -119,6 +120,39 @@ PostgreSQL. Les tests ciblés couvrent SQLite et un compte SSO synthétique ; ce
 ne prouve ni un échange avec un fournisseur OIDC réel ni un scan sur téléphone
 physique. Le téléphone et le nouvel appareil doivent atteindre la même URL
 publique configurée (une URL loopback n’est pas accessible depuis un téléphone).
+
+## Applications natives : jeton d'appareil — 10 novembre 2026
+
+Les applications mobiles, TV et bureau n'utilisent pas de cookie. Elles obtiennent
+un jeton de session ordinaire (même table `sessions`, mêmes expirations, même
+révocation dans Appareils et sessions) et l'envoient dans
+`Authorization: Bearer <jeton>` sur toutes les routes qui acceptent le cookie,
+y compris les URL de lecture signées et le WebSocket « Regarder ensemble ».
+
+| Route | Comportement natif |
+|---|---|
+| `POST /api/v1/auth/device/start` | Accepté sans `Origin` ni `Sec-Fetch-Site` ; une origine étrangère reste refusée. Le nom affiché vient du `User-Agent` (ex. `Aether-Android/1.0 (Pixel 9)`) |
+| `POST /api/v1/auth/device/poll` | Avec `"tokenType":"bearer"` : `{status:"authenticated",user,tokenType,accessToken,expiresIn}`, sans cookie ni `csrfToken`, `Cache-Control: no-store` |
+| `POST /api/v1/auth/login` | Même option `"tokenType":"bearer"` et même réponse, pour la connexion par mot de passe |
+| `POST /api/v1/auth/token/refresh` | Bearer uniquement : nouveau jeton de 30 jours, même appareil ; l'ancien reste valable 60 s puis expire et ne peut plus être renouvelé |
+| `POST /api/v1/auth/device/inspect`, `approve` | Utilisables en Bearer : un téléphone connecté peut approuver une TV |
+
+Règles de sécurité :
+- Un en-tête `Authorization` n'est jamais ajouté par un navigateur de lui-même ;
+  une requête Bearer est donc exemptée de CSRF et du contrôle d'origine.
+- Si un cookie est présent, il l'emporte : la requête garde CSRF et origine, quel
+  que soit l'en-tête `Authorization`. Un en-tête qui n'est pas un jeton de session
+  (JWT d'un proxy, `Basic`, en-têtes répétés) est ignoré et ne casse pas le cookie.
+- Le mode cookie de `poll` et de `login` garde l'origine exacte (pas de login CSRF).
+- L'inactivité de 7 jours s'applique aussi aux appareils : l'application renouvelle
+  son jeton à l'ouverture et en tâche de fond (WorkManager, `BGAppRefreshTask`)
+  bien avant l'expiration absolue, et le range dans le trousseau du système.
+- La déconnexion Bearer (`POST /api/v1/auth/logout`) ne renvoie aucun cookie.
+- Pour la lecture native et la diffusion (Chromecast, AirPlay), l'application
+  demande une URL HLS autorisée par asset : voir [HLS.md](HLS.md).
+
+Vérifié par les tests unitaires `auth::` et par `tests/postgres.rs`, qui rejoue ce
+parcours à travers `secure_app` sur SQLite et sur PostgreSQL 18 (`--include-ignored`).
 
 ## Permissions et isolation P0
 

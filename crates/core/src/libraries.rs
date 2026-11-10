@@ -389,7 +389,15 @@ async fn browse_filesystem(
         raw_path
     };
 
-    let target_path = DiskPath::new(&target_path_str);
+    let Some(target_path) = resolve_directory(&target_path_str).await else {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(
+                serde_json::json!({ "error": "Le dossier spécifié n'existe pas ou n'est pas accessible." }),
+            ),
+        ));
+    };
+    let target_path_str = target_path.to_string_lossy().into_owned();
     let Ok(metadata) = tokio::fs::metadata(&target_path).await else {
         return Err((
             StatusCode::NOT_FOUND,
@@ -464,6 +472,56 @@ async fn browse_filesystem(
         directories,
     }))
 }
+
+/// The directory `requested` names, rebuilt from directory listings alone: each
+/// component must be an existing child of the one before it, `..` and relative
+/// paths are refused. The path the disk is asked about never comes from the
+/// request text itself, only from the names it selects.
+async fn resolve_directory(requested: &str) -> Option<std::path::PathBuf> {
+    use std::path::{Component, PathBuf};
+    let mut current: Option<PathBuf> = None;
+    for component in DiskPath::new(requested).components() {
+        match component {
+            Component::Prefix(prefix) => {
+                // A Windows drive, among the letters only.
+                let wanted = prefix.as_os_str().to_string_lossy().to_ascii_uppercase();
+                current = (b'A'..=b'Z')
+                    .map(|letter| format!("{}:", letter as char))
+                    .find(|drive| *drive == wanted)
+                    .map(|drive| PathBuf::from(format!("{drive}\\")));
+                current.as_ref()?;
+            }
+            Component::RootDir => {
+                if current.is_none() {
+                    current = Some(PathBuf::from(std::path::MAIN_SEPARATOR_STR));
+                }
+            }
+            Component::CurDir => {}
+            Component::ParentDir => return None,
+            Component::Normal(name) => {
+                let directory = current.take()?;
+                let mut entries = tokio::fs::read_dir(&directory).await.ok()?;
+                while let Ok(Some(entry)) = entries.next_entry().await {
+                    let found = entry.file_name();
+                    // Windows names are case-insensitive.
+                    let same = if cfg!(windows) {
+                        found.to_string_lossy().to_lowercase()
+                            == name.to_string_lossy().to_lowercase()
+                    } else {
+                        found.as_os_str() == name
+                    };
+                    if same {
+                        current = Some(entry.path());
+                        break;
+                    }
+                }
+                current.as_ref()?;
+            }
+        }
+    }
+    current
+}
+
 async fn create(
     State(state): State<LibraryState>,
     headers: HeaderMap,
@@ -753,6 +811,11 @@ async fn save(
     let root = input.root.clone();
     input.user_ids.sort();
     input.user_ids.dedup();
+    // Read before the write transaction opens: the server-wide values a library in
+    // `inherit` mode follows.
+    let media_defaults = crate::server_settings::load(&state.auth.store)
+        .await?
+        .media_defaults();
     let mut conn = state.auth.store.pool.acquire().await.map_err(database)?;
     let mut tx = crate::database::begin_write(&mut conn)
         .await
@@ -798,11 +861,12 @@ async fn save(
             .fetch_optional(&mut *tx)
             .await
             .map_err(database)?;
-    let options = match input.options {
+    let mut options = match input.options {
         Some(options) => options,
         None => serde_json::from_str(previous.as_deref().unwrap_or("{}"))
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
     };
+    options.resolve(&media_defaults, &input.kind);
     let options_json =
         serde_json::to_string(&options).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let previous_options: crate::library_options::LibraryOptions =
@@ -1455,5 +1519,33 @@ mod http_tests {
         )
         .await;
         assert_eq!(invalid_browse.status(), StatusCode::NOT_FOUND);
+    }
+}
+
+#[cfg(test)]
+mod browse_tests {
+    #[tokio::test]
+    async fn directories_resolve_from_listings_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let nested = temp.path().join("Films").join("Action");
+        std::fs::create_dir_all(&nested).unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        let text = |path: &std::path::Path| path.to_string_lossy().into_owned();
+
+        let found = super::resolve_directory(&text(&root.join("Films").join("Action")))
+            .await
+            .unwrap();
+        assert_eq!(found, root.join("Films").join("Action"));
+        assert!(
+            super::resolve_directory(&text(&root.join("Films").join("..").join("Films")))
+                .await
+                .is_none()
+        );
+        assert!(
+            super::resolve_directory(&text(&root.join("Missing")))
+                .await
+                .is_none()
+        );
+        assert!(super::resolve_directory("Films/Action").await.is_none());
     }
 }

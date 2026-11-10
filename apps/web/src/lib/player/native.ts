@@ -8,6 +8,8 @@ import { AudioSelectionRetainedError } from './errors';
 import { unsupportedAudio } from './compatibility';
 import { PlaybackFailure, classifyHttp, classifyMediaError, failureMessage, refineFailure, withContext, type PlaybackFailureKind } from './diagnostics';
 import { StartupTimeline, observeClockAdvance, observeFirstFrame, type StartupSummary } from './startup-timeline';
+import { StallMonitor, browserEnvironment, lowerCeiling, planTranscode, transcodeReason, type TranscodeOptions, type TranscodePlan } from './transcode';
+import { pageAudio, type AudioEnhancement } from './audio-enhancement';
 
 import { tr } from '../i18n';
 class VideoSeekTimeoutError extends Error {}
@@ -21,7 +23,7 @@ export class NativePlayer implements Player {
     const track = index === undefined ? (audios.length === 1 ? audios[0] : undefined) : audios.find(t => t.index === Number(index));
     return {
       mediaId: this.media?.id,
-      method: !source ? 'unknown' : this.externalAudio ? 'separate_audio' : this.progressiveVideo ? 'remux' : this.video.currentSrc?.includes('/prepared/video') ? 'prepared' : source.prepare ? 'remux' : 'direct',
+      method: !source ? 'unknown' : this.transcoding ? 'transcode' : this.externalAudio ? 'separate_audio' : this.progressiveVideo ? 'remux' : this.video.currentSrc?.includes('/prepared/video') ? 'prepared' : source.prepare ? 'remux' : 'direct',
       audio: source ? { id: source.audioTrackId, language: source.audioTrackId === 'internal-default' && audios.length > 1 ? 'und' : source.language || 'und', codec: track?.codec_name ?? '' } : undefined
     };
   }
@@ -32,8 +34,17 @@ export class NativePlayer implements Player {
   private progressiveVideo?: ProgressiveVideo;
   private subtitle: string | null = null;
   private subtitleRevision = 0;
+  /** libass (ASS/SSA) or PGS bitmaps drawn over the video. */
   private ass?: { timeOffset: number; destroy(): Promise<void> };
+  private streamOptions: TranscodeOptions = { quality: 'auto', maxKbps: 0, toneMapping: 'auto', audioChannels: 'stereo' };
+  private transcoding?: TranscodePlan;
+  private transcodeHeaders?: { encoder?: string; tonemap?: string };
+  private stallMonitor = new StallMonitor();
+  private stuckTimer?: ReturnType<typeof setInterval>;
+  private enhancement: AudioEnhancement = 'off';
   private audioOffset = 0;
+  /** WebVTT line, percent from the top (the subtitle style's distance from the bottom). */
+  private subtitleLine = 90;
   private subtitleOffset = 0;
   private cueTimes = new WeakMap<TextTrackCue, [number, number]>();
   private preparations = new Set<AbortController>();
@@ -77,6 +88,72 @@ export class NativePlayer implements Player {
     video.addEventListener('pause', this.clearStall);
     video.addEventListener('seeking', this.seeking);
     video.addEventListener('seeked', this.seeked);
+    video.addEventListener('waiting', this.adaptiveWaiting);
+    video.addEventListener('playing', this.adaptivePlaying);
+  }
+  // Automatic quality: repeated or long stalls while playing step the ceiling down.
+  private adaptiveWaiting = () => {
+    if (this.busy || this.destroyed || this.video.seeking || this.video.paused || this.streamOptions.quality !== 'auto' || !this.media?.transcode || this.media.transcode.video === false) return;
+    if (this.stallMonitor.waiting(Date.now())) { void this.adapt(); return; }
+    clearInterval(this.stuckTimer);
+    this.stuckTimer = setInterval(() => {
+      if (this.stallMonitor.stuck(Date.now())) { clearInterval(this.stuckTimer); void this.adapt(); }
+    }, 500);
+  };
+  private adaptivePlaying = () => {
+    clearInterval(this.stuckTimer);
+    if (this.stallMonitor.playing(Date.now())) void this.adapt();
+  };
+  private async adapt() {
+    const source = this.source, media = this.media;
+    if (this.busy || this.destroyed || !source || !media?.transcode) return;
+    const current = this.transcoding;
+    const ceiling = current ? lowerCeiling(current) : Math.max(1000, Math.floor((media.transcode.bitrateKbps ?? 10000) * 0.6));
+    if (!ceiling) return;
+    this.stallMonitor.reset();
+    this.streamOptions = { ...this.streamOptions, adaptiveKbps: ceiling };
+    const environment = browserEnvironment(this.video);
+    const reason = transcodeReason(media, source, this.streamOptions, environment, false) ?? (current ? current.reason : undefined);
+    const plan = reason ? planTranscode(media, source, reason, this.streamOptions, environment) : undefined;
+    if (!plan || plan.prefix === current?.prefix) return;
+    console.info('[media playback]', { stage: 'adaptive-quality', height: plan.height, kbps: plan.kbps });
+    this.status(tr('lowering_quality_for_the_connection'));
+    const state = this.state();
+    try { await this.replace(source, state.position, state.paused, plan); }
+    catch (error) { if (!this.destroyed) this.onError(error instanceof Error ? error.message : String(error)); }
+  }
+  private transcodeCarriesAudio() { return this.transcoding?.audio !== undefined; }
+  /** The active transcode and what the Node reported about it, `null` for direct play. */
+  transcodeState() { return this.transcoding ? { plan: this.transcoding, ...this.transcodeHeaders } : null; }
+  /**
+   * Quality, ceiling, HDR and audio choices. Reloads at the current position only when
+   * the stream to request changes; a fallback transcode stays one (the original failed).
+   */
+  async setStreamOptions(options: Partial<TranscodeOptions>) {
+    const changedCeiling = options.quality !== undefined || options.maxKbps !== undefined;
+    this.streamOptions = { ...this.streamOptions, ...options, ...(changedCeiling ? { adaptiveKbps: undefined } : {}) };
+    this.stallMonitor.reset();
+    const source = this.source, media = this.media;
+    if (!source || !media || this.busy) return;
+    const environment = browserEnvironment(this.video);
+    const unsupported = Boolean(unsupportedAudio(source, mime => this.video.canPlayType(mime)));
+    const reason = transcodeReason(media, source, this.streamOptions, environment, unsupported);
+    const current = this.transcoding;
+    const target = reason ? planTranscode(media, source, reason, this.streamOptions, environment)
+      : current?.reason === 'fallback' ? planTranscode(media, source, 'fallback', this.streamOptions, environment) : undefined;
+    if ((target?.prefix ?? null) === (current?.prefix ?? null)) return;
+    const state = this.state();
+    await this.replace(source, state.position, state.paused, target ?? null);
+  }
+  /** Browser-side night mode / levelling; `false` when this playback cannot be processed. */
+  setAudioEnhancement(mode: AudioEnhancement): boolean {
+    this.enhancement = mode;
+    return this.applyEnhancement();
+  }
+  private applyEnhancement(): boolean {
+    if (this.enhancement === 'off' && !pageAudio.requiresSameOrigin(this.video)) return true;
+    const element: HTMLMediaElement = this.externalAudio?.mediaElement() ?? this.video;
+    return pageAudio.apply(element, this.enhancement);
   }
   private mediaError = () => {
     if(this.busy)return;
@@ -165,16 +242,25 @@ export class NativePlayer implements Player {
     } finally { clearTimeout(timeout); this.preparations.delete(controller); }
     if (this.destroyed) throw new Error(tr('player_closed'));
   }
-  private async replace(source: Source, position: number | Promise<number>, paused: boolean) {
+  /**
+   * `forced`: a transcode chosen by the caller (`null` forces direct play); otherwise the
+   * stream options and the source decide. Either way the whole stream is reloaded.
+   */
+  private async replace(source: Source, position: number | Promise<number>, paused: boolean, forced?: TranscodePlan | null) {
     if (this.busy || this.destroyed) throw new Error(tr('player_unavailable_during_the_source_change'));
     const unsupported=unsupportedAudio(source,mime=>this.video.canPlayType(mime));
-    if (unsupported) {
+    const media = this.media;
+    const environment = browserEnvironment(this.video);
+    const reason = media && forced === undefined ? transcodeReason(media, source, this.streamOptions, environment, Boolean(unsupported)) : undefined;
+    const plan = forced ?? (media && reason ? planTranscode(media, source, reason, this.streamOptions, environment) : undefined);
+    if (unsupported && !plan) {
       console.info('[media playback]',{stage:'capability-rejected',reason:'unsupported-dts',track: /^internal-(default|\d+)$/.test(source.audioTrackId) ? source.audioTrackId : 'external'});
       throw new Error(unsupported);
     }
+    if (source.transcodeOnly && !plan) throw new Error(tr('this_track_needs_transcoding_unavailable'));
     this.busy = true;
     const previous = this.source;
-    const independentSwitch = previous?.url === source.url && Boolean(source.externalAudioUrl);
+    const independentSwitch = previous?.url === source.url && Boolean(source.externalAudioUrl) && forced === undefined && !plan && !this.transcoding;
     let pausedForReplacement = false;
     let resumeReplacement = false;
     let replacementPauseRevision: number | undefined;
@@ -189,12 +275,12 @@ export class NativePlayer implements Player {
     // video; the commit below still aligns both clocks before resuming.
     if (!independentSwitch) { this.pause(); pausedForReplacement = true; }
     try {
-      if (source.prepare) {
+      if (source.prepare && !plan) {
         if (!source.videoStreamUrl && source.prepareVideo !== false && previous?.url !== source.url) await this.prepareUrl(source.url);
         if (!segmented && source.externalAudioUrl) await this.prepareUrl(source.externalAudioUrl);
       }
       // Independent Opus track switch: keep the same video element, URL and timeline.
-      if (previous?.url === source.url && source.externalAudioUrl) {
+      if (independentSwitch) {
         const candidate = createAudio();
         this.pendingAudio = candidate;
         try {
@@ -215,6 +301,7 @@ export class NativePlayer implements Player {
           this.externalAudio = candidate;
           candidate.activate();
           this.source = source;
+          this.applyEnhancement();
           if (resumeReplacement && replacementPauseRevision === this.pauseRevision) await this.play();
         } catch (error) {
           // Once committed, this is the current source. A rejected play()
@@ -250,13 +337,15 @@ export class NativePlayer implements Player {
     this.clearStall();
     // Hide obsolete captions before the new resource is ready.
     this.removeNativeSubtitles();
+    this.transcoding = undefined; this.transcodeHeaders = undefined;
     const nowSecs = Math.floor(Date.now() / 1000);
     const hasFreshDirect = Boolean(
       source.directUrl && (!source.tokenExpiresAt || source.tokenExpiresAt > nowSecs + 5)
     );
-    const primaryUrl = hasFreshDirect && source.directUrl ? source.directUrl : source.url;
+    const sameOriginOnly = pageAudio.requiresSameOrigin(this.video);
+    const primaryUrl = hasFreshDirect && source.directUrl && !sameOriginOnly ? source.directUrl : source.url;
     const fallbackUrl =
-      hasFreshDirect && (source.relayUrl ?? source.url) !== primaryUrl
+      hasFreshDirect && !sameOriginOnly && (source.relayUrl ?? source.url) !== primaryUrl
         ? (source.relayUrl ?? source.url)
         : undefined;
 
@@ -344,16 +433,35 @@ export class NativePlayer implements Player {
       // Keep it inactive until both resources are ready; segmented Opus needs the
       // video's duration/index and retains its ordered initialization.
       let audioLoading: Promise<void> | undefined;
-      if (source.externalAudioUrl && segmented && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0) {
+      // A transcode that carries the chosen track replaces the separate audio element.
+      const separateAudio = Boolean(source.externalAudioUrl) && plan?.audio === undefined;
+      if (separateAudio && segmented && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0) {
         const audio = new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, duration: source.durationSeconds, trackId: source.audioTrackId});
         this.externalAudio = audio;
         audioLoading = audio.preload(audioUrl!, position);
         void audioLoading.catch(() => {});
-      } else if (source.externalAudioUrl && !segmented) {
+      } else if (separateAudio && !segmented) {
         this.externalAudio = createAudio();
         audioLoading = this.externalAudio.load(audioUrl!, false, undefined, position);
         void audioLoading.catch(() => {});
       }
+      const startTranscode = async (chosen: TranscodePlan) => {
+        const offer = media?.transcode;
+        if (!offer) throw new Error(tr('this_track_needs_transcoding_unavailable'));
+        this.status(chosen.height ? tr('transcoding_to_quality', { height: chosen.height }) : tr('converting_the_audio_track'));
+        if (chosen.audio !== undefined && this.externalAudio) { this.externalAudio.destroy(); this.externalAudio = undefined; audioLoading = undefined; }
+        const stream = new ProgressiveVideo(this.video, chosen.prefix, offer.durationSeconds, chosen.mime, message => {
+          this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.transcoding=undefined;this.onError(message);
+        });
+        this.progressiveVideo = stream;
+        try { await Promise.race([Promise.all([stream.load(position), loadCandidate(stream.url)]), stream.failure]); stream.activate(); }
+        catch (error) { this.cancel?.(); stream.destroy(); if (this.progressiveVideo === stream) this.progressiveVideo = undefined; throw error; }
+        this.transcoding = chosen;
+        this.transcodeHeaders = stream.headers;
+        console.info('[media playback]', { stage: 'transcode', reason: chosen.reason, height: chosen.height, kbps: chosen.kbps, flags: chosen.flags, ...stream.headers });
+      };
+      if (plan) await startTranscode(plan);
+      else try {
       try {
         this.status(tr('loading_the_video'));
         try {
@@ -399,8 +507,19 @@ export class NativePlayer implements Player {
           await loadCandidate(source.preparedVideoUrl);
         }
       }
+      } catch (directError) {
+        // Last resort before reporting: let the server convert what this browser rejected.
+        const fallback = !this.destroyed && media ? planTranscode(media, source, 'fallback', this.streamOptions, environment) : undefined;
+        if (!fallback) throw directError;
+        console.warn('[media playback] Original and packet-copy playback failed, transcoding:', directError);
+        try { await startTranscode(fallback); }
+        catch (transcodeError) {
+          console.warn('[media playback] Fallback transcoding failed:', transcodeError);
+          throw directError;
+        }
+      }
       this.source = source;
-      if (source.externalAudioUrl) {
+      if (separateAudio && !this.transcodeCarriesAudio()) {
         this.status(`Chargement audio ${source.language.toUpperCase()} (${source.audioTrackId})${segmented ? ' par segments' : ''}…`);
         if (audioLoading) {
           await audioLoading;
@@ -413,6 +532,7 @@ export class NativePlayer implements Player {
         }
       }
       await this.selectSubtitle(this.subtitle);
+      this.applyEnhancement();
       if (!paused) await this.play();
     } catch (error) {
       this.video.pause();
@@ -450,9 +570,32 @@ export class NativePlayer implements Player {
     if (previousAss) await previousAss.destroy().catch(() => {});
     if (this.destroyed || revision !== this.subtitleRevision) return;
     this.removeNativeSubtitles();
-    if (id === null) return;
-    const subtitle = this.media?.subtitles.find(s => s.id === id);
-    if (!subtitle) throw new Error(tr('subtitles_unavailable'));
+    const subtitle = id === null ? undefined : this.media?.subtitles.find(s => s.id === id);
+    if (id !== null && !subtitle) throw new Error(tr('subtitles_unavailable'));
+    // Bitmaps the browser cannot draw (VobSub, DVB, PGS without canvas) are burnt in.
+    const { PgsRenderer } = subtitle?.image === 'pgs' ? await import('./pgs') : { PgsRenderer: undefined };
+    if (this.destroyed || revision !== this.subtitleRevision) return;
+    const needsBurn = subtitle?.image === 'burn' || (subtitle?.image === 'pgs' && !PgsRenderer?.supported());
+    const burn = needsBurn ? subtitle?.burnIndex ?? undefined : undefined;
+    if (needsBurn && burn === undefined) throw new Error(tr('these_subtitles_need_transcoding'));
+    if (burn !== this.streamOptions.burnSubtitle) {
+      this.streamOptions = { ...this.streamOptions, burnSubtitle: burn };
+      if (this.source && !this.busy) {
+        // The reload re-selects this subtitle itself (and bumps the revision).
+        await this.setStreamOptions({ burnSubtitle: burn });
+        if (this.destroyed || revision !== this.subtitleRevision) return;
+        if (burn !== undefined && this.transcoding?.subtitle === undefined) throw new Error(tr('these_subtitles_need_transcoding'));
+      }
+    }
+    if (!subtitle || burn !== undefined) return;
+    if (subtitle.image === 'pgs' && PgsRenderer) {
+      if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
+      if (this.destroyed || revision !== this.subtitleRevision) return;
+      const renderer = await PgsRenderer.create(this.video, subtitle.url, this.subtitleOffset);
+      if (this.destroyed || revision !== this.subtitleRevision) { await renderer.destroy(); return; }
+      this.ass = renderer;
+      return;
+    }
     if (subtitle.assUrl && typeof OffscreenCanvas !== 'undefined' && typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined') {
       try {
         if (subtitle.assUrl.includes('/prepared/')) await this.prepareUrl(subtitle.assUrl);
@@ -474,7 +617,7 @@ export class NativePlayer implements Player {
       for (const cue of Array.from(track.track.cues ?? [])) {
         this.cueTimes.set(cue, [cue.startTime, cue.endTime]);
         this.shiftCue(cue);
-        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = 90; }
+        if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = this.subtitleLine; }
       }
     }, { once: true });
     track.addEventListener('error', () => this.onError(tr('failed_to_load_the_webvtt_subtitles')), { once: true });
@@ -501,6 +644,7 @@ export class NativePlayer implements Player {
         await this.video.play();
         if (startup.signal.aborted || this.destroyed) throw new Error(tr('start_cancelled'));
         this.timeline.mark('play-resolved');
+        if (this.enhancement !== 'off') pageAudio.resume();
         if (this.externalAudio) {
           await this.externalAudio.play();
           if (startup.signal.aborted || this.destroyed) throw new Error(tr('start_cancelled'));
@@ -524,7 +668,7 @@ export class NativePlayer implements Player {
       this.startupObservers.push(observeClockAdvance(this.video, this.video.currentTime, () => this.timeline.mark('first-audio', 'media-clock')));
     }
   }
-  pause() { this.pauseRevision++; this.startup?.abort(); this.externalAudio?.pause(); this.pendingAudio?.pause(); this.video.pause(); }
+  pause() { this.pauseRevision++; this.startup?.abort(); this.externalAudio?.pause(); this.pendingAudio?.pause(); this.video.pause(); clearInterval(this.stuckTimer); }
   seek(position: number) { if (Number.isFinite(position)) this.video.currentTime = Math.max(0, Math.min(position, this.video.duration || 0)); }
   setVolume(volume: number) { this.video.volume = Math.max(0, Math.min(1, volume)); }
   setAudioOffset(seconds: number) {
@@ -543,6 +687,13 @@ export class NativePlayer implements Player {
     this.subtitleOffset = seconds;
     if (this.ass) this.ass.timeOffset = -seconds;
     for (const track of Array.from(this.video.textTracks)) for (const cue of Array.from(track.cues ?? [])) this.shiftCue(cue);
+  }
+  setSubtitlePosition(line: number) {
+    if (!Number.isFinite(line) || line < 50 || line > 100) return;
+    this.subtitleLine = line;
+    for (const track of Array.from(this.video.textTracks)) for (const cue of Array.from(track.cues ?? [])) {
+      if (typeof VTTCue !== 'undefined' && cue instanceof VTTCue) { cue.snapToLines = false; cue.line = line; }
+    }
   }
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
@@ -564,6 +715,10 @@ export class NativePlayer implements Player {
     this.video.removeEventListener('pause', this.clearStall);
     this.video.removeEventListener('seeking', this.seeking);
     this.video.removeEventListener('seeked', this.seeked);
+    this.video.removeEventListener('waiting', this.adaptiveWaiting);
+    this.video.removeEventListener('playing', this.adaptivePlaying);
+    clearInterval(this.stuckTimer);
+    this.transcoding = undefined;
     this.video.pause(); this.video.removeAttribute('src'); this.video.load();
   }
 }

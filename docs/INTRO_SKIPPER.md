@@ -55,6 +55,41 @@ de l'image (`crates/node/src/end_credits.rs`, tâche `analyze` de composant `cre
 Pas de générique pour un fondu au noir, un noir sans texte (scène de nuit, entracte) ou une carte de
 moins d'une minute. Limite : un générique qui défile **sur des images** (fond non noir) n'est pas lu.
 
+### Réglages en cascade et verrouillage des corrections (9 novembre 2026)
+
+**Cascade global → bibliothèque → utilisateur** (Trickplay, images de chapitres, détection des intros) :
+
+| Niveau | Où | Contenu |
+|---|---|---|
+| Global | Administration › Général (`PUT /api/v1/admin/settings`) | `trickplayEnabled` et son profil, `chapterImagesEnabled`, `introDetectionEnabled`, `markerMinConfidence` (50–99) |
+| Bibliothèque | Options de la bibliothèque › Lecture | `trickplayMode`, `chapterImagesMode`, `introDetectionMode` : `inherit` \| `enabled` \| `disabled` |
+| Utilisateur | Compte › Lecture | par segment `auto_skip` \| `ask` \| `off`, et `trickplayPreviews` (voir `PREFERENCES.md`) |
+
+Les booléens historiques de `LibraryOptions` (`trickplayEnabled`, `chapterImagesEnabled`,
+`introDetectionEnabled`, profil des aperçus, `markerMinConfidence`) restent la valeur **effective** lue
+par tout le Core : `LibraryOptions::resolve` les recalcule à partir du mode et des réglages globaux, à
+l'enregistrement d'une bibliothèque et à chaque modification globale. Un mode `inherit` suit le serveur ;
+`enabled` / `disabled` forcent la bibliothèque et lui laissent son propre profil. Options enregistrées
+avant les modes : `false` devient `disabled` (le refus est conservé), `true` devient `inherit` si le profil
+est celui du serveur ou celui livré, sinon `enabled` (les valeurs propres ne sont pas écrasées). Une
+bibliothèque de musique, sans choix explicite, démarre en `disabled` (ni aperçus vidéo ni intros) ;
+les films gardent la détection, utile pour leurs génériques.
+
+**Verrouillage.** Une correction est une ligne de `manual_timeline_markers`, table que l'analyse automatique
+n'écrit ni ne supprime (elle ne touche que `automatic_timeline_markers`) ; le plugin, exécuté dans un bac à
+sable, ne reçoit ni ne renvoie de correction. Elle est donc toujours verrouillée : l'API la renvoie avec
+`locked: true` et `source: "manual"`, ou `"chapter"` quand ses deux bornes sont sur des chapitres du fichier
+(déduit des horaires, rien de plus n'est stocké) ; une détection porte `source: "auto"`, `locked: false`.
+Seul « Revenir à la détection automatique » la supprime : `DELETE /api/v1/admin/assets/{asset}/markers/{kind}`
+(un type) ou `DELETE /api/v1/admin/assets/{asset}/markers` (tout le fichier), administrateur et CSRF requis.
+Test : `crates/core/tests/media_tools_flow.rs`.
+
+**Outils par média** (`crates/core/src/media_tools.rs`, administrateur) : `GET …/media-status` (Trickplay :
+généré / non généré / en cours / échec ; chapitres ; segments détectés ou verrouillés),
+`POST …/regenerate-trickplay` (supprime le cache préparé du Node local puis remet la tâche en file ; un Node
+distant garde son cache valide), `POST …/refresh-chapters` (relit les chapitres et relance leurs miniatures).
+Les chapitres viennent de la dernière analyse du fichier : relire le conteneur demande un nouveau scan.
+
 ---
 
 ## 1. Pipeline complet de détection

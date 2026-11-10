@@ -1,13 +1,17 @@
 <script lang="ts">
   import ReportButton from '../applications/ReportButton.svelte';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
   import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import PlayerControls, { type Menu } from './PlayerControls.svelte';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
-  import { subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
+  import { subtitleLine, subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
+  import { maxBitrate, qualityChoice, qualityPreference, type AudioChannels, type QualityChoice, type ToneMapping } from './transcode';
+  import { audioEnhancement, type AudioEnhancement } from './audio-enhancement';
+  import { SLEEP_OFF, sleepDue, sleepRemaining, startSleep, type SleepChoice, type SleepTimer } from './sleep-timer';
+  import type { TranscodeInfo } from './PlayerControls.svelte';
   import { ProgressTracker } from './progress';
   import { PlaybackCollector, type EventKind, type Origin } from '../statistics/collector';
   import { PlaybackPresence } from './presence';
@@ -24,6 +28,10 @@
   import WatchPartyOverlay from '../syncplay/WatchPartyOverlay.svelte';
   import WatchPartyModal from '../syncplay/WatchPartyModal.svelte';
   import { t } from '../i18n';
+  import { watchTogetherEnabled } from '../config/presentation';
+  import { remote, type RemoteCommand, type RemoteDevice } from '../remote/remote.svelte';
+  import { isDirection, tvActive, tvKey, type TvKey } from '../tv/keys';
+  import { moveFocus } from '../tv/navigation';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
     /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
@@ -99,6 +107,17 @@
   /** Whether the audio being played is an original version, for remembering subtitle choices. */
   let foreignAudio = false;
   let subtitleStyle = $state<SubtitleStyle | undefined>();
+  let quality = $state<QualityChoice>('auto');
+  let maxKbps = $state(0);
+  let toneMapping: ToneMapping = 'auto';
+  let audioChannels: AudioChannels = 'stereo';
+  let enhancement = $state<AudioEnhancement>('off');
+  let preferAudioDescription = false;
+  let preferSdh = false;
+  let transcodeInfo = $state<TranscodeInfo>(null);
+  let sleepTimer = $state<SleepTimer>(SLEEP_OFF);
+  let sleepNow = $state(Date.now());
+  const sleepShown = $derived(sleepTimer.kind === 'end' ? 'end' as const : sleepRemaining(sleepTimer, sleepNow));
   const activeSubtitleCss = $derived(subtitleStyleToCss(subtitleStyle));
   let menu = $state<Menu>(null);
   /** "Watch together" started from the player on the item being watched. */
@@ -122,6 +141,31 @@
   let previousVolume = 1;
   let triedMediaIds = new SvelteSet<string>();
   let resumeTarget = 0;
+  /** Position handed over by another device ("open" command or "Send to"). */
+  let handoffPosition: number | undefined;
+  let sendMenu = $state(false);
+  const sendTargets = $derived(remote.devices);
+  function reportRemote(force = false) {
+    const item = active;
+    if (!opened || !item?.workId || item.synthetic) return;
+    remote.report({ workId: item.workId, title: item.title, position: playback.position, duration: playback.duration || null, paused }, force);
+  }
+  function remoteCommand(command: RemoteCommand) {
+    if (!opened || !engine || command.action === 'open') return;
+    if (syncClient) { notice = $t('remote_ignored_in_party'); return; }
+    notice = $t('remote_command_from', { name: command.fromName });
+    if (command.action === 'stop') { close(); return; }
+    if (command.action === 'seek' && command.position !== undefined) { seek(command.position); reportRemote(true); return; }
+    if ((command.action === 'play') === paused) togglePlayback();
+  }
+  /** Hands this title over to another device at the current position. */
+  function sendTo(device: RemoteDevice) {
+    const item = active;
+    if (!item?.workId) return;
+    sendMenu = false;
+    remote.send(device.deviceId, 'open', playback.position, item.workId);
+    close();
+  }
   let failoverInProgress = false;
   function sync() {
     if (!engine || !opened) return;
@@ -129,7 +173,9 @@
     playback = { ...snapshot, duration: Number.isFinite(snapshot.duration) ? snapshot.duration : 0 };
     paused = snapshot.paused;
     bufferedUntil = bufferedEnd(playback.position);
-    if (!busy) progressTracker?.save(playback);
+    const running = engine.transcodeState?.() ?? null;
+    transcodeInfo = running ? { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap } : null;
+    if (!busy) { progressTracker?.save(playback); reportRemote(); }
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
       const correction = syncClient.evaluateDrift(playback.position);
@@ -176,6 +222,36 @@
     && playback.position >= nextCardStart && playback.position < playback.duration - 0.25));
   const postCreditsScene = $derived(Boolean(active?.credits && active.credits.end < playback.duration - 10 && playback.position < active.credits.end));
   $effect(() => { void active?.id; nextDismissed = false; });
+  $effect(() => {
+    if (!opened || sleepTimer.kind !== 'at') return;
+    const timer = setInterval(() => {
+      sleepNow = Date.now();
+      if (sleepDue(sleepTimer, sleepNow)) { sleepTimer = SLEEP_OFF; engine?.pause(); sync(); notice = $t('sleep_timer_paused_playback'); wake(); }
+    }, 1000);
+    return () => clearInterval(timer);
+  });
+  function setSleep(choice: SleepChoice | null) {
+    sleepTimer = startSleep(choice, Date.now()); sleepNow = Date.now();
+    notice = choice === null ? $t('sleep_timer_off') : choice === 'end' ? $t('sleep_timer_set_end') : $t('sleep_timer_set', { count: choice });
+    wake();
+  }
+  function streamOptions() { return { quality, maxKbps, toneMapping, audioChannels }; }
+  function setQuality(value: QualityChoice) {
+    quality = value;
+    savePreferences({ streamingQuality: qualityPreference(value) });
+    void action(player => player.setStreamOptions?.({ quality: value }));
+  }
+  function setMaxBitrate(value: number) {
+    maxKbps = value;
+    savePreferences({ maxBitrateKbps: value });
+    void action(player => player.setStreamOptions?.({ maxKbps: value }));
+  }
+  function setEnhancement(value: AudioEnhancement) {
+    enhancement = value;
+    savePreferences({ audioEnhancement: value });
+    if (engine?.setAudioEnhancement && !engine.setAudioEnhancement(value)) notice = $t('audio_enhancement_unavailable');
+    wake();
+  }
   function armIdle() {
     clearTimeout(idle);
     if (!opened || statistics || paused || menu || busy || error || keyboardPinned) { visible = true; return; }
@@ -300,7 +376,7 @@
       const creditsChapter = media.chapters?.find(ch => /cr[eé]dits?|g[eé]n[eé]rique|outro|ending/i.test(ch.title) && ch.start > 0);
       const detectedCreditsStart = media.credits?.start ?? creditsChapter?.start;
       const tracker = !restore && media.workId && !media.synthetic
-        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }, detectedCreditsStart) : undefined;
+        ? new ProgressTracker(media.workId, message => { if (current === generation) notice = message; }, detectedCreditsStart, Boolean(syncClient)) : undefined;
       if (tracker) progressTracker = tracker;
       else progressTracker?.setCreditsStart(detectedCreditsStart);
       const resume = tracker?.load();
@@ -312,19 +388,23 @@
       catch { preferenceNotice = $t('preferences_unavailable_settings_are_local'); }
       if (current !== generation) return;
       readPlaybackPreferences();
-      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))), playDefaultAudio);
+      const source = chooseSource(media, preferredAudio?.mediaId === media.id ? preferredAudio.trackId : undefined, preferredLanguage, source => Boolean(video.canPlayType(playbackMime(media, source))) && !source.transcodeOnly, playDefaultAudio, preferAudioDescription);
       if (!source) throw new Error($t('no_usable_audio_source_for_this'));
       if (syncClient) await resume; // Load the progress revision before collective playback saves it.
       if (current !== generation) return;
-      await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? resume ?? 0);
+      await engine.setStreamOptions?.({ ...streamOptions(), burnSubtitle: undefined, adaptiveKbps: undefined });
+      engine.setSubtitlePosition?.(subtitleLine(subtitleStyle));
+      const handoff = handoffPosition; handoffPosition = undefined;
+      await engine.load(media, source.audioTrackId, syncClient ? syncClient.getComputedPartyPosition() : restore?.position ?? handoff ?? resume ?? 0);
       if (current !== generation) return;
       const autoFailoverMsg = failoverNotice || (media.failoverFrom ? $t('automatically_switched_to_an_available_node') : '');
       notice = autoFailoverMsg || preferenceNotice;
       await engine.selectAudio(source.audioTrackId); audio = source.audioTrackId;
       collector?.source(engine.playbackInfo?.(), media.id);
       engine.setAudioOffset?.(audioOffset); engine.setSubtitleOffset?.(subtitleOffset);
+      if (enhancement !== 'off' && engine.setAudioEnhancement && !engine.setAudioEnhancement(enhancement)) notice = $t('audio_enhancement_unavailable');
       foreignAudio = isForeignAudio(source.language, subtitleLanguage);
-      const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage);
+      const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage, preferSdh);
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -386,6 +466,13 @@
       subtitlePreference = manualSubtitle ?? policy.subtitlePreference;
       foreignSubtitlePreference = manualForeignSubtitle ?? policy.foreignSubtitlePreference;
       subtitleStyle = account.subtitleStyle;
+      quality = qualityChoice(account.streamingQuality);
+      maxKbps = maxBitrate(account.maxBitrateKbps);
+      toneMapping = account.hdrToneMapping === 'always' || account.hdrToneMapping === 'never' ? account.hdrToneMapping : 'auto';
+      audioChannels = account.audioChannels === 'surround' || account.audioChannels === 'passthrough' ? account.audioChannels : 'stereo';
+      enhancement = audioEnhancement(account.audioEnhancement);
+      preferAudioDescription = account.preferAudioDescription === true;
+      preferSdh = account.preferSdhSubtitles === true;
     } catch { /* Preferences are optional when browser storage is unavailable. */ }
   }
   // What the automatic detection stored for this file, shown beside the manual correction.
@@ -449,8 +536,9 @@
     } catch (error) { markerError = error instanceof Error ? error.message : $t('correction_unavailable'); }
     finally { markerSaving = false; }
   }
-  export function open(media: Media | Promise<Media>) {
+  export function open(media: Media | Promise<Media>, startAt?: number) {
     if (opened) return false;
+    handoffPosition = startAt !== undefined && Number.isFinite(startAt) && startAt >= 0 ? startAt : undefined;
     generation++; const current = generation;
     manualAudio = undefined; manualSubtitle = undefined; manualForeignSubtitle = undefined;
     triedMediaIds.clear();
@@ -481,7 +569,8 @@
     if (engine) progressTracker?.save(engine.state(), true);
     progressTracker = undefined;
     presence?.stop();presence=undefined;
-    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false;
+    remote.report(null, true); sendMenu = false;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null;
     const returnTarget = opener;
     const restoreNavigation = () => {
       if (opened || generation !== closedGeneration) return;
@@ -662,29 +751,92 @@
     const media = catalogue.find(media => media.id === id);
     if (media) { const restore = engine.state(); engine.pause(); void prepare(media, restore); }
   }
+  function toggleSubtitles() {
+    if (!active?.subtitles?.length) return;
+    if (subtitle) {
+      selectSubtitle(null);
+    } else {
+      const preferred = preferredSubtitle(active.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage, preferSdh);
+      selectSubtitle(preferred ?? active.subtitles[0]?.id ?? null);
+    }
+  }
+  /** Media keys of keyboards and TV remotes, whatever has the focus. */
+  function mediaKey(key: TvKey | null): boolean {
+    if (key === 'playPause' || (key === 'play' && paused) || (key === 'pause' && !paused)) togglePlayback();
+    else if (key === 'play' || key === 'pause') wake();
+    else if (key === 'stop') close();
+    else if (key === 'forward') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
+    else if (key === 'rewind') seek(Math.max(0, playback.position - skipBackSeconds));
+    else if (key === 'next' && onNext && !syncClient) onNext();
+    else if (key === 'previous') seek(0);
+    else return false;
+    return true;
+  }
+  /**
+   * TV remote: the arrows move between the controls once one has the focus; on the picture, left and
+   * right seek, up and down bring the controls back with the focus on play (the TV owns the volume),
+   * and OK plays or pauses.
+   */
+  function remoteKeyboard(event: KeyboardEvent, key: TvKey | null, target: HTMLElement | null): boolean {
+    if (isDirection(key)) {
+      const bar = target?.closest<HTMLElement>('.player-controls');
+      if (bar && target !== surface) {
+        if (target instanceof HTMLInputElement && target.type === 'range' && (key === 'left' || key === 'right')) return true;
+        event.preventDefault();
+        moveFocus(key, bar);
+        return true;
+      }
+      if (key === 'up' || key === 'down') {
+        event.preventDefault();
+        wake();
+        void tick().then(() => surface?.querySelector<HTMLElement>('.player-controls .play-btn')?.focus());
+        return true;
+      }
+      return false;
+    }
+    if (key === 'enter' && !target?.closest('button, a, input, select, textarea')) {
+      event.preventDefault();
+      togglePlayback();
+      return true;
+    }
+    return false;
+  }
   function keyboard(event: KeyboardEvent) {
     if (!opened) return;
-    keyboardPinned = true; wake();
-    if (event.key === 'Escape') {
+    const tv = tvActive();
+    // On a TV every key comes from the remote: the controls hide again on their own.
+    keyboardPinned = !tv; wake();
+    const remoteKey = tvKey(event);
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const editing = Boolean(target?.closest('input:not([type="range"]), textarea'));
+    if (remoteKey === 'back' || (tv && event.key === 'Backspace' && !editing)) {
       event.preventDefault();
       if (statistics) { statistics = false; return; }
       if (menu) controls?.closeMenu();
-      else if (document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
+      // A TV is always full screen: Back leaves the player at once.
+      else if (!tv && document.fullscreenElement === surface) void document.exitFullscreen().catch(() => {});
       else close();
       return;
     }
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('input, select, textarea, [role="menu"]')) return;
+    if (!editing && mediaKey(remoteKey)) { event.preventDefault(); return; }
+    if (target?.closest('[role="menu"]')) return;
+    if (tv && remoteKeyboard(event, remoteKey, target)) return;
+    if (target?.closest('input, select, textarea')) return;
     if ((event.key === ' ' || event.key === 'Enter') && target?.closest('button, a')) return;
-    if ([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'm', 'M', 'f', 'F'].includes(event.key)) {
+    const key = event.key.toLowerCase();
+    const isControlKey = [' ', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'm', 'f', 'k', 'j', 'l', 'c', '0'].includes(key)
+      || ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key);
+    if (isControlKey) {
       event.preventDefault();
-      if (event.key === ' ') togglePlayback();
-      else if (event.key === 'ArrowLeft') seek(Math.max(0, playback.position - skipBackSeconds));
-      else if (event.key === 'ArrowRight') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
+      if (key === ' ' || key === 'k') togglePlayback();
+      else if (event.key === 'ArrowLeft' || key === 'j') seek(Math.max(0, playback.position - skipBackSeconds));
+      else if (event.key === 'ArrowRight' || key === 'l') seek(Math.min(playback.duration, playback.position + skipForwardSeconds));
       else if (event.key === 'ArrowUp') volume(Math.min(1, playback.volume + .05));
       else if (event.key === 'ArrowDown') volume(Math.max(0, playback.volume - .05));
-      else if (event.key.toLowerCase() === 'm') mute();
-      else toggleFullscreen();
+      else if (key === 'm') mute();
+      else if (key === 'f') toggleFullscreen();
+      else if (key === 'c') toggleSubtitles();
+      else if (key === '0') seek(0);
     }
   }
   function windowKeyboard(event: KeyboardEvent) {
@@ -695,6 +847,7 @@
   function ended() {
     collector?.stop(true); collector = undefined; collectorWork = '';
     sync(); if (engine) progressTracker?.save(engine.state(), true, true);
+    if (sleepTimer.kind === 'end') { sleepTimer = SLEEP_OFF; notice = $t('sleep_timer_paused_playback'); return; }
     if (repeat && active && engine && !syncClient) { collect(active); engine.seek(0); void engine.play().catch(cause => fail(String(cause))); return; }
     if (!syncClient && autoplayNext && onNext) onNext();
   }
@@ -716,16 +869,17 @@
   onMount(() => {
     const change = () => { fullscreen = document.fullscreenElement === surface; wake(); };
     document.addEventListener('fullscreenchange', change);
-    return () => { close(); document.removeEventListener('fullscreenchange', change); clearTimeout(idle); };
+    const unsubscribe = remote.onCommand(remoteCommand);
+    return () => { unsubscribe(); close(); document.removeEventListener('fullscreenchange', change); clearTimeout(idle); };
   });
 </script>
 
 <svelte:window onkeydown={windowKeyboard} />
 
-<dialog id="player" bind:this={dialog} class="immersive-dialog" aria-label={$t('immersive_player')} oncancel={cancel} onclose={close}>
+<dialog id="player" bind:this={dialog} class="immersive-dialog" data-tv-nav="self" aria-label={$t('immersive_player')} oncancel={cancel} onclose={close}>
   <!-- The media shell owns focus and shortcuts; the controls do not know the playback implementation. -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = true; wake(); }} onkeydown={keyboard}
+  <div class="player-shell" class:inactive={!visible && !paused} bind:this={surface} role="document" tabindex="-1" onkeydowncapture={() => { keyboardPinned = !tvActive(); wake(); }} onkeydown={keyboard}
     onpointermove={pointerMoved} onpointerdown={() => { keyboardPinned = false; surface?.focus(); }}>
     <video
       bind:this={video}
@@ -754,7 +908,17 @@
       <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
       {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
-      {#if active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
+      {#if $watchTogetherEnabled && active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
+      {#if active?.workId && !active.synthetic && !syncClient && sendTargets.length}
+        <div class="send-to">
+          <button type="button" class="watch-together" aria-expanded={sendMenu} aria-haspopup="menu" title={$t('send_to_device')} onclick={() => { menu = null; sendMenu = !sendMenu; }}><Icon name="tv" size={20} /><span>{$t('send_to')}</span></button>
+          {#if sendMenu}
+            <div class="send-menu" role="menu" aria-label={$t('send_to_device')}>
+              {#each sendTargets as device (device.deviceId)}<button type="button" role="menuitem" onclick={() => sendTo(device)}>{device.name}</button>{/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
       {#if $session?.user.role === 'administrator' && active?.episode}<button type="button" onclick={() => editMarker('intro')}>{$t('fix_markers')}</button>{/if}
     </div>
     {#if markerEditor && active?.episode}
@@ -801,6 +965,7 @@
         <dt>{$t('container_language')}</dt><dd>{selectedSource?.mime ?? $t('stats_not_set')} / {selectedSource?.language ?? $t('not_specified')}</dd>
         <dt>{$t('declared_audio_mode')}</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
         <dt>{$t('report_category_subtitles')}</dt><dd>{subtitle ?? 'Désactivés'}</dd>
+        <dt>{$t('transcoding')}</dt><dd>{transcodeInfo ? `${transcodeInfo.height ? `${transcodeInfo.height}p · ${(transcodeInfo.kbps / 1000).toFixed(1)} Mb/s` : $t('transcoding_audio_only')} · ${transcodeInfo.reason}${transcodeInfo.encoder ? ` · ${transcodeInfo.encoder}` : ''}` : $t('not_used')}</dd>
       </dl>
       {#each selectedSource?.tracks ?? [] as track, i (i)}<p>{$t('track_diagnostic', { index: track.index ?? i, type: track.codec_type, codec: track.codec_name, profile: track.profile ?? '', channels: track.channels ? `· ${$t('channels_count', { count: track.channels })}` : '' })}</p>{/each}
       <p>{$t('technical_diagnostic', { detail: error || loadStage })}</p>
@@ -808,9 +973,9 @@
     </section>{/if}
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if syncClient}
-      <WatchPartyOverlay client={syncClient} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
+      <WatchPartyOverlay client={syncClient} controlsVisible={visible} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
     {/if}
-    {#if partyModal && active}
+    {#if partyModal && active && $watchTogetherEnabled}
       <WatchPartyModal mediaId={active.workId ?? active.id} mediaTitle={active.title} onClose={() => partyModal = false} onJoinParty={partyId => startPartyFromPlayer(partyId)} />
     {/if}
     {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
@@ -818,7 +983,9 @@
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
       onSpeed={speed => action(player => { player.setSpeed(speed); collector?.event('speed_change'); })} onFullscreen={toggleFullscreen} onWake={wake}
-      buffered={bufferedUntil} hideCreditsSkip={showNextCard} />{/if}
+      buffered={bufferedUntil} hideCreditsSkip={showNextCard}
+      {quality} {maxKbps} onQuality={setQuality} onMaxKbps={setMaxBitrate} transcode={transcodeInfo}
+      {enhancement} onEnhancement={setEnhancement} sleep={sleepShown} onSleep={setSleep} />{/if}
     {#if showNextCard}
       <aside class="next-card" class:raised={visible} aria-label={$t('next_episode')}>
         <div class="next-thumb">
@@ -1031,6 +1198,10 @@
   .watch-together:hover { background: rgb(255 255 255 / 0.22); }
   .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
   @media (max-width: 640px) { .watch-together span { display: none; } .watch-together { padding: 0 10px; } }
+  .send-to { position: relative; }
+  .send-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: grid; min-width: 200px; padding: 6px; border-radius: 14px; background: rgb(18 20 26 / 0.94); box-shadow: 0 12px 32px rgb(0 0 0 / 0.4); }
+  .send-menu button { min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: #f4f6fb; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+  .send-menu button:hover, .send-menu button:focus-visible { background: rgb(255 255 255 / 0.14); outline: none; }
   .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
   .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
   .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }

@@ -58,6 +58,12 @@ impl Limits {
 }
 
 pub fn preparation_error_code(error: &io::Error) -> &'static str {
+    if let Some(coded) = error
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<crate::transcode::CodedError>())
+    {
+        return coded.0;
+    }
     match error.kind() {
         io::ErrorKind::WouldBlock => "preparation_busy",
         io::ErrorKind::StorageFull => "preparation_cache_limit_reached",
@@ -153,6 +159,8 @@ pub struct Preparations {
     limits: io::Result<Limits>,
     native_audio: crate::mp4_audio::NativeAudio,
     video_streams: crate::video_stream::VideoStreams,
+    transcodes: crate::transcode::Transcodes,
+    hls: crate::hls::HlsStreams,
     in_flight: Mutex<HashMap<String, Weak<Mutex<()>>>>,
     joiners: Semaphore,
 }
@@ -169,6 +177,8 @@ impl Default for Preparations {
             limits: Limits::from_env(),
             native_audio: crate::mp4_audio::NativeAudio::default(),
             video_streams: crate::video_stream::VideoStreams::default(),
+            transcodes: crate::transcode::Transcodes::default(),
+            hls: crate::hls::HlsStreams::default(),
             in_flight: Mutex::new(HashMap::new()),
             joiners: Semaphore::new(64),
         }
@@ -183,6 +193,8 @@ pub enum Component {
     OpusChunk(u32, u32),
     Subtitle(u32),
     AssSubtitle(u32),
+    /// Blu-ray PGS bitmaps copied as a `.sup` stream for the browser renderer.
+    PgsSubtitle(u32),
 }
 impl Component {
     pub fn mime(self) -> &'static str {
@@ -192,6 +204,7 @@ impl Component {
             Self::AudioChunk(_, _) | Self::OpusChunk(_, _) => "audio/mp4",
             Self::Subtitle(_) => "text/vtt; charset=utf-8",
             Self::AssSubtitle(_) => "text/plain; charset=utf-8",
+            Self::PgsSubtitle(_) => "application/octet-stream",
         }
     }
 }
@@ -249,6 +262,25 @@ impl Preparations {
     }
     pub fn video_streams(&self) -> &crate::video_stream::VideoStreams {
         &self.video_streams
+    }
+    pub fn transcodes(&self) -> &crate::transcode::Transcodes {
+        &self.transcodes
+    }
+    pub fn hls(&self) -> &crate::hls::HlsStreams {
+        &self.hls
+    }
+    /// HLS entry point: copies, conversions and reduced renditions, all cut
+    /// per segment; encodes use this Node's transcoding configuration.
+    pub async fn serve_hls(
+        &self,
+        opened: OpenedFile,
+        source: String,
+        request: crate::hls::HlsRequest,
+        method: http::Method,
+    ) -> io::Result<http::Response<crate::BoxStreamBody>> {
+        self.hls
+            .serve(opened, source, request, method, &self.transcodes)
+            .await
     }
 
     pub async fn prepare(
@@ -390,6 +422,8 @@ impl Preparations {
                 limits.audio.min(16 * 1024 * 1024)
             }
             Component::Subtitle(_) | Component::AssSubtitle(_) => 4 * 1024 * 1024,
+            // Bitmaps: a feature film's PGS track usually weighs 1 to 40 MiB.
+            Component::PgsSubtitle(_) => 96 * 1024 * 1024,
         });
         let mut file = input.try_clone_std()?;
         std::io::Seek::rewind(&mut file)?;
@@ -493,6 +527,18 @@ impl Preparations {
                     "ass",
                     "-f",
                     "ass",
+                ]);
+            }
+            Component::PgsSubtitle(index) => {
+                command.args([
+                    "-map",
+                    &format!("0:{index}"),
+                    "-vn",
+                    "-an",
+                    "-c:s",
+                    "copy",
+                    "-f",
+                    "sup",
                 ]);
             }
         }

@@ -26,8 +26,9 @@ futures-util = "0.3"
 argon2 = { version = "0.6.0", features = ["zeroize"] }
 rpassword = "7.5.4"
 zeroize = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 sha2 = "0.10.9"
+socket2 = { version = "0.6", features = ["all"] }
 bytes = "1"
 http-body-util = "0.1"
 httpdate = "1"
@@ -47,7 +48,7 @@ wasmi = "=2.0.0"
 [dev-dependencies]
 tempfile = "3"
 wat = "1"
-tokio-tungstenite = "0.29.0"
+tokio-tungstenite = "0.30.0"
 
 [[bin]]
 name = "media-extension-worker"

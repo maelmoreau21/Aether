@@ -166,6 +166,13 @@ jobs:
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
         uses: ./.github/actions/setup-ffmpeg
 
+      - name: Installer les bibliothèques de l'application de bureau (GPUI, libmpv)
+        # `--workspace` compile apps/desktop ; libmpv sert à son test de lecture réelle.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libmpv2
+
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
         shell: pwsh
@@ -278,14 +285,20 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     name: Audit de sécurité (cargo audit)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
 
+      # cargo audit direct : échoue sur une vulnérabilité ; les crates non
+      # maintenues (dépendances de GPUI) restent des avertissements. L'action
+      # rustsec/audit-check échouait en publiant ces avertissements (« Not Found »).
+      - name: Installer cargo-audit
+        run: cargo install cargo-audit --locked
+
       - name: Audit de sécurité des dépendances RustSec
-        uses: rustsec/audit-check@v1.4.1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit --ignore RUSTSEC-2026-0459
 
   # =========================================================================
   # 3. Vérifications et tests Frontend (SvelteKit)
@@ -518,12 +531,22 @@ jobs:
       - name: Vérifier le runtime Node optimisé avant publication
         run: |
           set -euo pipefail
+          # Same checks, but each failure says what it found (annotations are public).
           docker run --rm --entrypoint sh media-ci:runtime-node -ec '
             ffprobe -version | head -n 1 | grep -F "ffprobe version 9.0.2"
             ffmpeg -version | head -n 1 | grep -F "ffmpeg version 9.0.2"
-            test -z "$(find /usr/lib -name "libav*.so*" -print -quit)"
+            found=$(find /usr/lib -name "libav*.so*" -print | tr "\n" " ")
+            if [ -n "$found" ]; then
+              echo "::error::runtime-node contains libav* libraries: $found"
+              exit 1
+            fi
           '
-          test "$(docker inspect --format '{{.Size}}' media-ci:runtime-node)" -lt 200000000
+          size=$(docker inspect --format '{{.Size}}' media-ci:runtime-node)
+          echo "runtime-node image size: $size bytes"
+          if [ "$size" -ge 200000000 ]; then
+            echo "::error::runtime-node image is $size bytes (limit 200000000)"
+            exit 1
+          fi
       - name: Réutiliser la fixture AV1/Opus des tests Rust
         id: image-fixtures
         uses: actions/cache/restore@v4
@@ -608,6 +631,41 @@ jobs:
             git tag -a "$TAG" -m "Development beta $TAG"
             git push origin "$TAG"
           fi
+
+  clients:
+    name: Applications clientes
+    permissions:
+      contents: read
+    uses: ./.github/workflows/clients.yml
+    secrets: inherit
+
+  beta-release:
+    name: Pré-version GitHub de la bêta (avec les applis)
+    needs: [calculate-beta, tag-beta, clients]
+    if: needs.calculate-beta.outputs.has_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Récupérer les applications
+        uses: actions/download-artifact@v4
+        with:
+          pattern: aether-*
+          path: dist
+          merge-multiple: true
+
+      - name: Créer la pré-version et y joindre les applications
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.calculate-beta.outputs.next_tag }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false \
+              --title "Aether $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
 
   publish:
     name: Publication Docker GHCR (develop)

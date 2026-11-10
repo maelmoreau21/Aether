@@ -31,11 +31,11 @@ const server = http.createServer(async (req,res) => {
   const chunkMatch = /^\/audio-([12])-chunk-(\d+)$/.exec(name);
   if (segmented && chunkMatch && !files[name]) {
     if(!jobs.has(name)) jobs.set(name, new Promise((resolve,reject)=>{
-      const index=Number(chunkMatch[1]),chunk=Number(chunkMatch[2]),file=path.join(temp,name.slice(1)),started=performance.now();
+      const index=Number(chunkMatch[1]),chunk=Number(chunkMatch[2]),chunkName=`audio-${index}-chunk-${chunk}`,file=path.join(temp,chunkName),started=performance.now();
       const args=['-v','error','-nostdin','-ss',String(Math.max(0,chunk*10-1)),'-i',fixture,'-ss','0','-map',`0:${index}`,'-vn','-sn','-c:a','copy','-t','12','-avoid_negative_ts','make_zero','-movflags','frag_keyframe+empty_moov+default_base_moof','-frag_duration','1000000','-f','mp4',file];
       const dockerArgs=['run','--rm','--cpus=2','--memory=256m','--pids-limit=64','--network=none','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10001:10001',
         '--mount',`type=bind,source=${path.dirname(fixture)},target=/media,readonly`,'--mount',`type=bind,source=${temp},target=/cache`,'media-preparation-runtime:test','bash','-c',
-        `exec /probe/bin/ffmpeg -v error -nostdin -ss ${Math.max(0,chunk*10-1)} -protocol_whitelist fd,pipe -format_whitelist matroska,webm,mov,mp4 -max_alloc 67108864 -fd 0 -i fd: -ss 0 -map 0:${index} -vn -sn -c:a copy -t 12 -avoid_negative_ts make_zero -movflags frag_keyframe+empty_moov+default_base_moof -frag_duration 1000000 -f mp4 pipe:1 < /media/fixture.mp4 > /cache/${name.slice(1)}`];
+        `exec /probe/bin/ffmpeg -v error -nostdin -ss ${Math.max(0,chunk*10-1)} -protocol_whitelist fd,pipe -format_whitelist matroska,webm,mov,mp4 -max_alloc 67108864 -fd 0 -i fd: -ss 0 -map 0:${index} -vn -sn -c:a copy -t 12 -avoid_negative_ts make_zero -movflags frag_keyframe+empty_moov+default_base_moof -frag_duration 1000000 -f mp4 pipe:1 < /media/fixture.mp4 > /cache/${chunkName}`];
       // Use a fixed fixture name in the read-only mount for shell-safe input.
       if(docker){dockerArgs[dockerArgs.length-1]=dockerArgs.at(-1).replace('/media/fixture.mp4', '/media/'+path.basename(fixture));assert.match(path.basename(fixture),/^[a-zA-Z0-9_.-]+$/);}
       execFile(docker?'docker':'ffmpeg',docker?dockerArgs:args,error=>{
@@ -91,11 +91,12 @@ function compile(name) {
     const page=await browser.newPage(); page.setDefaultTimeout(15000);
     report.console=[];page.on('console',message=>report.console.push(message.text()));
     await page.goto(origin);
-    // Same module order as browser-streaming-performance.cjs: native.ts imports every one of them.
+    // native.ts imports every one of these modules: keep them before it, in dependency order.
     // The production player imports the i18n catalogue; the harness only needs stable keys.
     await page.addScriptTag({content:"window['/i18n']={tr:(key,params)=>params?key+JSON.stringify(params):key};"});
-    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','diagnostics','startup-timeline','native']) {
-      await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
+    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','diagnostics','startup-timeline','transcode','audio-enhancement','native']) {
+      // Name and code go in as arguments, never spliced into a script's text.
+      await page.evaluate(({name,code})=>{window[name]={};new Function('exports','require',code)(window[name],other=>window[other.slice(2)]);},{name,code:compile(name)});
     }
     await page.evaluate(({probe,videoContainer,originalContainer})=>{
       window.errors=[];window.videoLoads=0;

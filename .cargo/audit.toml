@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+    # SQLite < 3.54 page-cache uninitialized memory when opening database with crafted mismatched WAL.
+    # Aether operates exclusively on its internal SQLite database in a protected directory;
+    # no untrusted external SQLite/WAL database files are accepted or opened.
+    # sqlx-sqlite 0.9.0 currently restricts libsqlite3-sys to <0.38.0.
+    "RUSTSEC-2026-0459",
+]

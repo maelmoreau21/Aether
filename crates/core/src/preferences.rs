@@ -70,6 +70,9 @@ struct Preferences {
     skip_recap_enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     auto_skip_recap: Option<bool>,
+    /// `false`: no preview thumbnails when hovering the timeline.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trickplay_previews: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     autoplay_next_episode: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,6 +81,25 @@ struct Preferences {
     skip_forward_seconds: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     artwork_rotation: Option<ArtworkRotation>,
+    /// `auto`, `original` or a maximum height (`2160` to `360`) for fallback transcoding.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    streaming_quality: Option<String>,
+    /// Bit rate ceiling for remote viewing, in kbit/s; `0` means unlimited.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_bitrate_kbps: Option<u32>,
+    /// HDR to SDR conversion: `auto` (unsupported screens), `always` or `never`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hdr_tone_mapping: Option<String>,
+    /// `stereo` downmix, `surround` (5.1 kept) or `passthrough` (Dolby copied when decodable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_channels: Option<String>,
+    /// `off`, `normalize` (even loudness) or `night` (dialogue up, peaks down).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio_enhancement: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prefer_audio_description: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prefer_sdh_subtitles: Option<bool>,
 }
 fn default_true() -> bool {
     true
@@ -132,6 +154,9 @@ struct SubtitleStyle {
     background_opacity: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text_shadow: Option<String>,
+    /// Distance from the bottom of the picture, in percent of its height.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    position: Option<f64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -251,7 +276,9 @@ impl Preferences {
             && self.subtitle_style.as_ref().is_none_or(|s| {
                 s.font_size
                     .as_deref()
-                    .is_none_or(|v| matches!(v, "small" | "medium" | "large"))
+                    .is_none_or(|v| matches!(v, "small" | "medium" | "large" | "x-large"))
+                    && s.position
+                        .is_none_or(|v| v.is_finite() && (0.0..=40.0).contains(&v))
                     && s.font_family
                         .as_deref()
                         .is_none_or(|v| matches!(v, "sans-serif" | "serif" | "monospace"))
@@ -263,6 +290,27 @@ impl Preferences {
                         .as_deref()
                         .is_none_or(|v| matches!(v, "none" | "outline" | "drop-shadow"))
             })
+            && self.streaming_quality.as_deref().is_none_or(|v| {
+                matches!(
+                    v,
+                    "auto" | "original" | "2160" | "1440" | "1080" | "720" | "480" | "360"
+                )
+            })
+            && self
+                .max_bitrate_kbps
+                .is_none_or(|v| v == 0 || (500..=120_000).contains(&v))
+            && self
+                .hdr_tone_mapping
+                .as_deref()
+                .is_none_or(|v| matches!(v, "auto" | "always" | "never"))
+            && self
+                .audio_channels
+                .as_deref()
+                .is_none_or(|v| matches!(v, "stereo" | "surround" | "passthrough"))
+            && self
+                .audio_enhancement
+                .as_deref()
+                .is_none_or(|v| matches!(v, "off" | "normalize" | "night"))
     }
 }
 /// A `null` value removes that preference (back to its default); every other field is validated

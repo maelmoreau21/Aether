@@ -356,8 +356,77 @@ async fn search(
         ));
     }
     let server = choose(&auth, &actor, &input.kind, input.server_id.as_deref()).await?;
-    let results = remote::search(&server, &input.kind, input.q.trim()).await?;
+    let mut results = remote::search(&server, &input.kind, input.q.trim()).await?;
+    annotate(&auth, &actor, &input.kind, &mut results).await?;
     Ok(Json(json!({"results":results})))
+}
+/// Marks results already present in a readable Aether library or already requested,
+/// so nobody requests twice what exists. Another account's request only shows its state.
+async fn annotate(
+    auth: &AuthState,
+    actor: &Authenticated,
+    kind: &str,
+    results: &mut [Value],
+) -> Result<(), Error> {
+    let ids: Vec<String> = results
+        .iter()
+        .filter_map(|r| r["externalId"].as_str().map(str::to_owned))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let marks = vec!["?"; ids.len()].join(",");
+    let sql = format!(
+        "SELECT external_id,id,status,user_id FROM media_requests WHERE kind=? AND external_id IN ({marks}) AND status NOT IN ('rejected','cancelled','failed') ORDER BY created_at DESC,id"
+    );
+    let mut statement =
+        query_as::<_, (String, String, String, Option<String>)>(sqlx::AssertSqlSafe(sql))
+            .bind(kind);
+    for id in &ids {
+        statement = statement.bind(id);
+    }
+    let requests = statement.fetch_all(auth.store.pool()).await.map_err(db)?;
+    let works: Vec<(String, String, String)> = match kind {
+        "film" | "series" => {
+            let path = if kind == "film" { "$.tmdb" } else { "$.tvdb" };
+            let sql = format!(
+                "SELECT CAST(json_extract(external_ids_json,'{path}') AS TEXT),id,library_id FROM inventory_works WHERE kind=? AND CAST(json_extract(external_ids_json,'{path}') AS TEXT) IN ({marks}) ORDER BY id LIMIT 200"
+            );
+            let mut statement =
+                query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql)).bind(kind);
+            for id in &ids {
+                statement = statement.bind(id);
+            }
+            statement.fetch_all(auth.store.pool()).await.map_err(db)?
+        }
+        _ => vec![],
+    };
+    let administrator = actor.user.role == Role::Administrator;
+    let mut readable = std::collections::BTreeMap::new();
+    for (external, work, library) in works {
+        if readable.contains_key(&external) {
+            continue;
+        }
+        if authorize(auth, actor, &library).await.is_ok() {
+            readable.insert(external, work);
+        }
+    }
+    for result in results.iter_mut() {
+        let Some(external) = result["externalId"].as_str().map(str::to_owned) else {
+            continue;
+        };
+        if let Some(work) = readable.get(&external) {
+            result["inLibrary"] = json!({"workId":work});
+        }
+        if let Some((_, id, status, owner)) = requests.iter().find(|r| r.0 == external) {
+            let mine = owner.as_deref() == Some(actor.user.id.as_str());
+            result["request"] = json!({"status":status,"mine":mine,
+                "id":(mine || administrator).then_some(id)});
+        }
+    }
+    Ok(())
 }
 async fn create(
     State(auth): State<AuthState>,
@@ -433,8 +502,50 @@ async fn create(
 }
 #[derive(Deserialize, Default)]
 struct Page {
+    /// Opaque cursor returned as `nextCursor` (`created_at:id`).
     before: Option<String>,
     limit: Option<i64>,
+    /// One status, or a group: `active`, `attention` (failed/suspended), `done`, `closed`.
+    status: Option<String>,
+    kind: Option<String>,
+    /// Lets an administrator see only their own requests.
+    #[serde(default)]
+    mine: bool,
+}
+const STATUSES: [&str; 11] = [
+    "pending",
+    "approved",
+    "submitted",
+    "acquiring",
+    "imported",
+    "partial",
+    "available",
+    "rejected",
+    "cancelled",
+    "failed",
+    "suspended",
+];
+fn status_filter(value: Option<&str>) -> Result<Vec<&'static str>, Error> {
+    Ok(match value {
+        None | Some("all") => STATUSES.to_vec(),
+        Some("active") => vec![
+            "pending",
+            "approved",
+            "submitted",
+            "acquiring",
+            "imported",
+            "partial",
+        ],
+        Some("attention") => vec!["failed", "suspended"],
+        Some("done") => vec!["available"],
+        Some("closed") => vec!["rejected", "cancelled"],
+        Some(status) => vec![
+            STATUSES
+                .into_iter()
+                .find(|known| *known == status)
+                .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_page"))?,
+        ],
+    })
 }
 async fn list(
     State(auth): State<AuthState>,
@@ -442,19 +553,101 @@ async fn list(
     Query(page): Query<Page>,
 ) -> Result<Json<Value>, Error> {
     let actor = crate::applications::require(&auth, &headers, "requests", false).await?;
-    let rows:Vec<RequestRecord>=query_as(sqlx::AssertSqlSafe(format!("SELECT {REQUEST_COLUMNS} FROM media_requests WHERE (?='administrator' OR user_id=?) AND (? IS NULL OR id<?) ORDER BY id DESC LIMIT ?")))
-        .bind(actor.user.role.as_str()).bind(&actor.user.id).bind(&page.before).bind(&page.before).bind(page.limit.unwrap_or(100).clamp(1,200)).fetch_all(auth.store.pool()).await.map_err(db)?;
-    let cursor = rows.last().map(|r| r.id.clone());
+    let statuses = status_filter(page.status.as_deref())?;
+    if page
+        .kind
+        .as_deref()
+        .is_some_and(|k| !matches!(k, "film" | "series" | "artist" | "album" | "track"))
+    {
+        return Err(err(StatusCode::BAD_REQUEST, "invalid_page"));
+    }
+    // Requests are listed newest first; ids are random, so the cursor carries the date.
+    let (before_at, before_id) = match page.before.as_deref() {
+        None => (i64::MAX, String::new()),
+        Some(cursor) => cursor
+            .split_once(':')
+            .and_then(|(at, id)| Some((at.parse::<i64>().ok()?, id.to_owned())))
+            .filter(|(_, id)| id.len() <= 64)
+            .ok_or_else(|| err(StatusCode::BAD_REQUEST, "invalid_cursor"))?,
+    };
+    let marks = vec!["?"; statuses.len()].join(",");
+    let scope = "(?='administrator' OR user_id=?) AND (?=0 OR user_id=?)";
+    let sql = format!(
+        "SELECT {REQUEST_COLUMNS} FROM media_requests WHERE {scope} AND status IN ({marks}) AND (? IS NULL OR kind=?) AND (created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT ?"
+    );
+    let mine = i64::from(page.mine);
+    let mut statement = query_as::<_, RequestRecord>(sqlx::AssertSqlSafe(sql))
+        .bind(actor.user.role.as_str())
+        .bind(&actor.user.id)
+        .bind(mine)
+        .bind(&actor.user.id);
+    for status in &statuses {
+        statement = statement.bind(*status);
+    }
+    let limit = page.limit.unwrap_or(100).clamp(1, 200);
+    let rows: Vec<RequestRecord> = statement
+        .bind(&page.kind)
+        .bind(&page.kind)
+        .bind(before_at)
+        .bind(before_at)
+        .bind(&before_id)
+        .bind(limit)
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(db)?;
+    let cursor = (rows.len() as i64 == limit)
+        .then(|| rows.last().map(|r| format!("{}:{}", r.created_at, r.id)))
+        .flatten();
+    let labels = crate::applications::user_labels(
+        &auth.store,
+        rows.iter().filter_map(|r| r.user_id.as_deref()),
+    )
+    .await?;
     let mut visible = vec![];
     for row in rows {
         if match &row.library_id {
             Some(library) => authorize(&auth, &actor, library).await.is_ok(),
             None => row.imported == 1,
         } {
-            visible.push(row);
+            visible.push(present(&row, &actor, &labels));
         }
     }
-    Ok(Json(json!({"requests":visible,"nextCursor":cursor})))
+    let grouped: Vec<(String, i64)> = query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT status,COUNT(*) FROM media_requests WHERE {scope} GROUP BY status"
+    )))
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .bind(mine)
+    .bind(&actor.user.id)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
+    let counts: serde_json::Map<String, Value> = grouped
+        .into_iter()
+        .map(|(status, count)| (status, json!(count)))
+        .collect();
+    Ok(Json(
+        json!({"requests":visible,"nextCursor":cursor,"counts":counts}),
+    ))
+}
+/// A record as listed: the requester's name, and whether it belongs to the caller.
+fn present(
+    row: &RequestRecord,
+    actor: &Authenticated,
+    labels: &std::collections::BTreeMap<String, String>,
+) -> Value {
+    let mut value = json!(row);
+    if row.author_label.is_none()
+        && let Some(label) = row.user_id.as_ref().and_then(|id| labels.get(id))
+    {
+        value["authorLabel"] = json!(label);
+    }
+    value["own"] = json!(row.user_id.as_deref() == Some(actor.user.id.as_str()));
+    if let Ok(input) = serde_json::from_str::<Value>(&row.input_json) {
+        value["selection"] = json!({"seasons":input["seasons"],"episodes":input["episodes"],
+            "albumIds":input["albumIds"],"monitorFuture":input["monitorFuture"]});
+    }
+    value
 }
 async fn own(auth: &AuthState, actor: &Authenticated, id: &str) -> Result<RequestRecord, Error> {
     let row = record(&auth.store, id).await?;
@@ -483,16 +676,35 @@ async fn detail(
     let events: Vec<EventRow> =query_as("SELECT id,actor_id,status,code,created_at FROM acquisition_events WHERE request_id=? ORDER BY created_at,id LIMIT 500").bind(&id).fetch_all(auth.store.pool()).await.map_err(db)?;
     let input: Value = serde_json::from_str(&row.input_json)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_request_state"))?;
-    let mut value = json!(row);
+    let labels = crate::applications::user_labels(
+        &auth.store,
+        row.user_id
+            .as_deref()
+            .into_iter()
+            .chain(events.iter().filter_map(|e| e.1.as_deref())),
+    )
+    .await?;
+    let mut value = present(&row, &actor, &labels);
     value["selection"] = input;
-    value["events"]=json!(events.iter().map(|(id,actor,status,code,created)|json!({"id":id,"actorId":actor,"status":status,"code":code,"createdAt":created})).collect::<Vec<_>>());
+    value["events"]=json!(events.iter().map(|(id,actor,status,code,created)|json!({"id":id,"actorLabel":actor.as_ref().and_then(|a|labels.get(a)),"status":status,"code":code,"createdAt":created})).collect::<Vec<_>>());
     Ok(Json(value))
 }
+/// Fixed reasons an administrator gives when refusing; shown to the requester.
+const REJECT_REASONS: [&str; 6] = [
+    "already_available",
+    "not_available",
+    "duplicate",
+    "out_of_scope",
+    "storage",
+    "other",
+];
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Action {
     action: String,
     server_id: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
 }
 async fn action(
     State(auth): State<AuthState>,
@@ -511,6 +723,16 @@ async fn action(
             "approved"
         }
         _ => return Err(err(StatusCode::CONFLICT, "request_action_not_allowed")),
+    };
+    let reason = match input.reason.as_deref() {
+        None => None,
+        Some(reason) if status == "rejected" && REJECT_REASONS.contains(&reason) => Some(reason),
+        Some(_) => {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_reject_reason",
+            ));
+        }
     };
     let mut selection: RequestInput = serde_json::from_str(&row.input_json)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_request_state"))?;
@@ -539,11 +761,11 @@ async fn action(
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
         .await
         .map_err(db)?;
-    let changed=query("UPDATE media_requests SET status=?,error_code=NULL,server_id=?,library_id=?,input_json=?,updated_at=?,imported=CASE WHEN ?='approved' THEN 0 ELSE imported END WHERE id=? AND status=?").bind(status).bind(&server.id).bind(&server.library_id).bind(json!(selection).to_string()).bind(now()).bind(status).bind(&id).bind(&row.status).execute(&mut *tx).await.map_err(db)?.rows_affected();
+    let changed=query("UPDATE media_requests SET status=?,error_code=?,server_id=?,library_id=?,input_json=?,updated_at=?,imported=CASE WHEN ?='approved' THEN 0 ELSE imported END WHERE id=? AND status=?").bind(status).bind(reason).bind(&server.id).bind(&server.library_id).bind(json!(selection).to_string()).bind(now()).bind(status).bind(&id).bind(&row.status).execute(&mut *tx).await.map_err(db)?.rows_affected();
     if changed != 1 {
         return Err(err(StatusCode::CONFLICT, "request_changed"));
     }
-    event(&mut tx, &id, Some(&actor.user.id), status, None).await?;
+    event(&mut tx, &id, Some(&actor.user.id), status, reason).await?;
     if status == "approved" {
         query("INSERT INTO acquisition_jobs(request_id,available_at) VALUES(?,?) ON CONFLICT(request_id) DO UPDATE SET available_at=excluded.available_at,lease_token=NULL,lease_until=0,attempts=0,phase='initial'").bind(&id).bind(now()).execute(&mut *tx).await.map_err(db)?;
     } else {

@@ -40,6 +40,8 @@ export class ExternalAudio {
     this.audio.addEventListener('seeked', this.recover);
   }
   private clearStall() { clearTimeout(this.stallTimer); this.stallTimer = undefined; }
+  /** The element playing this track, for optional browser-side audio processing. */
+  mediaElement(): HTMLAudioElement { return this.audio; }
   private error = () => {
     if (this.stopped || this.failed || !this.active) return;
     this.failed = true; this.holdingVideo = false; this.clearStall();

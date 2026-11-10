@@ -7,11 +7,22 @@ export const segmentKinds = ['intro', 'credits', 'recap', 'preview'] as const;
 export type SegmentKind = typeof segmentKinds[number];
 
 export type TaskState = { status: string; error: string | null; updatedAt: number | null };
+/** Where a segment comes from: a detection, a chapter taken as it is, or an administrator's edit. */
+export type SegmentSource = 'auto' | 'chapter' | 'manual';
 export type AutomaticSegment = {
   type: SegmentKind; start: number; end: number; confidence: number;
   extensionId: string; updatedAt: number; usable: boolean;
+  /** Absent from servers before November 2026. */
+  source?: 'auto'; locked?: false;
 };
-export type ManualSegment = { type: SegmentKind; start: number | null; end: number | null; enabled: boolean; updatedAt: number };
+/**
+ * A correction is always locked: an analysis never writes or deletes it, and it wins over every
+ * detection until it is reset to the automatic detection.
+ */
+export type ManualSegment = {
+  type: SegmentKind; start: number | null; end: number | null; enabled: boolean; updatedAt: number;
+  source?: Exclude<SegmentSource, 'auto'>; locked?: true;
+};
 export type SegmentEpisode = {
   assetId: string; workId: string; episodeNumber: number; title: string;
   duration: number | null; minConfidence: number; detectionEnabled: boolean;

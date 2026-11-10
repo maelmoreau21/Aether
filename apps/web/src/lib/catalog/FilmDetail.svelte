@@ -20,6 +20,9 @@
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import ChapterImages from './ChapterImages.svelte';
   import { t } from '../i18n';
+  import MediaStatistics from '../statistics/MediaStatistics.svelte';
+  import { statisticsVisible } from '../statistics/visibility';
+  import { st } from '../statistics/i18n';
 
   let { work, playableMedia = [], allowedIds = [], selected = $bindable(''), mediaError = '', similarCandidates = [], onPlay }: {
     work: Work; playableMedia: Media[]; allowedIds: string[]; selected: string; mediaError?: string; similarCandidates?: Work[]; onPlay: () => Promise<void>;
@@ -34,10 +37,12 @@
   const hasCast = $derived(creditPeople(work).length > 0);
   const tabs = $derived([
     { id: 'details', label: $t('detail_tab_details') },
-    ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : [])
+    ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : []),
+    ...($statisticsVisible && !work.synthetic ? [{ id: 'stats', label: $st('media_tab') }] : [])
   ]);
   let tab = $state('details');
-  $effect(() => { void work.id; tab = 'details'; });
+  // `?section=stats` (links from the statistics page) opens the audience tab.
+  $effect(() => { void work.id; tab = new URLSearchParams(location.search).get('section') === 'stats' ? 'stats' : 'details'; });
 </script>
 
 {#snippet mediaFacts()}
@@ -123,6 +128,8 @@
     >
       {#if tab === 'cast' && hasCast}
         <EditorialCredits {work} />
+      {:else if tab === 'stats' && $statisticsVisible && !work.synthetic}
+        <MediaStatistics mediaId={work.id} kind="film" />
       {:else}
         <WorkDetails {work}>
           {#if currentSelectedMedia && !work.synthetic}{#key currentSelectedMedia.id}<ChapterImages assetId={currentSelectedMedia.id} />{/key}{/if}

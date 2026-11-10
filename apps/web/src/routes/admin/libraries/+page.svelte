@@ -15,6 +15,7 @@
   import Icon from '../../../lib/ui/Icon.svelte';
   import type { Library, Scan, AdminNode, CoreHealth, EnrollmentToken, RefreshMode } from '../../../lib/admin/types';
   import AdminSettings from '../../../lib/admin/AdminSettings.svelte';
+  import AdminPlayback from '../../../lib/admin/AdminPlayback.svelte';
   import { DEFAULT_NAME } from '../../../lib/config/brand';
 
   import AdminOverview from '../../../lib/admin/AdminOverview.svelte';
@@ -415,6 +416,7 @@
       </div>
     {:else}
           <AdminSettings section={currentHash} />
+          {#if currentHash === '#playback-section'}<AdminPlayback />{/if}
 
           <!-- Section 1: Dashboard Overview -->
           <div hidden={currentHash !== '#statistics-section'}><Statistics administrator embedded active={currentHash === '#statistics-section'} /></div>

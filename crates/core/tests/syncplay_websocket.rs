@@ -366,3 +366,53 @@ async fn another_account_finds_and_joins_an_open_party_that_ends_when_everyone_l
         "{body}"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn disabled_watch_together_refuses_every_party_route() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("disabled.sqlite"))
+        .await
+        .unwrap();
+    store
+        .bootstrap("host", Zeroizing::new(PASSWORD.into()))
+        .await
+        .unwrap();
+    query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json")
+        .bind(json!({"serverName":"Aether","welcomeMessage":"","watchTogetherEnabled":false}).to_string())
+        .execute(store.pool()).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
+    let app = auth::router(auth.clone()).merge(parties::router(auth));
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let http = Client::new();
+    let (cookie, csrf) = login(&http, &origin, "host").await;
+    let created = http
+        .post(format!("{origin}/api/v1/parties"))
+        .header("origin", &origin)
+        .header("cookie", &cookie)
+        .header("x-csrf-token", &csrf)
+        .json(&json!({"mediaId":"movie"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::FORBIDDEN);
+    let body: Value = created.json().await.unwrap();
+    assert!(body["error"].as_str().unwrap().contains("désactivé"));
+    for path in [
+        "/api/v1/parties",
+        "/api/v1/parties/invites",
+        "/api/v1/parties/any/ws",
+    ] {
+        let response = http
+            .get(format!("{origin}{path}"))
+            .header("cookie", &cookie)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+    server.abort();
+}

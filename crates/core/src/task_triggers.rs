@@ -320,6 +320,23 @@ pub struct TaskView {
     pub warnings_count: i64,
     pub issues: Vec<String>,
     pub triggers: Vec<TriggerView>,
+    /// The library scan a media sub-task belongs to (`scan-<library>`), shown under it.
+    pub parent_id: Option<String>,
+    /// What a media sub-task has done in its current or last run.
+    pub stats: Option<TaskStats>,
+    /// For a media sub-task: whether it also runs on its own after each scan of its library.
+    pub after_scan: Option<bool>,
+}
+
+/// Counts of a media sub-task run: files (or works) done, failed and still waiting, and for
+/// images the number of images downloaded.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskStats {
+    pub done: i64,
+    pub failed: i64,
+    pub pending: i64,
+    pub images: Option<i64>,
 }
 
 fn now() -> i64 {
@@ -516,6 +533,9 @@ async fn collect(
             warnings_count: 0,
             issues: Vec::new(),
             triggers: triggers_of("system", &id),
+            parent_id: None,
+            stats: None,
+            after_scan: None,
         });
     }
 
@@ -557,6 +577,9 @@ async fn collect(
                 warnings_count: 0,
                 issues: Vec::new(),
                 triggers: triggers_of("backup", "backup"),
+                parent_id: None,
+                stats: None,
+                after_scan: None,
             });
         }
     }
@@ -564,13 +587,68 @@ async fn collect(
     // Library scans: one task per visible library (physical folders are its scopes).
     let libraries: Vec<(String, String, String, i64, String, String)> = query_as("SELECT l.id,l.name,l.kind,l.enabled,l.node_id,n.status FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.kind IN ('films','series','music') AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) ORDER BY l.name,l.id")
         .fetch_all(pool).await?;
+    let marker_extension = crate::library_media_tasks::marker_extension_enabled(store).await?;
     for (library, name, library_kind, enabled, node, node_status) in libraries {
-        if !wants(&TaskRef::Scan(library.clone())) {
-            continue;
+        let reason = if enabled != 1 {
+            Some("Bibliothèque désactivée.".to_owned())
+        } else if node != "local" && node_status != "connected" {
+            Some("Media Node indisponible.".to_owned())
+        } else {
+            None
+        };
+        if wants(&TaskRef::Scan(library.clone())) {
+            tasks.push(
+                scan_view(
+                    store,
+                    &library,
+                    &name,
+                    &library_kind,
+                    reason.clone(),
+                    &active,
+                    &next_of,
+                    &triggers_of,
+                )
+                .await?,
+            );
         }
+        // Its media sub-tasks follow the scan of a film or series library.
+        let media = match only {
+            None => Some(None),
+            Some(TaskRef::Media(task, id)) if *id == library => Some(Some(*task)),
+            _ => None,
+        };
+        if let Some(only_task) = media {
+            let row = crate::library_media_tasks::LibraryRow {
+                id: &library,
+                name: &name,
+                kind: &library_kind,
+                reason: reason.as_deref(),
+            };
+            tasks.extend(
+                crate::library_media_tasks::views(store, &row, only_task, marker_extension).await?,
+            );
+        }
+    }
+    Ok(tasks)
+}
+
+/// The scan task of one library.
+#[allow(clippy::too_many_arguments)]
+async fn scan_view(
+    store: &IdentityStore,
+    library: &str,
+    name: &str,
+    library_kind: &str,
+    reason: Option<String>,
+    active: &[ActiveRow],
+    next_of: &impl Fn(&str, &str) -> Option<i64>,
+    triggers_of: &impl Fn(&str, &str) -> Vec<TriggerView>,
+) -> Result<TaskView, sqlx::Error> {
+    let pool = store.pool();
+    {
         let scopes: Vec<String> =
             query_scalar("SELECT library_id FROM library_folders WHERE parent_id=?")
-                .bind(&library)
+                .bind(library)
                 .fetch_all(pool)
                 .await?;
         let in_scope = |scope: &str| scope == library || scopes.iter().any(|s| s == scope);
@@ -586,9 +664,9 @@ async fn collect(
             .then(|| current.iter().map(|(.., p)| *p).sum::<i64>() / current.len().max(1) as i64);
         // The most recent finished run over every scope of the library.
         let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as("SELECT started_at,finished_at,status,error FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('completed','error','cancelled') ORDER BY COALESCE(finished_at,updated_at) DESC,id LIMIT 1")
-            .bind(&library).bind(&library).fetch_optional(pool).await?;
+            .bind(library).bind(library).fetch_optional(pool).await?;
         let job: Option<(String, String, i64, i64)> = query_as("SELECT status,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=?")
-            .bind(&library).fetch_optional(pool).await?;
+            .bind(library).fetch_optional(pool).await?;
         let issues: Vec<String> = job
             .as_ref()
             .and_then(|(_, json, ..)| serde_json::from_str::<Vec<String>>(json).ok())
@@ -622,7 +700,7 @@ async fn collect(
                 let legacy: Option<(Option<i64>, String)> = query_as(
                     "SELECT last_run_at,last_outcome FROM scheduled_scans WHERE library_id=?",
                 )
-                .bind(&library)
+                .bind(library)
                 .fetch_optional(pool)
                 .await?;
                 legacy.and_then(|(start, outcome)| {
@@ -634,17 +712,10 @@ async fn collect(
                 })
             }
         };
-        let reason = if enabled != 1 {
-            Some("Bibliothèque désactivée.".to_owned())
-        } else if node != "local" && node_status != "connected" {
-            Some("Media Node indisponible.".to_owned())
-        } else {
-            None
-        };
-        tasks.push(TaskView {
+        Ok(TaskView {
             id: format!("scan-{library}"),
             kind: "scan",
-            description: match library_kind.as_str() {
+            description: match library_kind {
                 "series" => "Analyse les fichiers de séries et actualise le catalogue. Les médias restent en lecture seule.",
                 "music" => "Analyse les fichiers de musique et actualise le catalogue. Les médias restent en lecture seule.",
                 _ => "Analyse les fichiers de films et actualise le catalogue. Les médias restent en lecture seule.",
@@ -654,17 +725,19 @@ async fn collect(
             category: "Bibliothèques".into(),
             state,
             progress,
-            next_run_at: next_of("scan", &library),
+            next_run_at: next_of("scan", library),
             last_run,
             reason,
-            library_id: Some(library.clone()),
-            library_kind: Some(library_kind),
+            library_id: Some(library.to_owned()),
+            library_kind: Some(library_kind.to_owned()),
             warnings_count,
             issues,
-            triggers: triggers_of("scan", &library),
-        });
+            triggers: triggers_of("scan", library),
+            parent_id: None,
+            stats: None,
+            after_scan: None,
+        })
     }
-    Ok(tasks)
 }
 
 async fn find(store: &IdentityStore, id: &str) -> Result<(TaskRef, TaskView), ApiError> {
@@ -732,6 +805,11 @@ async fn run(
         )
         .await
         .map_err(internal)?,
+        TaskRef::Media(media, library) => {
+            crate::library_media_tasks::admit(&auth, *media, library, &actor, timestamp)
+                .await
+                .map_err(internal)?
+        }
     };
     match admission {
         Admission::Queued => {
@@ -752,7 +830,18 @@ async fn cancel(
 ) -> Result<StatusCode, ApiError> {
     authorize(&auth, &headers, true).await?;
     let (task, _) = find(&auth.store, &id).await?;
+    if let TaskRef::Media(media, library) = &task {
+        return if crate::library_media_tasks::cancel(&auth, *media, library, now())
+            .await
+            .map_err(internal)?
+        {
+            Ok(StatusCode::NO_CONTENT)
+        } else {
+            Err(ApiError::coded(StatusCode::CONFLICT, "task_not_active"))
+        };
+    }
     let ids: Vec<String> = match &task {
+        TaskRef::Media(..) => Ok(Vec::new()),
         TaskRef::System(target) => query_scalar("SELECT id FROM durable_tasks WHERE category='system' AND target_id=? AND status IN ('queued','running','paused')")
             .bind(target).fetch_all(auth.store.pool()).await,
         TaskRef::Backup => query_scalar("SELECT id FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','running','paused')")
@@ -803,6 +892,10 @@ async fn create_trigger(
 ) -> Result<(StatusCode, Json<TriggerView>), ApiError> {
     authorize(&auth, &headers, true).await?;
     let (task, _) = find(&auth.store, &id).await?;
+    if matches!(task, TaskRef::Media(..)) {
+        // A media sub-task runs after each scan of its library: schedule the scan instead.
+        return Err(ApiError::coded(StatusCode::CONFLICT, "trigger_unsupported"));
+    }
     let invalid = || ApiError::coded(StatusCode::UNPROCESSABLE_ENTITY, "trigger_invalid");
     let spec = TriggerSpec {
         kind: input.trigger_type,

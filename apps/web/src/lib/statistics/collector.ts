@@ -5,7 +5,7 @@ export type Origin = 'manual' | 'automatic' | 'sync';
 export type EventKind = 'start' | 'heartbeat' | 'pause' | 'resume' | 'seek' | 'buffering' | 'buffered' | 'audio_change' | 'subtitle_change' | 'speed_change' | 'source_change' | 'skip_intro' | 'skip_credits' | 'skip_recap' | 'skip_preview' | 'stop' | 'ended' | 'error';
 export interface TrackInfo { id: string; language: string; codec: string }
 export interface Snapshot { position: number; duration: number; paused: boolean; speed: number }
-export interface PlaybackInfo { method: 'direct' | 'remux' | 'separate_audio' | 'prepared' | 'unknown'; audio?: TrackInfo; mediaId?: string }
+export interface PlaybackInfo { method: 'direct' | 'remux' | 'separate_audio' | 'prepared' | 'transcode' | 'unknown'; audio?: TrackInfo; mediaId?: string }
 interface Sample {
   sequence: number; kind: EventKind; elapsedMs: number; position: number; duration: number;
   playing: boolean; buffering: boolean; rate: number; origin: Origin;

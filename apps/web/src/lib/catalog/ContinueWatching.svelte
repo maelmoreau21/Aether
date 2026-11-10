@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
-  import { history, loadHistory } from './watch-state';
+  import { history, loadHistory, markWatched } from './watch-state';
   import { isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
   import Icon from '../ui/Icon.svelte';
@@ -38,6 +38,15 @@
   $effect(() => {
     if ($session) void loadHistory().catch(e => (error = e.message));
   });
+
+  let hiding = $state<string[]>([]);
+  // Netflix-style removal: resetting the saved position drops the title from this row on every client.
+  async function hide(workId: string) {
+    if (hiding.includes(workId)) return;
+    hiding = [...hiding, workId];
+    try { await markWatched(workId, false); } catch (e) { error = e instanceof Error ? e.message : String(e); }
+    finally { hiding = hiding.filter(id => id !== workId); }
+  }
 
   const continuing = $derived($history.filter(item => isResumable(item, $serverPresentation)));
 
@@ -123,6 +132,7 @@
     >
       {#each continuing as item (item.workId)}
         {@const image = thumbnail(item.workId,item.seriesId)}
+        <div class="continue-item">
         <a
           class="continue-card"
           href={resolve(`${item.kind === 'episode' ? 'series/' : 'films/'}?work=${encodeURIComponent(item.seriesId ?? item.workId)}`)}
@@ -162,6 +172,15 @@
             </span>
           </div>
         </a>
+        <button
+          type="button"
+          class="hide-btn"
+          disabled={hiding.includes(item.workId)}
+          title={$t('catalog_hide_from_continue', { title: item.title })}
+          aria-label={$t('catalog_hide_from_continue', { title: item.title })}
+          onclick={() => hide(item.workId)}
+        ><Icon name="close" size={14} /></button>
+        </div>
       {/each}
     </div>
   {/if}
@@ -221,6 +240,20 @@
   @media (hover: hover) and (pointer: fine) {
     .continue-card:hover { background: var(--pn-2); transform: translateY(-2px); }
   }
+
+  .continue-item { position: relative; display: flex; min-width: 0; scroll-snap-align: start; }
+  .continue-item > .continue-card { flex: 1; min-width: 0; }
+  .hide-btn {
+    position: absolute; top: 16px; right: 16px; z-index: 3;
+    display: grid; place-items: center; width: 30px; height: 30px;
+    border: none; border-radius: 50%; cursor: pointer;
+    background: color-mix(in srgb, var(--bg) 72%, transparent); color: var(--tx);
+    opacity: 0; transition: opacity .15s ease;
+  }
+  .continue-item:hover .hide-btn, .hide-btn:focus-visible { opacity: 1; }
+  .hide-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  .hide-btn:disabled { cursor: progress; }
+  @media (hover: none) { .hide-btn { opacity: 1; } }
 
   .continue-card:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
 

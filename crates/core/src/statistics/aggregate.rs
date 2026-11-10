@@ -262,7 +262,7 @@ pub(crate) fn resolution(height: i64) -> &'static str {
 fn transcoded(method: &str) -> Option<bool> {
     match method {
         "direct" => Some(false),
-        "remux" | "separate_audio" | "prepared" => Some(true),
+        "remux" | "separate_audio" | "prepared" | "transcode" => Some(true),
         _ => None,
     }
 }
@@ -563,6 +563,171 @@ pub(crate) fn insights(rows: &[Play], zone: &Zone, now: i64) -> Value {
             json!({"label":label,"plays":plays,"seconds":seconds,"direct":direct,"transcoded":transcoded,"unknown":unknown,
                 "transcodeShare": if known > 0 { *transcoded as f64 / known as f64 } else { 0.0 }})
         }).collect::<Vec<_>>(),
+    })
+}
+
+/// Watched share of one (account, title) pair: 1 when completed, -1 when unknown.
+fn watched_ratio(covered: f64, length: f64, done: bool) -> f64 {
+    if done {
+        1.0
+    } else if length > 0.0 {
+        (covered / length).clamp(0.0, 1.0)
+    } else {
+        -1.0
+    }
+}
+
+/// Audience of one title (film, episode, track or a whole series).
+///
+/// `episodes` maps an episode work to its (season, episode) numbers; viewers
+/// are only listed for administrators.
+pub(crate) fn media(
+    rows: &[Play],
+    episodes: &HashMap<String, (i64, i64)>,
+    with_viewers: bool,
+) -> Value {
+    #[derive(Default)]
+    struct Pair {
+        covered: f64,
+        length: f64,
+        done: bool,
+        plays: i64,
+    }
+    #[derive(Default)]
+    struct Viewer {
+        name: String,
+        seconds: f64,
+        plays: i64,
+        last: i64,
+        ratios: Vec<f64>,
+    }
+    #[derive(Default)]
+    struct Episode {
+        title: String,
+        seconds: f64,
+        plays: i64,
+        users: HashSet<String>,
+        ratios: Vec<f64>,
+    }
+    let mut pairs: HashMap<(&str, &str), Pair> = HashMap::new();
+    let mut viewers: HashMap<&str, Viewer> = HashMap::new();
+    for p in rows {
+        let viewer = viewers.entry(&p.user_id).or_default();
+        if viewer.name.is_empty() {
+            viewer.name = p.user.clone();
+        }
+        viewer.seconds += p.seconds;
+        viewer.plays += i64::from(p.qualifies());
+        viewer.last = viewer.last.max(p.started_at);
+        if p.seconds <= 0.0 {
+            continue;
+        }
+        let pair = pairs.entry((&p.user_id, p.title_key())).or_default();
+        pair.covered += p.covered;
+        pair.length = pair.length.max(p.duration);
+        pair.done |= p.completed;
+        pair.plays += i64::from(p.qualifies());
+    }
+    let mut by_episode: HashMap<&str, Episode> = HashMap::new();
+    for p in rows.iter().filter(|p| p.kind == "episode") {
+        let entry = by_episode.entry(&p.media_id).or_default();
+        if entry.title.is_empty() {
+            entry.title = p.title.clone();
+        }
+        entry.seconds += p.seconds;
+        entry.plays += i64::from(p.qualifies());
+        if p.seconds > 0.0 {
+            entry.users.insert(p.user_id.clone());
+        }
+    }
+    // Retention: share of (account, title) pairs that reached each decile.
+    let mut reached = [0i64; 11];
+    let (mut known, mut sum, mut finished, mut rewatched) = (0i64, 0.0f64, 0i64, 0i64);
+    for ((user, title), pair) in &pairs {
+        rewatched += i64::from(pair.plays > 1);
+        let ratio = watched_ratio(pair.covered, pair.length, pair.done);
+        if ratio < 0.0 {
+            continue;
+        }
+        known += 1;
+        sum += ratio;
+        finished += i64::from(pair.done || ratio >= 0.9);
+        for (decile, slot) in reached.iter_mut().enumerate() {
+            // Small tolerance: a credits skip still "reaches" 100 %.
+            if ratio + 1e-9 >= decile as f64 / 10.0 || (decile == 10 && ratio >= 0.95) {
+                *slot += 1;
+            }
+        }
+        if let Some(v) = viewers.get_mut(user) {
+            v.ratios.push(ratio);
+        }
+        if let Some(e) = by_episode.get_mut(title) {
+            e.ratios.push(ratio);
+        }
+    }
+    let average = |values: &[f64]| {
+        if values.is_empty() {
+            Value::Null
+        } else {
+            json!(values.iter().sum::<f64>() / values.len() as f64)
+        }
+    };
+    let totals = Totals::of(rows);
+    let first = rows.iter().map(|p| p.started_at).min();
+    let last = rows.iter().map(|p| p.started_at).max();
+    let mut episode_rows: Vec<_> = by_episode.into_iter().collect();
+    episode_rows.sort_by(|(a, _), (b, _)| {
+        let (sa, ea) = episodes.get(*a).copied().unwrap_or((i64::MAX, i64::MAX));
+        let (sb, eb) = episodes.get(*b).copied().unwrap_or((i64::MAX, i64::MAX));
+        sa.cmp(&sb).then(ea.cmp(&eb)).then(a.cmp(b))
+    });
+    let episode_values: Vec<Value> = episode_rows
+        .iter()
+        .take(500)
+        .map(|(id, e)| {
+            let numbers = episodes.get(*id);
+            json!({"id":id,"title":e.title,"season":numbers.map(|n| n.0),"episode":numbers.map(|n| n.1),
+                "plays":e.plays,"seconds":e.seconds,"users":e.users.len(),"averageCompletion":average(&e.ratios)})
+        })
+        .collect();
+    let mut viewer_rows: Vec<_> = viewers
+        .into_iter()
+        .filter(|(_, v)| v.seconds > 0.0)
+        .collect();
+    viewer_rows.sort_by(|a, b| b.1.seconds.total_cmp(&a.1.seconds).then(a.0.cmp(b.0)));
+    let viewer_values: Vec<Value> = if with_viewers {
+        viewer_rows
+            .iter()
+            .take(50)
+            .map(|(id, v)| {
+                json!({"id":id,"name":v.name,"plays":v.plays,"seconds":v.seconds,"lastPlay":v.last,"averageCompletion":average(&v.ratios)})
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let plays = totals.plays.max(0);
+    json!({
+        "audience": {
+            "viewers": totals.users,
+            "sessions": rows.len(),
+            "plays": plays,
+            "seconds": totals.seconds,
+            "averageSession": if plays > 0 { json!(rows.iter().filter(|p| p.qualifies()).map(|p| p.seconds).sum::<f64>() / plays as f64) } else { Value::Null },
+            "averageCompletion": if known > 0 { json!(sum / known as f64) } else { Value::Null },
+            "completionRate": if known > 0 { json!(finished as f64 / known as f64) } else { Value::Null },
+            "rewatches": rewatched,
+            "firstPlay": first,
+            "lastPlay": last,
+            "active": rows.iter().filter(|p| p.active).count(),
+        },
+        "retention": reached.iter().enumerate().map(|(decile, count)| json!({
+            "percent": decile * 10,
+            "viewers": count,
+            "share": if known > 0 { *count as f64 / known as f64 } else { 0.0 },
+        })).collect::<Vec<_>>(),
+        "episodes": episode_values,
+        "viewers": viewer_values,
     })
 }
 

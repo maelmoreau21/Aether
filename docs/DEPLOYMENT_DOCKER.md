@@ -159,6 +159,10 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 | `MEDIA_TRANSCODE_HARDWARE` | `none` | `nvenc` (NVIDIA), `vaapi` (Intel QuickSync et AMD sous Linux), `qsv`/`amf` (FFmpeg personnalisé) ; encodeur absent : repli logiciel x264 journalisé |
 | `MEDIA_TRANSCODE_VAAPI_DEVICE` | `/dev/dri/renderD128` | Nœud de rendu VA-API, sous `/dev/dri/` uniquement |
 | `MEDIA_TRANSCODE_MAX_SESSIONS` | `2` | Transcodages simultanés (1 à 16) ; au-delà, `transcode_capacity_reached` |
+| `MEDIA_DLNA_API_KEY` | absente | Active le serveur DLNA/UPnP pour les vieilles TV et consoles : une clé d'API `catalog:read` (Administration › Clés d'API). Le réseau voit exactement ce que la clé peut lire ; la révoquer coupe le DLNA immédiatement |
+| `MEDIA_DLNA_NAME` | `Aether` | Nom affiché par les TV pour le serveur DLNA |
+
+**DLNA/UPnP.** Les TV découvrent le serveur par SSDP (UDP 1900, multicast `239.255.255.250`) : le conteneur doit être en `network_mode: host` (le multicast ne traverse pas le pont Docker) et le port 1900/UDP ouvert sur le pare-feu de l'hôte. Seules les adresses privées, de bouclage et de lien local sont servies ; les fichiers sont lus en lecture directe (pas de transcodage), la TV doit donc décoder le format d'origine.
 
 **Accélération matérielle.** VA-API : exposer le périphérique (`devices: ["/dev/dri:/dev/dri"]`) et ajouter le groupe `render` de l'hôte (`group_add`). NVIDIA : NVIDIA Container Toolkit, `runtime: nvidia` (ou `deploy.resources.reservations.devices`) et `NVIDIA_DRIVER_CAPABILITIES=compute,video,utility` ; les bibliothèques du pilote sont injectées à l'exécution, l'image n'en contient aucune. Le FFmpeg de l'image inclut x264 : ce binaire est sous GPL, compatible avec l'AGPLv3 du projet (`/usr/share/media-probe/LICENSE`).
 

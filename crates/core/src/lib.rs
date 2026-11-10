@@ -26,6 +26,7 @@ pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
+pub mod dlna;
 pub mod extensions;
 pub mod groups;
 pub mod imports;

@@ -1,0 +1,82 @@
+# XcodeGen spec: `xcodegen generate` writes Aether.xcodeproj (not versioned).
+# Run scripts/build-xcframework.sh first: both apps link Generated/AetherFFI.xcframework
+# (the Rust core) and compile its Swift bindings, Generated/aether_ffi.swift.
+name: Aether
+options:
+  bundleIdPrefix: app.aether
+  deploymentTarget:
+    iOS: "17.0"
+    tvOS: "17.0"
+  createIntermediateGroups: true
+  developmentLanguage: fr
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # The XCFramework carries arm64 simulator slices only (Apple silicon Macs).
+    EXCLUDED_ARCHS[sdk=*simulator*]: x86_64
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+targetTemplates:
+  AetherApp:
+    type: application
+    sources:
+      - path: Sources/Shared
+      - path: Generated/aether_ffi.swift
+        group: Generated
+    dependencies:
+      - framework: Generated/AetherFFI.xcframework
+        embed: false
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+    settings:
+      base:
+        # Same identifier on iPhone, iPad and Apple TV: one universal purchase.
+        PRODUCT_BUNDLE_IDENTIFIER: app.aether
+        PRODUCT_NAME: Aether
+    # A shared scheme per app, for xcodebuild -scheme.
+    scheme: {}
+targets:
+  Aether:
+    templates: [AetherApp]
+    platform: iOS
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2"
+    info:
+      path: Generated/Info-iOS.plist
+      properties:
+        CFBundleDisplayName: Aether
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UIRequiresFullScreen: false
+        UISupportedInterfaceOrientations:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad:
+          [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
+           UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        # audio: Picture in Picture and AirPlay keep playing in the background;
+        # fetch: the daily token refresh.
+        UIBackgroundModes: [audio, fetch]
+        BGTaskSchedulerPermittedIdentifiers: [app.aether.refresh]
+        # A self-hosted Core is often reached over plain HTTP on the local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: Aether se connecte à votre serveur multimédia sur le réseau local.
+        ITSAppUsesNonExemptEncryption: false
+  AetherTV:
+    templates: [AetherApp]
+    platform: tvOS
+    info:
+      path: Generated/Info-tvOS.plist
+      properties:
+        CFBundleDisplayName: Aether
+        UIRequiredDeviceCapabilities: [arm64]
+        UIBackgroundModes: [audio, fetch]
+        BGTaskSchedulerPermittedIdentifiers: [app.aether.refresh]
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        ITSAppUsesNonExemptEncryption: false

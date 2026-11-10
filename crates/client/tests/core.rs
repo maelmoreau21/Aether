@@ -201,6 +201,29 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
     ));
     assert_eq!(tv.progress(&film.id).await.unwrap().position, 42.0);
 
+    // Home screen: what to continue, and each library on its own.
+    let resume = tv.continue_watching().await.unwrap();
+    assert_eq!(resume[0].work_id, film.id);
+    assert_eq!(
+        (resume[0].position, resume[0].title.as_str()),
+        (42.0, "Client Film")
+    );
+    let libraries = tv.libraries().await.unwrap();
+    assert!(!libraries.is_empty(), "{libraries:?}");
+    let mut found = false;
+    for library in &libraries {
+        let page = tv
+            .catalog(&CatalogQuery {
+                library: Some(library.id.clone()),
+                limit: 50,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        found |= page.items.iter().any(|w| w.id == film.id);
+    }
+    assert!(found, "the film is listed in one of {libraries:?}");
+
     // Rotation, then sign-out: the old and the forgotten tokens stop working.
     let before = tv.token().unwrap();
     assert!(!tv.refresh_if_due(3600).await.unwrap());

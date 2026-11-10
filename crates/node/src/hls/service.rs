@@ -437,6 +437,11 @@ pub fn encode_arguments(
 /// How long an encoded segment waits for a free encoder: a download asks for
 /// segments back to back and would rather wait than fail.
 const ENCODE_SLOT_WAIT: Duration = Duration::from_secs(20);
+/// How long a packet copy waits for one of the 6 slots. A copy takes about
+/// 0.1 s (measured: 85 ms to the first byte of a 6 s 1080p segment), so the
+/// queue drains quickly: a download fetching segments must not make a
+/// viewer's segment fail after a quarter of a second.
+const COPY_SLOT_WAIT: Duration = Duration::from_secs(3);
 
 fn remember<T>(map: &Mutex<HashMap<String, T>>, key: String, value: T) {
     let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
@@ -524,7 +529,7 @@ impl HlsStreams {
         encoder: Option<(&EncoderPlan, &Transcodes)>,
     ) -> io::Result<PipeBody> {
         // Converting a few seconds of audio costs about as little as a copy.
-        let quick = |args| (args, self.slots.clone(), Duration::from_millis(250));
+        let quick = |args| (args, self.slots.clone(), COPY_SLOT_WAIT);
         let (args, slots, wait) = match (request.encode, encoder, request.audio) {
             (Some(encode), Some((plan, transcodes)), _) => (
                 encode_arguments(request, encode, segment, last, plan),

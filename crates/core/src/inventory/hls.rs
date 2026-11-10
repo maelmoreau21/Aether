@@ -474,33 +474,42 @@ pub(crate) fn master_playlist(
 async fn load(
     store: &IdentityStore,
     asset_id: &str,
-) -> Result<(Probe, Vec<SubtitleRendition>), Response> {
+) -> Result<(Probe, Vec<SubtitleRendition>), Box<Response>> {
     let row = query("SELECT a.probe_json,a.library_id,t.subtitles_json FROM inventory_assets a JOIN libraries l ON l.id=a.library_id LEFT JOIN inventory_subtitles t ON t.asset_id=a.id WHERE a.id=? AND a.available=1 AND l.enabled=1")
         .bind(asset_id)
         .fetch_optional(&store.pool)
         .await;
     let row = match row {
         Ok(Some(row)) => row,
-        Ok(None) => return Err(crate::error(StatusCode::NOT_FOUND, "asset_unavailable")),
+        Ok(None) => {
+            return Err(Box::new(crate::error(
+                StatusCode::NOT_FOUND,
+                "asset_unavailable",
+            )));
+        }
         Err(_) => {
-            return Err(crate::error(
+            return Err(Box::new(crate::error(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "inventory_unavailable",
-            ));
+            )));
         }
     };
-    let probe = decode(row.get("probe_json"))
-        .map_err(|_| crate::error(StatusCode::INTERNAL_SERVER_ERROR, "probe_invalid"))?;
+    let probe = decode(row.get("probe_json")).map_err(|_| {
+        Box::new(crate::error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "probe_invalid",
+        ))
+    })?;
     let options = super::playback::playback_library_options(
         store,
         row.get::<String, _>("library_id").as_str(),
     )
     .await
     .map_err(|_| {
-        crate::error(
+        Box::new(crate::error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "library_options_unavailable",
-        )
+        ))
     })?;
     let sidecars: Vec<media_contracts::inventory::ExternalSubtitle> = row
         .get::<Option<String>, _>("subtitles_json")
@@ -537,7 +546,7 @@ pub async fn hls_subtitle_playlist(
 ) -> Response {
     let (probe, subtitles) = match load(store, asset_id).await {
         Ok(loaded) => loaded,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     if !subtitles.iter().any(|s| s.stem == stem) {
         return crate::error(StatusCode::NOT_FOUND, "unknown_subtitle");
@@ -553,7 +562,7 @@ pub async fn hls_subtitle_playlist(
 pub async fn hls_master(store: &IdentityStore, asset_id: &str, method: &Method) -> Response {
     let (probe, subtitles) = match load(store, asset_id).await {
         Ok(loaded) => loaded,
-        Err(response) => return response,
+        Err(response) => return *response,
     };
     // AAC conversions and reduced variants spend Node CPU: they follow the transcoding setting.
     let transcode = crate::server_settings::load(store)

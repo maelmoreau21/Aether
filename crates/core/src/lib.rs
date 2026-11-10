@@ -68,6 +68,7 @@ pub mod product;
 pub mod progress;
 mod provider_download;
 pub mod recommendations;
+pub mod remote;
 pub mod scans;
 pub mod statistics;
 pub mod translations;
@@ -290,6 +291,7 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(imports::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(parties::router(auth.clone()))
+            .merge(remote::router(auth.clone()))
             .merge(playlists::router(auth.clone()))
             .merge(product::router(auth.clone()))
             .merge(artwork::router(auth.clone()))

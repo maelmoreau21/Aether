@@ -10,15 +10,21 @@
     <string name="sign_in">Se connecter</string>
     <string name="pair_title">Ou scannez ce code avec un appareil déjà connecté</string>
     <string name="pair_code">Code : %1$s</string>
-    <string name="pair_expired">Code expiré, un nouveau est affiché.</string>
     <string name="change_server">Changer de serveur</string>
     <string name="search">Rechercher</string>
     <string name="films">Films</string>
     <string name="series">Séries</string>
     <string name="empty">Aucun titre</string>
     <string name="sign_out">Se déconnecter</string>
-    <string name="error_network">Serveur injoignable : %1$s</string>
     <string name="error_credentials">Identifiant ou mot de passe incorrect</string>
     <string name="error_unavailable">Ce titre n’est pas lisible ici (%1$s)</string>
     <string name="back">Retour</string>
+    <string name="season">Saison %1$d</string>
+    <string name="downloads">Téléchargements</string>
+    <string name="downloads_channel">Téléchargements</string>
+    <string name="download">Télécharger</string>
+    <string name="no_downloads">Aucun téléchargement</string>
+    <string name="download_percent">%1$d %%</string>
+    <string name="play">Lire</string>
+    <string name="delete">Supprimer</string>
 </resources>

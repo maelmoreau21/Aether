@@ -49,4 +49,6 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.5.1")
     // UniFFI's Kotlin bindings call the Rust library through JNA.
     implementation("net.java.dev.jna:jna:5.15.0@aar")
+    // Posters: memory and disk cache, downsampling; versioned URLs are cached for good.
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }

@@ -5,9 +5,16 @@ Application native (Kotlin, Compose, Media3) au-dessus du cœur Rust partagé
 
 - Connexion par mot de passe ou par code QR approuvé depuis un autre appareil.
 - Jeton d'appareil chiffré par une clé du Keystore Android, renouvelé au démarrage.
-- Catalogue films et séries avec recherche.
+- Catalogue films et séries avec affiches et recherche ; écran série avec saisons
+  et épisodes.
 - Lecture HLS par copie, décodée par le matériel ([docs/HLS.md](../../docs/HLS.md)),
   reprise à la position enregistrée et sauvegarde toutes les 15 s.
+- Téléchargements hors ligne en arrière-plan (service Media3 avec notification,
+  relancé au retour du réseau ou après redémarrage) : qualité d'origine, toutes
+  les pistes audio. Le cache ignore l'autorisation contenue dans l'URL HLS : un
+  téléchargement repris avec une nouvelle URL (validité 12 h) garde ses segments,
+  et une copie terminée se lit sans réseau. La lecture en ligne n'écrit pas dans
+  ce cache.
 
 ## Construire
 
@@ -26,7 +33,6 @@ L'APK de debug est produit dans `app/build/outputs/apk/debug/app-debug.apk`
 
 ## Limites actuelles
 
-Pas encore de téléchargements hors ligne, d'affiches, de Chromecast, de choix
-d'épisode (une série lance son premier épisode) ni de renouvellement du jeton
-en tâche de fond. Un Core en certificat auto-signé n'est pas accepté ; utiliser
+Pas encore de Chromecast ni de renouvellement du jeton en tâche de fond ; la
+position d'une lecture hors ligne n'est envoyée au Core que si le réseau est là. Un Core en certificat auto-signé n'est pas accepté ; utiliser
 un vrai certificat ou HTTP sur le réseau local.

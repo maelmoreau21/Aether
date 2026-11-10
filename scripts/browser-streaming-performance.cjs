@@ -130,7 +130,8 @@ async function instrument(page, strategy) {
   // The production player imports the i18n catalogue; the harness only needs stable keys, not the catalogue.
   await page.addScriptTag({ content: "window['/i18n']={tr:(key,params)=>params?key+JSON.stringify(params):key};" });
   for (const name of playerModules) {
-    await page.addScriptTag({ content: `window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);` });
+    // Name and code go in as arguments, never spliced into a script's text.
+    await page.evaluate(({ name, code }) => { window[name] = {}; new Function('exports', 'require', code)(window[name], other => window[other.slice(2)]); }, { name, code: compile(name) });
   }
   await page.evaluate(({ probe, container, strategy, englishHz, seekTargets }) => {
     const video = document.querySelector('video'), ctx = new AudioContext(), attached = new WeakMap();

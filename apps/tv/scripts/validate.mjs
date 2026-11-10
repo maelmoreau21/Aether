@@ -55,8 +55,9 @@ assert.match(widget.appId, new RegExp(`^${widget.package}\\.[0-9a-zA-Z]{1,52}$`)
 assert.match(widget.required, /^\d+\.\d+$/);
 assert.equal(widget.name, 'Aether');
 assert.equal(widget.profile, 'tv-samsung');
-assert.ok(widget.privileges.includes('http://tizen.org/privilege/internet'), 'internet privilege');
-assert.ok(widget.privileges.includes('http://tizen.org/privilege/tv.inputdevice'), 'media keys privilege');
+const privileges = new Set(widget.privileges);
+assert.ok(privileges.has('http://tizen.org/privilege/internet'), 'internet privilege');
+assert.ok(privileges.has('http://tizen.org/privilege/tv.inputdevice'), 'media keys privilege');
 assert.equal(widget.navigation, '*', 'the shell navigates to the Core');
 assert.equal(widget.access, '*');
 assert.equal(widget.content, 'index.html');

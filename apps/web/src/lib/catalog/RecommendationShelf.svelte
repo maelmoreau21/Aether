@@ -6,7 +6,8 @@
   import Poster from './Poster.svelte';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import { t } from '../i18n';
-  let items = $state<(Work & { recommendationReason: string })[]>([]);
+  import { recommendationReasonText, type RecommendationBecause } from './recommendation-reason';
+  let items = $state<(Work & { recommendationReason: string; recommendationBecause?: RecommendationBecause })[]>([]);
   let enabled = $state(false);
   let mode = $state('');
   let error = $state('');
@@ -38,7 +39,7 @@
 {#if enabled && items.length}
   <MediaShelf title={mode === 'personalized' ? $t('recommended_for_you') : $t('to_discover_in_your_catalogue')}>
     {#each items as item (item.id)}
-      <div class="recommendation"><Poster work={item} href={item.kind === 'series' ? resolve(`series/?work=${encodeURIComponent(item.id)}`) : resolve(`films/?work=${encodeURIComponent(item.id)}`)} /><small>{item.recommendationReason}</small></div>
+      <div class="recommendation"><Poster work={item} href={item.kind === 'series' ? resolve(`series/?work=${encodeURIComponent(item.id)}`) : resolve(`films/?work=${encodeURIComponent(item.id)}`)} /><small>{recommendationReasonText(item, $t)}</small></div>
     {/each}
   </MediaShelf>
 {:else if enabled}<p role="status">{$t('no_other_accessible_titles_to_suggest')}</p>{/if}

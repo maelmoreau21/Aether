@@ -25,6 +25,11 @@
     <string name="download">Télécharger</string>
     <string name="no_downloads">Aucun téléchargement</string>
     <string name="download_percent">%1$d %%</string>
+    <string name="download_quality">Qualité du téléchargement</string>
+    <string name="download_original">Originale</string>
+    <string name="download_height">%1$dp</string>
+    <string name="download_size">≈ %1$s Go par heure</string>
+    <string name="cancel">Annuler</string>
     <string name="play">Lire</string>
     <string name="delete">Supprimer</string>
     <string name="devices">Appareils</string>

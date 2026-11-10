@@ -4,6 +4,10 @@
 //! - video rendition `hls-v{v}.m3u8` (+ `-init.mp4`, `-{n}.m4s`), cut on fragments;
 //! - audio rendition `hls-v{v}-a{a}.m3u8` (same suffixes), cut on timestamps.
 //!
+//! Two more are encoded per segment on the same cuts: AAC conversions of audio
+//! native players cannot decode (`hls-v{v}-aac{a}…`) and reduced H.264 video
+//! renditions (`hls-v{v}-h{height}…`, see `renditions`).
+//!
 //! Separate renditions are what lets both cuts be exact: B-frames make video
 //! decode order differ from presentation order, which no single timestamp cut
 //! can respect for video and audio at once. They also expose every audio track
@@ -12,11 +16,12 @@
 use super::{
     keyframes::{self, Keyframes},
     playlist::{self, Segment},
+    renditions,
     segments::{BoxFilter, MediaBody, Part, TIMELINE_OFFSET_MS, Window},
 };
 use crate::{
     BoxStreamBody, OpenedFile,
-    transcode::coded,
+    transcode::{self, EncoderPlan, FLAG_TONEMAP, TranscodeRequest, Transcodes, coded},
     video_stream::{PipeBody, PipeLabels, spawn_pipe},
 };
 use bytes::Bytes;
@@ -45,6 +50,14 @@ pub enum Resource {
     Segment(u32),
 }
 
+/// A reduced video rendition (`hls-v{v}-h{height}…`, `-t{height}…` when the
+/// HDR picture is tone mapped to SDR): one of `renditions::RENDITIONS`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Encode {
+    pub height: u32,
+    pub tonemap: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HlsRequest {
     /// FFmpeg stream index of the video stream whose keyframes cut the timeline.
@@ -53,15 +66,27 @@ pub struct HlsRequest {
     pub audio: Option<u32>,
     /// The audio track is served from its AAC conversion (`hls-v{v}-aac{a}…`).
     pub convert: bool,
+    /// The video is re-encoded in H.264 instead of copied.
+    pub encode: Option<Encode>,
     pub resource: Resource,
 }
 
 impl HlsRequest {
+    /// Whether serving it spends encoder time (a conversion or a re-encode).
+    pub fn encodes(&self) -> bool {
+        self.convert || self.encode.is_some()
+    }
     fn profile(&self) -> String {
-        match (self.audio, self.convert) {
-            (Some(audio), true) => format!("hls-v{}-aac{audio}", self.video),
-            (Some(audio), false) => format!("hls-v{}-a{audio}", self.video),
-            (None, _) => format!("hls-v{}", self.video),
+        match (self.audio, self.convert, self.encode) {
+            (Some(audio), true, _) => format!("hls-v{}-aac{audio}", self.video),
+            (Some(audio), false, _) => format!("hls-v{}-a{audio}", self.video),
+            (None, _, Some(encode)) => format!(
+                "hls-v{}-{}{}",
+                self.video,
+                if encode.tonemap { 't' } else { 'h' },
+                encode.height
+            ),
+            (None, _, None) => format!("hls-v{}", self.video),
         }
     }
     /// The canonical component name; parsing only accepts this spelling.
@@ -85,6 +110,19 @@ fn number(raw: &str, max_digits: usize) -> Option<(u32, &str)> {
 
 pub fn request(raw: &str) -> Option<HlsRequest> {
     let (video, rest) = number(raw.strip_prefix("hls-v")?, 4)?;
+    let reduced = match (rest.strip_prefix("-h"), rest.strip_prefix("-t")) {
+        (Some(after), _) => Some((false, after)),
+        (_, Some(after)) => Some((true, after)),
+        _ => None,
+    };
+    let (encode, rest) = match reduced {
+        Some((tonemap, after)) => {
+            let (height, rest) = number(after, 4)?;
+            renditions::rendition(height)?;
+            (Some(Encode { height, tonemap }), rest)
+        }
+        None => (None, rest),
+    };
     let (convert, after) = match rest.strip_prefix("-aac") {
         Some(after) => (true, Some(after)),
         None => (false, rest.strip_prefix("-a")),
@@ -111,8 +149,10 @@ pub fn request(raw: &str) -> Option<HlsRequest> {
         video,
         audio,
         convert,
+        encode,
         resource,
     };
+    // Also refuses a reduced rendition combined with an audio track.
     (parsed.component() == raw).then_some(parsed)
 }
 
@@ -168,11 +208,9 @@ pub fn arguments(request: &HlsRequest, segment: Segment, last: bool, hevc: bool)
             }
             // Audio decode and presentation times coincide: dropping packets
             // before the start and stopping at the end partitions them exactly.
-            // A converted track is the only stream of its prepared AAC file.
-            let stream = if request.convert { 0 } else { audio };
             args.extend(owned(&[
                 "-map",
-                &format!("0:{stream}"),
+                &format!("0:{audio}"),
                 "-vn",
                 "-copypriorss",
                 "0",
@@ -208,6 +246,197 @@ pub fn arguments(request: &HlsRequest, segment: Segment, last: bool, hevc: bool)
     ]));
     args
 }
+
+/// Converted audio is AAC at this rate, in frames of this many samples.
+const AAC_RATE: u64 = 48_000;
+const AAC_FRAME: u64 = 1_024;
+/// Frames encoded before a segment and dropped: the encoder warms up on the
+/// same signal as the end of the previous segment (half a second).
+const AAC_PREROLL: u64 = 24;
+/// Frames encoded after it: the last kept frame is complete, not padded.
+const AAC_POSTROLL: u64 = 3;
+/// Decoding starts this much before the first encoded sample (codec warm-up).
+const AAC_DECODE_LEAD_MS: u64 = 500;
+
+/// First AAC frame (on the film-wide grid) at or after `ms`.
+fn aac_frame(ms: u64) -> u64 {
+    (ms * AAC_RATE).div_ceil(1000 * AAC_FRAME)
+}
+
+/// FFmpeg arguments for one segment of an AAC conversion (DTS, TrueHD, PCM…).
+///
+/// Every segment is encoded on its own, yet the joined rendition reads as one
+/// encode: AAC frames sit on one grid of 1024 samples from the film's start.
+/// The encoder is fed from a grid point `AAC_PREROLL` frames early (`atrim`
+/// in samples), so its packets land on that grid, and the `noise` bitstream
+/// filter keeps exactly the packets of frames `[aac_frame(start),
+/// aac_frame(end))`. Neighbouring segments thus share no frame and miss none,
+/// and each starts warmed up instead of on a fresh encoder's priming.
+pub fn convert_arguments(audio: u32, segment: Segment, last: bool) -> Vec<String> {
+    let owned = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+    let first = aac_frame(segment.start_ms);
+    let fed = first.saturating_sub(AAC_PREROLL);
+    let seek_ms = (fed * AAC_FRAME * 1000 / AAC_RATE).saturating_sub(AAC_DECODE_LEAD_MS);
+    let mut trim = format!("atrim=start_pts={}", fed * AAC_FRAME);
+    let mut keep = format!("lt(pts\\,{})", first * AAC_FRAME);
+    let mut args = owned(&[
+        "-v",
+        "error",
+        "-nostdin",
+        "-protocol_whitelist",
+        "fd,pipe",
+        "-format_whitelist",
+        "matroska,webm,mov,mp4",
+        "-max_alloc",
+        "268435456",
+        "-ss",
+        &seconds(seek_ms),
+        "-copyts",
+        "-fd",
+        "0",
+        "-i",
+        "fd:",
+    ]);
+    if !last {
+        let end = aac_frame(segment.end_ms);
+        let fed_end = end + AAC_POSTROLL;
+        trim.push_str(&format!(":end_pts={}", fed_end * AAC_FRAME));
+        keep.push_str(&format!("+gte(pts\\,{})", end * AAC_FRAME));
+        // Stops reading once the trim is done (one second of slack).
+        let stop_ms = (fed_end * AAC_FRAME * 1000).div_ceil(AAC_RATE) + 1000;
+        args.extend(owned(&["-to", &seconds(stop_ms)]));
+    }
+    args.extend(owned(&[
+        "-map",
+        &format!("0:{audio}"),
+        "-vn",
+        "-sn",
+        "-dn",
+        // One rate for the whole grid, the first sample pinned on it (a track
+        // starting a few samples late is padded), 5.1 at most (7.1 folded down).
+        "-af",
+        &format!(
+            "aresample={AAC_RATE}:first_pts={}:min_comp=0.00001,\
+             aformat=channel_layouts=5.1|stereo|mono,{trim}",
+            fed * AAC_FRAME
+        ),
+        "-c:a",
+        "aac",
+        "-b:a",
+        "320k",
+        // Packet times here are the source's, before `-output_ts_offset`.
+        "-bsf:a",
+        &format!("noise=drop={keep}"),
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
+        "-avoid_negative_ts",
+        "disabled",
+        "-output_ts_offset",
+        &seconds(TIMELINE_OFFSET_MS),
+        "-use_editlist",
+        "0",
+        "-max_muxing_queue_size",
+        "1024",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof+frag_discont",
+        "-frag_duration",
+        "2000000",
+        "-f",
+        "mp4",
+        "pipe:1",
+    ]));
+    args
+}
+
+/// The transcoding request a reduced rendition stands for.
+fn transcode_request(video: u32, encode: Encode) -> TranscodeRequest {
+    let rendition = renditions::rendition(encode.height).unwrap_or(renditions::RENDITIONS[0]);
+    TranscodeRequest {
+        video,
+        audio: None,
+        subtitle: None,
+        height: rendition.height,
+        kbps: rendition.kbps,
+        flags: if encode.tonemap { FLAG_TONEMAP } else { 0 },
+        position_ms: 0,
+    }
+}
+
+/// FFmpeg arguments for one segment of a reduced rendition. Decoding starts
+/// on the segment's own keyframe and `-to` stops before the next segment's,
+/// so each encode holds exactly the frames shown in `[start, end)` and opens
+/// on an IDR frame. `-copyts`, the shared offset and passthrough timing keep
+/// the source timeline: segments encoded apart play as one continuous stream.
+pub fn encode_arguments(
+    request: &HlsRequest,
+    encode: Encode,
+    segment: Segment,
+    last: bool,
+    plan: &EncoderPlan,
+) -> Vec<String> {
+    let owned = |values: &[&str]| values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>();
+    let transcode = transcode_request(request.video, encode);
+    let rendition = renditions::rendition(encode.height).unwrap_or(renditions::RENDITIONS[0]);
+    let mut args = owned(&["-v", "error", "-nostdin"]);
+    args.extend(transcode::input_arguments(plan, &transcode));
+    args.extend(owned(&[
+        "-protocol_whitelist",
+        "fd,pipe",
+        "-format_whitelist",
+        "matroska,webm,mov,mp4",
+        "-max_alloc",
+        "268435456",
+        "-ss",
+        &seconds(segment.start_ms),
+        "-copyts",
+        "-fd",
+        "0",
+        "-i",
+        "fd:",
+    ]));
+    if !last {
+        args.extend(owned(&["-to", &seconds(segment.end_ms)]));
+    }
+    args.extend(transcode::video_arguments(
+        &transcode,
+        plan,
+        &renditions::scale_filter(rendition),
+        false,
+    ));
+    args.extend(owned(&[
+        "-fps_mode",
+        "passthrough",
+        "-an",
+        "-sn",
+        "-dn",
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
+        "-avoid_negative_ts",
+        "disabled",
+        "-output_ts_offset",
+        &seconds(TIMELINE_OFFSET_MS),
+        "-use_editlist",
+        "0",
+        "-max_muxing_queue_size",
+        "1024",
+        "-movflags",
+        "frag_keyframe+empty_moov+default_base_moof+frag_discont",
+        "-frag_duration",
+        "2000000",
+        "-f",
+        "mp4",
+        "pipe:1",
+    ]));
+    args
+}
+
+/// How long an encoded segment waits for a free encoder: a download asks for
+/// segments back to back and would rather wait than fail.
+const ENCODE_SLOT_WAIT: Duration = Duration::from_secs(20);
 
 fn remember<T>(map: &Mutex<HashMap<String, T>>, key: String, value: T) {
     let mut map = map.lock().unwrap_or_else(|e| e.into_inner());
@@ -283,6 +512,8 @@ impl HlsStreams {
         Ok(frames)
     }
 
+    /// A packet copy, an AAC conversion, or a video encode when `encoder` is
+    /// given (reduced renditions, which share the transcoding slots).
     async fn spawn(
         &self,
         opened: OpenedFile,
@@ -290,18 +521,29 @@ impl HlsStreams {
         segment: Segment,
         last: bool,
         hevc: bool,
+        encoder: Option<(&EncoderPlan, &Transcodes)>,
     ) -> io::Result<PipeBody> {
-        let permit = tokio::time::timeout(
-            Duration::from_millis(250),
-            self.slots.clone().acquire_owned(),
-        )
-        .await
-        .map_err(|_| coded(io::ErrorKind::WouldBlock, "hls_capacity_reached"))?
-        .map_err(|_| io::Error::other("hls service stopped"))?;
+        // Converting a few seconds of audio costs about as little as a copy.
+        let quick = |args| (args, self.slots.clone(), Duration::from_millis(250));
+        let (args, slots, wait) = match (request.encode, encoder, request.audio) {
+            (Some(encode), Some((plan, transcodes)), _) => (
+                encode_arguments(request, encode, segment, last, plan),
+                transcodes.slots(),
+                ENCODE_SLOT_WAIT,
+            ),
+            (_, _, Some(audio)) if request.convert => {
+                quick(convert_arguments(audio, segment, last))
+            }
+            _ => quick(arguments(request, segment, last, hevc)),
+        };
+        let permit = tokio::time::timeout(wait, slots.acquire_owned())
+            .await
+            .map_err(|_| coded(io::ErrorKind::WouldBlock, "hls_capacity_reached"))?
+            .map_err(|_| io::Error::other("hls service stopped"))?;
         let mut file = opened.try_clone_std()?;
         std::io::Seek::rewind(&mut file)?;
         let mut command = Command::new("ffmpeg");
-        command.args(arguments(request, segment, last, hevc));
+        command.args(args);
         spawn_pipe(
             opened,
             file,
@@ -320,15 +562,14 @@ impl HlsStreams {
     }
 
     /// `source` identifies this version of the file (asset, size, mtime).
-    /// `converted` is the prepared AAC file of a converted audio rendition:
-    /// segments are copied from it, while the original still gives the cuts.
+    /// `transcodes` encodes reduced renditions, with its hardware and its slots.
     pub async fn serve(
         &self,
         opened: OpenedFile,
         source: String,
         request: HlsRequest,
         method: Method,
-        converted: Option<OpenedFile>,
+        transcodes: &Transcodes,
     ) -> io::Result<Response<BoxStreamBody>> {
         if method != Method::GET && method != Method::HEAD {
             return Response::builder()
@@ -337,12 +578,24 @@ impl HlsStreams {
                 .map_err(io::Error::other);
         }
         opened.verify_unchanged_sync()?;
+        // Checked from the playlist on, so a player drops a variant this Node cannot encode.
+        let plan = match request.encode {
+            Some(encode) => Some(
+                transcodes
+                    .encoder(&transcode_request(request.video, encode))
+                    .await?,
+            ),
+            None => None,
+        };
+        let encoder = plan.as_ref().map(|plan| (plan, transcodes));
         let frames = self.keyframes(&opened, &source, request.video).await?;
-        if request.convert && converted.is_none() && request.resource != Resource::Playlist {
-            return Err(coded(io::ErrorKind::Unsupported, "hls_conversion_missing"));
+        let mut cut = playlist::segments(&frames, playlist::TARGET_MS);
+        if request.convert
+            && let Some(first) = cut.first_mut()
+        {
+            // An encode covers the whole track, even before the first keyframe.
+            first.start_ms = 0;
         }
-        let opened = converted.unwrap_or(opened);
-        let cut = playlist::segments(&frames, playlist::TARGET_MS);
         let profile = request.profile();
         match request.resource {
             Resource::Playlist => {
@@ -371,7 +624,14 @@ impl HlsStreams {
                             .first()
                             .ok_or_else(|| coded(io::ErrorKind::Unsupported, "hls_unavailable"))?;
                         let pipe = self
-                            .spawn(opened, &request, first, cut.len() == 1, frames.hevc)
+                            .spawn(
+                                opened,
+                                &request,
+                                first,
+                                cut.len() == 1,
+                                frames.hevc,
+                                encoder,
+                            )
                             .await?;
                         let init = initialization(pipe).await?;
                         remember(&self.inits, key, init.clone());
@@ -393,12 +653,15 @@ impl HlsStreams {
                         .body(crate::stream::empty_body())
                         .map_err(io::Error::other);
                 }
-                let window = request.audio.is_none().then_some(Window {
-                    start_ms: segment.start_ms,
-                    end_ms: (!last).then_some(segment.end_ms),
-                });
+                // Copied video reads past its bounds and is cut on fragments;
+                // audio and encoded video are already cut by FFmpeg.
+                let window =
+                    (request.audio.is_none() && request.encode.is_none()).then_some(Window {
+                        start_ms: segment.start_ms,
+                        end_ms: (!last).then_some(segment.end_ms),
+                    });
                 let pipe = self
-                    .spawn(opened, &request, segment, last, frames.hevc)
+                    .spawn(opened, &request, segment, last, frames.hevc, encoder)
                     .await?;
                 response
                     .body(MediaBody::new(pipe, window).boxed())
@@ -437,6 +700,7 @@ mod tests {
                 video,
                 audio,
                 convert: false,
+                encode: None,
                 resource,
             };
             assert_eq!(request(raw), Some(expected), "{raw}");
@@ -448,15 +712,6 @@ mod tests {
         for raw in ["hls-v0-aac.m3u8", "hls-v0-aac03.m3u8", "hls-v0-aaca1.m3u8"] {
             assert_eq!(request(raw), None, "{raw}");
         }
-        let segment = Segment {
-            start_ms: 0,
-            end_ms: 6_000,
-        };
-        assert!(
-            arguments(&converted, segment, false, false)
-                .join(" ")
-                .contains("-map 0:0 -vn")
-        );
         ok("hls-v0.m3u8", 0, None, Resource::Playlist);
         ok("hls-v0-a1.m3u8", 0, Some(1), Resource::Playlist);
         ok("hls-v2-init.mp4", 2, None, Resource::Init);
@@ -483,6 +738,123 @@ mod tests {
         ] {
             assert_eq!(request(raw), None, "{raw}");
         }
+    }
+
+    #[test]
+    fn converted_segments_keep_their_frames_of_the_aac_grid() {
+        // 6 s to 12 s: frames 282 (6.016 s) to 563 excluded, fed from 258.
+        let middle = Segment {
+            start_ms: 6_000,
+            end_ms: 12_000,
+        };
+        let args = convert_arguments(3, middle, false).join(" ");
+        assert!(
+            args.contains("-ss 5.004 -copyts -fd 0 -i fd: -to 13.075 -map 0:3 -vn"),
+            "{args}"
+        );
+        assert!(args.contains("-af aresample=48000:first_pts=264192:min_comp=0.00001,aformat=channel_layouts=5.1|stereo|mono,atrim=start_pts=264192:end_pts=579584 -c:a aac -b:a 320k"), "{args}");
+        assert!(
+            args.contains(r"-bsf:a noise=drop=lt(pts\,288768)+gte(pts\,576512)"),
+            "{args}"
+        );
+        assert!(args.contains("-output_ts_offset 10.000") && args.ends_with("-f mp4 pipe:1"));
+        // The next segment starts on the frame this one stops before.
+        let next = convert_arguments(
+            3,
+            Segment {
+                start_ms: 12_000,
+                end_ms: 18_000,
+            },
+            true,
+        )
+        .join(" ");
+        assert!(next.contains(r"noise=drop=lt(pts\,576512) "), "{next}");
+        assert!(!next.contains("-to ") && !next.contains("end_pts"));
+        let first = convert_arguments(
+            3,
+            Segment {
+                start_ms: 0,
+                end_ms: 6_000,
+            },
+            false,
+        )
+        .join(" ");
+        assert!(first.contains("-ss 0.000 ") && first.contains("atrim=start_pts=0:"));
+    }
+
+    #[test]
+    fn reduced_renditions_have_strict_names() {
+        let sdr = request("hls-v0-h720-12.m4s").unwrap();
+        assert_eq!(
+            sdr.encode,
+            Some(Encode {
+                height: 720,
+                tonemap: false
+            })
+        );
+        assert_eq!((sdr.audio, sdr.resource), (None, Resource::Segment(12)));
+        assert!(sdr.encodes() && !request("hls-v0-a1.m3u8").unwrap().encodes());
+        let hdr = request("hls-v1-t1080-init.mp4").unwrap();
+        assert!(hdr.encode.unwrap().tonemap && hdr.resource == Resource::Init);
+        assert_eq!(hdr.component(), "hls-v1-t1080-init.mp4");
+        assert!(request("hls-v0-h1080.m3u8").is_some());
+        for raw in [
+            "hls-v0-h.m3u8",
+            "hls-v0-h0720.m3u8",
+            "hls-v0-h1440.m3u8",
+            "hls-v0-h480.m3u8",
+            "hls-v0-h720-a1.m3u8",
+            "hls-v0-h720-aac1-3.m4s",
+            "hls-v0-x720.m3u8",
+            "hls-v0-t720t.m3u8",
+        ] {
+            assert_eq!(request(raw), None, "{raw}");
+        }
+    }
+
+    fn plan(hardware: transcode::Hardware, encoder: &'static str, tonemap: bool) -> EncoderPlan {
+        EncoderPlan {
+            hardware,
+            encoder,
+            vaapi_device: "/dev/dri/renderD128".to_owned(),
+            tonemap,
+        }
+    }
+
+    #[test]
+    fn reduced_segments_encode_exactly_their_window() {
+        let segment = Segment {
+            start_ms: 18_042,
+            end_ms: 24_000,
+        };
+        let sdr = request("hls-v0-h1080-3.m4s").unwrap();
+        let software = plan(transcode::Hardware::None, "libx264", false);
+        let args = encode_arguments(&sdr, sdr.encode.unwrap(), segment, false, &software).join(" ");
+        assert!(
+            args.starts_with("-v error -nostdin -protocol_whitelist fd,pipe"),
+            "{args}"
+        );
+        assert!(args.contains("-ss 18.042 -copyts -fd 0 -i fd: -to 24.000 -filter_complex [0:0]null,scale=w='min(iw,1920)':h='min(ih,1080)':force_original_aspect_ratio=decrease:force_divisible_by=2,format=yuv420p[video] -map [video]"), "{args}");
+        assert!(args.contains("-c:v libx264 -b:v 8000k -maxrate 8000k -bufsize 16000k -profile:v high -level:v 4.1 -preset veryfast -fps_mode passthrough -an"), "{args}");
+        assert!(!args.contains("zerolatency") && !args.contains("-force_key_frames"));
+        assert!(args.contains("-output_ts_offset 10.000 -use_editlist 0"));
+        assert!(args.contains("frag_discont -frag_duration 2000000"));
+        assert!(args.ends_with("-f mp4 pipe:1"));
+        let last = encode_arguments(&sdr, sdr.encode.unwrap(), segment, true, &software).join(" ");
+        assert!(!last.contains("-to "));
+        // HDR tone mapped, on a VAAPI Node: hardware decode, upload, encoder.
+        let hdr = request("hls-v0-t720-3.m4s").unwrap();
+        let vaapi = plan(transcode::Hardware::Vaapi, "h264_vaapi", true);
+        let args = encode_arguments(&hdr, hdr.encode.unwrap(), segment, false, &vaapi).join(" ");
+        assert!(
+            args.starts_with("-v error -nostdin -hwaccel vaapi"),
+            "{args}"
+        );
+        assert!(args.contains("tonemap=tonemap=hable"), "{args}");
+        assert!(args.contains("format=nv12,hwupload[video]"), "{args}");
+        assert!(args.contains("-c:v h264_vaapi -b:v 4000k"), "{args}");
+        let request = transcode_request(0, hdr.encode.unwrap());
+        assert!(request.has(FLAG_TONEMAP) && request.height == 720 && request.audio.is_none());
     }
 
     #[test]

@@ -14,8 +14,10 @@ TV, Google TV et Fire TV (même APK), au-dessus du cœur Rust partagé
 - Lecture HLS par copie, décodée par le matériel ([docs/HLS.md](../../docs/HLS.md)),
   reprise à la position enregistrée et sauvegarde toutes les 15 s.
 - Téléchargements hors ligne en arrière-plan (service Media3 avec notification,
-  relancé au retour du réseau ou après redémarrage) : qualité d'origine, toutes
-  les pistes audio. Le cache ignore l'autorisation contenue dans l'URL HLS : un
+  relancé au retour du réseau ou après redémarrage), toutes les pistes audio.
+  Quand le serveur autorise le transcodage, l'app demande la qualité (originale,
+  1080p ou 720p H.264, avec la place prise par heure) et ne télécharge que cette
+  variante ([docs/HLS.md](../../docs/HLS.md)) ; sinon, la qualité d'origine. Le cache ignore l'autorisation contenue dans l'URL HLS : un
   téléchargement repris avec une nouvelle URL (validité 12 h) garde ses segments,
   et une copie terminée se lit sans réseau. La lecture en ligne n'écrit pas dans
   ce cache.

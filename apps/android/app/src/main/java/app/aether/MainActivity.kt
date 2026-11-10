@@ -35,6 +35,7 @@ import androidx.compose.foundation.lazy.items as listItems
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -135,6 +136,40 @@ private fun App(model: AetherViewModel) {
             }
         }
     }
+    val choice by model.downloadChoice.collectAsState()
+    choice?.let { DownloadQualityDialog(it, model::chooseDownload) }
+}
+
+/** Original or a reduced variant, with the storage each takes per hour of film. */
+@Composable
+private fun DownloadQualityDialog(choice: DownloadChoice, onChoose: (DownloadQuality?) -> Unit) {
+    AlertDialog(
+        onDismissRequest = { onChoose(null) },
+        title = { Text(stringResource(R.string.download_quality)) },
+        text = {
+            Column {
+                Text(choice.work.title, style = MaterialTheme.typography.bodyMedium)
+                choice.qualities.forEach { quality ->
+                    val parts = listOfNotNull(
+                        if (quality.original) stringResource(R.string.download_original) else null,
+                        if (quality.height > 0) stringResource(R.string.download_height, quality.height) else null,
+                        if (quality.bitrate > 0) {
+                            // BANDWIDTH is a peak: an upper bound of the copy's size.
+                            val gigabytes = quality.bitrate.toDouble() * 3600 / 8 / 1e9
+                            stringResource(R.string.download_size, String.format("%.1f", gigabytes))
+                        } else {
+                            null
+                        },
+                    )
+                    TextButton(onClick = { onChoose(quality) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(parts.joinToString(" · "), modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = { onChoose(null) }) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable

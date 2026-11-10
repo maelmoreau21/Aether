@@ -16,8 +16,10 @@ import java.io.File
 import java.util.concurrent.Executors
 
 /**
- * Offline copies: Media3 downloads the Core's HLS (packet-copied, so the copy
- * is the original quality) into one cache that the player reads first.
+ * Offline copies: Media3 downloads the Core's HLS into one cache that the
+ * player reads first. The request's stream keys pick one video variant (the
+ * packet-copied original or a reduced H.264 encode) and every audio rendition;
+ * the offline item carries them, so playback reads only what was downloaded.
  *
  * HLS URLs carry a 12 h playback grant in their path. Cache keys drop it, so a
  * download resumed with a fresh URL keeps every segment it already has, and a

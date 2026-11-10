@@ -337,6 +337,85 @@ pub fn h264_codec(height: u32) -> &'static str {
     }
 }
 
+/// The H.264 encode of `request.video`: filter graph (tone mapping, burnt
+/// subtitle, `scale`, pixel format, upload), encoder and rate control.
+/// `live` favours a quick start (no lookahead, a keyframe every two seconds)
+/// over compression; HLS renditions, cut and encoded per segment, do not need it.
+pub(crate) fn video_arguments(
+    request: &TranscodeRequest,
+    plan: &EncoderPlan,
+    scale: &str,
+    live: bool,
+) -> Vec<String> {
+    let mut args: Vec<String> = Vec::new();
+    let push = |args: &mut Vec<String>, values: &[&str]| {
+        args.extend(values.iter().map(|value| (*value).to_owned()));
+    };
+    // HDR → SDR BT.709 (Hable curve, as Jellyfin and Plex do in software).
+    let tonemap = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,\
+         tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
+    let pixels = match plan.hardware {
+        Hardware::Qsv | Hardware::Vaapi => "format=nv12",
+        _ => "format=yuv420p",
+    };
+    let upload = if plan.hardware == Hardware::Vaapi {
+        ",hwupload"
+    } else {
+        ""
+    };
+    let base = if plan.tonemap { tonemap } else { "null" };
+    let graph = match request.subtitle {
+        // The picture is tone mapped before the 8-bit subtitle bitmap is drawn on it.
+        Some(subtitle) => format!(
+            "[0:{video}]{base}[base];[base][0:{subtitle}]overlay=eof_action=pass:repeatlast=0[burnt];\
+             [burnt]{scale},{pixels}{upload}[video]",
+            video = request.video
+        ),
+        None => format!(
+            "[0:{video}]{base},{scale},{pixels}{upload}[video]",
+            video = request.video
+        ),
+    };
+    push(&mut args, &["-filter_complex", &graph, "-map", "[video]"]);
+    let rate = format!("{}k", request.kbps);
+    let buffer = format!("{}k", request.kbps.saturating_mul(2));
+    push(
+        &mut args,
+        &[
+            "-c:v",
+            plan.encoder,
+            "-b:v",
+            &rate,
+            "-maxrate",
+            &rate,
+            "-bufsize",
+            &buffer,
+        ],
+    );
+    if plan.encoder != "libopenh264" {
+        push(
+            &mut args,
+            &["-profile:v", "high", "-level:v", level(request.height)],
+        );
+    }
+    match plan.encoder {
+        "libx264" if live => push(&mut args, &["-preset", "veryfast", "-tune", "zerolatency"]),
+        "libx264" => push(&mut args, &["-preset", "veryfast"]),
+        "h264_nvenc" => push(
+            &mut args,
+            &["-preset", "p4", "-rc", "vbr", "-forced-idr", "1"],
+        ),
+        "h264_qsv" => push(&mut args, &["-preset", "veryfast"]),
+        "h264_amf" => push(&mut args, &["-quality", "speed"]),
+        _ => {}
+    }
+    if live {
+        // A keyframe every two seconds keeps seeks and the first fragment short.
+        push(&mut args, &["-force_key_frames", "expr:gte(t,n_forced*2)"]);
+    }
+    args
+}
+
 /// FFmpeg arguments after the input. Pure, so every combination is unit-tested.
 pub fn arguments(request: &TranscodeRequest, plan: &EncoderPlan) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
@@ -349,66 +428,8 @@ pub fn arguments(request: &TranscodeRequest, plan: &EncoderPlan) -> Vec<String> 
             &["-map", &format!("0:{}", request.video), "-c:v", "copy"],
         );
     } else {
-        // HDR → SDR BT.709 (Hable curve, as Jellyfin and Plex do in software).
-        let tonemap = "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,\
-             tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv";
         let scale = format!("scale=w=-2:h='min(ih,{})'", request.height);
-        let pixels = match plan.hardware {
-            Hardware::Qsv | Hardware::Vaapi => "format=nv12",
-            _ => "format=yuv420p",
-        };
-        let upload = if plan.hardware == Hardware::Vaapi {
-            ",hwupload"
-        } else {
-            ""
-        };
-        let base = if plan.tonemap { tonemap } else { "null" };
-        let graph = match request.subtitle {
-            // The picture is tone mapped before the 8-bit subtitle bitmap is drawn on it.
-            Some(subtitle) => format!(
-                "[0:{video}]{base}[base];[base][0:{subtitle}]overlay=eof_action=pass:repeatlast=0[burnt];\
-                 [burnt]{scale},{pixels}{upload}[video]",
-                video = request.video
-            ),
-            None => format!(
-                "[0:{video}]{base},{scale},{pixels}{upload}[video]",
-                video = request.video
-            ),
-        };
-        push(&mut args, &["-filter_complex", &graph, "-map", "[video]"]);
-        let rate = format!("{}k", request.kbps);
-        let buffer = format!("{}k", request.kbps.saturating_mul(2));
-        push(
-            &mut args,
-            &[
-                "-c:v",
-                plan.encoder,
-                "-b:v",
-                &rate,
-                "-maxrate",
-                &rate,
-                "-bufsize",
-                &buffer,
-            ],
-        );
-        if plan.encoder != "libopenh264" {
-            push(
-                &mut args,
-                &["-profile:v", "high", "-level:v", level(request.height)],
-            );
-        }
-        match plan.encoder {
-            "libx264" => push(&mut args, &["-preset", "veryfast", "-tune", "zerolatency"]),
-            "h264_nvenc" => push(
-                &mut args,
-                &["-preset", "p4", "-rc", "vbr", "-forced-idr", "1"],
-            ),
-            "h264_qsv" => push(&mut args, &["-preset", "veryfast"]),
-            "h264_amf" => push(&mut args, &["-quality", "speed"]),
-            _ => {}
-        }
-        // A keyframe every two seconds keeps seeks and the first fragment short.
-        push(&mut args, &["-force_key_frames", "expr:gte(t,n_forced*2)"]);
+        args.extend(video_arguments(request, plan, &scale, true));
     }
     match request.audio {
         None => push(&mut args, &["-an"]),
@@ -472,7 +493,7 @@ pub fn arguments(request: &TranscodeRequest, plan: &EncoderPlan) -> Vec<String> 
 }
 
 /// Input-side arguments: hardware decoding when an accelerator is configured.
-fn input_arguments(plan: &EncoderPlan, request: &TranscodeRequest) -> Vec<String> {
+pub(crate) fn input_arguments(plan: &EncoderPlan, request: &TranscodeRequest) -> Vec<String> {
     let mut args = Vec::new();
     if request.copies_video() {
         return args;
@@ -516,6 +537,18 @@ impl Transcodes {
     }
     pub fn config(&self) -> &TranscodeConfig {
         &self.config
+    }
+    /// Every encode on this Node, fallback streams and HLS renditions alike,
+    /// shares `MEDIA_TRANSCODE_MAX_SESSIONS`.
+    pub(crate) fn slots(&self) -> Arc<Semaphore> {
+        self.slots.clone()
+    }
+    /// The encoder for `request`, or `transcode_disabled` on a Node that refuses encodes.
+    pub(crate) async fn encoder(&self, request: &TranscodeRequest) -> io::Result<EncoderPlan> {
+        if !self.config.enabled {
+            return Err(coded(io::ErrorKind::Unsupported, "transcode_disabled"));
+        }
+        plan(&self.config, self.capabilities().await, request)
     }
     /// Reads the FFmpeg listings once; a missing FFmpeg yields empty capabilities.
     pub async fn capabilities(&self) -> &Capabilities {

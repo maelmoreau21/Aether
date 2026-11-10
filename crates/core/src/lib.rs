@@ -13,7 +13,6 @@ macro_rules! eprintln {
 }
 
 pub mod account;
-pub mod dlna;
 pub mod acquisition;
 pub mod admin_backups;
 pub mod admin_users;
@@ -27,6 +26,7 @@ pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
 pub mod database;
+pub mod dlna;
 pub mod extensions;
 pub mod groups;
 pub mod imports;

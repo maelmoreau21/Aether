@@ -91,10 +91,10 @@ function compile(name) {
     const page=await browser.newPage(); page.setDefaultTimeout(15000);
     report.console=[];page.on('console',message=>report.console.push(message.text()));
     await page.goto(origin);
-    // Same module order as browser-streaming-performance.cjs: native.ts imports every one of them.
+    // native.ts imports every one of these modules: keep them before it, in dependency order.
     // The production player imports the i18n catalogue; the harness only needs stable keys.
     await page.addScriptTag({content:"window['/i18n']={tr:(key,params)=>params?key+JSON.stringify(params):key};"});
-    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','diagnostics','startup-timeline','native']) {
+    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','diagnostics','startup-timeline','transcode','audio-enhancement','native']) {
       await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${compile(name)}\n})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
     }
     await page.evaluate(({probe,videoContainer,originalContainer})=>{

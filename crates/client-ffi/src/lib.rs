@@ -106,7 +106,7 @@ pub struct Media {
     pub available: bool,
 }
 #[derive(uniffi::Record)]
-pub struct Library {
+pub struct MediaLibrary {
     pub id: String,
     pub name: String,
     pub kind: String,
@@ -257,13 +257,13 @@ impl AetherClient {
         })
     }
     /// The libraries this account may browse.
-    pub async fn libraries(&self) -> Result<Vec<Library>> {
+    pub async fn libraries(&self) -> Result<Vec<MediaLibrary>> {
         Ok(self
             .inner
             .libraries()
             .await?
             .into_iter()
-            .map(|l| Library {
+            .map(|l| MediaLibrary {
                 id: l.id,
                 name: l.name,
                 kind: l.kind,

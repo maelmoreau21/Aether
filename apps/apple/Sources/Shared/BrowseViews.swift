@@ -4,14 +4,14 @@ extension View {
     /// The pages every tab's navigation stack can push.
     func aetherDestinations() -> some View {
         navigationDestination(for: Work.self) { WorkDetailView(work: $0) }
-            .navigationDestination(for: Library.self) { LibraryView(library: $0) }
+            .navigationDestination(for: MediaLibrary.self) { LibraryView(library: $0) }
     }
 }
 
 /// A titled horizontal row of cards.
 struct Shelf<Content: View>: View {
     let title: String
-    var library: Library?
+    var library: MediaLibrary?
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -104,7 +104,7 @@ struct HomeView: View {
 }
 
 struct LibraryRow: Identifiable {
-    let library: Library
+    let library: MediaLibrary
     let works: [Work]
     var id: String { library.id }
 }
@@ -147,7 +147,7 @@ struct ResumeCard: View {
 
 struct LibrariesView: View {
     @Environment(AppModel.self) private var model
-    @State private var libraries: [Library] = []
+    @State private var libraries: [MediaLibrary] = []
 
     var body: some View {
         List(libraries, id: \.id) { library in
@@ -175,7 +175,7 @@ struct LibrariesView: View {
 /// One library as a grid, a page at a time.
 struct LibraryView: View {
     @Environment(AppModel.self) private var model
-    let library: Library
+    let library: MediaLibrary
     @State private var works: [Work] = []
     @State private var hasMore = true
     @State private var loading = false

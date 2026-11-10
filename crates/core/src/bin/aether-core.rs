@@ -162,14 +162,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let shutdown_jobs = jobs.clone();
     let scheduler_root = inventory.root().to_owned();
     let app = secure_app_with_jobs(inventory, port, auth.clone(), jobs.clone()).await?;
+    // DLNA/UPnP for old TVs and consoles: opt-in through a catalog:read API key.
+    let app = match media_poc::dlna::DlnaConfig::from_env(port) {
+        Some(config) => {
+            media_poc::dlna::ssdp::spawn(config.clone());
+            app.merge(media_poc::dlna::router(database.clone(), config))
+        }
+        None => app,
+    };
     let scheduler = media_poc::scheduler::Scheduler::start(auth, scheduler_root, jobs);
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async move {
-            let _ = tokio::signal::ctrl_c().await;
-            drop(scheduler);
-            shutdown_jobs.shutdown().await;
-        })
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(async move {
+        let _ = tokio::signal::ctrl_c().await;
+        drop(scheduler);
+        shutdown_jobs.shutdown().await;
+    })
+    .await?;
     database.close().await;
     Ok(())
 }

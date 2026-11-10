@@ -248,11 +248,19 @@ impl Client {
             if let Some(search) = query.search.as_deref().filter(|s| !s.is_empty()) {
                 pairs.append_pair("q", search);
             }
+            if let Some(library) = query.library.as_deref().filter(|l| !l.is_empty()) {
+                pairs.append_pair("library", library);
+            }
             pairs.append_pair("offset", &query.offset.to_string());
             pairs.append_pair("limit", &query.limit.clamp(1, 200).to_string());
         }
         let path = format!("{}?{}", url.path(), url.query().unwrap_or(""));
         self.get(&path).await
+    }
+    /// The libraries this account may browse, by name.
+    pub async fn libraries(&self) -> Result<Vec<Library>> {
+        let value: Value = self.get("/api/v1/libraries").await?;
+        serde_json::from_value(value["libraries"].clone()).map_err(|_| missing())
     }
     /// A work with its seasons and episodes.
     pub async fn work(&self, id: &str) -> Result<WorkDetail> {
@@ -283,6 +291,18 @@ impl Client {
     }
 
     // ---- Progress -----------------------------------------------------------
+
+    /// "Continue watching": started and unfinished films and episodes, most
+    /// recently watched first (the Core keeps the latest 100 positions).
+    pub async fn continue_watching(&self) -> Result<Vec<ResumePoint>> {
+        let value: Value = self.get("/api/v1/progress").await?;
+        let items: Vec<ResumePoint> =
+            serde_json::from_value(value["items"].clone()).map_err(|_| missing())?;
+        Ok(items
+            .into_iter()
+            .filter(|p| !p.watched && p.position > 0.0 && p.position < p.duration)
+            .collect())
+    }
 
     pub async fn progress(&self, work_id: &str) -> Result<Progress> {
         self.get(&format!("/api/v1/progress/{}", segment(work_id)))

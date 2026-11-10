@@ -106,6 +106,22 @@ pub struct Media {
     pub available: bool,
 }
 #[derive(uniffi::Record)]
+pub struct Library {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+#[derive(uniffi::Record)]
+pub struct ResumePoint {
+    pub work_id: String,
+    pub title: String,
+    pub kind: String,
+    pub series_id: Option<String>,
+    pub position: f64,
+    pub duration: f64,
+    pub updated_at: i64,
+}
+#[derive(uniffi::Record)]
 pub struct PlaybackUrl {
     pub url: String,
     pub expires_at: i64,
@@ -229,6 +245,7 @@ impl AetherClient {
             .catalog(&core::CatalogQuery {
                 kind,
                 search,
+                library: None,
                 offset: offset as usize,
                 limit: limit as usize,
             })
@@ -238,6 +255,62 @@ impl AetherClient {
             has_more: page.has_more,
             total: page.total.map(|t| t as u64),
         })
+    }
+    /// The libraries this account may browse.
+    pub async fn libraries(&self) -> Result<Vec<Library>> {
+        Ok(self
+            .inner
+            .libraries()
+            .await?
+            .into_iter()
+            .map(|l| Library {
+                id: l.id,
+                name: l.name,
+                kind: l.kind,
+            })
+            .collect())
+    }
+    /// One library's works, films and series together.
+    pub async fn library_catalog(
+        &self,
+        library: String,
+        search: Option<String>,
+        offset: u32,
+        limit: u32,
+    ) -> Result<CatalogPage> {
+        let page = self
+            .inner
+            .catalog(&core::CatalogQuery {
+                kind: None,
+                search,
+                library: Some(library),
+                offset: offset as usize,
+                limit: limit as usize,
+            })
+            .await?;
+        Ok(CatalogPage {
+            items: page.items.into_iter().map(Into::into).collect(),
+            has_more: page.has_more,
+            total: page.total.map(|t| t as u64),
+        })
+    }
+    /// Started and unfinished films and episodes, most recent first.
+    pub async fn continue_watching(&self) -> Result<Vec<ResumePoint>> {
+        Ok(self
+            .inner
+            .continue_watching()
+            .await?
+            .into_iter()
+            .map(|p| ResumePoint {
+                work_id: p.work_id,
+                title: p.title,
+                kind: p.kind,
+                series_id: p.series_id,
+                position: p.position,
+                duration: p.duration,
+                updated_at: p.updated_at,
+            })
+            .collect())
     }
     /// A work with its seasons and episodes (no seasons for a film).
     pub async fn work(&self, id: String) -> Result<WorkDetail> {

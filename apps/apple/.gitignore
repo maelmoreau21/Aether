@@ -1,0 +1,5 @@
+# Built by scripts/build-xcframework.sh and xcodegen
+/Generated/
+/Aether.xcodeproj/
+/build/
+xcuserdata/

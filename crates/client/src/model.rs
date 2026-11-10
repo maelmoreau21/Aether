@@ -41,6 +41,8 @@ pub struct CatalogQuery {
     /// `film` or `series`; `None` for both.
     pub kind: Option<String>,
     pub search: Option<String>,
+    /// A library id from `Client::libraries`; `None` for every library.
+    pub library: Option<String>,
     pub offset: usize,
     pub limit: usize,
 }
@@ -103,6 +105,39 @@ pub struct CatalogPage {
     pub has_more: bool,
     #[serde(default)]
     pub total: Option<usize>,
+}
+
+/// A library the signed-in user may browse.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Library {
+    pub id: String,
+    pub name: String,
+    /// `films`, `series`, `music`… as configured by the administrator.
+    #[serde(default)]
+    pub kind: String,
+}
+
+/// A saved position, most recent first in `Client::continue_watching`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumePoint {
+    /// The film or episode to play.
+    pub work_id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub kind: String,
+    /// The series of an episode.
+    #[serde(default)]
+    pub series_id: Option<String>,
+    pub position: f64,
+    pub duration: f64,
+    #[serde(default)]
+    pub watched: bool,
+    /// Unix seconds.
+    #[serde(default)]
+    pub updated_at: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]

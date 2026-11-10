@@ -48,10 +48,13 @@ const server=http.createServer((req,res)=>{
     browser=await chromium.launch({channel:'chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});
     for(const result of report.formats){
       const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}/`);
-      for(const name of ['startup-buffer','external-audio','segmented-audio','mp4-timeline']){
+      const bundleDir=fs.mkdtempSync(path.join(out,'bundle-'));
+      try{for(const name of ['startup-buffer','external-audio','segmented-audio','mp4-timeline']){
         const code=ts.transpileModule(fs.readFileSync(path.resolve('apps/web/src/lib/player',`${name}.ts`),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-        await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
-      }
+        const scriptPath=path.join(bundleDir,`${name}.js`);
+        fs.writeFileSync(scriptPath,`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`);
+        await page.addScriptTag({path:scriptPath});
+      }}finally{fs.rmSync(bundleDir,{recursive:true,force:true});}
       result.browser=await page.evaluate(async ({format,streaming})=>{
         const video=document.querySelector('video'),source=new MediaSource(),events=[],frames=[],appends=[],errors=[];
         let priorFrame=0;

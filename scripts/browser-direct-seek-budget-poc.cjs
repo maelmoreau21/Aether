@@ -20,7 +20,10 @@ const server=http.createServer((req,res)=>{const u=new URL(req.url,'http://local
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));browser=await chromium.launch({channel:'chrome',headless:true});report.browser=browser.version();
   for(const [label,native] of [['baseline',baseline],['current',current.native]]){
     armed=false;requests=[];const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}/`);
-    for(const n of names){const code=ts.transpileModule(n==='native'?native:current[n],{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;await page.addScriptTag({content:`window[${JSON.stringify(n)}]={};(function(exports,require){${code}})(window[${JSON.stringify(n)}],n=>window[n.slice(2)]);`});}
+    const bundleDir=fs.mkdtempSync(path.join(out,'bundle-'));
+    try{
+      for(const n of names){const code=ts.transpileModule(n==='native'?native:current[n],{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;const scriptPath=path.join(bundleDir,`${n}.js`);fs.writeFileSync(scriptPath,`window[${JSON.stringify(n)}]={};(function(exports,require){${code}})(window[${JSON.stringify(n)}],n=>window[n.slice(2)]);`);await page.addScriptTag({path:scriptPath});}
+    }finally{fs.rmSync(bundleDir,{recursive:true,force:true});}
     const result=await page.evaluate(async()=>{const video=document.querySelector('video'),errors=[],player=new window.native.NativePlayer(video,m=>errors.push(m));
       const position=new Promise(resolve=>video.addEventListener('loadedmetadata',()=>{fetch('/arm').then(()=>resolve(1800));},{once:true}));
       const source={id:'original',audioTrackId:'default',language:'und',url:'/relay',directUrl:location.origin+'/direct',relayUrl:'/relay',mime:'video/mp4'};

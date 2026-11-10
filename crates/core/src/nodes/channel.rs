@@ -342,10 +342,10 @@ pub(super) async fn receive_stream_uplink(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let req_nonce = headers
-        .get(HDR_NONCE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let req_nonce = match headers.get(HDR_NONCE).and_then(|v| v.to_str().ok()) {
+        Some(n) if !n.is_empty() => n,
+        _ => return error(StatusCode::UNAUTHORIZED, "missing_nonce"),
+    };
     let req_sig = headers
         .get(HDR_SIGNATURE)
         .and_then(|v| v.to_str().ok())

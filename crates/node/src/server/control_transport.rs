@@ -102,11 +102,16 @@ pub(super) fn verify_signed_core_call(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.parse::<i64>().ok())
         .unwrap_or(0);
-    let nonce = headers
-        .get(HDR_NONCE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("")
-        .to_owned();
+    let nonce = match headers.get(HDR_NONCE).and_then(|v| v.to_str().ok()) {
+        Some(n) if !n.is_empty() => n.to_owned(),
+        _ => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({ "error": "missing_nonce" })),
+            )
+                .into_response());
+        }
+    };
     let header_body_sha = headers
         .get(HDR_BODY_SHA256)
         .and_then(|v| v.to_str().ok())

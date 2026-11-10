@@ -7,7 +7,7 @@ for (const entry of readdirSync(root, { recursive: true, withFileTypes: true }))
   if (!entry.isFile() || !entry.name.endsWith('.html')) continue;
   const file = join(entry.parentPath, entry.name);
   let count = 0;
-  const html = readFileSync(file, 'utf8').replace(/<script>([\s\S]*?)<\/script>/g, (_, body) => {
+  const html = readFileSync(file, 'utf8').replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gi, (_, body) => {
     const name = `${entry.name.replace('.html', '')}-bootstrap-${count++}.js`;
     writeFileSync(join(dirname(file), name), body);
     return `<script src="./${name}"></script>`;

@@ -830,32 +830,32 @@ mod tests {
 
     #[test]
     fn internal_request_signature_and_replay_window_reject_replays_and_tampering() {
-        let secret = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        let secret = random_secret_hex();
         let now = 1_760_000_000;
-        let nonce = "nonce-1234567890abcdef";
+        let nonce = random_nonce_hex();
         let body_hash = sha256_hex(b"{\"hello\":\"world\"}");
         let sig = sign_internal_request(
-            secret,
+            &secret,
             "core-to-node",
             "POST",
             "/internal/v1/node/heartbeat",
             "node-films",
             "kid-1",
             now,
-            nonce,
+            &nonce,
             &body_hash,
         );
 
         assert!(
             verify_internal_request(
-                secret,
+                &secret,
                 "core-to-node",
                 "POST",
                 "/internal/v1/node/heartbeat",
                 "node-films",
                 "kid-1",
                 now,
-                nonce,
+                &nonce,
                 &body_hash,
                 &sig,
                 now,
@@ -866,14 +866,14 @@ mod tests {
         // Wrong direction or wrong node_id must fail
         assert_eq!(
             verify_internal_request(
-                secret,
+                &secret,
                 "node-to-core",
                 "POST",
                 "/internal/v1/node/heartbeat",
                 "node-films",
                 "kid-1",
                 now,
-                nonce,
+                &nonce,
                 &body_hash,
                 &sig,
                 now,
@@ -884,14 +884,14 @@ mod tests {
         // Expired timestamp must fail
         assert_eq!(
             verify_internal_request(
-                secret,
+                &secret,
                 "core-to-node",
                 "POST",
                 "/internal/v1/node/heartbeat",
                 "node-films",
                 "kid-1",
                 now - 600,
-                nonce,
+                &nonce,
                 &body_hash,
                 &sig,
                 now,
@@ -903,17 +903,17 @@ mod tests {
         let window = ReplayWindow::new();
         assert!(
             window
-                .check_and_record("node-films", nonce, now, now)
+                .check_and_record("node-films", &nonce, now, now)
                 .is_ok()
         );
         assert_eq!(
-            window.check_and_record("node-films", nonce, now, now + 1),
+            window.check_and_record("node-films", &nonce, now, now + 1),
             Err("replay_detected")
         );
         // Same nonce on a different node is isolated
         assert!(
             window
-                .check_and_record("node-series", nonce, now, now + 1)
+                .check_and_record("node-series", &nonce, now, now + 1)
                 .is_ok()
         );
     }

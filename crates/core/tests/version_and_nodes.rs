@@ -82,11 +82,13 @@ async fn test_nodes_version_tracking_local_and_remote() {
     );
 
     // 2. Insert a remote node with an initial version (e.g. 0.0.9)
+    let shared_secret = media_contracts::protocol::random_secret_hex();
     let now = media_contracts::protocol::unix_now();
     media_poc::database::query(
         "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version)
-         VALUES('remote-node-1', 'NAS Remote 1', 'remote', 'http://127.0.0.1:4101', NULL, 'connected', 'k1', 'secret', '[]', ?, ?, NULL, '0.0.9')",
+         VALUES('remote-node-1', 'NAS Remote 1', 'remote', 'http://127.0.0.1:4101', NULL, 'connected', 'k1', ?, '[]', ?, ?, NULL, '0.0.9')",
     )
+    .bind(&shared_secret)
     .bind(now)
     .bind(now)
     .execute(store.pool())
@@ -119,17 +121,17 @@ async fn test_nodes_version_tracking_local_and_remote() {
     };
     let body_bytes = serde_json::to_vec(&hb).unwrap();
     let ts = media_contracts::protocol::unix_now();
-    let nonce = "nonce-version-test-1234567890123456";
+    let nonce = media_contracts::protocol::random_nonce_hex();
     let body_sha = media_contracts::protocol::sha256_hex(&body_bytes);
     let sig = media_contracts::protocol::sign_internal_request(
-        "secret",
+        &shared_secret,
         "node-to-core",
         "POST",
         "/internal/v1/core/heartbeat",
         "remote-node-1",
         "k1",
         ts,
-        nonce,
+        &nonce,
         &body_sha,
     );
 
@@ -146,7 +148,7 @@ async fn test_nodes_version_tracking_local_and_remote() {
                 .header(media_contracts::protocol::HDR_NODE_ID, "remote-node-1")
                 .header(media_contracts::protocol::HDR_KEY_ID, "k1")
                 .header(media_contracts::protocol::HDR_TIMESTAMP, ts.to_string())
-                .header(media_contracts::protocol::HDR_NONCE, nonce)
+                .header(media_contracts::protocol::HDR_NONCE, &nonce)
                 .header(media_contracts::protocol::HDR_BODY_SHA256, body_sha)
                 .header(media_contracts::protocol::HDR_SIGNATURE, sig)
                 .header("Content-Type", "application/json")
@@ -185,17 +187,17 @@ async fn test_nodes_version_tracking_local_and_remote() {
     };
     let body_bytes = serde_json::to_vec(&legacy_hb).unwrap();
     let ts = media_contracts::protocol::unix_now();
-    let nonce = "nonce-version-test-legacy-12345678";
+    let nonce = media_contracts::protocol::random_nonce_hex();
     let body_sha = media_contracts::protocol::sha256_hex(&body_bytes);
     let sig = media_contracts::protocol::sign_internal_request(
-        "secret",
+        &shared_secret,
         "node-to-core",
         "POST",
         "/internal/v1/core/heartbeat",
         "remote-node-1",
         "k1",
         ts,
-        nonce,
+        &nonce,
         &body_sha,
     );
 
@@ -211,7 +213,7 @@ async fn test_nodes_version_tracking_local_and_remote() {
                 .header(media_contracts::protocol::HDR_NODE_ID, "remote-node-1")
                 .header(media_contracts::protocol::HDR_KEY_ID, "k1")
                 .header(media_contracts::protocol::HDR_TIMESTAMP, ts.to_string())
-                .header(media_contracts::protocol::HDR_NONCE, nonce)
+                .header(media_contracts::protocol::HDR_NONCE, &nonce)
                 .header(media_contracts::protocol::HDR_BODY_SHA256, body_sha)
                 .header(media_contracts::protocol::HDR_SIGNATURE, sig)
                 .header("Content-Type", "application/json")

@@ -13,7 +13,9 @@ use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
 const ORIGIN: &str = "http://127.0.0.1:3000";
-const PASSWORD: &str = "personal account integration secret";
+fn dynamic_auth_secret() -> String {
+    format!("auth-test-secret-{}", uuid::Uuid::new_v4())
+}
 async fn req(
     app: &Router,
     path: &str,
@@ -63,18 +65,20 @@ async fn login(app: &Router, password: &str) -> (String, String) {
 }
 #[tokio::test]
 async fn password_sessions_revocation_and_csrf() {
+    let pass = dynamic_auth_secret();
+    let replacement = dynamic_auth_secret();
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("accounts.db"))
         .await
         .unwrap();
     store
-        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .bootstrap("admin", Zeroizing::new(pass.clone()))
         .await
         .unwrap();
     let auth = AuthState::new(store, ORIGIN.into()).await.unwrap();
     let app = auth::router(auth.clone()).merge(account::router(auth));
-    let (a, csrf) = login(&app, PASSWORD).await;
-    let (b, _) = login(&app, PASSWORD).await;
+    let (a, csrf) = login(&app, &pass).await;
+    let (b, _) = login(&app, &pass).await;
     let listed =
         body(req(&app, "/api/v1/account/sessions", "GET", &a, "", json!(null)).await).await;
     let devices = listed["sessions"].as_array().unwrap();
@@ -109,7 +113,7 @@ async fn password_sessions_revocation_and_csrf() {
             "PUT",
             &a,
             &csrf,
-            json!({"currentPassword":"wrong","newPassword":"replacement integration secret"})
+            json!({"currentPassword":"wrong","newPassword":&replacement})
         )
         .await
         .status(),
@@ -122,7 +126,7 @@ async fn password_sessions_revocation_and_csrf() {
             "PUT",
             &a,
             &csrf,
-            json!({"currentPassword":PASSWORD,"newPassword":"replacement integration secret"})
+            json!({"currentPassword":&pass,"newPassword":&replacement})
         )
         .await
         .status(),
@@ -134,7 +138,7 @@ async fn password_sessions_revocation_and_csrf() {
             .status(),
         StatusCode::UNAUTHORIZED
     );
-    let (c, new_csrf) = login(&app, "replacement integration secret").await;
+    let (c, new_csrf) = login(&app, &replacement).await;
     assert_eq!(
         req(
             &app,
@@ -171,12 +175,13 @@ async fn password_sessions_revocation_and_csrf() {
 
 #[tokio::test]
 async fn persistent_session_survives_return_and_expires_after_seven_days() {
+    let pass = dynamic_auth_secret();
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("persistent.db"))
         .await
         .unwrap();
     store
-        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .bootstrap("admin", Zeroizing::new(pass.clone()))
         .await
         .unwrap();
     let pool = store.pool().clone();
@@ -188,7 +193,7 @@ async fn persistent_session_survives_return_and_expires_after_seven_days() {
         "POST",
         "",
         "",
-        json!({"login":"admin","password":PASSWORD}),
+        json!({"login":"admin","password":&pass}),
     )
     .await;
     assert_eq!(response.status(), StatusCode::OK);
@@ -227,19 +232,20 @@ async fn persistent_session_survives_return_and_expires_after_seven_days() {
 
 #[tokio::test]
 async fn sso_local_credentials_policy_csrf_and_recent_login() {
+    let pass = dynamic_auth_secret();
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("policy.db"))
         .await
         .unwrap();
     store
-        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .bootstrap("admin", Zeroizing::new(pass.clone()))
         .await
         .unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let app = auth::router(auth.clone())
         .merge(account::router(auth.clone()))
         .merge(media_poc::server_settings::router(auth));
-    let (cookie, csrf) = login(&app, PASSWORD).await;
+    let (cookie, csrf) = login(&app, &pass).await;
     let user: String = media_poc::database::query_scalar(
         "SELECT user_id FROM local_credentials WHERE login='admin'",
     )
@@ -253,7 +259,8 @@ async fn sso_local_credentials_policy_csrf_and_recent_login() {
         .await
         .unwrap();
     let path = "/api/v1/account/local-credentials";
-    let input = json!({"login":"new-local","password":"new synthetic local password"});
+    let new_user_pass = dynamic_auth_secret();
+    let input = json!({"login":"new-local","password":&new_user_pass});
     assert_eq!(
         req(&app, path, "POST", &cookie, &csrf, input.clone())
             .await
@@ -315,17 +322,18 @@ async fn sso_local_credentials_policy_csrf_and_recent_login() {
 
 #[tokio::test]
 async fn avatar_policy_is_independent_of_active_plugins() {
+    let pass = dynamic_auth_secret();
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("avatar-policy.db"))
         .await
         .unwrap();
     store
-        .bootstrap("admin", Zeroizing::new(PASSWORD.into()))
+        .bootstrap("admin", Zeroizing::new(pass.clone()))
         .await
         .unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let app = auth::router(auth.clone()).merge(media_poc::avatars::router(auth));
-    let (cookie, csrf) = login(&app, PASSWORD).await;
+    let (cookie, csrf) = login(&app, &pass).await;
     let path = "/api/v1/account/avatar/policy";
     assert_eq!(
         req(&app, path, "GET", "", "", json!(null)).await.status(),

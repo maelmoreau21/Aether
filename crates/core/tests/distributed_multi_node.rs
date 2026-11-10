@@ -31,8 +31,8 @@ use media_contracts::{
     ids::{LibraryId, NodeId},
     protocol::{
         HDR_BODY_SHA256, HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE, HDR_PROTOCOL, HDR_SIGNATURE,
-        HDR_TIMESTAMP, PROTOCOL_VERSION, PlaybackTokenClaims, issue_playback_token, sha256_hex,
-        sign_internal_request, unix_now,
+        HDR_TIMESTAMP, PROTOCOL_VERSION, PlaybackTokenClaims, issue_playback_token,
+        random_nonce_hex, random_secret_hex, sha256_hex, sign_internal_request, unix_now,
     },
 };
 use media_node::server::{NodeServerConfig, NodeServerState, app_with_state as node_router};
@@ -1862,15 +1862,17 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         b"{\"nodeId\":\"unknown-node\",\"name\":\"Fake\",\"publicUrl\":null,\"roots\":[]}";
     let fake_hash = sha256_hex(fake_body);
     let fake_ts = unix_now();
+    let fake_nonce = random_nonce_hex();
+    let fake_secret = random_secret_hex();
     let fake_sig = sign_internal_request(
-        "fake-secret",
+        &fake_secret,
         "node->core",
         "POST",
         "/internal/v1/core/heartbeat",
         "unknown-node",
         "fake-key",
         fake_ts,
-        "fake-nonce-1234567890",
+        &fake_nonce,
         &fake_hash,
     );
     let (unk_st, _, _) = http_request(
@@ -1882,7 +1884,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             (HDR_NODE_ID, "unknown-node"),
             (HDR_KEY_ID, "fake-key"),
             (HDR_TIMESTAMP, &fake_ts.to_string()),
-            (HDR_NONCE, "fake-nonce-1234567890"),
+            (HDR_NONCE, &fake_nonce),
             (HDR_BODY_SHA256, &fake_hash),
             (HDR_SIGNATURE, &fake_sig),
             ("content-type", "application/json"),

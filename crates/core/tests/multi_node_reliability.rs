@@ -490,10 +490,16 @@ impl Cluster {
 
     /// The Core stops hearing from a Node, the way it would after a power cut: no request fails,
     /// the last sign of life simply gets older than the heartbeat tolerance.
-    fn silence(&self, node: &str) {
+    async fn silence(&self, node: &str) {
+        let stale = unix_now() - 3_600;
         self.store
             .node_registry()
-            .record_success(node, None, unix_now() - 3_600);
+            .record_success(node, None, stale);
+        let _ = query("UPDATE media_nodes SET last_seen_at=? WHERE id=?")
+            .bind(stale)
+            .bind(node)
+            .execute(self.store.pool())
+            .await;
     }
 
     async fn node_secret(&self, node: &str) -> (String, String) {
@@ -631,7 +637,7 @@ async fn equivalent_copy_is_a_failover_target_only_for_viewers_allowed_to_read_i
     assert_eq!(bob_view["alternatives"], json!([]));
 
     // Node A goes silent without a single failed request.
-    c.silence(&c.node1.id);
+    c.silence(&c.node1.id).await;
 
     // Before the first playback request the Core already knows: the administrator is moved to
     // the equivalent copy, with no direct URL handed out for the silent Node.
@@ -687,7 +693,7 @@ async fn a_copy_with_another_runtime_is_never_substituted() {
 
     // With Node A gone the administrator is told the title is unavailable instead of being
     // silently moved to a different cut whose timeline the saved position does not match.
-    c.silence(&c.node1.id);
+    c.silence(&c.node1.id).await;
     let (_, view) = c.descriptor(&c.admin_cookie, &c.asset1).await;
     assert_eq!(view["id"], c.asset1);
     assert!(view.get("failoverFrom").is_none(), "{view}");
@@ -859,7 +865,7 @@ async fn protocol_mismatch_is_refused_and_the_node_recovers_with_a_valid_call() 
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     // The refusal did not change what the Core believes about the Node...
-    c.silence(&c.node1.id);
+    c.silence(&c.node1.id).await;
     let (status, _) = c
         .signed_node_post(
             &c.node1,
@@ -1127,7 +1133,7 @@ async fn a_node_killed_mid_read_interrupts_that_response_and_the_next_request_co
 
     // Once the Core stops hearing from the Node (here: the heartbeat tolerance elapsed), the
     // player's next request lands on the equivalent copy...
-    c.silence(&c.node1.id);
+    c.silence(&c.node1.id).await;
     let (_, moved) = c.descriptor(&c.admin_cookie, &c.asset1).await;
     assert_eq!(moved["id"], c.asset2, "{moved}");
     let (_, alice_view) = c.descriptor(&c.alice_cookie, &c.asset1).await;

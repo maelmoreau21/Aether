@@ -680,7 +680,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.goto(origin+'/app/settings/#devices');await page.getByRole('heading',{name:'Vos sessions'}).waitFor();
     for(const width of [390,1440]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:`${out}/account-security-${width}.png`,fullPage:true});}
     await page.goto(origin+'/app/settings/#security');
-    await page.getByLabel('Mot de passe actuel',{exact:true}).fill('disposable series user-b password');
+    const passwordForm=page.locator('form').filter({has:page.getByRole('button',{name:'Changer le mot de passe',exact:true})});
+    await passwordForm.getByLabel('Mot de passe actuel',{exact:true}).fill('disposable series user-b password');
     await page.getByLabel('Nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
     await page.getByLabel('Confirmer le nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
     await page.getByRole('button',{name:'Changer le mot de passe',exact:true}).click();await page.waitForURL('**/app/login/**');

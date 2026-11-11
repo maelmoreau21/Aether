@@ -15,6 +15,10 @@
 //! The scenarios need the generated fixtures (`scripts/generate-fixtures.ps1`) and, for the
 //! non-equivalent copy, an `ffmpeg` binary; they say so and return early when it is missing.
 
+use aether_core::{
+    auth::AuthState, database::query, database::query_scalar, identity::IdentityStore,
+    node::Inventory, nodes::ACTIVE_CHANNELS, scans::ScanJobs, secure_app_with_jobs,
+};
 use axum::http::{Method, Request, StatusCode, header};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -26,10 +30,6 @@ use media_contracts::protocol::{
     issue_playback_token, random_nonce_hex, sha256_hex, sign_internal_request, unix_now,
 };
 use media_node::server::{NodeServerConfig, NodeServerState, app_with_state as node_router};
-use media_poc::{
-    auth::AuthState, database::query, database::query_scalar, identity::IdentityStore,
-    node::Inventory, nodes::ACTIVE_CHANNELS, scans::ScanJobs, secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
@@ -170,7 +170,7 @@ async fn place_film(root: &Path, source: &Path) {
 
 struct Cluster {
     _temp: tempfile::TempDir,
-    _scheduler: media_poc::scheduler::Scheduler,
+    _scheduler: aether_core::scheduler::Scheduler,
     core_origin: String,
     store: IdentityStore,
     admin_cookie: String,
@@ -261,7 +261,7 @@ impl Cluster {
             .unwrap();
         // The production binary runs the scheduler beside the router; lease renewal, expiry and
         // retry of interrupted scans live there.
-        let scheduler = media_poc::scheduler::Scheduler::start(auth, scheduler_root, jobs);
+        let scheduler = aether_core::scheduler::Scheduler::start(auth, scheduler_root, jobs);
         tokio::spawn(async move {
             let _ = axum::serve(listener, app).await;
         });
@@ -341,7 +341,7 @@ impl Cluster {
                 .execute(store.pool())
                 .await
                 .unwrap();
-            users.push((format!("media_session={raw}"), hash));
+            users.push((format!("aether_session={raw}"), hash));
         }
 
         let mut libs = Vec::new();

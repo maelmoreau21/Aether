@@ -263,7 +263,7 @@ le comportement d'une installation réelle de Radarr/Sonarr/Lidarr ou d'un NAS.
   modules Wasm des extensions, signés par une clé de test temporaire. Les tests
   utilisant le worker partagent un verrou de test, car son admission est commune
   au processus même lorsque les bases SQLite sont indépendantes.
-- `cargo clippy -p media-poc --locked --lib -- -D warnings`, `cargo fmt --all --
+- `cargo clippy -p aether-core --locked --lib -- -D warnings`, `cargo fmt --all --
   --check` et `git diff --check` réussis.
 - Web : Svelte sans erreur/avertissement, ESLint ciblé, cinq tests des helpers,
   build statique et `scripts/test-applications-ui.mjs` réussis. Chrome utilise des

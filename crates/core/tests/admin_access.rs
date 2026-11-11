@@ -1,3 +1,11 @@
+use aether_core::{
+    admin_users, api_keys,
+    auth::{self, AuthState},
+    database::{query, query_scalar},
+    groups,
+    identity::IdentityStore,
+    permissions::{self, MediaAccess},
+};
 use axum::{
     Json, Router,
     body::Body,
@@ -7,14 +15,6 @@ use axum::{
     routing::get,
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    admin_users, api_keys,
-    auth::{self, AuthState},
-    database::{query, query_scalar},
-    groups,
-    identity::IdentityStore,
-    permissions::{self, MediaAccess},
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -145,7 +145,7 @@ async fn role_groups_cover_all_accounts_follow_role_changes_and_cannot_be_overri
         .status(),
         StatusCode::NO_CONTENT
     );
-    let memberships: Vec<String> = media_poc::database::query_scalar(
+    let memberships: Vec<String> = aether_core::database::query_scalar(
         "SELECT group_id FROM effective_user_group_members WHERE user_id=? ORDER BY group_id",
     )
     .bind(&user)

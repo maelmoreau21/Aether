@@ -1,9 +1,9 @@
+use aether_core::{app, media, node::Inventory};
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use http_body_util::{BodyExt, Empty};
-use media_poc::{app, media, node::Inventory};
 use std::path::PathBuf;
 use tower::ServiceExt;
 
@@ -302,7 +302,7 @@ async fn representative_tracks_and_ten_bit_profile() {
         assert!(subs.iter().all(|s| s.codec_name.as_deref() == Some(codec)));
     }
     let partial = tempfile::tempdir().unwrap();
-    for (_, filename, _) in media_poc::node::FIXTURES {
+    for (_, filename, _) in aether_core::node::FIXTURES {
         std::fs::copy(root().join(filename), partial.path().join(filename)).unwrap();
     }
     std::fs::create_dir(partial.path().join("representative")).unwrap();
@@ -316,10 +316,10 @@ async fn representative_tracks_and_ten_bit_profile() {
 #[tokio::test]
 async fn http_head_ranges_and_exact_bytes() {
     let router = router().await;
-    for (id, name, _) in media_poc::node::FIXTURES
+    for (id, name, _) in aether_core::node::FIXTURES
         .into_iter()
-        .chain(media_poc::node::REMUX_FIXTURES)
-        .chain(media_poc::node::REPRESENTATIVE_FIXTURES)
+        .chain(aether_core::node::REMUX_FIXTURES)
+        .chain(aether_core::node::REPRESENTATIVE_FIXTURES)
     {
         let path = format!("/api/v1/assets/{id}/content");
         let expected = std::fs::read(root().join(name)).unwrap();
@@ -473,7 +473,7 @@ async fn language_remux_inventory_and_partial_preparation() {
         assert_eq!(asset.probe.streams[1].tags["language"], tag);
     }
     let temp = tempfile::tempdir().unwrap();
-    for (_, filename, _) in media_poc::node::FIXTURES {
+    for (_, filename, _) in aether_core::node::FIXTURES {
         std::fs::copy(root().join(filename), temp.path().join(filename)).unwrap();
     }
     // Optional preparation may be absent, but a partial directory must fail closed.
@@ -548,7 +548,7 @@ async fn replaced_link_cannot_escape_root() {
 #[tokio::test]
 async fn large_file_is_not_buffered_in_full() {
     let temp = tempfile::tempdir().unwrap();
-    for (_, filename, _) in media_poc::node::FIXTURES {
+    for (_, filename, _) in aether_core::node::FIXTURES {
         std::fs::copy(root().join(filename), temp.path().join(filename)).unwrap();
     }
     let inventory = Inventory::load(temp.path().to_path_buf()).await.unwrap();

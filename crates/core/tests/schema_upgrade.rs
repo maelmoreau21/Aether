@@ -5,8 +5,8 @@
 //! a fresh install, repeated starts, and recovery after a failed upgrade.
 //!
 //! SQLite always runs. PostgreSQL needs a disposable server:
-//! `MEDIA_TEST_POSTGRES_URL=postgres://... cargo test -p media-poc --test schema_upgrade -- --ignored`
-use media_poc::database::initialize_fresh_schema;
+//! `MEDIA_TEST_POSTGRES_URL=postgres://... cargo test -p aether-core --test schema_upgrade -- --ignored`
+use aether_core::database::initialize_fresh_schema;
 use sqlx::{AnyConnection, Connection, Row};
 use std::collections::BTreeMap;
 use std::io::Read;

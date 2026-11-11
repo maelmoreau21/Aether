@@ -1784,7 +1784,7 @@ mod automatic_collection_tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            format!("media_session={token}").parse().unwrap(),
+            format!("aether_session={token}").parse().unwrap(),
         );
         let actor = auth.authenticate(&headers).await.unwrap();
         let collections = automatic_collections(&auth, &actor).await.unwrap();
@@ -1795,7 +1795,7 @@ mod automatic_collection_tests {
         let request = |path: &str| {
             axum::http::Request::builder()
                 .uri(path)
-                .header(header::COOKIE, format!("media_session={token}"))
+                .header(header::COOKIE, format!("aether_session={token}"))
                 .body(axum::body::Body::empty())
                 .unwrap()
         };
@@ -1910,7 +1910,7 @@ mod automatic_collection_tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            format!("media_session={token}").parse().unwrap(),
+            format!("aether_session={token}").parse().unwrap(),
         );
         let actor = auth.authenticate(&headers).await.unwrap();
 
@@ -1927,7 +1927,7 @@ mod automatic_collection_tests {
         let request = |path: &str| {
             axum::http::Request::builder()
                 .uri(path)
-                .header(header::COOKIE, format!("media_session={token}"))
+                .header(header::COOKIE, format!("aether_session={token}"))
                 .body(axum::body::Body::empty())
                 .unwrap()
         };

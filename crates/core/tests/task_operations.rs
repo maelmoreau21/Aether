@@ -1,5 +1,5 @@
 //! Real standalone scanner and confined executors; no fake Node or synthetic HTTP result.
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     database::{query, query_scalar},
     identity::IdentityStore,
@@ -56,7 +56,7 @@ async fn standalone_scans_then_executes_real_analysis_preparation_and_image_jobs
     let before_poster = Sha256::digest(tokio::fs::read(&poster).await.unwrap());
     let path = temp.path().join("tasks.sqlite");
     let store = IdentityStore::open(&path).await.unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('tasks','Task fixtures','films','local',?,1)")

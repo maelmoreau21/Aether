@@ -80,11 +80,11 @@ suspendues autour de la transaction et rétablies même en cas d'échec (testé)
 ## Tests
 
 ```powershell
-cargo test -p media-poc --lib database
-cargo test -p media-poc --test schema_upgrade
+cargo test -p aether-core --lib database
+cargo test -p aether-core --test schema_upgrade
 # PostgreSQL 18 jetable :
 $env:MEDIA_TEST_POSTGRES_URL = 'postgres://postgres:…@localhost:5432/media_test'
-cargo test -p media-poc --test schema_upgrade -- --ignored
+cargo test -p aether-core --test schema_upgrade -- --ignored
 ```
 
 `schema_upgrade.rs` : pour chaque révision et chaque moteur, installe l'ancien schéma,

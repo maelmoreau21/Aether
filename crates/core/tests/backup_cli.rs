@@ -1,6 +1,6 @@
 //! `media-backup --full` and `media-recover` as operators run them: key from the environment,
 //! fail closed without one, legacy plaintext only on explicit opt-in.
-use media_poc::identity::IdentityStore;
+use aether_core::identity::IdentityStore;
 use std::{path::Path, process::Output};
 
 const KEY: &str = "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12";

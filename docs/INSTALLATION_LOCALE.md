@@ -13,7 +13,7 @@ Dans PowerShell, remplacer le chemin d’exemple par la racine du dépôt :
 Set-Location 'C:\chemin\vers\Aether'
 npm --prefix apps/web ci
 npm --prefix apps/web run build
-cargo build --locked -p media-poc --bin aether-core --bin media-bootstrap --bin media-extension-worker --bin media-extension-pack -j 1
+cargo build --locked -p aether-core --bin aether-core --bin media-bootstrap --bin media-extension-worker --bin media-extension-pack -j 1
 $env:MEDIA_DB_ENGINE = 'sqlite'
 $env:MEDIA_DB_PATH = Join-Path (Get-Location) 'data/core.sqlite3'
 New-Item -ItemType Directory -Force data | Out-Null

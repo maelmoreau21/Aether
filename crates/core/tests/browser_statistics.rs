@@ -1,5 +1,5 @@
 //! Real Chrome + AV1/Opus playback and optional statistics, on a disposable local Core.
-use media_poc::{database::query, identity::IdentityStore};
+use aether_core::{database::query, identity::IdentityStore};
 use std::{
     path::Path,
     process::Stdio,

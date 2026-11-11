@@ -1,7 +1,7 @@
 //! Benchmark and functional verification of SQLite catalog performance,
 //! pagination, Unicode search, and multi-user library permissions.
 
-use media_poc::identity::IdentityStore;
+use aether_core::identity::IdentityStore;
 use serde_json::{Value, json};
 use std::time::Instant;
 
@@ -340,7 +340,7 @@ async fn multi_user_permissions_and_disabled_libraries() {
     let (main_libs, all_libs) = populate_synthetic_catalog(&store, 500).await;
 
     // User A: only main library
-    let res_a = media_poc::inventory::catalogue(&store, &main_libs, None, "", "title-asc", 0, 24)
+    let res_a = aether_core::inventory::catalogue(&store, &main_libs, None, "", "title-asc", 0, 24)
         .await
         .unwrap();
     let total_a = res_a["total"].as_u64().unwrap();
@@ -348,14 +348,14 @@ async fn multi_user_permissions_and_disabled_libraries() {
     assert_eq!(res_a["items"].as_array().unwrap().len(), 24);
 
     // User B: both main and private libraries
-    let res_b = media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
+    let res_b = aether_core::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
         .await
         .unwrap();
     let total_b = res_b["total"].as_u64().unwrap();
     assert_eq!(total_b, 500); // 100% of 500
 
     // User C: only disabled library
-    let res_c = media_poc::inventory::catalogue(
+    let res_c = aether_core::inventory::catalogue(
         &store,
         &["lib-disabled".to_string()],
         None,
@@ -370,7 +370,7 @@ async fn multi_user_permissions_and_disabled_libraries() {
     assert_eq!(res_c["items"].as_array().unwrap().len(), 0);
 
     // User D: empty libraries
-    let res_d = media_poc::inventory::catalogue(&store, &[], None, "", "title-asc", 0, 24)
+    let res_d = aether_core::inventory::catalogue(&store, &[], None, "", "title-asc", 0, 24)
         .await
         .unwrap();
     assert_eq!(res_d["total"], 0);
@@ -387,7 +387,7 @@ async fn unicode_search_and_sort_semantics_and_deep_pagination() {
 
     // 1. Unicode case folding search: "été" finds "Été à Paris"
     let res_ete =
-        media_poc::inventory::catalogue(&store, &all_libs, None, "été", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store, &all_libs, None, "été", "title-asc", 0, 24)
             .await
             .unwrap();
     assert!(res_ete["total"].as_u64().unwrap() > 0);
@@ -397,7 +397,7 @@ async fn unicode_search_and_sort_semantics_and_deep_pagination() {
 
     // 2. Unicode search: "éléphant" finds "Éléphant Blanc"
     let res_ele =
-        media_poc::inventory::catalogue(&store, &all_libs, None, "éléphant", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store, &all_libs, None, "éléphant", "title-asc", 0, 24)
             .await
             .unwrap();
     assert!(res_ele["total"].as_u64().unwrap() > 0);
@@ -406,20 +406,22 @@ async fn unicode_search_and_sort_semantics_and_deep_pagination() {
     }
 
     // 3. Unicode search: "ça" finds "Ça chapitre un"
-    let res_ca = media_poc::inventory::catalogue(&store, &all_libs, None, "ça", "title-asc", 0, 24)
-        .await
-        .unwrap();
+    let res_ca =
+        aether_core::inventory::catalogue(&store, &all_libs, None, "ça", "title-asc", 0, 24)
+            .await
+            .unwrap();
     assert!(res_ca["total"].as_u64().unwrap() > 0);
     for item in res_ca["items"].as_array().unwrap() {
         assert!(item["title"].as_str().unwrap().contains("Ça"));
     }
 
     // 4. Sorting: title-asc vs title-desc
-    let res_asc = media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
-        .await
-        .unwrap();
+    let res_asc =
+        aether_core::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
     let res_desc =
-        media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-desc", 0, 24)
+        aether_core::inventory::catalogue(&store, &all_libs, None, "", "title-desc", 0, 24)
             .await
             .unwrap();
 
@@ -448,7 +450,7 @@ async fn unicode_search_and_sort_semantics_and_deep_pagination() {
 
     // 5. Deep pagination on 1,000 items
     let page_last =
-        media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 984, 24)
+        aether_core::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 984, 24)
             .await
             .unwrap();
     assert_eq!(page_last["total"], 1000);
@@ -457,7 +459,7 @@ async fn unicode_search_and_sort_semantics_and_deep_pagination() {
 
     // 6. Out-of-bounds offset
     let page_oob =
-        media_poc::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 2000, 24)
+        aether_core::inventory::catalogue(&store, &all_libs, None, "", "title-asc", 2000, 24)
             .await
             .unwrap();
     assert_eq!(page_oob["total"], 1000);
@@ -476,14 +478,15 @@ async fn benchmark_1000_and_10000_works_comparison() {
     let (_, all_libs_1k) = populate_synthetic_catalog(&store_1k, 1000).await;
 
     // Warm-up
-    let _ = media_poc::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
-        .await
-        .unwrap();
+    let _ =
+        aether_core::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
 
     // 1. Measure New SQLite-driven Catalogue on 1k
     let start_new_1k = Instant::now();
     let res_new_1k =
-        media_poc::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 0, 24)
             .await
             .unwrap();
     let elapsed_new_1k = start_new_1k.elapsed();
@@ -493,7 +496,7 @@ async fn benchmark_1000_and_10000_works_comparison() {
     // Deep page (offset=960)
     let start_new_1k_deep = Instant::now();
     let res_new_1k_deep =
-        media_poc::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 960, 24)
+        aether_core::inventory::catalogue(&store_1k, &all_libs_1k, None, "", "title-asc", 960, 24)
             .await
             .unwrap();
     let elapsed_new_1k_deep = start_new_1k_deep.elapsed();
@@ -501,7 +504,7 @@ async fn benchmark_1000_and_10000_works_comparison() {
 
     // Search query on 1k
     let start_new_1k_search = Instant::now();
-    let res_new_1k_search = media_poc::inventory::catalogue(
+    let res_new_1k_search = aether_core::inventory::catalogue(
         &store_1k,
         &all_libs_1k,
         None,
@@ -554,14 +557,14 @@ async fn benchmark_1000_and_10000_works_comparison() {
 
     // Warm-up
     let _ =
-        media_poc::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
             .await
             .unwrap();
 
     // 1. Measure New SQLite-driven Catalogue on 10k
     let start_new_10k = Instant::now();
     let res_new_10k =
-        media_poc::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 0, 24)
             .await
             .unwrap();
     let elapsed_new_10k = start_new_10k.elapsed();
@@ -570,16 +573,23 @@ async fn benchmark_1000_and_10000_works_comparison() {
 
     // Deep page on 10k (offset=9960)
     let start_new_10k_deep = Instant::now();
-    let res_new_10k_deep =
-        media_poc::inventory::catalogue(&store_10k, &all_libs_10k, None, "", "title-asc", 9960, 24)
-            .await
-            .unwrap();
+    let res_new_10k_deep = aether_core::inventory::catalogue(
+        &store_10k,
+        &all_libs_10k,
+        None,
+        "",
+        "title-asc",
+        9960,
+        24,
+    )
+    .await
+    .unwrap();
     let elapsed_new_10k_deep = start_new_10k_deep.elapsed();
     assert_eq!(res_new_10k_deep["items"].as_array().unwrap().len(), 24);
 
     // Search query on 10k
     let start_new_10k_search = Instant::now();
-    let res_new_10k_search = media_poc::inventory::catalogue(
+    let res_new_10k_search = aether_core::inventory::catalogue(
         &store_10k,
         &all_libs_10k,
         None,
@@ -736,7 +746,7 @@ async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
 
     // Search "été" finds "Été d'amour"
     let res_ete =
-        media_poc::inventory::catalogue(&store, &visible, None, "été", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store, &visible, None, "été", "title-asc", 0, 24)
             .await
             .unwrap();
     assert_eq!(res_ete["total"], 1);
@@ -744,38 +754,40 @@ async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
 
     // Search uppercase "ÉTÉ" also finds "Été d'amour"
     let res_ete_upper =
-        media_poc::inventory::catalogue(&store, &visible, None, "ÉTÉ", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store, &visible, None, "ÉTÉ", "title-asc", 0, 24)
             .await
             .unwrap();
     assert_eq!(res_ete_upper["total"], 1);
     assert_eq!(res_ete_upper["items"][0]["title"], "Été d'amour");
 
     // Search "à" finds "À bout de souffle"
-    let res_a = media_poc::inventory::catalogue(&store, &visible, None, "à", "title-asc", 0, 24)
+    let res_a = aether_core::inventory::catalogue(&store, &visible, None, "à", "title-asc", 0, 24)
         .await
         .unwrap();
     assert_eq!(res_a["total"], 1);
     assert_eq!(res_a["items"][0]["title"], "À bout de souffle");
 
     // Search "ça" finds "Ça"
-    let res_ca = media_poc::inventory::catalogue(&store, &visible, None, "ça", "title-asc", 0, 24)
-        .await
-        .unwrap();
+    let res_ca =
+        aether_core::inventory::catalogue(&store, &visible, None, "ça", "title-asc", 0, 24)
+            .await
+            .unwrap();
     assert_eq!(res_ca["total"], 1);
     assert_eq!(res_ca["items"][0]["title"], "Ça");
 
     // Search "œuvre" finds "Œuvre d'art"
     let res_oeuvre =
-        media_poc::inventory::catalogue(&store, &visible, None, "œuvre", "title-asc", 0, 24)
+        aether_core::inventory::catalogue(&store, &visible, None, "œuvre", "title-asc", 0, 24)
             .await
             .unwrap();
     assert_eq!(res_oeuvre["total"], 1);
     assert_eq!(res_oeuvre["items"][0]["title"], "Œuvre d'art");
 
     // 5. Verify deterministic Unicode sorting (ORDER BY title_sort ASC)
-    let res_sort = media_poc::inventory::catalogue(&store, &visible, None, "", "title-asc", 0, 24)
-        .await
-        .unwrap();
+    let res_sort =
+        aether_core::inventory::catalogue(&store, &visible, None, "", "title-asc", 0, 24)
+            .await
+            .unwrap();
     let sorted_titles: Vec<&str> = res_sort["items"]
         .as_array()
         .unwrap()

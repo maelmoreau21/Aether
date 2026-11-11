@@ -139,7 +139,7 @@ Le state est haché en SQLite ; verifier/nonce sont conservés temporairement da
 `oidc_flows` (5 min). Le verifier ne figure jamais dans une URL. State et nonce
 figurent dans la requête d’autorisation OIDC ; ils ne sont pas journalisés par
 le Core. Le cookie temporaire
-`media_oidc_flow` est HttpOnly, Secure en HTTPS, SameSite=Lax, limité au chemin
+`aether_oidc_flow` est HttpOnly, Secure en HTTPS, SameSite=Lax, limité au chemin
 OIDC ; il permet le retour de navigation externe. Le callback exact est la seule
 exception au refus global cross-site et exige GET/navigation document (si Fetch
 Metadata est présent), state unique et cookie navigateur correspondant. Le callback termine la chaîne
@@ -150,7 +150,7 @@ et les cookies de session Strict, sans élargir les exceptions aux pages publiqu
 Le cookie temporaire est effacé après callback réussi ou refusé. Un autre onglet lançant un
 nouveau flux remplace ce cookie et invalide le parcours navigateur précédent.
 
-Le cookie de session `media_session` garde HttpOnly, Secure en HTTPS et
+Le cookie de session `aether_session` garde HttpOnly, Secure en HTTPS et
 SameSite=Strict, les limites absolue 12 h / inactive 30 min, et le CSRF existant.
 Logout reste POST + Origin + CSRF et révoque la session Core. Les jetons d'accès,
 ID tokens et refresh tokens ne sont pas persistés ; ils ne sont pas nécessaires
@@ -221,11 +221,11 @@ Les secrets aléatoires du banc restent dans `target/oidcqa-*`, jamais dans Git.
   aucun échec, 7 ignorés explicites (navigateurs/certificats/aide subprocess).
   Cette passe précède l'ajustement final du document de fin du callback et
   l'ajout du quatrième test OIDC.
-- Après cet ajustement : `cargo test --locked -p media-poc --lib oidc::tests --
+- Après cet ajustement : `cargo test --locked -p aether-core --lib oidc::tests --
   --nocapture` : 4/4 réussis ; signatures/algorithmes, claims, state/nonce,
   expiration de flux, refus fournisseur, panne fournisseur, rotation JWKS,
   groupe refusé, rôles, compte désactivé, collision email et liaison locale.
-- Non-régression après correction : `cargo test --locked -p media-poc
+- Non-régression après correction : `cargo test --locked -p aether-core
   --test challenger_security_challenge --test permissions --test distributed_multi_node`
   : 7/7 réussis (Host/Origin/Fetch-Site/CSRF, cookies HTTPS, droits, Core et deux
   Nodes distants sur sockets réelles).
@@ -268,3 +268,23 @@ Voir [prévalidation sans secrets](evidence/2026-10-18/oidc/real-provider-prefli
 Administration → Général propose « Empêcher les utilisateurs SSO de créer des identifiants locaux », activé par défaut et persisté dans `blockSsoLocalAccounts` via GET/PUT `/api/v1/admin/settings`. Omettre le champ conserve le réglage existant. Les credentials locaux déjà présents restent utilisables.
 
 GET `/api/v1/account/local-credentials` nécessite une session et retourne `{canCreate}`. POST sur cette route accepte `{login,password}` : session et CSRF obligatoires, politique serveur autorisant la création, connexion de moins de cinq minutes, identité OIDC existante et absence de credentials locaux. Identifiant ASCII en minuscules ou chiffres avec `._-`, 3–64 octets ; mot de passe conforme au validateur Argon2 commun. Échecs 400 (format), 403 (politique/connexion récente/CSRF), 409 (identifiant pris ou credentials existants). Aucun compte supplémentaire n’est créé : les credentials sont attachés au même utilisateur et conservent ses droits.
+
+## Connexion SSO des applications natives — 11 novembre 2026
+
+Les applications (Android, bureau) ouvrent le SSO dans le navigateur du système, sans appareil à approuver :
+
+1. L'application tire un vérificateur (64 hexadécimaux), garde ce secret et ouvre
+   `GET /api/v1/auth/oidc/app/start?challenge=<SHA-256 hex du vérificateur>&redirect=<retour>`.
+   Seuls deux retours sont acceptés : `aether://sso` (téléphone) et `http://127.0.0.1:<port ≥ 1024>/sso` (bureau).
+2. Le Core enchaîne le flux OIDC habituel (state, nonce, PKCE fournisseur, cookie de flux). Au callback, le
+   navigateur ne reçoit **aucune session** : seulement un code à usage unique (2 min) renvoyé vers le retour,
+   ou `error=<code>` en cas de refus.
+3. L'application échange `POST /api/v1/auth/oidc/app/token` `{code, verifier, tokenType}` : jeton d'appareil
+   (`bearer`) ou cookie pour une application qui affiche l'interface web. Un mauvais vérificateur consomme le code.
+
+Table `oidc_app_grants` (éphémère). Un lien piégé ne donne rien à son auteur : le code n'est remis qu'à
+l'appareil qui a ouvert le navigateur, et ne vaut rien sans le vérificateur. Quick Connect reste le moyen de
+connecter un appareil sans navigateur (TV).
+
+`POST /api/v1/auth/session/extend` (cookie + CSRF) repousse de 30 jours l'expiration d'une session web ; la
+limite d'inactivité de 7 jours reste inchangée.

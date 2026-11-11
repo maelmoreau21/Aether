@@ -110,7 +110,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     rm -f target/release/deps/*media_contracts* \
           target/release/deps/*media_node* \
           target/release/deps/*aether_node* \
-          target/release/deps/*media_poc* \
+          target/release/deps/*aether_core* \
           target/release/deps/*aether_core* \
           target/release/deps/*media_bootstrap* \
           target/release/deps/*media_backup* \

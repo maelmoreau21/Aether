@@ -22,9 +22,23 @@ class TokenRefresh(context: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val store = TokenStore(applicationContext)
         val server = store.server ?: return Result.success()
+        val device = "${Build.MANUFACTURER} ${Build.MODEL}"
+        // The accounts set aside stay signed in too; one that was revoked leaves the list.
+        store.setParked(store.parked().mapNotNull { account ->
+            try {
+                val other = AetherClient(server, device, account.token)
+                other.me()
+                other.refreshIfDue(MARGIN_SECONDS)
+                account.copy(token = other.token() ?: account.token)
+            } catch (e: ClientException.Unauthorized) {
+                null
+            } catch (e: ClientException) {
+                account
+            }
+        })
         val token = store.load() ?: return Result.success()
         return try {
-            val client = AetherClient(server, "${Build.MANUFACTURER} ${Build.MODEL}", token)
+            val client = AetherClient(server, device, token)
             // `me` also counts as activity for the idle limit; refresh rotates before the absolute one.
             client.me()
             client.refreshIfDue(MARGIN_SECONDS)

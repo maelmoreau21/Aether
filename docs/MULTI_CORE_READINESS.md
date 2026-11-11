@@ -78,7 +78,7 @@ ni reprise, ni absence de double effet.
   création neuve du schéma unique sur SQLite et PostgreSQL.
 - `scripts/test-postgres.ps1` : contrat HTTP/réouverture (1 test), OIDC
   (7 tests) et parcours TCP à deux Nodes (1 test), tous réussis.
-- `cargo test --locked -p media-poc --test automation_flow hundred_thousand_persistent_tasks_admission -j 1 -- --ignored --nocapture --test-threads=1` :
+- `cargo test --locked -p aether-core --test automation_flow hundred_thousand_persistent_tasks_admission -j 1 -- --ignored --nocapture --test-threads=1` :
   SQLite Debug local, 100 Nodes simulés et 100 000 tâches persistantes ;
   insertion 3 572 ms, attribution groupée p50 477 ms/p95 596 ms, admission
   unitaire p50 10,3 ms/p95 15,1 ms. Mesure antérieure à la lecture groupée

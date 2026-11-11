@@ -1,12 +1,12 @@
 //! `GET /api/v1/assets/{id}/details`: Media Node, library and technical sheet of an
 //! indexed asset. Node-side paths are administrator-only; library rights stay live.
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 use tower::ServiceExt;
@@ -178,7 +178,7 @@ async fn asset_details_expose_node_and_paths_to_administrators_only() {
     let asset_for = |relative: &'static str| {
         let store = store.clone();
         async move {
-            media_poc::database::query_scalar::<_, String>(
+            aether_core::database::query_scalar::<_, String>(
                 "SELECT id FROM inventory_assets WHERE relative_path LIKE ?",
             )
             .bind(format!("%{relative}"))

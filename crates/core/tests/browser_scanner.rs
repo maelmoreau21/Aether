@@ -1,5 +1,5 @@
 //! Disposable browser scan/playback evidence, including a real Core process restart.
-use media_poc::identity::IdentityStore;
+use aether_core::identity::IdentityStore;
 use std::{path::Path, process::Stdio, time::Duration};
 use zeroize::Zeroizing;
 
@@ -120,7 +120,7 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
     let store = IdentityStore::open(&db).await.unwrap();
     // These synthetic fixtures exercise local scanning/playback, not providers.
     // Keep their deliberately synthetic external IDs without resolving real films.
-    media_poc::database::query("UPDATE extensions SET enabled=0")
+    aether_core::database::query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await
         .unwrap();
@@ -134,18 +134,18 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
         .unwrap();
     let task_backlog = std::env::var("MEDIA_TEST_TASK_BACKLOG").as_deref() == Ok("1");
     if task_backlog {
-        media_poc::libraries::initialize_local(&store)
+        aether_core::libraries::initialize_local(&store)
             .await
             .unwrap();
         let empty = library.join("background-task-queue");
         std::fs::create_dir_all(&empty).unwrap();
         let empty = std::fs::canonicalize(empty).unwrap();
-        media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('browser-task-backlog','Browser task backlog','films','local',?,1)").bind(empty.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
+        aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('browser-task-backlog','Browser task backlog','films','local',?,1)").bind(empty.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
         let timestamp = media_contracts::protocol::unix_now();
         let mut tx = store.pool().begin().await.unwrap();
         for index in 0..10_000 {
             let id = format!("browser-backlog-{index:05}");
-            media_poc::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) VALUES(?,'browser-task-backlog','browser-test',?,'local',?,?,?)")
+            aether_core::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) VALUES(?,'browser-task-backlog','browser-test',?,'local',?,?,?)")
                 .bind(&id).bind(&id).bind(timestamp).bind(timestamp).bind(timestamp).execute(&mut *tx).await.unwrap();
         }
         tx.commit().await.unwrap();
@@ -161,7 +161,7 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
             // Acquisition itself is covered by the signed-Wasm HTTP test, without a real provider.
             let check = IdentityStore::open(&db).await.unwrap();
             let track=serde_json::json!({"language":"fr","label":"Downloaded offline fixture","forced":false,"sdh":false,"match":"identity"}).to_string();
-            media_poc::database::query("INSERT INTO subtitle_downloads(id,asset_id,provider_id,file_id,fingerprint,track_json,status,created_at,content) SELECT 'browser-'||id,id,'offline-fixture','42',CAST(size AS TEXT)||':'||modified_ns,?,'completed',0,? FROM inventory_assets WHERE available=1")
+            aether_core::database::query("INSERT INTO subtitle_downloads(id,asset_id,provider_id,file_id,fingerprint,track_json,status,created_at,content) SELECT 'browser-'||id,id,'offline-fixture','42',CAST(size AS TEXT)||':'||modified_ns,?,'completed',0,? FROM inventory_assets WHERE available=1")
                 .bind(track).bind("WEBVTT\n\n00:00:00.000 --> 00:00:12.000\nDownloaded application subtitle").execute(check.pool()).await.unwrap();
             check.close().await;
         }
@@ -181,12 +181,12 @@ async fn browser_scanner_persists_and_plays_after_core_restart() {
             let check = IdentityStore::open(&db).await.unwrap();
             let completed=tokio::time::timeout(Duration::from_secs(75),async {
                 loop {
-                    let completed:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE owner='browser-test' AND status='completed'").fetch_one(check.pool()).await.unwrap();
+                    let completed:i64=aether_core::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE owner='browser-test' AND status='completed'").fetch_one(check.pool()).await.unwrap();
                     if completed>completed_before_restart {break completed;}
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }).await.expect("background queue must make real progress across restart");
-            let total: i64 = media_poc::database::query_scalar(
+            let total: i64 = aether_core::database::query_scalar(
                 "SELECT COUNT(*) FROM durable_tasks WHERE owner='browser-test'",
             )
             .fetch_one(check.pool())

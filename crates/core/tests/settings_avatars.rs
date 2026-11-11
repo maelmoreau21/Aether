@@ -1,11 +1,4 @@
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode},
-    response::Response,
-};
-use http_body_util::BodyExt;
-use media_poc::{
+use aether_core::{
     admin_users,
     auth::{self, AuthState},
     avatars,
@@ -13,6 +6,13 @@ use media_poc::{
     identity::IdentityStore,
     server_settings,
 };
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode},
+    response::Response,
+};
+use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -449,7 +449,7 @@ async fn cors_preflight_and_configured_origins_are_enforced() {
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let raw_app = auth::router(auth.clone()).merge(server_settings::router(auth.clone()));
     let app =
-        media_poc::local_security_with_store(raw_app, ORIGIN.into(), Some(store.clone()), vec![]);
+        aether_core::local_security_with_store(raw_app, ORIGIN.into(), Some(store.clone()), vec![]);
 
     // 1. Initial state: untrusted origin http://client.example.com gets 403 Forbidden
     let req = Request::builder()

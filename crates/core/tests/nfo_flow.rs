@@ -1,10 +1,10 @@
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{path::Path, time::Duration};
@@ -370,7 +370,7 @@ async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing
     let library = create_library(&app, &root, &cookie, csrf, "Refresh modes").await;
     scan(&app, &library, &cookie, csrf).await;
     let initial: Vec<String> =
-        media_poc::database::query_scalar("SELECT id FROM inventory_assets ORDER BY id")
+        aether_core::database::query_scalar("SELECT id FROM inventory_assets ORDER BY id")
             .fetch_all(store.pool())
             .await
             .unwrap();
@@ -390,7 +390,7 @@ async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing
     .await;
     assert_eq!(missing["probed"], 0);
     let titles: Vec<String> =
-        media_poc::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
+        aether_core::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
             .fetch_all(store.pool())
             .await
             .unwrap();
@@ -412,7 +412,7 @@ async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing
         .unwrap();
     scan_mode(&app, &library, &cookie, csrf, json!({"mode":"new_only"})).await;
     let titles: Vec<String> =
-        media_poc::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
+        aether_core::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
             .fetch_all(store.pool())
             .await
             .unwrap();
@@ -423,14 +423,14 @@ async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing
     assert_eq!(full["probed"], 3);
     assert_eq!(full["reused"], 0);
     let titles: Vec<String> =
-        media_poc::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
+        aether_core::database::query_scalar("SELECT title FROM inventory_works ORDER BY title")
             .fetch_all(store.pool())
             .await
             .unwrap();
     assert!(titles.contains(&"First replacement".into()));
     assert!(titles.contains(&"Second replacement".into()));
     let after: Vec<String> =
-        media_poc::database::query_scalar("SELECT id FROM inventory_assets ORDER BY id")
+        aether_core::database::query_scalar("SELECT id FROM inventory_assets ORDER BY id")
             .fetch_all(store.pool())
             .await
             .unwrap();
@@ -492,7 +492,7 @@ async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing
     .unwrap();
     for mode in ["new_only", "missing_metadata"] {
         scan_mode(&app, series, &cookie, csrf, json!({"mode":mode})).await;
-        let titles: Vec<String> = media_poc::database::query_scalar(
+        let titles: Vec<String> = aether_core::database::query_scalar(
             "SELECT title FROM inventory_works WHERE library_id=? ORDER BY title",
         )
         .bind(series)
@@ -510,7 +510,7 @@ async fn refresh_modes_preserve_known_fill_missing_and_force_all_without_writing
     }
     let full = scan_mode(&app, series, &cookie, csrf, json!({"mode":"full"})).await;
     assert_eq!(full["probed"], 1);
-    let titles: Vec<String> = media_poc::database::query_scalar(
+    let titles: Vec<String> = aether_core::database::query_scalar(
         "SELECT title FROM inventory_works WHERE library_id=? ORDER BY title",
     )
     .bind(series)

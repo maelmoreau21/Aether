@@ -1,5 +1,5 @@
 //! Explicit opt-in browser evidence against an isolated, disposable SQLite database.
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use zeroize::Zeroizing;
 
 #[tokio::test(flavor = "multi_thread")]

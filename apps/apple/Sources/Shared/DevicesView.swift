@@ -78,9 +78,38 @@ struct SettingsView: View {
             Section("Serveur") {
                 Text(model.serverAddress ?? "")
                 Button("Changer de serveur") { model.changeServer() }
-                Button("Se déconnecter", role: .destructive) {
-                    Task { await model.signOut() }
+            }
+            Section {
+                ForEach(model.accounts) { account in
+                    HStack {
+                        Button {
+                            model.switchAccount(account.id)
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(account.name)
+                                if account.current {
+                                    Text("Actif").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(account.current)
+                        Spacer()
+                        Button("Déconnecter", role: .destructive) {
+                            if account.current {
+                                Task { await model.signOut() }
+                            } else {
+                                model.forgetAccount(account.id)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
+                Button("Ajouter un compte") { model.addAccount() }
+            } header: {
+                Text("Comptes")
+            } footer: {
+                Text("Plusieurs comptes peuvent rester connectés sur cet appareil : touchez un compte pour l’utiliser, sans vous reconnecter.")
             }
             #if os(iOS)
             Section {

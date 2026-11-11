@@ -21,8 +21,8 @@
   externes synchronisées. Les sauts automatiques personnels et l'épisode suivant
   personnel sont désactivés pendant une séance collective.
 
-Validation ciblée : `cargo test -p media-poc --lib parties::tests`,
-`cargo test -p media-poc --test syncplay_websocket`,
+Validation ciblée : `cargo test -p aether-core --lib parties::tests`,
+`cargo test -p aether-core --test syncplay_websocket`,
 `npm --prefix apps/web test -- --run src/lib/syncplay`.
 Le test WebSocket utilise un vrai serveur TCP local, deux comptes authentifiés,
 les routes HTTP de création/adhésion et deux clients WebSocket. Il ne prouve pas

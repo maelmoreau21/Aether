@@ -1,13 +1,13 @@
 //! End-to-end integration test for full backup and restore: SQL, durable assets,
 //! and signed Wasm extensions.
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use media_extension_sdk::{Manifest, Package};
-use media_poc::{
+use aether_core::{
     backup::restore_database,
     backup_bundle::{BackupKey, Protection, create_with_assets, extract},
     extensions::storage::{persist, sync_installed, wasm},
     identity::IdentityStore,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use media_extension_sdk::{Manifest, Package};
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -124,7 +124,7 @@ async fn full_backup_and_restore_cycle_restores_sql_assets_and_extensions() {
     let backup_archive = backups_dir.join("live-full-backup.media-backup");
 
     let snapshot_db = temp.path().join("db-snapshot.tmp");
-    media_poc::backup::backup_database(&db_a, &snapshot_db, None)
+    aether_core::backup::backup_database(&db_a, &snapshot_db, None)
         .await
         .unwrap();
 
@@ -227,7 +227,7 @@ async fn restore_assets_cli_rejects_partial_extension_sync() {
         let store = IdentityStore::open(&db).await.unwrap();
         let key = generate_key();
         let package = create_package(&key, "fixture.extension", "1.0.0", valid_wasm());
-        media_poc::database::query(
+        aether_core::database::query(
             "INSERT INTO extension_publishers(id,public_key,active) VALUES(?,?,1)",
         )
         .bind(&package.publisher_id)
@@ -235,7 +235,7 @@ async fn restore_assets_cli_rejects_partial_extension_sync() {
         .execute(store.pool())
         .await
         .unwrap();
-        media_poc::database::query(
+        aether_core::database::query(
             "INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES(?,?,?,?)",
         )
         .bind(&package.manifest.id)
@@ -246,7 +246,7 @@ async fn restore_assets_cli_rejects_partial_extension_sync() {
         .await
         .unwrap();
         if invalid {
-            media_poc::database::query(
+            aether_core::database::query(
                 "INSERT INTO extensions(id,publisher_id,package_json,generation) VALUES(?,?,?,?)",
             )
             .bind("broken.extension")

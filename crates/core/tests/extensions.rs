@@ -1,3 +1,8 @@
+use aether_core::{
+    auth::{self, AuthState},
+    extensions,
+    identity::IdentityStore,
+};
 use axum::{
     Router,
     body::Body,
@@ -6,11 +11,6 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use http_body_util::BodyExt;
 use media_extension_sdk::{ExtensionRequest, Manifest, Package};
-use media_poc::{
-    auth::{self, AuthState},
-    extensions,
-    identity::IdentityStore,
-};
 use ring::{
     rand::SystemRandom,
     signature::{Ed25519KeyPair, KeyPair},
@@ -99,22 +99,23 @@ fn generic_abi_does_not_require_a_metadata_payload() {
         (4096u64 << 32) | result.len() as u64
     ))
     .unwrap();
-    let response =
-        media_poc::extensions::runtime::execute(media_poc::extensions::runtime::Invocation::new(
+    let response = aether_core::extensions::runtime::execute(
+        aether_core::extensions::runtime::Invocation::new(
             STANDARD.encode(wasm),
             ExtensionRequest {
                 api_version: 1,
                 operation: "test.compute".into(),
                 input: json!({"a":3}),
             },
-        ))
-        .unwrap();
+        ),
+    )
+    .unwrap();
     assert_eq!(response.result, json!({"accepted":true,"value":7}));
 }
 
 #[test]
 fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
-    use media_poc::extensions::runtime::{Invocation, execute};
+    use aether_core::extensions::runtime::{Invocation, execute};
     let wasm = |depth: u32| {
         wat::parse_str(format!(
             r#"(module
@@ -139,7 +140,7 @@ fn sandbox_bounds_recursion_separately_from_value_stack_bytes() {
 
 #[test]
 fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
-    use media_poc::extensions::runtime::{Invocation, execute};
+    use aether_core::extensions::runtime::{Invocation, execute};
     let run = |wasm: Vec<u8>| execute(Invocation::new(STANDARD.encode(wasm), input()));
     assert_eq!(
         run(good_module()).unwrap().result["title"],
@@ -281,23 +282,23 @@ async fn artwork_batch_is_bounded_resumable_and_requires_admin_csrf() {
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('folder','Folder','films','local','synthetic-child',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query(
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('folder','Folder','films','local','synthetic-child',1)").execute(store.pool()).await.unwrap();
+    aether_core::database::query(
         "INSERT INTO library_folders(library_id,parent_id,active) VALUES('folder','films',1)",
     )
     .execute(store.pool())
     .await
     .unwrap();
     for (id, ids) in [("a", "{}"), ("b", "{\"tmdb\":\"42\"}")] {
-        media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,title_sort) VALUES(?,?,?,?,?,?)")
+        aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,title_sort) VALUES(?,?,?,?,?,?)")
             .bind(id).bind(if id == "a" { "films" } else { "folder" }).bind(id).bind(if id == "b" { "ÉB" } else { id }).bind(ids).bind(if id == "b" { "éb" } else { id }).execute(store.pool()).await.unwrap();
     }
-    media_poc::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('poster-b','b','poster',0,12,18)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("UPDATE inventory_works SET manual_json=? WHERE id='a'")
+    aether_core::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('poster-b','b','poster',0,12,18)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("UPDATE inventory_works SET manual_json=? WHERE id='a'")
         .bind(r#"{"title":"Nom choisi"}"#)
         .execute(store.pool())
         .await
@@ -472,11 +473,11 @@ async fn image_collection_uses_only_enabled_providers_and_skips_known_sources() 
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Film','{\"test.metadata\":\"known\"}')").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Film','{\"test.metadata\":\"known\"}')").execute(store.pool()).await.unwrap();
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
@@ -552,12 +553,12 @@ async fn image_collection_uses_only_enabled_providers_and_skips_known_sources() 
         .0,
         StatusCode::NO_CONTENT
     );
-    media_poc::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('known-image','work','poster',0,12,18)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height) VALUES('known-image','work','poster',0,12,18)").execute(store.pool()).await.unwrap();
     let hash = format!(
         "{:x}",
         Sha256::digest(b"https://images.example.org/known.png")
     );
-    media_poc::database::query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES('work',?,'known-image')").bind(hash).execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO artwork_image_sources(work_id,source_url_hash,image_id) VALUES('work',?,'known-image')").bind(hash).execute(store.pool()).await.unwrap();
     let (status, result, _) = call(&app, "POST", endpoint, &cookie, csrf, request.clone()).await;
     assert_eq!(status, StatusCode::OK, "{result}");
     assert_eq!(result["providers"], 1, "{result}");
@@ -597,18 +598,18 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
     for id in ["films", "other"] {
-        media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic',1)").bind(id).bind(id).execute(store.pool()).await.unwrap();
-        media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES(?,?,?,'Original','{}')").bind(format!("work-{id}")).bind(id).bind(id).execute(store.pool()).await.unwrap();
+        aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic',1)").bind(id).bind(id).execute(store.pool()).await.unwrap();
+        aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES(?,?,?,'Original','{}')").bind(format!("work-{id}")).bind(id).bind(id).execute(store.pool()).await.unwrap();
     }
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
     let app = extensions::router(auth.clone())
-        .merge(media_poc::admin_users::router(auth.clone()))
+        .merge(aether_core::admin_users::router(auth.clone()))
         .merge(auth::router(auth));
     let base = "/api/v1/admin/extensions";
     assert_eq!(
@@ -894,7 +895,7 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
     });
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            let active: i64 = media_poc::database::query_scalar(
+            let active: i64 = aether_core::database::query_scalar(
                 "SELECT COUNT(*) FROM extension_runs WHERE status='running'",
             )
             .fetch_one(store.pool())
@@ -987,7 +988,7 @@ async fn signed_package_real_worker_live_permissions_persistence_and_lifecycle()
     let reopened = IdentityStore::open(&temp.path().join("db.sqlite"))
         .await
         .unwrap();
-    let count: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM extension_audit")
+    let count: i64 = aether_core::database::query_scalar("SELECT COUNT(*) FROM extension_audit")
         .fetch_one(reopened.pool())
         .await
         .unwrap();
@@ -1001,8 +1002,8 @@ fn real_rust_sdk_module_executes() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../target/wasm32-unknown-unknown/release/media_extension_sdk_fixture.wasm");
     let bytes = std::fs::read(path).unwrap();
-    let result = media_poc::extensions::runtime::execute(
-        media_poc::extensions::runtime::Invocation::new(STANDARD.encode(bytes), input()),
+    let result = aether_core::extensions::runtime::execute(
+        aether_core::extensions::runtime::Invocation::new(STANDARD.encode(bytes), input()),
     )
     .unwrap();
     assert_eq!(result.result["title"], "Original");
@@ -1029,20 +1030,20 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films synthétiques','films','local',?,1)")
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films synthétiques','films','local',?,1)")
         .bind(media.to_str().unwrap()).execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work-films','films','synthetic','Titre original','{}')")
+    aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work-films','films','synthetic','Titre original','{}')")
         .execute(store.pool()).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let origin = format!("http://127.0.0.1:{port}");
     let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
     std::env::set_current_dir(&root).unwrap();
-    let app = media_poc::secure_app(
-        media_poc::node::Inventory::local(media).await.unwrap(),
+    let app = aether_core::secure_app(
+        aether_core::node::Inventory::local(media).await.unwrap(),
         port,
         auth,
     )
@@ -1084,7 +1085,7 @@ async fn browser_extension_installs_and_executes_real_rust_module() {
 
 #[test]
 fn http_broker_security_enforces_allowed_imports_and_allowlist() {
-    use media_poc::extensions::runtime::{Invocation, execute};
+    use aether_core::extensions::runtime::{Invocation, execute};
 
     // 1. Module with unauthorized imports is rejected immediately
     let bad_import_module = wat::parse_str(
@@ -1130,8 +1131,8 @@ fn http_broker_security_enforces_allowed_imports_and_allowlist() {
 
 #[test]
 fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
+    use aether_core::extensions::runtime::{HostState, execute_host_http};
     use media_extension_sdk::HostHttpRequest;
-    use media_poc::extensions::runtime::{HostState, execute_host_http};
     use wasmi::StoreLimitsBuilder;
 
     let limits = StoreLimitsBuilder::new().build();
@@ -1216,7 +1217,7 @@ fn http_broker_rejects_ssrf_and_enforces_domain_allowlist() {
 #[test]
 #[ignore = "requires MEDIA_TEST_EXTENSION_WASM pointing to an explicitly built external extension"]
 fn external_extension_wasm_manifest_uses_generic_runtime() {
-    use media_poc::extensions::runtime::{Invocation, execute};
+    use aether_core::extensions::runtime::{Invocation, execute};
     let path =
         std::env::var_os("MEDIA_TEST_EXTENSION_WASM").expect("external test artifact required");
     let bytes = std::fs::read(path).unwrap();
@@ -1246,15 +1247,15 @@ async fn apply_extension_metadata_updates_inventory_work() {
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
 
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)")
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)")
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work-1','films','work-1','Original Film','{}')")
+    aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work-1','films','work-1','Original Film','{}')")
         .execute(store.pool())
         .await
         .unwrap();
@@ -1263,7 +1264,7 @@ async fn apply_extension_metadata_updates_inventory_work() {
         .await
         .unwrap();
     let app = extensions::router(auth.clone())
-        .merge(media_poc::artwork::router(auth.clone()))
+        .merge(aether_core::artwork::router(auth.clone()))
         .merge(auth::router(auth));
 
     let (status, login, cookie) = call(
@@ -1436,7 +1437,7 @@ async fn apply_extension_metadata_updates_inventory_work() {
     assert_eq!(status, StatusCode::NO_CONTENT);
 
     // Verify detail reflects the applied metadata
-    let detail = media_poc::inventory::detail(&store, "work-1")
+    let detail = aether_core::inventory::detail(&store, "work-1")
         .await
         .unwrap()
         .unwrap();
@@ -1486,17 +1487,17 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Original','{}')").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Original','{}')").execute(store.pool()).await.unwrap();
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
     let app = extensions::router(auth.clone())
-        .merge(media_poc::avatars::router(auth.clone()))
-        .merge(media_poc::admin_users::router(auth.clone()))
+        .merge(aether_core::avatars::router(auth.clone()))
+        .merge(aether_core::admin_users::router(auth.clone()))
         .merge(auth::router(auth));
     let (_, login, cookie) = call(
         &app,
@@ -1629,7 +1630,7 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
             )
             .await;
             assert_eq!(status, StatusCode::FORBIDDEN, "{output}");
-            let sha: String = media_poc::database::query_scalar(
+            let sha: String = aether_core::database::query_scalar(
                 "SELECT sha256 FROM user_avatars WHERE user_id=?",
             )
             .bind(user_login["user"]["id"].as_str().unwrap())
@@ -1694,7 +1695,7 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
             if id == "details" {
                 // A fixture that can only return details must identify from its
                 // existing NFO/catalogue ID even when the local title is wrong.
-                media_poc::database::query(
+                aether_core::database::query(
                     "UPDATE inventory_works SET external_ids_json=? WHERE id='work'",
                 )
                 .bind(json!({"test.details":"candidate"}).to_string())
@@ -1721,7 +1722,7 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
                 assert_eq!(identified["results"][0]["id"], "candidate");
                 assert_eq!(identified["results"][0]["overview"], "Full plot");
                 assert_eq!(identified["errors"], json!([]));
-                let unchanged: String = media_poc::database::query_scalar(
+                let unchanged: String = aether_core::database::query_scalar(
                     "SELECT editorial_json FROM inventory_works WHERE id='work'",
                 )
                 .fetch_one(store.pool())
@@ -1769,7 +1770,7 @@ async fn rich_operations_and_account_avatars_use_signed_permissions() {
                     .0,
                     StatusCode::NO_CONTENT
                 );
-                let saved: String = media_poc::database::query_scalar(
+                let saved: String = aether_core::database::query_scalar(
                     "SELECT manual_json FROM inventory_works WHERE id='work'",
                 )
                 .fetch_one(store.pool())
@@ -1796,7 +1797,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     let file = root.join("fixture.package.json");
     std::fs::write(&file, serde_json::to_vec(&package).unwrap()).unwrap();
     assert!(
-        media_poc::extensions::files::import(&store, &root)
+        aether_core::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1809,52 +1810,52 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     )
     .unwrap();
     assert_eq!(
-        media_poc::extensions::files::import(&store, &root)
+        aether_core::extensions::files::import(&store, &root)
             .await
             .unwrap(),
         1
     );
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT enabled FROM extensions")
+        aether_core::database::query_scalar::<_, i64>("SELECT enabled FROM extensions")
             .fetch_one(store.pool())
             .await
             .unwrap(),
         0
     );
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM extension_grants")
+        aether_core::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM extension_grants")
             .fetch_one(store.pool())
             .await
             .unwrap(),
         0
     );
-    media_poc::database::query("UPDATE extensions SET enabled=1")
+    aether_core::database::query("UPDATE extensions SET enabled=1")
         .execute(store.pool())
         .await
         .unwrap();
     assert_eq!(
-        media_poc::extensions::files::import(&store, &root)
+        aether_core::extensions::files::import(&store, &root)
             .await
             .unwrap(),
         0
     );
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT enabled FROM extensions")
+        aether_core::database::query_scalar::<_, i64>("SELECT enabled FROM extensions")
             .fetch_one(store.pool())
             .await
             .unwrap(),
         1
     );
-    media_poc::database::query("UPDATE extension_publishers SET active=0")
+    aether_core::database::query("UPDATE extension_publishers SET active=0")
         .execute(store.pool())
         .await
         .unwrap();
     assert!(
-        media_poc::extensions::files::import(&store, &root)
+        aether_core::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
-    media_poc::database::query("UPDATE extension_publishers SET active=1")
+    aether_core::database::query("UPDATE extension_publishers SET active=1")
         .execute(store.pool())
         .await
         .unwrap();
@@ -1862,7 +1863,7 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
     tampered["sha256"] = json!("0".repeat(64));
     std::fs::write(file, serde_json::to_vec(&tampered).unwrap()).unwrap();
     assert!(
-        media_poc::extensions::files::import(&store, &root)
+        aether_core::extensions::files::import(&store, &root)
             .await
             .is_err()
     );
@@ -1870,11 +1871,11 @@ async fn signed_file_import_requires_explicit_trust_and_never_enables_or_overwri
 
 #[tokio::test(flavor = "multi_thread")]
 async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database_reopen() {
-    use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
-    use media_poc::{
+    use aether_core::{
         extensions::data as extension_data,
         extensions::runtime::{Invocation, read_frame, write_frame},
     };
+    use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
     use std::process::{Command, Stdio};
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("storage.sqlite");
@@ -1884,13 +1885,13 @@ async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database
     package.manifest.permissions.push("storage.private".into());
     package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
     assert!(extensions::validate_package(&package, signing.public_key().as_ref()).is_ok());
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO extension_publishers(id,public_key,active) VALUES('test','fixture',1)",
     )
     .execute(store.pool())
     .await
     .unwrap();
-    media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,generation,enabled) VALUES('test.metadata','test',?,'first',1)").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO extensions(id,publisher_id,package_json,generation,enabled) VALUES('test.metadata','test',?,'first',1)").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
     store
         .bootstrap(
             "storage-admin",
@@ -1898,7 +1899,7 @@ async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database
         )
         .await
         .unwrap();
-    let user_id: String = media_poc::database::query_scalar(
+    let user_id: String = aether_core::database::query_scalar(
         "SELECT user_id FROM local_credentials WHERE login='storage-admin'",
     )
     .fetch_one(store.pool())
@@ -2050,7 +2051,7 @@ async fn signed_private_storage_permission_installs_without_implicit_activation(
         .0,
         StatusCode::CREATED
     );
-    let enabled: i64 = media_poc::database::query_scalar(
+    let enabled: i64 = aether_core::database::query_scalar(
         "SELECT enabled FROM extensions WHERE id='test.metadata'",
     )
     .fetch_one(store.pool())
@@ -2096,11 +2097,11 @@ async fn private_storage_http_fixture_with_id(
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Synthetic','{}')").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Synthetic','{}')").execute(store.pool()).await.unwrap();
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
@@ -2294,21 +2295,21 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     )
     .await;
 
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO extension_data_namespaces(extension_id,publisher_id,publisher_key,entries,bytes) VALUES('upgradable.ext','test','key',1,18)"
     )
     .execute(store.pool())
     .await
     .unwrap();
 
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO extension_data(extension_id,scope,scope_id,key,value,version,durability,value_bytes,sha256) VALUES('upgradable.ext','global','','state','durable_v1_payload','v1-uuid','durable',18,'sha')"
     )
     .execute(store.pool())
     .await
     .unwrap();
 
-    let gen_v1: String = media_poc::database::query_scalar(
+    let gen_v1: String = aether_core::database::query_scalar(
         "SELECT generation FROM extensions WHERE id='upgradable.ext'",
     )
     .fetch_one(store.pool())
@@ -2462,14 +2463,14 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     assert_eq!(response["error"], "incompatible_abi");
 
     // 4. The active generation and package remain unchanged.
-    let gen_v2: String = media_poc::database::query_scalar(
+    let gen_v2: String = aether_core::database::query_scalar(
         "SELECT generation FROM extensions WHERE id='upgradable.ext'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
     assert_eq!(gen_v1, gen_v2);
-    let installed: String = media_poc::database::query_scalar(
+    let installed: String = aether_core::database::query_scalar(
         "SELECT package_json FROM extensions WHERE id='upgradable.ext'",
     )
     .fetch_one(store.pool())
@@ -2527,7 +2528,7 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // 5. Verify durable storage was preserved!
-    let saved_state: String = media_poc::database::query_scalar(
+    let saved_state: String = aether_core::database::query_scalar(
         "SELECT value FROM extension_data WHERE extension_id='upgradable.ext' AND key='state'",
     )
     .fetch_one(store.pool())
@@ -2582,7 +2583,7 @@ async fn test_extension_upgrade_refuses_unverified_compatibility_without_mutatio
 
 #[tokio::test(flavor = "multi_thread")]
 async fn private_extension_update_migrates_atomically_and_rollback_restores_snapshot() {
-    use media_poc::database::{query, query_scalar};
+    use aether_core::database::{query, query_scalar};
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("update.sqlite"))
         .await

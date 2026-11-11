@@ -11,7 +11,7 @@ aucune modification de code, migration, Web ou packaging.
 
 | Domaine | Présent dans le code | Limite structurante |
 | --- | --- | --- |
-| Workspace | Une crate `media-poc`, dans `crates/core`, Rust 2024, MSRV déclarée 1.99 | `crates/shared` n'a pas de manifeste ; `brand.rs` est inclus par `#[path]` |
+| Workspace | Une crate `aether-core`, dans `crates/core`, Rust 2024, MSRV déclarée 1.99 | `crates/shared` n'a pas de manifeste ; `brand.rs` est inclus par `#[path]` |
 | Identité | SQLx/SQLite, bootstrap CLI, Argon2id, sessions, CSRF, deux rôles et permissions de bibliothèque | `IdentityStore` porte aussi le pool du catalogue, des bibliothèques et des jobs |
 | Catalogue | Films persistés, Work/Edition/Version/Source/Asset/Track, NFO et affiches locales | DTO partiellement en `serde_json::Value`, catalogue de fixtures toujours mêlé aux handlers |
 | Node local | Découverte MKV/MP4, cache de probe, NFO/images bornés, confinement, streaming Range | Résolution SQL et ouverture des médias se croisent entre Core et Node |
@@ -61,7 +61,7 @@ apps/web/                     inchangé par cet audit
 ```
 
 Les noms de packages/binaires restent génériques ; les quatre noms d'images
-imposés sont des noms de distribution. Ne pas renommer immédiatement `media-poc`
+imposés sont des noms de distribution. Ne pas renommer immédiatement `aether-core`
 et casser les scripts, tests et travaux Docker en cours. La crate Core peut
 conserver une dépendance Node pour composer le standalone : son binaire Core seul
 ne doit ni initialiser le Node local, ni demander de montage média ou `ffprobe`.

@@ -261,9 +261,9 @@ npm run build --prefix apps/web
 cargo test --locked -p media-node --lib -j 1 -- --test-threads=1
 cargo test --locked -p media-node --lib -j 1 copies_dual_51_opus_mp4_without_changing_packets_or_channels -- --ignored --nocapture --test-threads=1
 cargo test --locked -p media-node -j 1 benchmark_preparation_cache_open_concurrency -- --ignored --nocapture --test-threads=1
-cargo test --locked -p media-poc --test scanner_flow --test distributed_multi_node --test node_enrollment_and_relay -j 1 -- --test-threads=1
+cargo test --locked -p aether-core --test scanner_flow --test distributed_multi_node --test node_enrollment_and_relay -j 1 -- --test-threads=1
 $env:MEDIA_REPORT_DIR='target/streaming-performance/core-scanner-final'
-cargo test --locked -p media-poc --test browser_scanner -j 1 -- --ignored --nocapture --test-threads=1
+cargo test --locked -p aether-core --test browser_scanner -j 1 -- --ignored --nocapture --test-threads=1
 cargo clippy --locked --workspace --all-targets -j 1 -- -D warnings
 cargo fmt --all --check
 git diff --check

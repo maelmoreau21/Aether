@@ -77,6 +77,12 @@ pub struct Pairing {
     pub qr_width: u32,
     pub qr_modules: Vec<bool>,
 }
+/// A single sign-on to finish in the system browser.
+#[derive(uniffi::Record)]
+pub struct SsoRequest {
+    pub url: String,
+    pub verifier: String,
+}
 /// What the sign-in screen needs, read before any account is known.
 #[derive(uniffi::Record)]
 pub struct ServerInfo {
@@ -293,6 +299,18 @@ impl AetherClient {
             .login_second_factor(&challenge, &code, recovery)
             .await?
             .into())
+    }
+    /// Open `url` in the system browser; it returns to `redirect`
+    /// (`aether://sso`) with a `code` for [`AetherClient::finish_sso`].
+    pub fn start_sso(&self, redirect: String) -> Result<SsoRequest> {
+        let request = self.inner.start_sso(&redirect)?;
+        Ok(SsoRequest {
+            url: request.url,
+            verifier: request.verifier,
+        })
+    }
+    pub async fn finish_sso(&self, code: String, verifier: String) -> Result<User> {
+        Ok(self.inner.finish_sso(&code, &verifier).await?.into())
     }
     pub async fn start_pairing(&self) -> Result<Pairing> {
         let p = self.inner.start_pairing().await?;

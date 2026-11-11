@@ -1,8 +1,8 @@
+use aether_core::identity::{IdentityError, IdentityStore};
 use argon2::{
     Argon2,
     password_hash::{PasswordVerifier, phc::PasswordHash},
 };
-use media_poc::identity::{IdentityError, IdentityStore};
 use sqlx::{Connection, Row};
 use zeroize::Zeroizing;
 const PASSWORD: &str = "synthetic test password only";
@@ -20,7 +20,7 @@ async fn migrations_bootstrap_hash_restart_and_permanent_closure() {
     let reopened = IdentityStore::open(&path).await.unwrap();
     assert_eq!(
         reopened.user(&id).await.unwrap().unwrap().role,
-        media_poc::identity::Role::Administrator
+        aether_core::identity::Role::Administrator
     );
     let mut conn = sqlx::SqliteConnection::connect(&format!("sqlite:{}", path.display()))
         .await

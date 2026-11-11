@@ -1,16 +1,26 @@
 //! Aether for the desktop (Windows, macOS, Linux): the Core's own web
 //! interface in a native window, drawn by the system's web engine (WebView2,
 //! WKWebView, WebKitGTK). Nothing of the interface is rewritten here: the
-//! application only asks which server to open, remembers it, and follows the
-//! web player into full screen. Playback, direct or transcoded, is decided by
-//! the web player and the Core exactly as in a browser.
+//! application asks which server to open, remembers it and its window, follows
+//! the web player into full screen, and signs in through the computer's own
+//! browser. Playback, direct or transcoded, is decided by the web player and
+//! the Core exactly as in a browser.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod shell;
+mod sso;
 mod store;
 
 use aether_client::{Client, Error};
-use std::{borrow::Cow, path::PathBuf, time::Duration};
+use std::{
+    borrow::Cow,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 use store::Settings;
 use tao::{
     dpi::LogicalSize,
@@ -36,6 +46,8 @@ enum UserEvent {
         server: String,
         result: Result<(), String>,
     },
+    /// The browser came back from a single sign-on.
+    SignedIn(sso::Outcome),
 }
 
 fn main() {
@@ -55,7 +67,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
-    let window = window_builder().build(&event_loop)?;
+    let window = window_builder(settings.window.unwrap_or_default()).build(&event_loop)?;
 
     // Cookies (the session), cache and site data live with the settings, never
     // next to the executable.
@@ -76,8 +88,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = ipc.send_event(UserEvent::Page(request));
             }
         })
-        // Single sign-on leaves for the identity provider and comes back:
-        // web addresses are followed, nothing else (files, other schemes).
+        // A portal in front of the server (forward authentication) is followed
+        // in the window: web addresses only, nothing else (files, other
+        // schemes). Single sign-on itself goes through the browser (`sso`).
         .with_navigation_handler(|url| {
             shell::is_web_url(&url) || shell::is_shell_url(&url) || url == "about:blank"
         })
@@ -87,6 +100,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             NewWindowResponse::Deny
         })
         .with_autoplay(true)
+        // An application has one size of text: no Ctrl + wheel or pinch zoom.
+        .with_hotkeys_zoom(false)
         .with_devtools(cfg!(debug_assertions))
         .with_url(shell::url(false));
     let webview = build_webview(platform_options(builder), &window)?;
@@ -99,6 +114,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         device: store::device_name(env),
         settings,
         resting: false,
+        sign_in: Arc::new(AtomicU64::new(0)),
     };
     event_loop.run(move |event, _, control_flow| {
         // Keeps the web context alive as long as the window.
@@ -108,7 +124,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             Event::WindowEvent {
                 event: WindowEvent::CloseRequested,
                 ..
-            } => *control_flow = ControlFlow::Exit,
+            } => {
+                app.remember_window();
+                *control_flow = ControlFlow::Exit;
+            }
             Event::WindowEvent {
                 event: WindowEvent::Resized(_) | WindowEvent::Focused(_),
                 ..
@@ -119,11 +138,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
 }
 
-fn window_builder() -> WindowBuilder {
+fn window_builder(state: store::WindowState) -> WindowBuilder {
+    let (width, height) = state.size();
     let builder = WindowBuilder::new()
         .with_title("Aether")
-        .with_inner_size(LogicalSize::new(1280.0, 800.0))
+        .with_inner_size(LogicalSize::new(width, height))
         .with_min_inner_size(LogicalSize::new(480.0, 480.0))
+        .with_maximized(state.maximized)
         .with_theme(Some(Theme::Dark));
     #[cfg(windows)]
     let builder = {
@@ -145,7 +166,11 @@ fn platform_options(builder: WebViewBuilder<'_>) -> WebViewBuilder<'_> {
     // wry's own defaults (no Edge mini menu, no SmartScreen lookups, autoplay
     // for "resume") plus what a single-site media window never uses: every one
     // of these is a background service or a process less to keep in memory.
-    builder.with_additional_browser_args(
+    // The browser's own shortcuts (find, print, reload, downloads…) are off:
+    // the keys belong to the interface.
+    builder
+        .with_browser_accelerator_keys(false)
+        .with_additional_browser_args(
         "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,OptimizationHints,MediaRouter \
          --autoplay-policy=no-user-gesture-required \
          --disable-background-networking --disable-component-update --disable-sync \
@@ -183,6 +208,8 @@ struct App {
     settings: Settings,
     /// The web engine was told to release memory (window minimized).
     resting: bool,
+    /// Number of the single sign-on in progress: an older one stops waiting.
+    sign_in: Arc<AtomicU64>,
 }
 
 impl App {
@@ -215,23 +242,112 @@ impl App {
             UserEvent::Page(shell::Request::ToggleFullscreen) => {
                 self.set_fullscreen(self.window.fullscreen().is_none())
             }
+            UserEvent::Page(shell::Request::Sso) => self.sign_in(),
+            UserEvent::Page(shell::Request::Offline) => {
+                if let Some(server) = self.settings.server.clone() {
+                    self.open(&store::downloads_url(&server));
+                }
+            }
+            UserEvent::SignedIn(outcome) => self.signed_in(outcome),
             UserEvent::Checked { server, result } => match result {
                 Ok(()) => {
                     self.settings.server = Some(server.clone());
-                    if let Some(dir) = &self.config_dir
-                        && let Err(error) = self.settings.save(dir)
-                    {
-                        eprintln!("aether-desktop: cannot save the settings: {error}");
-                    }
+                    self.save_settings();
                     self.open(&store::app_url(&server));
                 }
-                Err(error) => self.show(shell::State {
-                    server: Some(server),
-                    error: Some(error),
-                    checking: false,
-                }),
+                Err(error) => {
+                    // A server opened before that no longer answers: its
+                    // downloads can still be played.
+                    let offline = matches!(error.as_str(), "unreachable" | "timeout")
+                        && self.settings.server.as_deref() == Some(server.as_str());
+                    self.show(shell::State {
+                        server: Some(server),
+                        error: Some(error),
+                        checking: false,
+                        offline,
+                    })
+                }
             },
         }
+    }
+
+    fn save_settings(&self) {
+        if let Some(dir) = &self.config_dir
+            && let Err(error) = self.settings.save(dir)
+        {
+            eprintln!("aether-desktop: cannot save the settings: {error}");
+        }
+    }
+
+    /// The size to reopen with; a maximized or full-screen window keeps the
+    /// size it had before.
+    fn remember_window(&mut self) {
+        let mut state = self.settings.window.unwrap_or_default();
+        state.maximized = self.window.is_maximized();
+        if !state.maximized && self.window.fullscreen().is_none() && !self.window.is_minimized() {
+            let size = self
+                .window
+                .inner_size()
+                .to_logical::<f64>(self.window.scale_factor());
+            state.width = size.width.round() as u32;
+            state.height = size.height.round() as u32;
+        }
+        if self.settings.window != Some(state) {
+            self.settings.window = Some(state);
+            self.save_settings();
+        }
+    }
+
+    /// The address of the Core, when the window shows one of its pages.
+    fn server_on_screen(&self) -> Option<String> {
+        let server = self.settings.server.clone()?;
+        let page = self.webview.url().ok()?;
+        shell::is_page_of(&page, &server).then_some(server)
+    }
+
+    /// Single sign-on: the provider's page opens in the computer's browser,
+    /// which hands a one-time code back to this application.
+    fn sign_in(&self) {
+        let Some(server) = self.server_on_screen() else {
+            return;
+        };
+        let number = self.sign_in.fetch_add(1, Ordering::SeqCst) + 1;
+        let (proxy, device, latest) = (
+            self.proxy.clone(),
+            self.device.clone(),
+            self.sign_in.clone(),
+        );
+        std::thread::spawn(move || {
+            let outcome = match sso::prepare(&server, &device) {
+                Some(attempt) => {
+                    open_in_browser(&attempt.url);
+                    attempt.wait(|| latest.load(Ordering::SeqCst) == number)
+                }
+                None => Some(sso::Outcome::Refused(
+                    "oidc_provider_unavailable".to_owned(),
+                )),
+            };
+            if let Some(outcome) = outcome {
+                let _ = proxy.send_event(UserEvent::SignedIn(outcome));
+            }
+        });
+    }
+
+    /// Back from the browser: the sign-in page of the Core redeems the code
+    /// for its session, and the window comes back to the front.
+    fn signed_in(&self, outcome: sso::Outcome) {
+        if self.server_on_screen().is_none() {
+            return;
+        }
+        let script = match &outcome {
+            sso::Outcome::Code { code, verifier } => shell::sso_script(code, verifier),
+            sso::Outcome::Refused(reason) => shell::sso_refused_script(reason),
+        };
+        if let Some(script) = script {
+            let _ = self.webview.evaluate_script(&script);
+        }
+        self.window.set_minimized(false);
+        self.window.set_focus();
     }
 
     fn open(&self, url: &str) {
@@ -255,6 +371,7 @@ impl App {
             server: Some(server.clone()),
             error: None,
             checking: true,
+            offline: false,
         });
         let (proxy, device) = (self.proxy.clone(), self.device.clone());
         std::thread::spawn(move || {

@@ -1,13 +1,7 @@
 //! Comprehensive integration tests and scale benchmarks (1k, 10k, 100k, 1M works)
 //! for Mission 2: Global Multimedia Catalogue Consolidation & Extreme Performance.
 
-use axum::{
-    Router,
-    body::Body,
-    http::{Method, Request, StatusCode, header},
-};
-use media_contracts::media::FilmMetadata;
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     database::{query, query_scalar},
     identity::IdentityStore,
@@ -18,6 +12,12 @@ use media_poc::{
     node::Inventory,
     secure_app,
 };
+use axum::{
+    Router,
+    body::Body,
+    http::{Method, Request, StatusCode, header},
+};
+use media_contracts::media::FilmMetadata;
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, time::Instant};
 use tower::ServiceExt;
@@ -898,7 +898,7 @@ async fn series_seasons_and_episodes_unification_across_libraries() {
 }
 
 #[tokio::test]
-#[ignore = "benchmark: ~2 min seed of 1M works with millisecond thresholds; flaky on a loaded machine. Run with: cargo test -p media-poc --test global_catalogue_consolidation scale_benchmark -- --ignored --nocapture"]
+#[ignore = "benchmark: ~2 min seed of 1M works with millisecond thresholds; flaky on a loaded machine. Run with: cargo test -p aether-core --test global_catalogue_consolidation scale_benchmark -- --ignored --nocapture"]
 async fn scale_benchmark_1k_10k_100k_and_1m_works() {
     let temp = tempfile::tempdir().unwrap();
     let db_path = temp.path().join("scale_1m.sqlite");

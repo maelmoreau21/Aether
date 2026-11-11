@@ -146,9 +146,9 @@ SQLite/WAL sur le disque local. Profil debug, pool SQLx de quatre connexions.
 Commandes exécutées :
 
 ```powershell
-cargo test --locked -p media-poc --features query-metrics --lib extension_data::tests -j 1 -- --nocapture
-cargo test --locked -p media-poc --test extensions -j 1 -- --nocapture --test-threads=1
-cargo clippy --locked -p media-poc --features query-metrics --all-targets -j 1 -- -D warnings
+cargo test --locked -p aether-core --features query-metrics --lib extension_data::tests -j 1 -- --nocapture
+cargo test --locked -p aether-core --test extensions -j 1 -- --nocapture --test-threads=1
+cargo clippy --locked -p aether-core --features query-metrics --all-targets -j 1 -- -D warnings
 cargo fmt --all --check
 ```
 

@@ -1,4 +1,12 @@
 //! Host authorization, real disposable-worker ABI and persisted report lifecycle.
+use aether_core::{
+    applications,
+    auth::AuthState,
+    database::{query, query_scalar},
+    extensions,
+    identity::IdentityStore,
+    reports,
+};
 use axum::{
     Router,
     body::Body,
@@ -8,14 +16,6 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use http_body_util::BodyExt;
 use media_extension_sdk::{Manifest, Package};
-use media_poc::{
-    applications,
-    auth::AuthState,
-    database::{query, query_scalar},
-    extensions,
-    identity::IdentityStore,
-    reports,
-};
 use ring::{
     rand::SystemRandom,
     signature::{Ed25519KeyPair, KeyPair},
@@ -54,7 +54,7 @@ async fn fixture() -> Fixture {
         query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)")
             .bind(format!("{:x}",Sha256::digest(&raw))).bind(id).bind(now).bind(now).bind(now+3600).execute(store.pool()).await.unwrap();
         sessions.push((
-            format!("media_session={raw}"),
+            format!("aether_session={raw}"),
             format!("{:x}", Sha256::digest(format!("csrf:{raw}"))),
         ));
     }

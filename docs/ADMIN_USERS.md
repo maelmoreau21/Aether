@@ -32,4 +32,4 @@ Les rôles attribués au callback OIDC par une politique de groupes configurée 
 
 ## Vérification
 
-`cargo test -p media-poc --test admin_users` couvre les requêtes HTTP anonymes et utilisateur, CSRF, doublons, rôles invalides, protection de son compte, désactivation/réactivation, révocation des sessions et mot de passe SSO refusé. Un test concurrent conserve un administrateur actif lorsque deux administrateurs tentent de se désactiver mutuellement. Exécution et résultats globaux consignés par le jalon principal ; le code de test seul ne constitue pas une preuve d'exécution.
+`cargo test -p aether-core --test admin_users` couvre les requêtes HTTP anonymes et utilisateur, CSRF, doublons, rôles invalides, protection de son compte, désactivation/réactivation, révocation des sessions et mot de passe SSO refusé. Un test concurrent conserve un administrateur actif lorsque deux administrateurs tentent de se désactiver mutuellement. Exécution et résultats globaux consignés par le jalon principal ; le code de test seul ne constitue pas une preuve d'exécution.

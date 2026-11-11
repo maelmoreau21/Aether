@@ -1,14 +1,14 @@
 //! Opt-in proof with real PostgreSQL 18 dump/restore and encrypted (MDBK0003) Core state.
-use axum::{
-    Router,
-    body::{Body, to_bytes},
-    http::{Request, StatusCode},
-};
-use media_poc::{
+use aether_core::{
     admin_backups,
     auth::AuthState,
     database::{query, query_scalar},
     identity::IdentityStore,
+};
+use axum::{
+    Router,
+    body::{Body, to_bytes},
+    http::{Request, StatusCode},
 };
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -28,7 +28,7 @@ async fn request(
                 .method(method)
                 .uri(path)
                 .header("origin", "http://127.0.0.1:3000")
-                .header("cookie", format!("media_session={token}"))
+                .header("cookie", format!("aether_session={token}"))
                 .header("x-csrf-token", csrf)
                 .body(Body::empty())
                 .unwrap(),
@@ -110,8 +110,8 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
     for secret in [url.as_bytes(), &b"synthetic-oidc-secret"[..]] {
         assert!(!bytes.windows(secret.len()).any(|part| part == secret));
     }
-    let key = media_poc::backup_bundle::BackupKey::parse(BACKUP_KEY).unwrap();
-    let summary = media_poc::backup_bundle::extract(&archive, &output, Some(&key))
+    let key = aether_core::backup_bundle::BackupKey::parse(BACKUP_KEY).unwrap();
+    let summary = aether_core::backup_bundle::extract(&archive, &output, Some(&key))
         .await
         .unwrap();
     assert_eq!(summary.engine, "postgres");
@@ -126,7 +126,7 @@ async fn remote_postgres_full_backup_restores_all_core_tables_and_configuration(
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::postgres_backup::restore(
+    aether_core::postgres_backup::restore(
         target_url.as_str(),
         &output.join(summary.database_file),
         Some(&media),

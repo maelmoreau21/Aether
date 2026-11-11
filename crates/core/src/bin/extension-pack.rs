@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // package signed outside this tool (for example by a release workflow).
         let package: Package = serde_json::from_slice(&std::fs::read(&args[2])?)?;
         let key = STANDARD.decode(std::fs::read_to_string(&args[3])?.trim())?;
-        media_poc::extensions::validate_package(&package, &key)
+        aether_core::extensions::validate_package(&package, &key)
             .map_err(|code| format!("invalid extension package: {code}"))?;
         println!(
             "{}@{} signed by {} is valid",
@@ -53,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         signature: String::new(),
     };
     package.signature = STANDARD.encode(key.sign(&package.signing_bytes()?).as_ref());
-    media_poc::extensions::validate_package(&package, key.public_key().as_ref())
+    aether_core::extensions::validate_package(&package, key.public_key().as_ref())
         .map_err(|_| "invalid extension package")?;
     let output = Path::new(&args[6]);
     std::fs::OpenOptions::new()

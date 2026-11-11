@@ -4,6 +4,7 @@ use crate::{
     database::{query, query_scalar},
     identity::Role,
 };
+
 use axum::{
     Json, Router,
     extract::{DefaultBodyLimit, Path, State},
@@ -13,6 +14,9 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
+
+/// Longest duration (7 days, in seconds) accepted as a plausible media length.
+const MAX_DURATION_SECONDS: f64 = 604_800.0;
 
 pub fn router(auth: AuthState) -> Router {
     Router::new()
@@ -50,7 +54,7 @@ async fn heartbeat(
         || !input.duration.is_finite()
         || input.position < 0.0
         || input.duration <= 0.0
-        || input.duration > 604800.0
+        || input.duration > MAX_DURATION_SECONDS
         || input.position > input.duration
     {
         return Err(StatusCode::BAD_REQUEST);
@@ -249,7 +253,7 @@ async fn write(
     if !input.position.is_finite()
         || !input.duration.is_finite()
         || input.duration <= 0.0
-        || input.duration > 604800.0
+        || input.duration > MAX_DURATION_SECONDS
         || input.position < 0.0
         || input.position > input.duration
         || input.expected_revision < 0
@@ -406,8 +410,8 @@ mod activity_tests {
         let app = router(auth.clone())
             .merge(crate::auth::router(auth.clone()))
             .merge(crate::server_settings::router(auth));
-        let a = format!("media_session={}", "a".repeat(64));
-        let b = format!("media_session={}", "b".repeat(64));
+        let a = format!("aether_session={}", "a".repeat(64));
+        let b = format!("aether_session={}", "b".repeat(64));
         let ac = call(&app, "/api/v1/auth/me", "GET", &a, "", Value::Null)
             .await
             .1["csrfToken"]
@@ -559,8 +563,8 @@ mod activity_tests {
             .await
             .unwrap();
         let app = router(auth.clone()).merge(crate::auth::router(auth));
-        let a = format!("media_session={}", "a".repeat(64));
-        let b = format!("media_session={}", "b".repeat(64));
+        let a = format!("aether_session={}", "a".repeat(64));
+        let b = format!("aether_session={}", "b".repeat(64));
         let ac = call(&app, "/api/v1/auth/me", "GET", &a, "", Value::Null)
             .await
             .1["csrfToken"]

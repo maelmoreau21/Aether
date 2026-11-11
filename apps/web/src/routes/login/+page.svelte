@@ -5,7 +5,7 @@
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login, bootstrapAdmin, completeSecondFactor, loginWithPasskey, type MfaChallenge } from '../../lib/auth/session';
   import { getAssertion, passkeysSupported } from '../../lib/auth/webauthn';
-  import { PROFILES_AFTER_LOGIN } from '../../lib/auth/profiles';
+  import { type DeviceAccount, accountInitial, loadAccounts, switchAccount } from '../../lib/auth/accounts';
   import Icon from '../../lib/ui/Icon.svelte';
   import QuickConnect from '../../lib/auth/QuickConnect.svelte';
   import { t } from '../../lib/i18n';
@@ -25,6 +25,7 @@
   let mfaCode = $state('');
   let useRecovery = $state(false);
   let canUsePasskeys = $state(false);
+  let deviceAccounts = $state<DeviceAccount[]>([]);
 
   // Bootstrap form fields
   let bootstrapLogin = $state('admin');
@@ -74,6 +75,14 @@
     if (busy) return;
     busy = true;
     error = '';
+    // The desktop application signs in through the computer's own browser and
+    // comes back by itself; the button is free again in case it is closed.
+    const desktop = (window as { aetherDesktop?: { sso?: () => void } }).aetherDesktop;
+    if (desktop?.sso) {
+      desktop.sso();
+      setTimeout(() => (busy = false), 4000);
+      return;
+    }
     try {
       const response = await fetch('/api/v1/auth/oidc/start', {
         method: 'POST',
@@ -119,9 +128,22 @@
   }
 
   async function signedIn() {
-    // "Who's watching?" forwards straight to the catalogue when the account has a single profile.
-    sessionStorage.setItem(PROFILES_AFTER_LOGIN, '1');
-    await goto(resolve('profiles/'), { replaceState: true });
+    await goto(resolve('/'), { replaceState: true });
+  }
+
+  // Accounts already signed in on this browser and set aside: one click to come back.
+  async function resume(account: DeviceAccount) {
+    if (busy) return;
+    busy = true;
+    error = '';
+    try {
+      await switchAccount('', account.id);
+      window.location.assign(resolve('/'));
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : $t('accounts_unavailable');
+      deviceAccounts = deviceAccounts.filter((known) => known.id !== account.id);
+      busy = false;
+    }
   }
 
   function passkeyError(failure: unknown): string {
@@ -218,6 +240,10 @@
     if (errParam) {
       error = mapError(errParam);
     }
+
+    loadAccounts(controller.signal)
+      .then((device) => { deviceAccounts = device.accounts.filter((account) => !account.current); })
+      .catch(() => { deviceAccounts = []; });
 
     // Check bootstrap status (is this the first run?)
     fetch('/api/v1/auth/bootstrap/status', { signal: controller.signal })
@@ -415,6 +441,19 @@
           <div class="error-banner" role="alert">
             <Icon name="alert" size={18} />
             <p class="error-text">{error}</p>
+          </div>
+        {/if}
+
+        {#if deviceAccounts.length && !mfa}
+          <div class="known-accounts">
+            <p class="known-title">{$t('accounts_continue_as')}</p>
+            {#each deviceAccounts as account (account.id)}
+              <button type="button" class="known-account" disabled={busy} onclick={() => resume(account)}>
+                <span class="known-avatar" aria-hidden="true">{accountInitial(account.name)}</span>
+                <span class="known-name">{account.name}</span>
+                <Icon name="chevron" size={14} />
+              </button>
+            {/each}
           </div>
         {/if}
 
@@ -676,6 +715,14 @@
   }
 
   .error-banner > :global(svg) { flex: none; margin-top: 2px; }
+  .known-accounts { display: flex; flex-direction: column; gap: 8px; }
+  .known-title { margin: 0; color: var(--mu); font-size: 13px; font-weight: 600; }
+  .known-account { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 14px 6px 6px; border: 1px solid var(--line); border-radius: 16px; background: var(--pn); color: var(--tx); font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+  .known-account:hover:not(:disabled) { background: var(--pn-2); }
+  .known-account:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  .known-account:disabled { opacity: .6; cursor: default; }
+  .known-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 12px; background: var(--pn-2); font-weight: 800; }
+  .known-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .error-text {
     margin: 0;

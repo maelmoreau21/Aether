@@ -161,12 +161,12 @@ sur 3 lettres.
 ## Tests
 
 ```powershell
-cargo test --locked -p media-poc --lib metadata_locale translations::
+cargo test --locked -p aether-core --lib metadata_locale translations::
 cargo test --locked -p media-extension-sdk
-cargo test --locked -p media-poc --lib preferences::
+cargo test --locked -p aether-core --lib preferences::
 $env:MEDIA_TEST_POSTGRES_URL = 'postgres://…'
-cargo test --locked --all-features -p media-poc --lib translations::store_tests::postgres -- --ignored
-cargo test --locked --all-features -p media-poc --test schema_upgrade -- --ignored
+cargo test --locked --all-features -p aether-core --lib translations::store_tests::postgres -- --ignored
+cargo test --locked --all-features -p aether-core --test schema_upgrade -- --ignored
 ```
 
 Scénarios couverts sur les deux moteurs : deux comptes simultanés sur le même

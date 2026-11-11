@@ -4,12 +4,12 @@
 //! 2. 100% rejection (403 Forbidden) of all protected routes under mismatched Host, Sec-Fetch-Site, and Origin spoofing.
 //! 3. CSRF token and origin protections across mutating endpoints (login, logout, scans, admin libraries).
 
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use axum::{
     body::Body,
     http::{Method, Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;

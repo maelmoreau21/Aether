@@ -956,7 +956,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::COOKIE,
-            HeaderValue::from_str(&format!("media_session={token}")).unwrap(),
+            HeaderValue::from_str(&format!("aether_session={token}")).unwrap(),
         );
         assert_eq!(
             preview_image(State(auth), headers, Path("provider".into()), request())

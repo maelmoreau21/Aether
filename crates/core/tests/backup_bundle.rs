@@ -1,4 +1,4 @@
-use media_poc::backup_bundle::{BackupKey, BundleError, Protection, create, extract};
+use aether_core::backup_bundle::{BackupKey, BundleError, Protection, create, extract};
 use std::collections::BTreeMap;
 
 const KEY: &str = "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12";

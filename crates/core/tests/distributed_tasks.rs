@@ -1,4 +1,4 @@
-use media_poc::{
+use aether_core::{
     database::{query, query_scalar},
     identity::IdentityStore,
     task_engine as engine,
@@ -185,7 +185,9 @@ async fn ten_thousand_jobs_on_one_hundred_simulated_nodes() {
 }
 
 async fn setup(store: &IdentityStore) {
-    media_poc::libraries::initialize_local(store).await.unwrap();
+    aether_core::libraries::initialize_local(store)
+        .await
+        .unwrap();
     for id in ["one", "two"] {
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic-root',1)").bind(id).bind(id).execute(store.pool()).await.unwrap();
     }

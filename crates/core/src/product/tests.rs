@@ -197,9 +197,9 @@ async fn parental_filters_overrides_lists_and_explicit_grouping() {
     }
     query("INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES('unknown','directors-cut','Director’s Cut')").execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
-    let a = format!("media_session={}", "a".repeat(64));
-    let b = format!("media_session={}", "b".repeat(64));
-    let c = format!("media_session={}", "c".repeat(64));
+    let a = format!("aether_session={}", "a".repeat(64));
+    let b = format!("aether_session={}", "b".repeat(64));
+    let c = format!("aether_session={}", "c".repeat(64));
     let app = crate::secure_app(
         crate::node::Inventory::local(root.clone().into())
             .await
@@ -443,7 +443,7 @@ async fn parental_filters_overrides_lists_and_explicit_grouping() {
     // A second device reads the first device's track choices, without leaking them to another account.
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'reader',unixepoch(),unixepoch(),unixepoch()+3600)").bind(auth::hash(&"e".repeat(64))).execute(&store.pool).await.unwrap();
     assert_eq!(request(&app,"/api/v1/preferences","PUT",&b,&bc,json!({"audioLanguage":"fr","subtitlePreference":{"enabled":true,"language":"fr","forced":true},"offsets":{"audio":1.25,"subtitle":-0.5}})).await.status(),StatusCode::NO_CONTENT);
-    let second = format!("media_session={}", "e".repeat(64));
+    let second = format!("aether_session={}", "e".repeat(64));
     let synced =
         value(request(&app, "/api/v1/preferences", "GET", &second, "", Value::Null).await).await;
     assert_eq!(synced["audioLanguage"], "fr");
@@ -702,7 +702,7 @@ async fn music_scan_metadata_stable_identity_and_range() {
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(auth::hash(&"d".repeat(64))).bind(user).execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let app = crate::music::router(auth);
-    let cookie = format!("media_session={}", "d".repeat(64));
+    let cookie = format!("aether_session={}", "d".repeat(64));
     let listed =
         value(request(&app, "/api/v1/music?q=Une", "GET", &cookie, "", Value::Null).await).await;
     assert_eq!(listed["total"], 1);
@@ -818,9 +818,9 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
     query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES('source','version','films',?)").bind(&root_string).execute(&store.pool).await.unwrap();
     query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES('asset','source','films','clip.mp4',?,?,'video/mp4','{\"streams\":[],\"format\":{}}',1)").bind(opened.size() as i64).bind(opened.modified_ns()).execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
-    let a = format!("media_session={}", "a".repeat(64));
+    let a = format!("aether_session={}", "a".repeat(64));
     let b_token = "b".repeat(64);
-    let b = format!("media_session={b_token}");
+    let b = format!("aether_session={b_token}");
     let csrf = format!(
         "{:x}",
         Sha256::digest(format!("csrf:{}", "a".repeat(64)).as_bytes())
@@ -1325,9 +1325,9 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
     query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json) VALUES('film','films','film','Synthetic Film','synthetic film','film','{}')").execute(&store.pool).await.unwrap();
     query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,codec,mime,scan_id,lyrics) VALUES('song','music',?,'song.opus',1,'0','Song','Artist','Album','Artist','opus','audio/ogg','test','[00:00]Hello')").bind(&root).execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
-    let owner_cookie = format!("media_session={}", "b".repeat(64));
-    let peer_cookie = format!("media_session={}", "c".repeat(64));
-    let admin_cookie = format!("media_session={}", "a".repeat(64));
+    let owner_cookie = format!("aether_session={}", "b".repeat(64));
+    let peer_cookie = format!("aether_session={}", "c".repeat(64));
+    let admin_cookie = format!("aether_session={}", "a".repeat(64));
     let csrf = |cookie: &str| {
         let mut headers = axum::http::HeaderMap::new();
         headers.insert("cookie", cookie.parse().unwrap());

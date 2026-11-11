@@ -1,14 +1,14 @@
+use aether_core::{
+    account,
+    auth::{self, AuthState},
+    identity::IdentityStore,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    account,
-    auth::{self, AuthState},
-    identity::IdentityStore,
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -244,16 +244,16 @@ async fn sso_local_credentials_policy_csrf_and_recent_login() {
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let app = auth::router(auth.clone())
         .merge(account::router(auth.clone()))
-        .merge(media_poc::server_settings::router(auth));
+        .merge(aether_core::server_settings::router(auth));
     let (cookie, csrf) = login(&app, &pass).await;
-    let user: String = media_poc::database::query_scalar(
+    let user: String = aether_core::database::query_scalar(
         "SELECT user_id FROM local_credentials WHERE login='admin'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
-    media_poc::database::query("INSERT INTO oidc_identities(issuer,subject,user_id) VALUES('https://idp.invalid','synthetic',?)").bind(&user).execute(store.pool()).await.unwrap();
-    media_poc::database::query("DELETE FROM local_credentials WHERE user_id=?")
+    aether_core::database::query("INSERT INTO oidc_identities(issuer,subject,user_id) VALUES('https://idp.invalid','synthetic',?)").bind(&user).execute(store.pool()).await.unwrap();
+    aether_core::database::query("DELETE FROM local_credentials WHERE user_id=?")
         .bind(&user)
         .execute(store.pool())
         .await
@@ -290,7 +290,7 @@ async fn sso_local_credentials_policy_csrf_and_recent_login() {
             .status(),
         StatusCode::FORBIDDEN
     );
-    media_poc::database::query("UPDATE sessions SET created_at=unixepoch()-301 WHERE user_id=?")
+    aether_core::database::query("UPDATE sessions SET created_at=unixepoch()-301 WHERE user_id=?")
         .bind(&user)
         .execute(store.pool())
         .await
@@ -301,7 +301,7 @@ async fn sso_local_credentials_policy_csrf_and_recent_login() {
             .status(),
         StatusCode::FORBIDDEN
     );
-    media_poc::database::query("UPDATE sessions SET created_at=unixepoch() WHERE user_id=?")
+    aether_core::database::query("UPDATE sessions SET created_at=unixepoch() WHERE user_id=?")
         .bind(&user)
         .execute(store.pool())
         .await
@@ -332,7 +332,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         .await
         .unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
-    let app = auth::router(auth.clone()).merge(media_poc::avatars::router(auth));
+    let app = auth::router(auth.clone()).merge(aether_core::avatars::router(auth));
     let (cookie, csrf) = login(&app, &pass).await;
     let path = "/api/v1/account/avatar/policy";
     assert_eq!(
@@ -353,14 +353,14 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         wasm: String::new(),
         signature: String::new(),
     };
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO extension_publishers(id,public_key) VALUES('fixture','synthetic')",
     )
     .execute(store.pool())
     .await
     .unwrap();
-    media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture','fixture',?,1,'fixture')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
-    media_poc::database::query(
+    aether_core::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture','fixture',?,1,'fixture')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
+    aether_core::database::query(
         "INSERT INTO extension_settings(extension_id,settings_json) VALUES('fixture',?)",
     )
     .bind(json!({"disallow_custom_avatars":true,"force_random_on_creation":true}).to_string())
@@ -371,7 +371,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
         json!({"uploadAllowed":true,"removeAllowed":false})
     );
-    media_poc::database::query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,0,0,0) ON CONFLICT(singleton) DO UPDATE SET allow_custom=0")
+    aether_core::database::query("INSERT INTO avatar_policy(singleton,allow_custom,allow_gravatar,assign_on_create) VALUES(1,0,0,0) ON CONFLICT(singleton) DO UPDATE SET allow_custom=0")
         .execute(store.pool())
         .await
         .unwrap();
@@ -379,7 +379,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         body(req(&app, path, "GET", &cookie, "", json!(null)).await).await,
         json!({"uploadAllowed":false,"removeAllowed":false})
     );
-    media_poc::database::query("UPDATE avatar_policy SET allow_custom=1 WHERE singleton=1")
+    aether_core::database::query("UPDATE avatar_policy SET allow_custom=1 WHERE singleton=1")
         .execute(store.pool())
         .await
         .unwrap();
@@ -400,7 +400,7 @@ async fn avatar_policy_is_independent_of_active_plugins() {
         .status(),
         StatusCode::FORBIDDEN
     );
-    media_poc::database::query("UPDATE extensions SET enabled=0")
+    aether_core::database::query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await
         .unwrap();

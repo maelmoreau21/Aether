@@ -429,7 +429,7 @@ fs.mkdirSync(out, {recursive: true});
       'Same-session prefetch must use descriptorCache without extra network calls'
     );
 
-    const cookieAdmin = (await context.cookies()).find(c => c.name === 'media_session');
+    const cookieAdmin = (await context.cookies()).find(c => c.name === 'aether_session');
     assert(cookieAdmin && cookieAdmin.httpOnly && cookieAdmin.sameSite === 'Strict' && !cookieAdmin.secure);
 
     // Logout series-admin via ProfileMenu (pure SPA transition, real Core logout)
@@ -437,8 +437,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('button', {name: /^(Se déconnecter|Sign out)$/, exact: true}).click();
     await page.waitForURL('**/app/login/**');
 
-    const cookieAfterLogout = (await context.cookies()).find(c => c.name === 'media_session');
-    assert(!cookieAfterLogout, 'Logout Set-Cookie must remove HttpOnly media_session cookie');
+    const cookieAfterLogout = (await context.cookies()).find(c => c.name === 'aether_session');
+    assert(!cookieAfterLogout, 'Logout Set-Cookie must remove HttpOnly aether_session cookie');
 
     // Login as second distinct SQLite account series-user-b via SPA login form (no mocked auth JSON)
     await page.locator('input[autocomplete="username"]').fill('series-user-b');
@@ -446,7 +446,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin + '/app/');
 
-    const cookieUserB = (await context.cookies()).find(c => c.name === 'media_session');
+    const cookieUserB = (await context.cookies()).find(c => c.name === 'aether_session');
     assert(cookieUserB && cookieUserB.httpOnly && cookieUserB.sameSite === 'Strict' && !cookieUserB.secure);
     assert.notEqual(cookieUserB.value, cookieAdmin.value, 'Second account must receive a distinct HttpOnly session cookie');
 
@@ -568,7 +568,7 @@ fs.mkdirSync(out, {recursive: true});
     assert.equal(delayedLogoutResult.meBody.user.login, 'series-admin');
     assert.equal(delayedLogoutResult.storeSession.user.login, 'series-admin');
     assert.equal(delayedLogoutResult.storeSession.csrfToken, delayedLogoutResult.meBody.csrfToken);
-    const cookieAfterDelayedLogout = (await context.cookies()).find(c => c.name === 'media_session');
+    const cookieAfterDelayedLogout = (await context.cookies()).find(c => c.name === 'aether_session');
     assert(cookieAfterDelayedLogout && cookieAfterDelayedLogout.httpOnly);
     assert.notEqual(cookieAfterDelayedLogout.value, cookieUserB.value);
     report.results.delayedLogoutDoesNotWipeNewLoginCookie = true;

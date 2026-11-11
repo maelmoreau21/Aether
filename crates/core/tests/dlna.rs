@@ -1,5 +1,12 @@
 //! DLNA ContentDirectory over a real store: what a `catalog:read` key may read
 //! is exactly what the network sees, and a revoked key shows nothing.
+use aether_core::{
+    admin_users, api_keys,
+    auth::{self, AuthState},
+    database::query,
+    dlna::{DlnaConfig, router},
+    identity::IdentityStore,
+};
 use axum::{
     Router,
     body::Body,
@@ -7,13 +14,6 @@ use axum::{
     response::Response,
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    admin_users, api_keys,
-    auth::{self, AuthState},
-    database::query,
-    dlna::{DlnaConfig, router},
-    identity::IdentityStore,
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;

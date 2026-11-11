@@ -1,12 +1,12 @@
 //! Empirical stress tests for binding and static web serving.
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
-};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     process::Command,

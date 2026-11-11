@@ -94,6 +94,15 @@ pub struct Pairing {
     pub qr_modules: Vec<bool>,
 }
 
+/// A single sign-on to finish in the system browser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsoRequest {
+    /// Opened in the system browser: the provider's sign-in page follows.
+    pub url: String,
+    /// Kept by this device only; it redeems the code the browser brings back.
+    pub verifier: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CatalogQuery {
     /// `film` or `series`; `None` for both.

@@ -42,7 +42,7 @@ Le seul guest Rust présent est une fixture non installée sous
 ```powershell
 rustup target add wasm32-unknown-unknown
 cargo build -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release -j 1
-cargo test -p media-poc --test extensions -j 1 -- --include-ignored --test-threads=1
+cargo test -p aether-core --test extensions -j 1 -- --include-ignored --test-threads=1
 ```
 
 Les tests navigateur nécessitent le build Web et Chrome/Playwright. Les limites

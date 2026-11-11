@@ -1,15 +1,15 @@
+use aether_core::{
+    auth::{self, AuthState},
+    identity::IdentityStore,
+    scans::ScanJobs,
+    scheduler,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::{self, AuthState},
-    identity::IdentityStore,
-    scans::ScanJobs,
-    scheduler,
-};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -50,7 +50,7 @@ async fn settle(
         scheduler::dispatch_once(auth, root, jobs, timestamp)
             .await
             .unwrap();
-        let active: i64 = media_poc::database::query_scalar(
+        let active: i64 = aether_core::database::query_scalar(
             "SELECT COUNT(*) FROM durable_tasks WHERE lease_until IS NOT NULL",
         )
         .fetch_one(store.pool())
@@ -80,11 +80,11 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json,next_metadata_refresh_at) VALUES('metadata','Films','films','local',?,1,'{\"automaticRefreshIntervalDays\":30}',1000)").bind(root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json,next_metadata_refresh_at) VALUES('metadata','Films','films','local',?,1,'{\"automaticRefreshIntervalDays\":30}',1000)").bind(root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
     let jobs = Arc::new(ScanJobs::default());
     scheduler::run_due(&auth, &root, &jobs, 999).await.unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks")
+        aether_core::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks")
             .fetch_one(store.pool())
             .await
             .unwrap(),
@@ -92,7 +92,7 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
     );
     scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>(
+        aether_core::database::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM durable_tasks WHERE status='queued'"
         )
         .fetch_one(store.pool())
@@ -107,7 +107,7 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
     settle(&store, &auth, &root, &jobs, worker_now + 1).await;
     jobs.shutdown().await;
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>(
+        aether_core::database::query_scalar::<_, i64>(
             "SELECT next_metadata_refresh_at FROM libraries WHERE id='metadata'"
         )
         .fetch_one(store.pool())
@@ -115,7 +115,7 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
         .unwrap(),
         1000 + 30 * 86400
     );
-    let mode: String = media_poc::database::query_scalar(
+    let mode: String = aether_core::database::query_scalar(
         "SELECT refresh_mode FROM scan_jobs WHERE library_id='metadata'",
     )
     .fetch_one(store.pool())
@@ -127,7 +127,7 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
         .await
         .unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>(
+        aether_core::database::query_scalar::<_, i64>(
             "SELECT next_metadata_refresh_at FROM libraries WHERE id='metadata'"
         )
         .fetch_one(reopened.pool())
@@ -154,10 +154,10 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)")
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)")
         .bind(root.to_str().unwrap())
         .execute(store.pool())
         .await
@@ -239,7 +239,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
             .status(),
         StatusCode::NO_CONTENT
     );
-    media_poc::database::query("UPDATE users SET role='user'")
+    aether_core::database::query("UPDATE users SET role='user'")
         .execute(store.pool())
         .await
         .unwrap();
@@ -269,7 +269,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .status(),
         StatusCode::FORBIDDEN
     );
-    media_poc::database::query("UPDATE users SET role='administrator'")
+    aether_core::database::query("UPDATE users SET role='administrator'")
         .execute(store.pool())
         .await
         .unwrap();
@@ -296,7 +296,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     scheduler::run_due(&auth, &root, &jobs, due - 1)
         .await
         .unwrap();
-    let count: i64 = media_poc::database::query_scalar(
+    let count: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM durable_tasks WHERE category='scan'",
     )
     .fetch_one(store.pool())
@@ -305,9 +305,9 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     assert_eq!(count, 0);
     // A firing that finds the library already being scanned is skipped (the scan is happening
     // anyway) and the trigger moves on: no pile-up of scans behind a long one.
-    media_poc::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES('films','running',0,0)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES('films','running',0,0)").execute(store.pool()).await.unwrap();
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
-    let unclaimed: (Option<i64>, i64) = media_poc::database::query_as(
+    let unclaimed: (Option<i64>, i64) = aether_core::database::query_as(
         "SELECT last_run_at,next_run_at FROM scheduled_scans WHERE library_id='films'",
     )
     .fetch_one(store.pool())
@@ -315,7 +315,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     .unwrap();
     assert_eq!(unclaimed, (None, due + 300));
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>(
+        aether_core::database::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM durable_tasks WHERE category='scan'"
         )
         .fetch_one(store.pool())
@@ -323,7 +323,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .unwrap(),
         0
     );
-    media_poc::database::query("DELETE FROM scan_jobs WHERE library_id='films'")
+    aether_core::database::query("DELETE FROM scan_jobs WHERE library_id='films'")
         .execute(store.pool())
         .await
         .unwrap();
@@ -332,7 +332,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     // A second pass at the same instant never fires the same trigger twice.
     scheduler::run_due(&auth, &root, &jobs, due).await.unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>(
+        aether_core::database::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM durable_tasks WHERE category='scan' AND status IN ('queued','running','completed','error')"
         )
         .fetch_one(store.pool())
@@ -370,14 +370,14 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     drop(auth);
     store.close().await;
     let reopened = IdentityStore::open(&path).await.unwrap();
-    let interval: i64 = media_poc::database::query_scalar(
+    let interval: i64 = aether_core::database::query_scalar(
         "SELECT interval_minutes FROM scheduled_scans WHERE library_id='films'",
     )
     .fetch_one(reopened.pool())
     .await
     .unwrap();
     assert_eq!(interval, 5);
-    media_poc::database::query("UPDATE scheduled_scans SET last_outcome='queued'")
+    aether_core::database::query("UPDATE scheduled_scans SET last_outcome='queued'")
         .execute(reopened.pool())
         .await
         .unwrap();
@@ -385,7 +385,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .await
         .unwrap();
     let _recovered = scheduler::router(recovered_auth).await.unwrap();
-    let recovered_outcome: String = media_poc::database::query_scalar(
+    let recovered_outcome: String = aether_core::database::query_scalar(
         "SELECT last_outcome FROM scheduled_scans WHERE library_id='films'",
     )
     .fetch_one(reopened.pool())
@@ -393,7 +393,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     .unwrap();
     assert!(matches!(recovered_outcome.as_str(), "completed" | "error"));
     // An old schedule without a durable request key retains the legacy recovery rule.
-    media_poc::database::query(
+    aether_core::database::query(
         "UPDATE scheduled_scans SET last_outcome='dispatching',last_request_key=''",
     )
     .execute(reopened.pool())
@@ -403,7 +403,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .await
         .unwrap();
     let restarted_app = scheduler::router(restarted_auth).await.unwrap();
-    let outcome: String = media_poc::database::query_scalar(
+    let outcome: String = aether_core::database::query_scalar(
         "SELECT last_outcome FROM scheduled_scans WHERE library_id='films'",
     )
     .fetch_one(reopened.pool())
@@ -436,7 +436,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
         .status(),
         StatusCode::NO_CONTENT
     );
-    let count: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM scheduled_scans")
+    let count: i64 = aether_core::database::query_scalar("SELECT COUNT(*) FROM scheduled_scans")
         .fetch_one(reopened.pool())
         .await
         .unwrap();
@@ -450,13 +450,13 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
     let store = IdentityStore::open(&temp.path().join("aggregate.sqlite"))
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
     for id in ["one", "two"] {
-        media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic-root',1)")
+        aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films','local','synthetic-root',1)")
             .bind(id).bind(id).execute(store.pool()).await.unwrap();
-        media_poc::task_engine::enqueue(
+        aether_core::task_engine::enqueue(
             &store,
             id,
             "scheduler",
@@ -467,26 +467,26 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
         .await
         .unwrap();
     }
-    media_poc::database::query("INSERT INTO scheduled_scans(library_id,interval_minutes,enabled,next_run_at,last_outcome,last_request_key) VALUES('one',5,1,1300,'dispatching','schedule:one:1000')")
+    aether_core::database::query("INSERT INTO scheduled_scans(library_id,interval_minutes,enabled,next_run_at,last_outcome,last_request_key) VALUES('one',5,1,1300,'dispatching','schedule:one:1000')")
         .execute(store.pool()).await.unwrap();
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
     let _router = scheduler::router(auth.clone()).await.unwrap();
-    let outcome: String = media_poc::database::query_scalar(
+    let outcome: String = aether_core::database::query_scalar(
         "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
     assert_eq!(outcome, "queued");
-    let running = media_poc::task_engine::claim(&store, "local", 1000, 30, 1)
+    let running = aether_core::task_engine::claim(&store, "local", 1000, 30, 1)
         .await
         .unwrap()
         .unwrap();
-    media_poc::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'error',1,0)")
+    aether_core::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count) VALUES(?,'error',1,0)")
         .bind(&running.library_id).execute(store.pool()).await.unwrap();
-    media_poc::task_engine::finish(
+    aether_core::task_engine::finish(
         &store,
         &running.id,
         running.attempt,
@@ -497,32 +497,32 @@ async fn schedule_reconciliation_tracks_all_durable_scopes_and_pending_retries()
     .await
     .unwrap();
     let _router = scheduler::router(auth.clone()).await.unwrap();
-    let outcome: String = media_poc::database::query_scalar(
+    let outcome: String = aether_core::database::query_scalar(
         "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
     assert_eq!(outcome, "queued");
-    media_poc::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
+    aether_core::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
         .bind(&running.id)
         .execute(store.pool())
         .await
         .unwrap();
     let _router = scheduler::router(auth.clone()).await.unwrap();
-    let outcome: String = media_poc::database::query_scalar(
+    let outcome: String = aether_core::database::query_scalar(
         "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
     assert_eq!(outcome, "queued");
-    media_poc::database::query("UPDATE durable_tasks SET status='completed'")
+    aether_core::database::query("UPDATE durable_tasks SET status='completed'")
         .execute(store.pool())
         .await
         .unwrap();
     let _router = scheduler::router(auth).await.unwrap();
-    let outcome: String = media_poc::database::query_scalar(
+    let outcome: String = aether_core::database::query_scalar(
         "SELECT last_outcome FROM scheduled_scans WHERE library_id='one'",
     )
     .fetch_one(store.pool())
@@ -537,24 +537,24 @@ async fn missing_credentials_fail_once_while_provider_errors_retry() {
     let store = IdentityStore::open(&temp.path().join("credentials.sqlite"))
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','lib','films','local','synthetic-root',1)")
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','lib','films','local','synthetic-root',1)")
         .execute(store.pool()).await.unwrap();
     for (key, error, expected) in [
         ("k1", "extension_error:missing_api_key", ("error", 1)),
         ("k2", "extension_error:unauthorized", ("error", 1)),
         ("k3", "extension_error:provider_error", ("queued", 1)),
     ] {
-        media_poc::task_engine::enqueue(&store, "lib", "scheduler", key, 100, 1000)
+        aether_core::task_engine::enqueue(&store, "lib", "scheduler", key, 100, 1000)
             .await
             .unwrap();
-        let running = media_poc::task_engine::claim(&store, "local", 1000, 30, 1)
+        let running = aether_core::task_engine::claim(&store, "local", 1000, 30, 1)
             .await
             .unwrap()
             .unwrap();
-        media_poc::task_engine::finish(
+        aether_core::task_engine::finish(
             &store,
             &running.id,
             running.attempt,
@@ -564,7 +564,7 @@ async fn missing_credentials_fail_once_while_provider_errors_retry() {
         )
         .await
         .unwrap();
-        let (status, failures): (String, i64) = media_poc::database::query_as(
+        let (status, failures): (String, i64) = aether_core::database::query_as(
             "SELECT status,failure_count FROM durable_tasks WHERE id=?",
         )
         .bind(&running.id)
@@ -572,7 +572,7 @@ async fn missing_credentials_fail_once_while_provider_errors_retry() {
         .await
         .unwrap();
         assert_eq!((status.as_str(), failures), expected, "{error}");
-        media_poc::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
+        aether_core::database::query("UPDATE durable_tasks SET status='completed' WHERE id=?")
             .bind(&running.id)
             .execute(store.pool())
             .await
@@ -591,7 +591,7 @@ async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('auto','Films','films','local',?,1,?)")
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('auto','Films','films','local',?,1,?)")
         .bind(root.to_string_lossy().as_ref())
         .bind(json!({"realtimeMonitoring":true,"onlineRefreshIntervalDays":30}).to_string())
         .execute(store.pool()).await.unwrap();
@@ -599,7 +599,7 @@ async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_
     scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
     scheduler::run_due(&auth, &root, &jobs, 1000).await.unwrap();
     scheduler::run_due(&auth, &root, &jobs, 1100).await.unwrap();
-    let monitored: i64 = media_poc::database::query_scalar(
+    let monitored: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM durable_tasks WHERE owner='library-monitor'",
     )
     .fetch_one(store.pool())
@@ -609,22 +609,22 @@ async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_
         monitored, 1,
         "pending monitoring work coalesces even in the next minute"
     );
-    let sweeps: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_sweeps")
+    let sweeps: i64 = aether_core::database::query_scalar("SELECT COUNT(*) FROM automation_sweeps")
         .fetch_one(store.pool())
         .await
         .unwrap();
     assert_eq!(sweeps, 1);
-    media_poc::database::query("UPDATE durable_tasks SET status='completed';")
+    aether_core::database::query("UPDATE durable_tasks SET status='completed';")
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::database::query("UPDATE automation_sweeps SET completed_at=1001")
+    aether_core::database::query("UPDATE automation_sweeps SET completed_at=1001")
         .execute(store.pool())
         .await
         .unwrap();
     scheduler::run_due(&auth, &root, &jobs, 1101).await.unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>(
+        aether_core::database::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM durable_tasks WHERE owner='library-monitor'"
         )
         .fetch_one(store.pool())
@@ -636,13 +636,13 @@ async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_
         .await
         .unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
+        aether_core::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
             .fetch_one(store.pool())
             .await
             .unwrap(),
         2
     );
-    media_poc::database::query("UPDATE libraries SET enabled=0")
+    aether_core::database::query("UPDATE libraries SET enabled=0")
         .execute(store.pool())
         .await
         .unwrap();
@@ -650,7 +650,7 @@ async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_
         .await
         .unwrap();
     assert_eq!(
-        media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
+        aether_core::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM automation_sweeps")
             .fetch_one(store.pool())
             .await
             .unwrap(),
@@ -660,7 +660,7 @@ async fn monitoring_and_online_refresh_are_durable_and_do_not_duplicate_pending_
 
 // --- Jellyfin-style triggers -----------------------------------------------------------------
 
-use media_poc::task_triggers::{TriggerSpec, next_fire};
+use aether_core::task_triggers::{TriggerSpec, next_fire};
 
 fn utc(text: &str) -> i64 {
     text.parse::<jiff::Timestamp>().unwrap().as_second()
@@ -781,7 +781,7 @@ async fn admin_app(temp: &std::path::Path) -> (IdentityStore, AuthState, Router,
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::task_triggers::router(auth.clone())
+    let app = aether_core::task_triggers::router(auth.clone())
         .merge(scheduler::router(auth.clone()).await.unwrap())
         .merge(auth::router(auth.clone()));
     let response = call(
@@ -817,7 +817,7 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
     let (store, _auth, app, cookie, csrf) = admin_app(temp.path()).await;
     let pool = store.pool();
     // Migration: every enabled legacy interval is an interval trigger, the statistics cleanup too.
-    let migrated: Vec<(String, i64)> = media_poc::database::query_as(
+    let migrated: Vec<(String, i64)> = aether_core::database::query_as(
         "SELECT task_id,interval_minutes FROM task_triggers WHERE task_kind='system' AND trigger_type='interval' ORDER BY task_id",
     )
     .fetch_all(pool)
@@ -839,7 +839,7 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
         .unwrap();
     drop(conn);
     let count =
-        |sql: &'static str| media_poc::database::query_scalar::<_, i64>(sql).fetch_one(pool);
+        |sql: &'static str| aether_core::database::query_scalar::<_, i64>(sql).fetch_one(pool);
     let before = count("SELECT COUNT(*) FROM task_triggers").await.unwrap();
     assert_eq!(
         before as usize,
@@ -984,7 +984,7 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
     .await;
     assert_eq!(detail["triggers"].as_array().unwrap().len(), 3);
     // The dispatch cache follows the earliest trigger.
-    let (enabled, next): (i64, i64) = media_poc::database::query_as(
+    let (enabled, next): (i64, i64) = aether_core::database::query_as(
         "SELECT enabled,next_due_at FROM system_task_schedules WHERE id='clean-cache'",
     )
     .fetch_one(pool)
@@ -1012,7 +1012,7 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
             );
         }
     }
-    let enabled: i64 = media_poc::database::query_scalar(
+    let enabled: i64 = aether_core::database::query_scalar(
         "SELECT enabled FROM system_task_schedules WHERE id='clean-cache'",
     )
     .fetch_one(pool)
@@ -1025,7 +1025,7 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
         .await
         .unwrap();
     drop(conn);
-    let remaining: i64 = media_poc::database::query_scalar(
+    let remaining: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM task_triggers WHERE task_id='clean-cache'",
     )
     .fetch_one(pool)
@@ -1107,17 +1107,17 @@ async fn startup_triggers_queue_once_and_time_limits_reach_the_queue() {
     let temp = tempfile::tempdir().unwrap();
     let (store, auth, _app, _cookie, _csrf) = admin_app(temp.path()).await;
     let pool = store.pool();
-    media_poc::database::query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,max_runtime_seconds,enabled,created_at) VALUES('boot','system','optimize-database','startup',900,1,0)")
+    aether_core::database::query("INSERT INTO task_triggers(id,task_kind,task_id,trigger_type,max_runtime_seconds,enabled,created_at) VALUES('boot','system','optimize-database','startup',900,1,0)")
         .execute(pool).await.unwrap();
-    let fired = media_poc::task_scheduler::fire_startup(&auth, 1_000)
+    let fired = aether_core::task_scheduler::fire_startup(&auth, 1_000)
         .await
         .unwrap();
     assert_eq!(fired, 1);
     // A second start in the same instant (or an already active run) does not duplicate work.
-    media_poc::task_scheduler::fire_startup(&auth, 1_000)
+    aether_core::task_scheduler::fire_startup(&auth, 1_000)
         .await
         .unwrap();
-    let queued: Vec<String> = media_poc::database::query_scalar("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='optimize-database' AND status='queued'")
+    let queued: Vec<String> = aether_core::database::query_scalar("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='optimize-database' AND status='queued'")
         .fetch_all(pool).await.unwrap();
     assert_eq!(queued.len(), 1);
     assert!(
@@ -1127,25 +1127,25 @@ async fn startup_triggers_queue_once_and_time_limits_reach_the_queue() {
     );
 
     // A due periodic trigger carries its own limit into the queued run.
-    media_poc::database::query("DELETE FROM durable_tasks")
+    aether_core::database::query("DELETE FROM durable_tasks")
         .execute(pool)
         .await
         .unwrap();
-    media_poc::database::query("UPDATE task_triggers SET max_runtime_seconds=3600,next_fire_at=0 WHERE task_kind='system' AND task_id='clean-sessions'")
+    aether_core::database::query("UPDATE task_triggers SET max_runtime_seconds=3600,next_fire_at=0 WHERE task_kind='system' AND task_id='clean-sessions'")
         .execute(pool).await.unwrap();
     let jobs = Arc::new(ScanJobs::default());
     let now = media_contracts::protocol::unix_now();
     // The trigger alone decides: the legacy `next_due_at` column is never read to fire a run.
     assert_eq!(
-        media_poc::task_scheduler::fire_due(&auth, now)
+        aether_core::task_scheduler::fire_due(&auth, now)
             .await
             .unwrap(),
         1
     );
-    let (options,): (String,) = media_poc::database::query_as("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='clean-sessions' ORDER BY created_at DESC LIMIT 1")
+    let (options,): (String,) = aether_core::database::query_as("SELECT result_json FROM durable_tasks WHERE category='system' AND target_id='clean-sessions' ORDER BY created_at DESC LIMIT 1")
         .fetch_one(pool).await.unwrap();
     assert!(options.contains("\"maxRuntimeSeconds\":3600"), "{options}");
-    let next: i64 = media_poc::database::query_scalar(
+    let next: i64 = aether_core::database::query_scalar(
         "SELECT next_due_at FROM system_task_schedules WHERE id='clean-sessions'",
     )
     .fetch_one(pool)

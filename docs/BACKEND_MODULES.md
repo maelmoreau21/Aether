@@ -1,6 +1,6 @@
 # Modules internes du backend — 4 novembre 2026
 
-Les crates et leurs dépendances restent inchangées : Core (`media-poc`) dépend de
+Les crates et leurs dépendances restent inchangées : Core (`aether-core`) dépend de
 Node, des contrats et du SDK ; Node dépend des contrats, jamais de Core/SQLx.
 Les features Core restent `fixture-bench` et `query-metrics` ; Node n'en déclare
 pas. Les routes, JSON, migrations, protocoles, configurations et formats médias

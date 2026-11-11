@@ -1,3 +1,8 @@
+use aether_core::{
+    admin_users,
+    auth::{self, AuthState},
+    identity::IdentityStore,
+};
 use axum::{
     Router,
     body::Body,
@@ -5,11 +10,6 @@ use axum::{
     response::Response,
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    admin_users,
-    auth::{self, AuthState},
-    identity::IdentityStore,
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -146,7 +146,7 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
         .put_bytes(&avatar_data, "image/png")
         .await
         .unwrap();
-    media_poc::database::query("UPDATE user_avatars SET sha256=? WHERE user_id=?")
+    aether_core::database::query("UPDATE user_avatars SET sha256=? WHERE user_id=?")
         .bind(&asset.sha256)
         .bind(&user_id)
         .execute(store.pool())
@@ -287,7 +287,7 @@ async fn admin_account_lifecycle_authorization_and_revocation() {
         StatusCode::UNAUTHORIZED
     );
     // Password-only identities cannot be introduced onto an OIDC account.
-    media_poc::database::query("INSERT INTO users(id,role) VALUES('sso-test','user')")
+    aether_core::database::query("INSERT INTO users(id,role) VALUES('sso-test','user')")
         .execute(store.pool())
         .await
         .unwrap();
@@ -356,7 +356,7 @@ async fn concurrent_administrators_cannot_disable_each_other() {
             + usize::from(b.status() == StatusCode::NO_CONTENT),
         1
     );
-    let count: i64 = media_poc::database::query_scalar(
+    let count: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM users WHERE role='administrator' AND disabled_at IS NULL",
     )
     .fetch_one(store.pool())
@@ -377,13 +377,13 @@ async fn user_library_permissions_create_and_update() {
         .unwrap();
 
     // Insert dummy libraries in database
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-films', 'Films', 'films', 'local', '/media/films', 1)"
     )
     .execute(store.pool())
     .await
     .unwrap();
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO libraries(id, name, kind, node_id, root, enabled) VALUES('lib-series', 'Séries', 'series', 'local', '/media/series', 1)"
     )
     .execute(store.pool())
@@ -405,7 +405,7 @@ async fn user_library_permissions_create_and_update() {
     assert_eq!(res.status(), StatusCode::CREATED);
     let user_id = body(res).await["id"].as_str().unwrap().to_owned();
 
-    let has_films: i64 = media_poc::database::query_scalar(
+    let has_films: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM library_permissions WHERE user_id=? AND library_id='lib-films'",
     )
     .bind(&user_id)
@@ -432,7 +432,7 @@ async fn user_library_permissions_create_and_update() {
     .await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
 
-    let count: i64 = media_poc::database::query_scalar(
+    let count: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM library_permissions WHERE user_id=?",
     )
     .bind(&user_id)

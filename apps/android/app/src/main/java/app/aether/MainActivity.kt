@@ -3,6 +3,7 @@
 package app.aether
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -139,6 +140,19 @@ class MainActivity : FragmentActivity() {
         setContent {
             MaterialTheme(colorScheme = HaloColors) { App(model) }
         }
+        if (savedInstanceState == null) returnFromSso(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        returnFromSso(intent)
+    }
+
+    /** `aether://sso?code=…`: the browser is done with single sign-on. */
+    private fun returnFromSso(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "aether" || uri.host != "sso") return
+        model.finishSso(uri.getQueryParameter("code"), uri.getQueryParameter("error"))
     }
 }
 
@@ -161,6 +175,7 @@ private fun App(model: AetherViewModel) {
                 Screen.Catalog -> CatalogScreen(model)
                 Screen.Downloads -> DownloadsScreen(model)
                 Screen.Devices -> DevicesScreen(model)
+                Screen.Accounts -> AccountsScreen(model)
                 is Screen.Series -> SeriesScreen(model, current.work)
                 is Screen.Player -> PlayerScreen(model, current.work, current.startAt)
             }
@@ -384,11 +399,20 @@ private fun SignInScreen(model: AetherViewModel) {
             return@AuthFrame
         }
 
+        // Accounts already signed in on this device and set aside: one touch to come back.
+        val known = model.accounts.collectAsState().value.filter { !it.current }
+        if (known.isNotEmpty()) {
+            Text(stringResource(R.string.accounts_known), color = Muted, fontSize = 13.sp)
+            known.forEach { account -> WideButton(account.name, primary = false) { model.switchAccount(account.id) } }
+            HorizontalDivider(color = Line)
+        }
+
         if (ssoEnabled) {
             if (kind == PairingKind.Sso) {
-                SsoWait(pairing, model)
+                SsoWait(model)
             } else {
-                SsoButton(info?.ssoLabel.orEmpty(), info?.ssoProvider.orEmpty(), model::startSso)
+                val context = LocalContext.current
+                SsoButton(info?.ssoLabel.orEmpty(), info?.ssoProvider.orEmpty()) { model.startSso(context) }
             }
             if (localEnabled) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -454,18 +478,15 @@ private fun SsoButton(label: String, provider: String, onClick: () -> Unit) {
 
 /** Shown in place of the SSO button once the browser has been opened. */
 @Composable
-private fun SsoWait(pairing: Pairing?, model: AetherViewModel) {
+private fun SsoWait(model: AetherViewModel) {
+    val context = LocalContext.current
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text(stringResource(if (pairing == null) R.string.sso_opening else R.string.sso_wait), color = Muted, fontSize = 14.sp, lineHeight = 22.sp)
-        if (pairing != null) {
-            Text(codeText(pairing.code), fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text(stringResource(R.string.waiting_confirmation), color = Muted, fontSize = 13.sp)
-            WideButton(stringResource(R.string.sso_reopen), primary = false) { model.reopenBrowser() }
-        }
+        Text(stringResource(R.string.sso_wait), color = Muted, fontSize = 14.sp, lineHeight = 22.sp)
+        WideButton(stringResource(R.string.sso_reopen), primary = false) { model.reopenBrowser(context) }
         TextButton(onClick = model::cancelPairing) { Text(stringResource(R.string.cancel)) }
     }
 }
@@ -579,7 +600,7 @@ private fun CatalogScreen(model: AetherViewModel) {
             Spacer(Modifier.weight(1f))
             TextButton(onClick = model::showDevices) { Text(stringResource(R.string.devices)) }
             TextButton(onClick = model::showDownloads) { Text(stringResource(R.string.downloads)) }
-            TextButton(onClick = model::signOut) { Text(stringResource(R.string.sign_out)) }
+            TextButton(onClick = model::showAccounts) { Text(stringResource(R.string.accounts)) }
         }
         OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.search)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
@@ -669,6 +690,36 @@ private fun clock(seconds: Double): String {
     val total = seconds.toLong()
     return if (total >= 3600) "%d:%02d:%02d".format(total / 3600, total / 60 % 60, total % 60)
     else "%d:%02d".format(total / 60, total % 60)
+}
+
+/** The accounts signed in on this device: use another one, add one, or sign one out. */
+@Composable
+private fun AccountsScreen(model: AetherViewModel) {
+    val accounts by model.accounts.collectAsState()
+    BackHandler { model.closeSeries() }
+    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = model::closeSeries) { Text(stringResource(R.string.back)) }
+            Text(stringResource(R.string.accounts), style = MaterialTheme.typography.titleLarge)
+        }
+        Text(stringResource(R.string.accounts_hint), color = Muted, fontSize = 14.sp, lineHeight = 22.sp, modifier = Modifier.padding(horizontal = 4.dp))
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            listItems(accounts, key = { it.id }) { account ->
+                Card(Modifier.fillMaxWidth().clickable(enabled = !account.current) { model.switchAccount(account.id) }) {
+                    Row(Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(account.name, style = MaterialTheme.typography.titleMedium)
+                            if (account.current) Text(stringResource(R.string.accounts_active), style = MaterialTheme.typography.bodySmall)
+                        }
+                        TextButton(onClick = { if (account.current) model.signOut() else model.forgetAccount(account.id) }) {
+                            Text(stringResource(R.string.sign_out))
+                        }
+                    }
+                }
+            }
+        }
+        WideButton(stringResource(R.string.accounts_add), primary = true) { model.addAccount() }
+    }
 }
 
 /** The account's other devices: drive what they play, or take it over here. */

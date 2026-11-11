@@ -1180,7 +1180,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri(uri)
-                    .header(header::COOKIE, format!("media_session={token}"))
+                    .header(header::COOKIE, format!("aether_session={token}"))
                     .body(Body::empty())
                     .unwrap(),
             )

@@ -1,10 +1,10 @@
+use aether_core::{auth::AuthState, identity::IdentityStore, inventory, scans::ScanJobs};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
 use media_contracts::inventory::{InventoryBatch, ScanIssue};
-use media_poc::{auth::AuthState, identity::IdentityStore, inventory, scans::ScanJobs};
 use std::sync::Arc;
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -47,7 +47,7 @@ async fn test_scan_diagnostics_bounded_errors_total_counters_and_staging_cleanup
         "password": "pass-diag-test-12345"
     });
 
-    let auth_router = media_poc::auth::router(auth.clone());
+    let auth_router = aether_core::auth::router(auth.clone());
     let login_res = auth_router
         .clone()
         .oneshot(
@@ -76,8 +76,8 @@ async fn test_scan_diagnostics_bounded_errors_total_counters_and_staging_cleanup
     let _csrf_token = login_json["csrfToken"].as_str().unwrap().to_owned();
 
     let jobs = Arc::new(ScanJobs::default());
-    let app = media_poc::secure_app_with_jobs(
-        media_poc::node::Inventory::local(root.clone())
+    let app = aether_core::secure_app_with_jobs(
+        aether_core::node::Inventory::local(root.clone())
             .await
             .unwrap(),
         3000,

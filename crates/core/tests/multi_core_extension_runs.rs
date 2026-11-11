@@ -1,11 +1,11 @@
 //! Two real Core processes, signed Wasm, a blocked private write and abrupt owner loss.
 //! Only the disposable PostgreSQL runner may provide MEDIA_TEST_POSTGRES_URL.
-use base64::{Engine as _, engine::general_purpose::STANDARD};
-use media_extension_sdk::{Manifest, Package};
-use media_poc::{
+use aether_core::{
     database::{begin_write_scoped, query, query_as, query_scalar},
     identity::IdentityStore,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use media_extension_sdk::{Manifest, Package};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -161,7 +161,7 @@ async fn two_real_cores_fence_an_inflight_extension_after_owner_crash() {
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('failover-library','Synthetic','films','local','/unmounted-test-media',1)").execute(store.pool()).await.unwrap();
     query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,external_ids_json) VALUES('failover-work','failover-library','failover','Synthetic','synthetic','{}')").execute(store.pool()).await.unwrap();
     let (signed, key) = package();
-    media_poc::extensions::install_internal_with_key(&store, signed, &key)
+    aether_core::extensions::install_internal_with_key(&store, signed, &key)
         .await
         .unwrap();
     query("INSERT INTO automation_policies(extension_id,library_id,mode) VALUES(?,'failover-library','disabled') ON CONFLICT(extension_id,library_id) DO UPDATE SET mode='disabled'")

@@ -54,7 +54,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             let target = target_arg.ok_or("PostgreSQL backup requires an explicit TARGET_PATH")?;
             let url = std::env::var("MEDIA_DB_URL").map_err(|_| "MEDIA_DB_URL is required")?;
-            let size = media_poc::postgres_backup::backup(&url, &target, Some(&media_root)).await?;
+            let size =
+                aether_core::postgres_backup::backup(&url, &target, Some(&media_root)).await?;
             println!("PostgreSQL custom archive completed successfully ({size} bytes).");
             return Ok(());
         }
@@ -62,7 +63,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
     }
 
-    let db_path = media_poc::identity::configured_path(&media_root)?;
+    let db_path = aether_core::identity::configured_path(&media_root)?;
 
     let target_path = if let Some(path) = target_arg {
         path
@@ -75,8 +76,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         backup_dir.join(format!("core_backup_{timestamp}.sqlite3"))
     };
 
-    let options = media_poc::backup::BackupOptions { allow_replace };
-    let summary = media_poc::backup::backup_database_with_options(
+    let options = aether_core::backup::BackupOptions { allow_replace };
+    let summary = aether_core::backup::backup_database_with_options(
         &db_path,
         &target_path,
         Some(&media_root),
@@ -101,18 +102,19 @@ async fn full_backup(
     media_root: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Fail closed before any snapshot is written: no key means no plaintext copy of the secrets.
-    let protection =
-        media_poc::backup_bundle::protection_from_settings(&|name: &str| std::env::var(name).ok())?;
+    let protection = aether_core::backup_bundle::protection_from_settings(&|name: &str| {
+        std::env::var(name).ok()
+    })?;
     if matches!(
         protection,
-        media_poc::backup_bundle::Protection::Unencrypted
+        aether_core::backup_bundle::Protection::Unencrypted
     ) {
         eprintln!(
             "WARNING: MEDIA_BACKUP_ALLOW_UNENCRYPTED is set: the archive will contain secrets in clear text."
         );
     }
-    media_poc::backup::check_path_safety(target, "full backup")?;
-    media_poc::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
+    aether_core::backup::check_path_safety(target, "full backup")?;
+    aether_core::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
     if target.exists() {
         return Err("backup target already exists".into());
     }
@@ -151,20 +153,20 @@ async fn full_backup(
     let engine = std::env::var("MEDIA_DB_ENGINE").unwrap_or_else(|_| "sqlite".into());
     match engine.as_str() {
         "sqlite" => {
-            let source = media_poc::identity::configured_path(media_root)?;
+            let source = aether_core::identity::configured_path(media_root)?;
             config.insert("MEDIA_DB_PATH".into(), source.to_string_lossy().into());
-            media_poc::backup::backup_database(&source, &snapshot, Some(media_root)).await?;
+            aether_core::backup::backup_database(&source, &snapshot, Some(media_root)).await?;
         }
         "postgres" => {
             let url = zeroize::Zeroizing::new(
                 std::env::var("MEDIA_DB_URL").map_err(|_| "MEDIA_DB_URL is required")?,
             );
-            media_poc::postgres_backup::backup(&url, &snapshot, Some(media_root)).await?;
+            aether_core::postgres_backup::backup(&url, &snapshot, Some(media_root)).await?;
         }
         _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
     }
     config.insert("MEDIA_DB_ENGINE".into(), engine.clone());
-    media_poc::backup_bundle::create(&snapshot, config, target, &engine, protection).await?;
+    aether_core::backup_bundle::create(&snapshot, config, target, &engine, protection).await?;
     Ok(())
 }
 

@@ -1371,7 +1371,7 @@ mod http_tests {
             crate::database::query("INSERT INTO local_credentials(user_id,login,password_hash) VALUES(?,?,'unused-test-hash')").bind(id).bind(id).execute(&store.pool).await.unwrap();
             let hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
             crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(hash).bind(id).execute(&store.pool).await.unwrap();
-            cookies.push(format!("media_session={raw}"));
+            cookies.push(format!("aether_session={raw}"));
         }
         let csrf = format!(
             "{:x}",

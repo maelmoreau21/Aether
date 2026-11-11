@@ -6,11 +6,11 @@
 //! each inserted asset. These tests publish a real staged scan next to synthetic offline
 //! libraries of several sizes; timings are for comparison on one machine, not NAS figures.
 
+use aether_core::{database::query, identity::IdentityStore, inventory};
 use media_contracts::{
     inventory::{InventoryBatch, ScannedFile},
     media::NfoOutcome,
 };
-use media_poc::{database::query, identity::IdentityStore, inventory};
 use std::time::Instant;
 
 const PUBLISHED: usize = 1_000;
@@ -60,7 +60,7 @@ async fn publish_online_library(store: &IdentityStore, root: &std::path::Path) -
                     size: 1_048_576,
                     modified_ns: "1700000000".into(),
                     mime: "video/x-matroska".into(),
-                    probe: media_poc::media::Probe::default(),
+                    probe: aether_core::media::Probe::default(),
                     editorial: NfoOutcome::Missing,
                     ..Default::default()
                 }

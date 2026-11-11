@@ -264,10 +264,10 @@ Nodes, erreurs et contrôles.
 Commandes ciblées, à exécuter séquentiellement sous Windows :
 
 ```powershell
-cargo test -p media-poc -j 1 --test distributed_tasks --test task_engine_http --test scheduler --test task_operations -- --test-threads=1
+cargo test -p aether-core -j 1 --test distributed_tasks --test task_engine_http --test scheduler --test task_operations -- --test-threads=1
 cargo test -p media-node -j 1 resources -- --test-threads=1
-cargo test -p media-poc -j 1 --test distributed_tasks ten_thousand_jobs_on_one_hundred_simulated_nodes -- --ignored --nocapture --test-threads=1
-cargo test -p media-poc -j 1 --features query-metrics --test distributed_tasks_scale -- --ignored --nocapture --test-threads=1
+cargo test -p aether-core -j 1 --test distributed_tasks ten_thousand_jobs_on_one_hundred_simulated_nodes -- --ignored --nocapture --test-threads=1
+cargo test -p aether-core -j 1 --features query-metrics --test distributed_tasks_scale -- --ignored --nocapture --test-threads=1
 ```
 
 Le benchmark de file est une simulation SQLite de 10 000 jobs et 100 Nodes.

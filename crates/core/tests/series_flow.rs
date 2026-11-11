@@ -1,13 +1,13 @@
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
+    secure_app_with_jobs,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
-    secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use std::{path::Path, sync::Arc, time::Duration};
 use tower::ServiceExt;
@@ -1097,7 +1097,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
 
 #[tokio::test]
 async fn a3_contradictory_series_staging_deterministic_selection_and_200_episodes() {
-    use media_poc::{
+    use aether_core::{
         inventory::{
             InventoryBatch, NfoOutcome, Probe, ScannedFile, clean_staging, publish_staged_scan,
             stage_batch,

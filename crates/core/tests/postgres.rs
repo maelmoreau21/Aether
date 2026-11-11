@@ -1,17 +1,17 @@
 //! The same HTTP/storage contract is exercised against SQLite and an isolated PostgreSQL 18 schema.
-//! PostgreSQL: MEDIA_TEST_POSTGRES_URL=... cargo test -p media-poc --test postgres -- --ignored
+//! PostgreSQL: MEDIA_TEST_POSTGRES_URL=... cargo test -p aether-core --test postgres -- --ignored
+use aether_core::{
+    auth::AuthState,
+    database::{query, query_scalar},
+    identity::{IdentityError, IdentityStore},
+    node::Inventory,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState,
-    database::{query, query_scalar},
-    identity::{IdentityError, IdentityStore},
-    node::Inventory,
-};
 use serde_json::{Value, json};
 use std::{path::Path, time::Duration};
 use tower::ServiceExt;
@@ -257,7 +257,7 @@ async fn native_bearer_contract(app: &Router, asset: &str) {
     );
 }
 async fn app(root: &Path, store: &IdentityStore) -> Router {
-    media_poc::secure_app(
+    aether_core::secure_app(
         Inventory::local(root.to_owned()).await.unwrap(),
         3000,
         AuthState::new(store.clone(), "http://127.0.0.1:3000".into())

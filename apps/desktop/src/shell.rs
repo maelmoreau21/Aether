@@ -12,16 +12,46 @@ pub const SCHEME: &str = "aether";
 pub const PAGE: &str = include_str!("../assets/shell.html");
 
 /// Runs in every page: window full screen follows the web player's, F11 toggles
-/// it, and Ctrl+Shift+S returns to the choice of the server.
+/// it, and Ctrl+Shift+S returns to the choice of the server. It also makes the
+/// interface behave like an application rather than a page of a browser: no
+/// browser menu, no dragging of images and links, no selection of the
+/// interface's own labels, single sign-on in the computer's browser
+/// (`aetherDesktop.sso`, used by the sign-in page), and a session that stays
+/// open while the application is used.
 pub const PAGE_SCRIPT: &str = r#"(() => {
   if (window.top !== window || window.__aetherDesktop) return;
   window.__aetherDesktop = true;
   const post = message => window.ipc && window.ipc.postMessage(JSON.stringify(message));
+  window.aetherDesktop = Object.freeze({ sso: () => post({ type: 'sso' }) });
   document.addEventListener('fullscreenchange', () => post({ type: 'fullscreen', on: Boolean(document.fullscreenElement) }));
+  const editable = target => target instanceof Element && Boolean(target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]'));
   window.addEventListener('keydown', event => {
     if (event.key === 'F11') { event.preventDefault(); post({ type: 'toggle-fullscreen' }); }
     else if (event.ctrlKey && event.shiftKey && event.code === 'KeyS') { event.preventDefault(); post({ type: 'change-server' }); }
+    else if (event.key === 'F5') { event.preventDefault(); location.reload(); }
   }, true);
+  window.addEventListener('contextmenu', event => { if (!editable(event.target)) event.preventDefault(); }, true);
+  window.addEventListener('dragstart', event => { if (!editable(event.target)) event.preventDefault(); }, true);
+  window.addEventListener('wheel', event => { if (event.ctrlKey) event.preventDefault(); }, { capture: true, passive: false });
+  try {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync('html{-webkit-user-select:none;user-select:none}input,textarea,[contenteditable],p,pre,code,.selectable{-webkit-user-select:text;user-select:text}img,a{-webkit-user-drag:none}');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+  } catch { /* an older engine keeps the page's own behaviour */ }
+  // Once a day while the application is used: 30 more days for the session.
+  const extend = async () => {
+    if (!location.pathname.startsWith('/app')) return;
+    try {
+      const key = 'aether-desktop-session-extended';
+      if (Date.now() - Number(localStorage.getItem(key) || 0) < 86400000) return;
+      const me = await fetch('/api/v1/auth/me', { credentials: 'same-origin', cache: 'no-store' });
+      if (!me.ok) return;
+      const { csrfToken } = await me.json();
+      const done = await fetch('/api/v1/auth/session/extend', { method: 'POST', credentials: 'same-origin', headers: { 'x-csrf-token': csrfToken } });
+      if (done.ok) localStorage.setItem(key, String(Date.now()));
+    } catch { /* offline: next launch */ }
+  };
+  window.addEventListener('load', extend, { once: true });
 })();"#;
 
 /// Address of the local page. WebView2 maps a custom protocol to
@@ -57,6 +87,10 @@ pub enum Request {
     ChangeServer,
     Fullscreen(bool),
     ToggleFullscreen,
+    /// Single sign-on in the computer's browser, asked by the sign-in page.
+    Sso,
+    /// The server cannot be reached: open what was downloaded from it.
+    Offline,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +108,8 @@ enum Message {
         on: bool,
     },
     ToggleFullscreen,
+    Sso,
+    Offline,
 }
 
 /// Reads a message posted by the page at `page_url`; `None` for anything
@@ -89,6 +125,10 @@ pub fn request(body: &str, page_url: &str) -> Option<Request> {
         Message::ChangeServer => Some(Request::ChangeServer),
         Message::Fullscreen { on } => Some(Request::Fullscreen(on)),
         Message::ToggleFullscreen => Some(Request::ToggleFullscreen),
+        Message::Sso if !from_shell => Some(Request::Sso),
+        Message::Sso => None,
+        Message::Offline if from_shell => Some(Request::Offline),
+        Message::Offline => None,
     }
 }
 
@@ -99,6 +139,35 @@ pub struct State {
     /// `empty`, `invalid`, `not-aether`, `unreachable` or `timeout`.
     pub error: Option<String>,
     pub checking: bool,
+    /// The server opened before cannot be reached: its downloads are offered.
+    pub offline: bool,
+}
+
+/// The script, run in the sign-in page of the Core, that redeems the one-time
+/// code of a single sign-on for the session cookie and opens the interface.
+/// `None` unless both values are what the application itself produced.
+pub fn sso_script(code: &str, verifier: &str) -> Option<String> {
+    if !crate::sso::is_hex64(code) || !crate::sso::is_hex64(verifier) {
+        return None;
+    }
+    Some(format!(
+        "fetch('/api/v1/auth/oidc/app/token',{{method:'POST',credentials:'same-origin',cache:'no-store',         headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{code:'{code}',verifier:'{verifier}'}})}})         .then(r=>location.replace(r.ok?'/app/':'/app/login?error=oidc_invalid_response'),         ()=>location.replace('/app/login?error=oidc_provider_unavailable'));"
+    ))
+}
+
+/// The sign-in page of the Core, with the reason a single sign-on was refused.
+pub fn sso_refused_script(reason: &str) -> Option<String> {
+    crate::sso::is_error_code(reason)
+        .then(|| format!("location.replace('/app/login?error={reason}');"))
+}
+
+/// Whether `page` belongs to `server` (the interface of the Core in use).
+pub fn is_page_of(page: &str, server: &str) -> bool {
+    let server = server.trim_end_matches('/');
+    page.len() > server.len()
+        && page.is_char_boundary(server.len())
+        && page[..server.len()].eq_ignore_ascii_case(server)
+        && page[server.len()..].starts_with('/')
 }
 
 impl State {
@@ -186,8 +255,45 @@ mod tests {
             request(r#"{"type":"change-server"}"#, remote),
             Some(Request::ChangeServer)
         );
+        assert_eq!(request(r#"{"type":"sso"}"#, remote), Some(Request::Sso));
+        assert_eq!(request(r#"{"type":"sso"}"#, &url(false)), None);
+        assert_eq!(request(r#"{"type":"offline"}"#, remote), None);
+        assert_eq!(
+            request(r#"{"type":"offline"}"#, &url(false)),
+            Some(Request::Offline)
+        );
         assert_eq!(request(r#"{"type":"run","command":"calc"}"#, remote), None);
         assert_eq!(request("not json", remote), None);
+    }
+
+    #[test]
+    fn single_sign_on_only_runs_what_the_application_produced() {
+        let (code, verifier) = ("0a".repeat(32), "b1".repeat(32));
+        let script = sso_script(&code, &verifier).unwrap();
+        assert!(script.contains(&format!("code:'{code}',verifier:'{verifier}'")));
+        assert_eq!(sso_script("');alert(1);//", &verifier), None);
+        assert_eq!(sso_script(&code, "short"), None);
+        assert_eq!(
+            sso_refused_script("oidc_group_denied").as_deref(),
+            Some("location.replace('/app/login?error=oidc_group_denied');")
+        );
+        assert_eq!(sso_refused_script("');alert(1);//"), None);
+        assert!(is_page_of(
+            "https://media.example/app/login",
+            "https://media.example"
+        ));
+        assert!(is_page_of(
+            "https://media.example/app/",
+            "https://Media.Example/"
+        ));
+        assert!(!is_page_of(
+            "https://media.example.evil.test/app/",
+            "https://media.example"
+        ));
+        assert!(!is_page_of(
+            "http://aether.localhost/",
+            "https://media.example"
+        ));
     }
 
     #[test]
@@ -196,6 +302,7 @@ mod tests {
             server: Some("https://a.example\"</script>".into()),
             error: Some("invalid".into()),
             checking: false,
+            offline: false,
         };
         let script = state.script();
         assert!(script.contains(r#"\"</script>"#));

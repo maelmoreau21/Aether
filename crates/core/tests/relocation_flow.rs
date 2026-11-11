@@ -1,12 +1,12 @@
 //! Renamed / moved films keep their work; ambiguous or cross-library cases never merge anything.
 //! Synthetic staged scans only (no media fixtures): the Core decides from what Nodes report.
 
-use media_contracts::media::FilmMetadata;
-use media_poc::{
+use aether_core::{
     database::{query, query_scalar},
     identity::IdentityStore,
     inventory::{InventoryBatch, NfoOutcome, ScannedFile, publish_staged_scan, stage_batch},
 };
+use media_contracts::media::FilmMetadata;
 use std::{collections::BTreeMap, path::Path};
 
 const FP_A: &str = "b3s1:1000:00112233445566778899aabbccddeeff";

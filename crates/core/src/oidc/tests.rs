@@ -224,12 +224,187 @@ fn session_cookie(r: &Response) -> String {
         .get_all(header::SET_COOKIE)
         .iter()
         .filter_map(|h| h.to_str().ok())
-        .find(|v| v.starts_with("media_session="))
+        .find(|v| v.starts_with("aether_session="))
         .unwrap()
         .split(';')
         .next()
         .unwrap()
         .to_owned()
+}
+/// A request as a native application or the system browser sends it: no `Origin`.
+async fn bare(
+    s: &Oidc,
+    path: &str,
+    method: &str,
+    cookie: &str,
+    data: serde_json::Value,
+) -> Response {
+    routes(s.clone())
+        .merge(auth::router(s.auth.clone()))
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .method(method)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::USER_AGENT, "Aether test phone")
+                .body(Body::from(data.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
+/// Starts the application flow in the "browser"; returns its flow cookie and state.
+async fn app_begin(f: &Fixture, challenge: &str, redirect: &str) -> (String, String) {
+    let r = bare(
+        &f.s,
+        &format!("/api/v1/auth/oidc/app/start?challenge={challenge}&redirect={redirect}"),
+        "GET",
+        "",
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let cookie = r.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let url = Url::parse(r.headers()[header::LOCATION].to_str().unwrap()).unwrap();
+    let pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+    let now = jsonwebtoken::get_current_timestamp();
+    *f.provider.claims.lock().unwrap() = serde_json::json!({"iss":f.provider.issuer,"sub":"subject-1","aud":"client","iat":now,"exp":now+300,"nonce":pairs["nonce"],"groups":["media-users"]});
+    (cookie, pairs["state"].clone())
+}
+#[tokio::test]
+async fn oidc_application_flow_hands_a_one_time_code_to_the_application_only() {
+    let f = fixture().await;
+    let verifier = auth::random_token();
+    let challenge = auth::hash(&verifier);
+
+    // Only the application's own scheme or a loopback port may receive the code.
+    for redirect in [
+        "https://evil.example/sso",
+        "http://127.0.0.1:80/sso",
+        "http://127.0.0.1:4000/other",
+        "aether://sso/extra",
+    ] {
+        let r = bare(
+            &f.s,
+            &format!("/api/v1/auth/oidc/app/start?challenge={challenge}&redirect={redirect}"),
+            "GET",
+            "",
+            serde_json::Value::Null,
+        )
+        .await;
+        assert_eq!(r.status(), StatusCode::BAD_REQUEST, "{redirect}");
+    }
+
+    // Phone: the browser ends on a page that returns to the application, without a session.
+    let (cookie, state) = app_begin(&f, &challenge, "aether://sso").await;
+    let r = finish(&f, &cookie, &state).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(
+        !r.headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .any(|v| v.to_str().unwrap().starts_with("aether_session=")),
+    );
+    let page =
+        String::from_utf8(r.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    let code = page
+        .split("aether://sso?code=")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert_eq!(code.len(), 64);
+    let sessions = || async {
+        crate::database::query_scalar::<_, i64>("SELECT count(*) FROM sessions")
+            .fetch_one(&f.s.auth.store.pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(sessions().await, 0);
+
+    // A wrong verifier gets nothing and burns the code.
+    let token = |code: &str, verifier: &str| serde_json::json!({"code":code,"verifier":verifier,"tokenType":"bearer"});
+    let r = bare(
+        &f.s,
+        "/api/v1/auth/oidc/app/token",
+        "POST",
+        "",
+        token(&code, &auth::random_token()),
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    let r = bare(
+        &f.s,
+        "/api/v1/auth/oidc/app/token",
+        "POST",
+        "",
+        token(&code, &verifier),
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(sessions().await, 0);
+
+    // Desktop: a loopback redirect, then the device token for the right verifier, once.
+    let (cookie, state) = app_begin(&f, &challenge, "http://127.0.0.1:49152/sso").await;
+    let r = finish(&f, &cookie, &state).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    let location = r.headers()[header::LOCATION].to_str().unwrap().to_owned();
+    let code = location
+        .strip_prefix("http://127.0.0.1:49152/sso?code=")
+        .unwrap()
+        .to_owned();
+    let r = bare(
+        &f.s,
+        "/api/v1/auth/oidc/app/token",
+        "POST",
+        "",
+        token(&code, &verifier),
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::OK);
+    assert!(r.headers().get(header::SET_COOKIE).is_none());
+    let granted = body(r).await;
+    assert_eq!(granted["tokenType"], "bearer");
+    assert_eq!(granted["accessToken"].as_str().unwrap().len(), 64);
+    let label: String = crate::database::query_scalar("SELECT device_label FROM sessions")
+        .fetch_one(&f.s.auth.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(label, "Aether test phone");
+    let r = bare(
+        &f.s,
+        "/api/v1/auth/oidc/app/token",
+        "POST",
+        "",
+        token(&code, &verifier),
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(sessions().await, 1);
+
+    // A refusal by the provider comes back to the application as a reason, not a code.
+    let (cookie, state) = app_begin(&f, &challenge, "http://127.0.0.1:49152/sso").await;
+    let r = bare(
+        &f.s,
+        &format!("/api/v1/auth/oidc/callback?state={state}&error=access_denied"),
+        "GET",
+        &cookie,
+        serde_json::Value::Null,
+    )
+    .await;
+    assert_eq!(
+        r.headers()[header::LOCATION],
+        "http://127.0.0.1:49152/sso?error=oidc_invalid_response"
+    );
 }
 #[tokio::test]
 async fn oidc_sessions_rotation_roles_disabled_email_collision_and_local_regression() {

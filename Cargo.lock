@@ -12,9 +12,10 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 name = "aether-client"
 version = "0.1.0"
 dependencies = [
+ "aether-core",
  "axum",
- "media-poc",
  "reqwest",
+ "ring",
  "rustls",
  "serde",
  "serde_json",
@@ -33,6 +34,51 @@ dependencies = [
  "aether-client",
  "thiserror 2.0.21",
  "uniffi",
+]
+
+[[package]]
+name = "aether-core"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "base64 0.23.1",
+ "bytes",
+ "flate2",
+ "futures-util",
+ "http-body-util",
+ "httpdate",
+ "hyper",
+ "hyper-util",
+ "image",
+ "jiff",
+ "jsonwebtoken",
+ "lettre",
+ "media-contracts",
+ "media-extension-sdk",
+ "media-node",
+ "qrcode",
+ "quick-xml",
+ "reqwest",
+ "ring",
+ "rpassword",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "socket2",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.21",
+ "time",
+ "tokio",
+ "tokio-tungstenite 0.30.0",
+ "tower",
+ "tower-http 0.7.1",
+ "url",
+ "uuid",
+ "wasmi",
+ "wat",
+ "zeroize",
 ]
 
 [[package]]
@@ -2345,51 +2391,6 @@ dependencies = [
  "url",
  "uuid",
  "webp",
-]
-
-[[package]]
-name = "media-poc"
-version = "0.1.0"
-dependencies = [
- "argon2",
- "axum",
- "base64 0.23.1",
- "bytes",
- "flate2",
- "futures-util",
- "http-body-util",
- "httpdate",
- "hyper",
- "hyper-util",
- "image",
- "jiff",
- "jsonwebtoken",
- "lettre",
- "media-contracts",
- "media-extension-sdk",
- "media-node",
- "qrcode",
- "quick-xml",
- "reqwest",
- "ring",
- "rpassword",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "socket2",
- "sqlx",
- "tempfile",
- "thiserror 2.0.21",
- "time",
- "tokio",
- "tokio-tungstenite 0.30.0",
- "tower",
- "tower-http 0.7.1",
- "url",
- "uuid",
- "wasmi",
- "wat",
- "zeroize",
 ]
 
 [[package]]

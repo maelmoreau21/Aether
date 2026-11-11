@@ -12,6 +12,39 @@ pub struct Settings {
     /// The Core opened at start-up.
     #[serde(default)]
     pub server: Option<String>,
+    /// The window as it was left.
+    #[serde(default)]
+    pub window: Option<WindowState>,
+}
+
+/// Size (logical pixels) of the window when it is not maximized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowState {
+    pub width: u32,
+    pub height: u32,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 800,
+            maximized: false,
+        }
+    }
+}
+
+impl WindowState {
+    /// A size the window can really take, whatever the file says.
+    pub fn size(self) -> (f64, f64) {
+        (
+            f64::from(self.width.clamp(480, 7680)),
+            f64::from(self.height.clamp(480, 4320)),
+        )
+    }
 }
 
 impl Settings {
@@ -67,6 +100,12 @@ pub fn normalize_server(input: &str) -> String {
     }
 }
 
+/// What was downloaded from a Core, readable without it (the web interface
+/// keeps this page and the encrypted media in the web engine's storage).
+pub fn downloads_url(server: &str) -> String {
+    format!("{}downloads/", app_url(server))
+}
+
 /// The web interface of a Core.
 pub fn app_url(server: &str) -> String {
     format!("{}/app/", server.trim_end_matches('/'))
@@ -89,11 +128,23 @@ mod tests {
     fn settings_round_trip() {
         let dir = std::env::temp_dir().join(format!("aether-desktop-{}", std::process::id()));
         assert_eq!(Settings::load(&dir), Settings::default());
-        let settings = Settings {
+        let mut settings = Settings {
             server: Some("https://media.example".into()),
+            window: Some(WindowState {
+                width: 1600,
+                height: 900,
+                maximized: true,
+            }),
         };
         settings.save(&dir).unwrap();
         assert_eq!(Settings::load(&dir), settings);
+        settings.window = None;
+        let tiny = WindowState {
+            width: 1,
+            height: 99999,
+            maximized: false,
+        };
+        assert_eq!(tiny.size(), (480.0, 4320.0));
         // A file written by an earlier version keeps working.
         std::fs::write(
             dir.join(SETTINGS_FILE),

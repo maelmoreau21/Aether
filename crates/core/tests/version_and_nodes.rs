@@ -1,15 +1,15 @@
-use axum::{
-    body::Body,
-    http::{Request, StatusCode},
-};
-use media_contracts::protocol::{HeartbeatPayload, PROTOCOL_VERSION};
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     identity::IdentityStore,
     node::Inventory,
     nodes::{load_admin_nodes, load_node, router},
     secure_app,
 };
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
+use media_contracts::protocol::{HeartbeatPayload, PROTOCOL_VERSION};
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -84,7 +84,7 @@ async fn test_nodes_version_tracking_local_and_remote() {
     // 2. Insert a remote node with an initial version (e.g. 0.0.9)
     let shared_secret = media_contracts::protocol::random_secret_hex();
     let now = media_contracts::protocol::unix_now();
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO media_nodes(id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version)
          VALUES('remote-node-1', 'NAS Remote 1', 'remote', 'http://127.0.0.1:4101', NULL, 'connected', 'k1', ?, '[]', ?, ?, NULL, '0.0.9')",
     )

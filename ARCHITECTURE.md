@@ -39,7 +39,7 @@ Contrat, quotas et limites multi-Core : [EXTENSION_STORAGE.md](docs/EXTENSION_ST
 
 Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
 workspace Rust en trois crates (`crates/core`, `crates/node`, `crates/shared`),
-aucune dépendance de `media-node` vers `media-poc` ou `sqlx`, et confinement +
+aucune dépendance de `media-node` vers `aether-core` ou `sqlx`, et confinement +
 streaming/lecture de descripteurs ouverts (`OpenedFile`) sans réouverture par chemin
 (`openat2` sous Linux / `FILE_FLAG_OPEN_REPARSE_POINT` et vérification d'identité de
 handle sous Windows).

@@ -12,8 +12,9 @@
     <string name="welcome_desc">Connectez-vous pour retrouver vos films, séries et votre progression.</string>
     <string name="or_local">ou avec un identifiant local</string>
     <string name="signing_in">Connexion en cours…</string>
-    <string name="sso_wait">Terminez la connexion dans votre navigateur avec votre compte, puis validez ce téléphone.</string>
-    <string name="sso_opening">Ouverture du navigateur…</string>
+    <string name="sso_wait">Terminez la connexion dans votre navigateur : vous reviendrez ici automatiquement.</string>
+    <string name="sso_refused">La connexion a été refusée ou annulée. Réessayez.</string>
+    <string name="sso_no_browser">Aucun navigateur sur cet appareil. Utilisez Quick Connect depuis un appareil déjà connecté.</string>
     <string name="sso_reopen">Rouvrir le navigateur</string>
     <string name="waiting_confirmation">En attente de votre confirmation…</string>
     <string name="qc_title">Avec un appareil déjà connecté</string>
@@ -39,6 +40,11 @@
     <string name="series">Séries</string>
     <string name="empty">Aucun titre</string>
     <string name="sign_out">Se déconnecter</string>
+    <string name="accounts">Comptes</string>
+    <string name="accounts_hint">Plusieurs comptes peuvent rester connectés sur cet appareil : touchez un compte pour l’utiliser, sans vous reconnecter.</string>
+    <string name="accounts_active">Actif</string>
+    <string name="accounts_add">Ajouter un compte</string>
+    <string name="accounts_known">Comptes déjà connectés sur cet appareil</string>
     <string name="error_credentials">Identifiant ou mot de passe incorrect</string>
     <string name="update_available">Une nouvelle version d’Aether est disponible (%1$s) : cette application est plus ancienne que votre serveur.</string>
     <string name="update_download">Télécharger</string>

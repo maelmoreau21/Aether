@@ -49,7 +49,7 @@ lecture Opus, pause/seek, Range exact, suppression durable et reconnexion.
 L’analyseur Web Audio contrôle aussi le PCM du signal synthétique 440 Hz ; ce
 n’est pas une preuve sur des haut-parleurs physiques. Ce test utilise un
 serveur HTTP de test ; le service statique Core est vérifié séparément par
-`cargo test --locked -p media-poc --test static_web -j 1 -- --test-threads=1`.
+`cargo test --locked -p aether-core --test static_web -j 1 -- --test-threads=1`.
 L’installation réelle desktop/iOS/Android et le NAS HTTPS ne sont pas validés.
 
 Référence : [service workers SvelteKit](https://svelte.dev/docs/kit/service-workers).

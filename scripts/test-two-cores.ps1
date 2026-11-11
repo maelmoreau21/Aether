@@ -27,7 +27,7 @@ try {
     $env:MEDIA_DB_URL = "postgresql://postgres:${password}@127.0.0.1:$($Matches[1])/media_test?sslmode=disable"
     $env:POSTGRES_PASSWORD = $null
     $binary = Join-Path (Split-Path -Parent $PSScriptRoot) 'target/debug/aether-core.exe'
-    & cargo build --locked -p media-poc --bin aether-core -j 1
+    & cargo build --locked -p aether-core --bin aether-core -j 1
     if ($LASTEXITCODE -ne 0) { throw 'Could not build Core.' }
     $startup = [System.Diagnostics.Stopwatch]::StartNew()
     for ($i = 1; $i -le 2; $i++) {

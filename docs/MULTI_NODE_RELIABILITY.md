@@ -257,7 +257,7 @@ sélection, le RSS, le temps de reprise d'un scan et le compteur de relais sont 
 | `chapter_images_remote`, `healthcheck_resilience` | non rejoués avant | verts |
 | `distributed_multi_node`, `node_enrollment_and_relay` | échec ligne 923 / 484 (`unsupported_preparation`) | **même échec, mêmes lignes** |
 | `media-node` lib | 34 échecs (`mp4_audio`…, encodeurs externes) | **mêmes 34** (liste comparée) |
-| `media-poc` lib | non comptée avant | 294 verts, dont 19 nouveaux |
+| `aether-core` lib | non comptée avant | 294 verts, dont 19 nouveaux |
 | `media-contracts` lib | non comptée avant | 15 verts, dont 2 nouveaux |
 | `apps/web` : tests du lecteur | non rejoués avant | 173 verts ; `svelte-check` : 1 erreur préexistante (`format.test.ts`, types Node) |
 
@@ -271,10 +271,10 @@ Fixtures synthétiques (`scripts/generate-fixtures.ps1`) et `ffmpeg` requis ; si
 s'annoncent ignorés et rendent la main.
 
 ```bash
-cargo test -p media-poc --test multi_node_reliability -- --test-threads=1 --nocapture
+cargo test -p aether-core --test multi_node_reliability -- --test-threads=1 --nocapture
 # scénario de scan (~2 min)
-cargo test -p media-poc --test multi_node_reliability -- --test-threads=1 --ignored --nocapture
-cargo test -p media-poc --lib nodes::channel nodes::registry inventory::equivalence
+cargo test -p aether-core --test multi_node_reliability -- --test-threads=1 --ignored --nocapture
+cargo test -p aether-core --lib nodes::channel nodes::registry inventory::equivalence
 cargo test -p media-contracts command_
 ```
 

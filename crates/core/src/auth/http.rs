@@ -4,7 +4,7 @@ use super::{
     state::{AuthState, AuthUser, Authenticated},
     util::{
         ABSOLUTE_SECONDS, COOKIE, IDLE_SECONDS, TokenType, constant_equal, device_label,
-        extract_client_key, hash, random_token,
+        extract_client_key, hash, random_token, session_token,
     },
 };
 use crate::identity::IdentityError;
@@ -66,6 +66,7 @@ struct IdentityResponse {
 pub fn router(state: AuthState) -> Router {
     Router::new()
         .merge(super::quick_connect::router())
+        .merge(super::accounts::router())
         .merge(super::mfa::router())
         .merge(super::passkey::router())
         .route("/api/v1/auth/bootstrap/status", get(bootstrap_status))
@@ -74,6 +75,7 @@ pub fn router(state: AuthState) -> Router {
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/token/refresh", post(refresh))
+        .route("/api/v1/auth/session/extend", post(extend))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(state)
 }
@@ -378,6 +380,51 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response 
     if !identity.bearer
         && let Ok(cookie) = HeaderValue::from_str(&state.cookie("", 0))
     {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
+}
+/// Keeps a cookie session signed in while it is used: 30 more days from now,
+/// for an application that shows the web interface (the idle limit still ends
+/// a session nobody opens). Native applications rotate with `token/refresh`.
+async fn extend(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+    let identity = match state.authenticate(&headers).await {
+        Ok(i) => i,
+        Err(s) => return failure(s, "authentication_required"),
+    };
+    if identity.bearer {
+        return failure(StatusCode::BAD_REQUEST, "cookie_required");
+    }
+    if let Err(s) = state.require_csrf(&headers, &identity) {
+        return failure(s, "forbidden");
+    }
+    let Some(raw) = session_token(&headers) else {
+        return failure(StatusCode::UNAUTHORIZED, "authentication_required");
+    };
+    let extended = crate::database::query(
+        "UPDATE sessions SET expires_at=unixepoch()+? WHERE token_hash=? AND expires_at>unixepoch()",
+    )
+    .bind(ABSOLUTE_SECONDS)
+    .bind(&identity.token_hash)
+    .execute(&state.store.pool)
+    .await;
+    match extended {
+        Ok(done) if done.rows_affected() == 1 => {}
+        Ok(_) => return failure(StatusCode::UNAUTHORIZED, "authentication_required"),
+        Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+    }
+    // The accounts parked on the same browser stay signed in with it.
+    for parked in super::accounts::parked(&headers) {
+        let _ = crate::database::query(
+            "UPDATE sessions SET expires_at=unixepoch()+? WHERE token_hash=? AND expires_at>unixepoch()",
+        )
+        .bind(ABSOLUTE_SECONDS)
+        .bind(hash(&parked))
+        .execute(&state.store.pool)
+        .await;
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if let Ok(cookie) = HeaderValue::from_str(&state.cookie(raw, ABSOLUTE_SECONDS)) {
         response.headers_mut().insert(header::SET_COOKIE, cookie);
     }
     response

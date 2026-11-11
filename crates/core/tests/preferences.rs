@@ -1,3 +1,4 @@
+use aether_core::{auth::AuthState, identity::IdentityStore, preferences};
 use axum::{
     Router,
     body::Body,
@@ -5,7 +6,6 @@ use axum::{
     response::Response,
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, preferences};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -41,13 +41,13 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
         .as_secs() as i64;
     let mut sessions = vec![];
     for (id, raw) in [("first", "a".repeat(64)), ("second", "b".repeat(64))] {
-        media_poc::database::query("INSERT INTO users(id,role) VALUES(?,'user')")
+        aether_core::database::query("INSERT INTO users(id,role) VALUES(?,'user')")
             .bind(id)
             .execute(store.pool())
             .await
             .unwrap();
         let hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
-        media_poc::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)")
+        aether_core::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)")
             .bind(hash)
             .bind(id)
             .bind(now)
@@ -57,7 +57,7 @@ async fn preferences_are_account_owned_csrf_protected_bounded_and_persistent() {
             .await
             .unwrap();
         sessions.push((
-            format!("media_session={raw}"),
+            format!("aether_session={raw}"),
             format!("{:x}", Sha256::digest(format!("csrf:{raw}").as_bytes())),
         ));
     }

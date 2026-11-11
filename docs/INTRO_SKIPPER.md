@@ -261,5 +261,5 @@ FFmpeg ni un module Wasm réel et ne mesure pas la précision acoustique.
 - **Tests unitaires et intégration** :
   - `Aether-Plugins-IntroSkipper` : 15/15 tests `intro_skipper_tests.rs` + 1/1 benchmark passés.
   - `media-node` : 96/96 tests passés.
-  - `media-poc` : 138/138 tests unitaires passés + 16/16 tests d'intégration `automation_flow` passés.
+  - `aether-core` : 138/138 tests unitaires passés + 16/16 tests d'intégration `automation_flow` passés.
   - Frontend `apps/web` : `svelte-check` 0 erreur, 0 avertissement.

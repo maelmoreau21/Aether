@@ -2,13 +2,13 @@
 use super::{
     config::endpoint,
     error::{Error, db, deny, invalid},
-    types::{Callback, Flow, Oidc, Tokens},
+    types::{AppStart, AppToken, Callback, Flow, Oidc, SignIn, Tokens},
 };
 use crate::auth;
 use axum::{
     Json,
     http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
 };
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest, Sha256};
@@ -18,10 +18,22 @@ impl Oidc {
         &self,
         headers: &HeaderMap,
         link_session: Option<String>,
+        app: Option<AppStart>,
     ) -> Result<Response, Error> {
-        self.auth
-            .check_origin(headers)
-            .map_err(|s| deny(s, "forbidden"))?;
+        // The web interface starts from its own origin. A native application
+        // opens the system browser instead: nothing but a one-time code bound
+        // to its own verifier ever comes out of that flow.
+        match &app {
+            None => self
+                .auth
+                .check_origin(headers)
+                .map_err(|s| deny(s, "forbidden"))?,
+            Some(app) => {
+                if !is_hex64(&app.challenge) || !is_app_redirect(&app.redirect) {
+                    return Err(deny(StatusCode::BAD_REQUEST, "invalid_request"));
+                }
+            }
+        }
         let _permit = self
             .workers
             .try_acquire()
@@ -60,7 +72,18 @@ impl Oidc {
             ("code_challenge", &challenge),
             ("code_challenge_method", "S256"),
         ]);
-        let mut response = Json(serde_json::json!({"url":url.as_str()})).into_response();
+        let mut response = match app {
+            None => Json(serde_json::json!({"url":url.as_str()})).into_response(),
+            Some(app) => {
+                crate::database::query("DELETE FROM oidc_app_grants WHERE expires_at<=unixepoch()")
+                    .execute(&self.auth.store.pool)
+                    .await
+                    .map_err(db)?;
+                crate::database::query("INSERT INTO oidc_app_grants(state_hash,challenge,redirect,expires_at) VALUES(?,?,?,unixepoch()+300)")
+                    .bind(auth::hash(&state)).bind(&app.challenge).bind(&app.redirect).execute(&self.auth.store.pool).await.map_err(db)?;
+                Redirect::to(url.as_str()).into_response()
+            }
+        };
         response.headers_mut().insert(
             header::SET_COOKIE,
             HeaderValue::from_str(&self.flow_cookie(&browser, 300)).map_err(|_| invalid())?,
@@ -70,7 +93,7 @@ impl Oidc {
 
     pub(super) fn flow_cookie(&self, raw: &str, age: u32) -> String {
         format!(
-            "media_oidc_flow={raw}; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age={age}{}",
+            "aether_oidc_flow={raw}; Path=/api/v1/auth/oidc; HttpOnly; SameSite=Lax; Max-Age={age}{}",
             if self.auth.secure { "; Secure" } else { "" }
         )
     }
@@ -80,15 +103,73 @@ impl Oidc {
             .workers
             .try_acquire()
             .map_err(|_| deny(StatusCode::TOO_MANY_REQUESTS, "try_later"))?;
-        let c = self.config()?;
         if q.state.len() != 64 {
             return Err(invalid());
         }
         let browser = flow_token(headers).ok_or_else(invalid)?;
+        let state_hash = auth::hash(&q.state);
         // Atomic consume, bound to browser and deadline, even for provider errors.
         let flow: Flow = crate::database::query_as("DELETE FROM oidc_flows WHERE state_hash=? AND browser_hash=? AND expires_at>unixepoch() RETURNING browser_hash,nonce,verifier,link_session_hash")
-            .bind(auth::hash(&q.state)).bind(auth::hash(browser)).fetch_optional(&self.auth.store.pool).await.map_err(db)?.ok_or_else(invalid)?;
-        if flow.browser_hash != auth::hash(browser) || q.error.is_some() {
+            .bind(&state_hash).bind(auth::hash(browser)).fetch_optional(&self.auth.store.pool).await.map_err(db)?.ok_or_else(invalid)?;
+        if flow.browser_hash != auth::hash(browser) {
+            return Err(invalid());
+        }
+        let app: Option<String> = crate::database::query_scalar("SELECT redirect FROM oidc_app_grants WHERE state_hash=? AND code_hash IS NULL AND expires_at>unixepoch()")
+            .bind(&state_hash).fetch_optional(&self.auth.store.pool).await.map_err(db)?;
+        let outcome = self.sign_in(headers, q, flow, app.is_some()).await;
+        let Some(redirect) = app else {
+            let SignIn::Browser(raw) = outcome? else {
+                return Err(invalid());
+            };
+            // End the cross-site redirect chain on a Core document. A same-origin
+            // external script starts a new navigation so Strict session cookies and
+            // the existing cross-site guards both remain effective on /app/.
+            let mut response = Html(include_str!("complete.html")).into_response();
+            response.headers_mut().append(
+                header::SET_COOKIE,
+                HeaderValue::from_str(&self.auth.cookie(&raw, auth::ABSOLUTE_SECONDS))
+                    .map_err(|_| invalid())?,
+            );
+            return Ok(response);
+        };
+        // Application flow: the browser gets no session, only a one-time code
+        // (or the reason of the refusal) to hand back to the application.
+        match outcome {
+            Ok(SignIn::App(user)) => {
+                let code = auth::random_token();
+                let issued = crate::database::query("UPDATE oidc_app_grants SET code_hash=?, user_id=?, expires_at=unixepoch()+120 WHERE state_hash=? AND code_hash IS NULL")
+                    .bind(auth::hash(&code)).bind(&user).bind(&state_hash).execute(&self.auth.store.pool).await.map_err(db)?;
+                if issued.rows_affected() != 1 {
+                    return Err(invalid());
+                }
+                Ok(app_return(&redirect, "code", &code))
+            }
+            Ok(SignIn::Browser(_)) => Err(invalid()),
+            Err((_, Json(body))) => {
+                let _ = crate::database::query("DELETE FROM oidc_app_grants WHERE state_hash=?")
+                    .bind(&state_hash)
+                    .execute(&self.auth.store.pool)
+                    .await;
+                let code = body["error"]
+                    .as_str()
+                    .filter(|c| c.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+                    .unwrap_or("oidc_invalid_response");
+                Ok(app_return(&redirect, "error", code))
+            }
+        }
+    }
+
+    /// Exchanges the provider's code, validates the identity and resolves the
+    /// local user. The browser flow also opens its session here.
+    async fn sign_in(
+        &self,
+        headers: &HeaderMap,
+        q: Callback,
+        flow: Flow,
+        app: bool,
+    ) -> Result<SignIn, Error> {
+        let c = self.config()?;
+        if q.error.is_some() {
             return Err(invalid());
         }
         let code = q
@@ -165,8 +246,9 @@ impl Oidc {
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
         let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
         let linked_user: Option<String> = if let Some(ref session_hash) = flow.link_session_hash {
-            Some(crate::database::query_scalar("SELECT s.user_id FROM sessions s JOIN users u ON u.id=s.user_id JOIN local_credentials c ON c.user_id=u.id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800 AND u.disabled_at IS NULL")
-                .bind(session_hash).fetch_optional(&mut *tx).await.map_err(db)?
+            Some(crate::database::query_scalar(
+                "SELECT s.user_id FROM sessions s                  JOIN users u ON u.id=s.user_id                  JOIN local_credentials c ON c.user_id=u.id                  WHERE s.token_hash=? AND s.expires_at>unixepoch()                  AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
+                .bind(session_hash).bind(crate::auth::IDLE_SECONDS).fetch_optional(&mut *tx).await.map_err(db)?
                 .ok_or_else(|| deny(StatusCode::UNAUTHORIZED,"link_session_expired"))?)
         } else {
             None
@@ -267,6 +349,22 @@ impl Oidc {
                 id
             }
         };
+        if app {
+            let active: i64 = crate::database::query_scalar("SELECT CAST(EXISTS(SELECT 1 FROM users WHERE id=? AND disabled_at IS NULL) AS INTEGER)")
+                .bind(&user).fetch_one(&mut *tx).await.map_err(db)?;
+            if active == 0 {
+                return Err(deny(StatusCode::FORBIDDEN, "oidc_account_disabled"));
+            }
+            tx.commit().await.map_err(db)?;
+            drop(conn);
+            if crate::extensions::collections::assign_new_user(&self.auth, &user)
+                .await
+                .is_err()
+            {
+                eprintln!("Automatic avatar assignment failed");
+            }
+            return Ok(SignIn::App(user));
+        }
         let raw = auth::random_token();
         let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+2592000 FROM users WHERE id=? AND disabled_at IS NULL").bind(auth::hash(&raw)).bind(&user).execute(&mut *tx).await.map_err(db)?;
         crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
@@ -294,16 +392,37 @@ impl Oidc {
         {
             eprintln!("Automatic avatar assignment failed");
         }
-        // End the cross-site redirect chain on a Core document. A same-origin
-        // external script starts a new navigation so Strict session cookies and
-        // the existing cross-site guards both remain effective on /app/.
-        let mut response = Html(include_str!("complete.html")).into_response();
-        response.headers_mut().append(
-            header::SET_COOKIE,
-            HeaderValue::from_str(&self.auth.cookie(&raw, auth::ABSOLUTE_SECONDS))
-                .map_err(|_| invalid())?,
-        );
-        Ok(response)
+        Ok(SignIn::Browser(raw))
+    }
+
+    /// The application redeems its one-time code with the verifier only it
+    /// knows, for a device token (or a cookie, for an application that shows
+    /// the web interface).
+    pub(super) async fn redeem(
+        &self,
+        headers: &HeaderMap,
+        input: AppToken,
+    ) -> Result<Response, Error> {
+        let bearer = input.token_type == "bearer";
+        if bearer {
+            self.auth.check_origin_or_native(headers)
+        } else {
+            self.auth.check_origin(headers)
+        }
+        .map_err(|s| deny(s, "forbidden"))?;
+        if !is_hex64(&input.code) || !is_hex64(&input.verifier) {
+            return Err(deny(StatusCode::BAD_REQUEST, "invalid_request"));
+        }
+        // Single use: a wrong verifier burns the code.
+        let grant: Option<(String, Option<String>)> = crate::database::query_as("DELETE FROM oidc_app_grants WHERE code_hash=? AND expires_at>unixepoch() RETURNING challenge,user_id")
+            .bind(auth::hash(&input.code)).fetch_optional(&self.auth.store.pool).await.map_err(db)?;
+        let Some((challenge, Some(user))) = grant else {
+            return Err(invalid());
+        };
+        if auth::hash(&input.verifier) != challenge {
+            return Err(invalid());
+        }
+        Ok(auth::issue_session(&self.auth, headers, &user, bearer).await)
     }
 
     pub(super) async fn logout_url(&self) -> Result<Option<String>, Error> {
@@ -318,11 +437,56 @@ impl Oidc {
     }
 }
 
+fn is_hex64(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// Only the application itself can be handed the code: its own scheme on a
+/// phone, a loopback port it listens on for a desktop application.
+fn is_app_redirect(redirect: &str) -> bool {
+    if redirect == "aether://sso" {
+        return true;
+    }
+    redirect
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|rest| rest.strip_suffix("/sso"))
+        .is_some_and(|port| {
+            !port.starts_with('0')
+                && port.bytes().all(|b| b.is_ascii_digit())
+                && port.parse::<u16>().is_ok_and(|p| p >= 1024)
+        })
+}
+
+/// Sends the browser back to the application. A loopback address is a plain
+/// redirect; the application scheme goes through a page, because browsers
+/// refuse to leave for another application without a visible link to fall
+/// back on.
+fn app_return(redirect: &str, key: &str, value: &str) -> Response {
+    let url = format!("{redirect}?{key}={value}");
+    if redirect.starts_with("http://") {
+        return Redirect::to(&url).into_response();
+    }
+    let title = if key == "code" {
+        "Connexion réussie"
+    } else {
+        "Connexion refusée"
+    };
+    Html(
+        include_str!("app_return.html")
+            .replace("{title}", title)
+            .replace("{url}", &url),
+    )
+    .into_response()
+}
+
 fn flow_token(headers: &HeaderMap) -> Option<&str> {
     let mut found = None;
     for h in headers.get_all(header::COOKIE) {
         for pair in h.to_str().ok()?.split(';') {
-            if let Some(("media_oidc_flow", v)) = pair.trim().split_once('=') {
+            if let Some(("aether_oidc_flow", v)) = pair.trim().split_once('=') {
                 if found.is_some() || v.len() != 64 || !v.bytes().all(|b| b.is_ascii_hexdigit()) {
                     return None;
                 }

@@ -12,9 +12,19 @@ serveur sans nouvelle installation. Aucun navigateur n'est embarqué.
   `/api/v1/auth/oidc/status`) avant de l'ouvrir. L'adresse est rangée dans
   `settings.json` (`%APPDATA%\Aether`, `~/Library/Application Support/Aether`,
   `~/.config/aether`) ; les lancements suivants ouvrent directement le serveur.
-- Connexion : celle du web (compte local, SSO, passkeys, double
-  authentification). La session est le cookie du web, conservé par le moteur
-  dans le dossier `webview` à côté de `settings.json`.
+- Connexion : celle du web (compte local, passkeys, double authentification).
+  Le bouton SSO ouvre la page du fournisseur dans **le navigateur de
+  l'ordinateur** (ses sessions, son gestionnaire de mots de passe), qui rend
+  la main à l'application par un port local (`http://127.0.0.1:<port>/sso`).
+  La session est le cookie du web, conservé par le moteur dans le dossier
+  `webview` à côté de `settings.json`, et prolongée de 30 jours à chaque jour
+  d'utilisation (`POST /api/v1/auth/session/extend`).
+- Comportement d'application : pas de menu ni de raccourcis de navigateur
+  (recherche, impression, zoom), pas de glisser d'images ou de liens, taille
+  de fenêtre mémorisée. `F5` recharge l'interface.
+- Hors ligne : si le serveur déjà ouvert ne répond pas, la page locale propose
+  « Mes téléchargements hors ligne », qui ouvre la page des téléchargements du
+  web (conservée, avec les médias chiffrés, par le moteur web).
 - Lecture : le lecteur du web. Le Core lit en direct ce que le moteur sait
   décoder et transcode le reste, comme dans un navigateur.
 - Plein écran : celui du lecteur passe la fenêtre en plein écran ; `F11` le

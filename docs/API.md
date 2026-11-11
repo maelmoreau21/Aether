@@ -310,7 +310,7 @@ le séparateur du Node) ainsi que `node.version` et les chemins des pistes audio
 externes. Un compte `user` reçoit le Node, la bibliothèque et la description
 technique sans aucun nom de fichier ni chemin. Ces chemins sont informatifs :
 aucune route n'accepte de chemin en entrée. Test :
-`cargo test -p media-poc --test asset_details`.
+`cargo test -p aether-core --test asset_details`.
 
 ## P2 — contrôle interne de chaque requête directe (17 octobre 2026)
 

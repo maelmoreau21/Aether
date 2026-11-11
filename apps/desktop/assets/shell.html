@@ -27,6 +27,8 @@
   button:hover { background: #d9dde8; }
   button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
   button:disabled { opacity: 0.6; cursor: default; }
+  button.ghost { border: 1px solid var(--line); background: var(--pn); color: var(--tx); }
+  button.ghost:hover { background: var(--pn-2); }
   .notice { padding: 10px 14px; border-radius: 12px; background: var(--err-soft); color: var(--err); font-size: 14px; font-weight: 600; }
   .hint { color: var(--mu-2); font-size: 13px; }
   footer { color: var(--mu-2); font-size: 13px; text-align: center; }
@@ -53,6 +55,7 @@
       <input id="server" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://media.exemple.fr">
     </label>
     <button id="submit" type="submit"></button>
+    <button id="offline" type="button" class="ghost" data-t="offline" hidden></button>
     <div class="hint" data-t="hint"></div>
   </form>
   <footer data-t="footer"></footer>
@@ -61,11 +64,11 @@
   const french = (navigator.language || 'fr').toLowerCase().startsWith('fr');
   const text = french ? {
     tagline: 'Votre cinéma, chez vous', title: 'Votre serveur', intro: 'Indiquez l’adresse de votre serveur Aether : l’application ouvre ensuite son interface.',
-    label: 'Adresse du serveur', go: 'Continuer →', busy: 'Connexion…', hint: 'Pour changer de serveur plus tard : Ctrl + Maj + S.', footer: 'Aether · Votre cinéma, autrement.',
+    label: 'Adresse du serveur', offline: 'Mes téléchargements hors ligne', go: 'Continuer →', busy: 'Connexion…', hint: 'Pour changer de serveur plus tard : Ctrl + Maj + S.', footer: 'Aether · Votre cinéma, autrement.',
     errors: { empty: 'Indiquez l’adresse de votre serveur Aether.', invalid: 'Adresse de serveur invalide.', 'not-aether': 'Cette adresse ne répond pas comme un serveur Aether. Vérifiez l’adresse et le port.', unreachable: 'Serveur injoignable. Vérifiez l’adresse et votre connexion.', timeout: 'Le serveur ne répond pas. Vérifiez l’adresse et votre connexion.' }
   } : {
     tagline: 'Your cinema, at home', title: 'Your server', intro: 'Enter the address of your Aether server: the application then opens its interface.',
-    label: 'Server address', go: 'Continue →', busy: 'Connecting…', hint: 'To change server later: Ctrl + Shift + S.', footer: 'Aether · Your cinema, differently.',
+    label: 'Server address', offline: 'My offline downloads', go: 'Continue →', busy: 'Connecting…', hint: 'To change server later: Ctrl + Shift + S.', footer: 'Aether · Your cinema, differently.',
     errors: { empty: 'Enter the address of your Aether server.', invalid: 'Invalid server address.', 'not-aether': 'This address does not answer like an Aether server. Check the address and the port.', unreachable: 'Server unreachable. Check the address and your connection.', timeout: 'The server does not answer. Check the address and your connection.' }
   };
   for (const node of document.querySelectorAll('[data-t]')) node.textContent = text[node.dataset.t];
@@ -82,6 +85,7 @@
       error.hidden = !state.error;
       error.textContent = state.error ? (text.errors[state.error] || text.errors.unreachable) : '';
       busy(Boolean(state.checking));
+      document.getElementById('offline').hidden = !state.offline;
       if (!state.checking) input.focus();
     }
   };
@@ -92,6 +96,7 @@
     busy(true);
     post({ type: 'connect', server: input.value });
   });
+  document.getElementById('offline').addEventListener('click', () => post({ type: 'offline' }));
   busy(false);
   post({ type: 'ready', change: location.hash === '#change' });
 </script>

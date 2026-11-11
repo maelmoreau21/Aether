@@ -1,4 +1,4 @@
-use media_poc::identity::IdentityStore;
+use aether_core::identity::IdentityStore;
 use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,

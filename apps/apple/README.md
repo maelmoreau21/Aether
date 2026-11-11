@@ -7,6 +7,10 @@ par UniFFI (`crates/client-ffi`), comme l'app Android.
 - Connexion par mot de passe ou par code QR / code approuvé depuis un appareil
   déjà connecté (la voie conseillée sur Apple TV). Sur iPhone et iPad, Réglages
   → « Connecter une TV » approuve le code affiché par une TV.
+- Plusieurs comptes sur un même appareil : Réglages → Comptes liste les comptes
+  connectés, en ajoute un (le compte actif est mis de côté, pas déconnecté) et
+  passe de l'un à l'autre sans se reconnecter ; la page de connexion propose
+  les comptes mis de côté.
 - Jeton d'appareil dans le Trousseau (lisible après le premier déverrouillage,
   jamais synchronisé), renouvelé au retour dans l'app et chaque jour en tâche de
   fond (`BGAppRefreshTask`).

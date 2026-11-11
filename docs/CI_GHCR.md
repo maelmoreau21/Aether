@@ -182,7 +182,7 @@ sélecteur de version expire : il se trouve désormais dans le panneau replié
 affiches ouvrent ce panneau avant de sélectionner une version. Une relance du
 job Linux reste nécessaire pour confirmer l'ensemble du parcours en CI. Le
 scénario scanner ouvre aussi le panneau de suivi avant les contrôles vu/non vu.
-Après reconstruction Web, `cargo test --locked -p media-poc --test
+Après reconstruction Web, `cargo test --locked -p aether-core --test
 browser_scanner -- --ignored --nocapture` réussit sous Windows avec Chrome
 156.0.8078.48, en MP4 puis en MKV après redémarrage. NFO et affiches ne sont
 pas relancés ici.
@@ -295,7 +295,7 @@ première piste n’est pas une garantie de sélection par le navigateur.
 Le test vérifie désormais `internal-default`/`und`, les sources explicites FR/EN
 avec leurs index et canaux, et `en` pour l’original MP4 mono-audio. Les tags bruts
 `fra`/`eng` restent vérifiés. Aucun code de scan ou de lecture n’a été modifié.
-Commande ciblée : `cargo test --locked -p media-poc --all-features --test scanner_flow
+Commande ciblée : `cargo test --locked -p aether-core --all-features --test scanner_flow
 -j 1 -- --test-threads=1` : 1 réussi Windows, ainsi que fmt/diff checks.
 La suite GitHub complète reste à relancer ; aucun push effectué.
 
@@ -314,7 +314,7 @@ canaux restent contrôlés ; aucune assertion de lecture n'est désactivée.
 
 Validation locale : `python scripts/validate-prepared-fixtures.py`, rejet d'un
 répertoire incomplet, parsing YAML et distinction des clés, `cargo fmt --all --check`
-et `cargo test --locked -p media-poc --all-features --test p0 -j 1 -- --test-threads=1`
+et `cargo test --locked -p aether-core --all-features --test p0 -j 1 -- --test-threads=1`
 (11 réussis sous Windows). Le douzième test Linux sur les symlinks n'est pas
 compilé sous Windows. La CI Linux complète reste à relancer ; aucun push effectué.
 

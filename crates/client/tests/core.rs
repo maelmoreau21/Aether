@@ -1,7 +1,7 @@
 //! The client against a real Core served on a loopback port, with a film
 //! library scanned from a generated fixture: what an application does, end to end.
 use aether_client::{CatalogQuery, Client, Error, LoginStep, ProgressUpdate};
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory};
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory};
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
 use zeroize::Zeroizing;
@@ -41,7 +41,7 @@ async fn serve() -> (tempfile::TempDir, String, PathBuf) {
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
     let auth = AuthState::new(store, origin.clone()).await.unwrap();
-    let app = media_poc::secure_app(
+    let app = aether_core::secure_app(
         Inventory::local(media.clone()).await.unwrap(),
         address.port(),
         auth,
@@ -348,7 +348,7 @@ async fn discovery_reads_a_real_core_before_any_sign_in() {
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
     let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
-    let app = media_poc::secure_app(Inventory::local(media).await.unwrap(), address.port(), auth)
+    let app = aether_core::secure_app(Inventory::local(media).await.unwrap(), address.port(), auth)
         .await
         .unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

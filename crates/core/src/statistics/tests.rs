@@ -45,7 +45,7 @@ pub(super) async fn call(
 pub(super) async fn login(auth: &AuthState, user: &str, token: &str) -> (String, String) {
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at,device_label) VALUES(?,?,?,?,?,'Fixture browser')")
         .bind(crate::auth::hash(token)).bind(user).bind(now()).bind(now()).bind(now()+3600).execute(&auth.store.pool).await.unwrap();
-    let cookie = format!("media_session={token}");
+    let cookie = format!("aether_session={token}");
     let mut headers = HeaderMap::new();
     headers.insert(header::COOKIE, cookie.parse().unwrap());
     let csrf = auth.authenticate(&headers).await.unwrap().csrf_token;

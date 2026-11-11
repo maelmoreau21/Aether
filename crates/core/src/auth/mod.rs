@@ -1,12 +1,14 @@
 //! Local authentication. Session secrets never enter the database or application logs.
 //!
 //! Module layout:
+//! - `accounts`: several accounts on one browser, parked beside the active one.
 //! - `touch`: coalesced, batched session activity writes.
 //! - `state`: `AuthState`, identity types and session / CSRF / origin checks.
 //! - `config`: environment-driven authentication configuration.
 //! - `util`: token, cookie, hashing and client-key helpers.
 //! - `http`: REST router and handlers.
 
+mod accounts;
 mod config;
 mod grants;
 mod http;

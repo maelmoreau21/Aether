@@ -577,13 +577,6 @@ async fn content_additions_are_opt_in_deduplicated_and_permission_filtered() {
     let path = temp.path().join("content.sqlite");
     let store = IdentityStore::open(&path).await.unwrap();
     fixture(&store, "content-admin").await;
-    // Simulate an existing installation from before the additive content subscription table.
-    query("DROP TABLE notification_content_preferences")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    store.close().await;
-    let store = IdentityStore::open(&path).await.unwrap();
     content_contract(&store).await;
     store.close().await;
     let store = IdentityStore::open(&path).await.unwrap();

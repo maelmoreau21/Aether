@@ -31,7 +31,7 @@ de transfert et de vérification. Aucun outil de transfert inter-moteurs n'est l
 ## Schémas et transactions
 
 Le schéma neuf SQLite et PostgreSQL vient du seul fichier
-`crates/core/migrations/schema.sql`. Le Core choisit la section correspondant au moteur
+`crates/core/schema/postgres.sql` (et `sqlite.sql` pour SQLite). Le Core choisit le fichier du moteur
 et l'applique dans une transaction uniquement si le schéma est vide. Il ne
 convertit ni ne modifie automatiquement une ancienne base incompatible. La
 table `schema_version` identifie la structure actuelle (version 1) ; si le

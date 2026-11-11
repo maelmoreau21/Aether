@@ -45,8 +45,9 @@ Détails : [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md), [BACKUP_RESTORE.md](BACKUP_REST
   les builds de release (variable `AETHER_CLIENT_VERSION`).
 - HLS par copie pour les lecteurs natifs ([HLS.md](HLS.md)).
 - Images Docker multi-architecture `amd64` et `arm64`.
-- La base est mise à niveau automatiquement au démarrage ([MIGRATIONS.md](MIGRATIONS.md)) :
-  sauvegarder avant, une rétrogradation n'est pas prise en charge.
+- Le schéma 1.0 est le point de départ : il n'y a pas de chaîne de migrations ([MIGRATIONS.md](MIGRATIONS.md)).
+  Une base créée par une bêta antérieure est refusée explicitement : la recréer (sauvegarde puis restauration),
+  une rétrogradation n'est pas prise en charge.
 
 ## Garantie d'API
 

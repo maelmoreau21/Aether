@@ -8,7 +8,7 @@
 use crate::database::{normalize_sql, query};
 use crate::identity::IdentityStore;
 use crate::metadata_locale::{self as ml, Row as TrRow};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use sqlx::{Execute, Row};
 use std::collections::HashMap;
 
@@ -689,82 +689,6 @@ pub async fn localize_seasons(
         }
     }
     Ok(())
-}
-
-/// Move the per-language blob that older versions kept under `translations` in
-/// `editorial_json` / `manual_json` into real rows. Idempotent: running it twice, or
-/// after rows exist, never overwrites a stored row. Nothing is deleted.
-pub async fn backfill_legacy_blobs(
-    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
-) -> Result<u64, sqlx::Error> {
-    let rows = query(
-        "SELECT id, editorial_json, manual_json FROM inventory_works \
-         WHERE editorial_json LIKE '%\"translations\"%' OR manual_json LIKE '%\"translations\"%'",
-    )
-    .fetch_all(&mut **tx)
-    .await?;
-    let mut inserted = 0;
-    for row in rows {
-        let id: String = row.get("id");
-        let mut blobs: Vec<Map<String, Value>> = Vec::new();
-        for column in ["editorial_json", "manual_json"] {
-            if let Some(object) = row
-                .get::<Option<String>, _>(column)
-                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-                .and_then(|value| {
-                    value
-                        .get("translations")
-                        .and_then(Value::as_object)
-                        .cloned()
-                })
-            {
-                blobs.push(object);
-            }
-        }
-        // The manual blob is newer than the editorial one: later entries replace earlier ones.
-        let mut merged: Map<String, Value> = Map::new();
-        for blob in blobs {
-            merged.extend(blob);
-        }
-        for (key, item) in merged {
-            let Some(locale) = ml::normalize(&key) else {
-                continue;
-            };
-            let sql = "INSERT INTO work_translations(work_id,locale,language,source,priority,title,sort_title,overview,tagline,provider_locale,updated_at) \
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(work_id,locale,source) DO NOTHING";
-            let title = clip(
-                &text(&item, "title").or_else(|| text(&item, "name")),
-                MAX_TITLE,
-            );
-            let overview = clip(
-                &text(&item, "overview").or_else(|| text(&item, "plot")),
-                MAX_OVERVIEW,
-            );
-            let tagline = clip(&text(&item, "tagline"), MAX_TITLE);
-            if title.is_none() && overview.is_none() && tagline.is_none() {
-                continue;
-            }
-            inserted += query(sql)
-                .bind(&id)
-                .bind(&locale)
-                .bind(ml::language_of(&locale))
-                .bind(ml::SOURCE_LEGACY)
-                .bind(ml::PRIORITY_LEGACY)
-                .bind(title.clone())
-                .bind(title.as_ref().map(|t| t.to_lowercase()))
-                .bind(overview)
-                .bind(tagline)
-                .bind(Some(key))
-                .bind(0_i64)
-                .execute(&mut **tx)
-                .await?
-                .rows_affected();
-        }
-    }
-    if inserted > 0 {
-        bump_generation(tx).await?;
-    }
-    Ok(inserted)
 }
 
 #[cfg(test)]

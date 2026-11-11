@@ -812,7 +812,7 @@ async fn json_body(response: axum::response::Response) -> Value {
 }
 
 #[tokio::test]
-async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
+async fn default_intervals_become_triggers_and_the_unified_api_manages_them() {
     let temp = tempfile::tempdir().unwrap();
     let (store, _auth, app, cookie, csrf) = admin_app(temp.path()).await;
     let pool = store.pool();
@@ -831,13 +831,6 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
         migrated.contains(&("clean-cache".to_owned(), 1440)),
         "{migrated:?}"
     );
-    // The migration is idempotent and never re-creates a trigger an administrator removed.
-    let mut conn = pool.acquire().await.unwrap();
-    sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
-        .execute(&mut *conn)
-        .await
-        .unwrap();
-    drop(conn);
     let count =
         |sql: &'static str| aether_core::database::query_scalar::<_, i64>(sql).fetch_one(pool);
     let before = count("SELECT COUNT(*) FROM task_triggers").await.unwrap();
@@ -1019,12 +1012,6 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
     .await
     .unwrap();
     assert_eq!(enabled, 0);
-    let mut conn = pool.acquire().await.unwrap();
-    sqlx::raw_sql(include_str!("../migrations/task_triggers.sql"))
-        .execute(&mut *conn)
-        .await
-        .unwrap();
-    drop(conn);
     let remaining: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM task_triggers WHERE task_id='clean-cache'",
     )
@@ -1033,7 +1020,7 @@ async fn legacy_intervals_become_triggers_and_the_unified_api_manages_them() {
     .unwrap();
     assert_eq!(
         remaining, 1,
-        "the migration does not resurrect removed legacy intervals"
+        "a removed default interval is not resurrected"
     );
 
     // Run now, then cancel the queued run.

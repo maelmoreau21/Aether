@@ -1,21 +1,16 @@
-"""Validate the fresh SQLite section of the sole schema source."""
+"""Validate the fresh SQLite schema file (`crates/core/schema/sqlite.sql`)."""
 
 from pathlib import Path
 import sqlite3
 import unittest
 
 
-SCHEMA = Path(__file__).resolve().parents[1] / "crates/core/migrations/schema.sql"
-START = "-- AETHER_SCHEMA_SQLITE_BEGIN"
-END = "-- AETHER_SCHEMA_SQLITE_END"
+SCHEMA = Path(__file__).resolve().parents[1] / "crates/core/schema/sqlite.sql"
 
 
 class FreshSchema(unittest.TestCase):
     def test_sqlite_tables_seeds_and_task_constraints(self):
-        source = SCHEMA.read_text(encoding="utf-8")
-        self.assertEqual(source.count(START), 1)
-        self.assertEqual(source.count(END), 1)
-        schema = source.split(START, 1)[1].split(END, 1)[0]
+        schema = SCHEMA.read_text(encoding="utf-8")
         with sqlite3.connect(":memory:") as connection:
             connection.execute("PRAGMA foreign_keys=ON")
             connection.executescript(schema)

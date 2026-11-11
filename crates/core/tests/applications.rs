@@ -609,33 +609,3 @@ async fn reports_extension_installed_by_an_administrator_accepts_reports() {
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert_eq!(body(response).await["error"], "library_permission_denied");
 }
-
-#[tokio::test]
-async fn startup_repairs_application_extensions_left_without_library_scope() {
-    let _worker = WORKER_TEST.lock().await;
-    let f = fixture().await;
-    install(&f.store, "reports").await;
-    install(&f.store, "requests").await;
-    // Former default: no library at all for application extensions.
-    query("UPDATE extensions SET all_libraries=0")
-        .execute(f.store.pool())
-        .await
-        .unwrap();
-    // An explicit grant list is an administrator decision and must survive.
-    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('media-requests','films')")
-        .execute(f.store.pool())
-        .await
-        .unwrap();
-    let report = json!({"category":"audio","description":"Son désynchronisé","workId":"work-1"});
-    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, report.clone()).await;
-    assert_eq!(body(response).await["error"], "library_permission_denied");
-    let reopened = IdentityStore::open(&f._dir.path().join("applications.sqlite"))
-        .await
-        .unwrap();
-    assert_eq!(all_libraries(&reopened, "media-reports").await, 1);
-    assert_eq!(all_libraries(&reopened, "media-requests").await, 0);
-    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, report).await;
-    let status = response.status();
-    let created = body(response).await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
-}

@@ -177,61 +177,6 @@ async fn role_groups_cover_all_accounts_follow_role_changes_and_cannot_be_overri
     assert_eq!(count, 2);
 }
 
-#[tokio::test]
-async fn role_groups_upgrade_preserves_custom_groups_names_and_permissions() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("upgrade.sqlite");
-    let store = IdentityStore::open(&path).await.unwrap();
-    query("DELETE FROM user_groups WHERE id IN ('builtin-role-user','builtin-role-administrator')")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    query("INSERT INTO users(id,role) VALUES('existing','user')")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    query("INSERT INTO user_groups(id,name,is_default) VALUES('custom','Utilisateurs',0)")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    query("INSERT INTO user_group_members(group_id,user_id) VALUES('custom','existing')")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('existing-library','Existing library','films','local','/media',1)")
-        .execute(store.pool()).await.unwrap();
-    query(
-        "INSERT INTO user_group_libraries(group_id,library_id) VALUES('custom','existing-library')",
-    )
-    .execute(store.pool())
-    .await
-    .unwrap();
-    store.close().await;
-    for _ in 0..2 {
-        let store = IdentityStore::open(&path).await.unwrap();
-        let count: i64 = query_scalar("SELECT count(*) FROM user_groups")
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
-        assert_eq!(count, 3);
-        let name: String = query_scalar("SELECT name FROM user_groups WHERE id='custom'")
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
-        assert_eq!(name, "Utilisateurs");
-        let memberships: i64 = query_scalar(
-            "SELECT count(*) FROM effective_user_group_members WHERE user_id='existing'",
-        )
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-        assert_eq!(memberships, 2);
-        let grants: i64 = query_scalar("SELECT count(*) FROM effective_library_permissions WHERE user_id='existing' AND library_id='existing-library'")
-            .fetch_one(store.pool()).await.unwrap();
-        assert_eq!(grants, 1);
-        store.close().await;
-    }
-}
 async fn req(
     app: &Router,
     path: &str,

@@ -12,7 +12,6 @@ use sqlx::{AnyConnection, Row};
 use std::collections::BTreeSet;
 
 const MAX_TITLE: usize = 1_000;
-const BATCH: i64 = 500;
 
 /// The folding used for `inventory_works.display_title_sort`: trimmed and Unicode-lowercased, so
 /// the same search text matches either column.
@@ -86,29 +85,4 @@ pub async fn refresh(conn: &mut AnyConnection, work_id: &str) -> Result<(), sqlx
             .await?;
     }
     Ok(())
-}
-
-/// Fill the index for every existing work. Safe to run again: `refresh` only writes differences.
-pub async fn backfill(conn: &mut AnyConnection) -> Result<u64, sqlx::Error> {
-    let mut after = String::new();
-    let mut seen = 0;
-    loop {
-        let ids: Vec<String> =
-            query("SELECT id FROM inventory_works WHERE id>? ORDER BY id LIMIT ?")
-                .bind(&after)
-                .bind(BATCH)
-                .fetch_all(&mut *conn)
-                .await?
-                .iter()
-                .map(|row| row.get::<String, _>("id"))
-                .collect();
-        let Some(last) = ids.last().cloned() else {
-            return Ok(seen);
-        };
-        for id in &ids {
-            refresh(conn, id).await?;
-            seen += 1;
-        }
-        after = last;
-    }
 }

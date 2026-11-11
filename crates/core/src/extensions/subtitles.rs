@@ -593,6 +593,7 @@ pub(crate) async fn content(
                 [
                     (header::CONTENT_TYPE, "text/vtt; charset=utf-8"),
                     (header::CACHE_CONTROL, "private, no-store"),
+                    (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
                     (header::CONTENT_LENGTH, &length.to_string()),
                 ],
                 if head { String::new() } else { text },

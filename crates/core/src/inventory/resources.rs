@@ -519,6 +519,10 @@ pub async fn subtitle(
         header::ACCEPT_RANGES,
         axum::http::HeaderValue::from_static("bytes"),
     );
+    response.headers_mut().insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
     let range = request.headers().get(header::RANGE);
     let selected = match range {
         Some(value) => match value

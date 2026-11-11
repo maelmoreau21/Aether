@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
 import uniffi.aether_ffi.AetherClient
 import uniffi.aether_ffi.ClientException
 import uniffi.aether_ffi.Pairing
+import uniffi.aether_ffi.releasesUrl
 import uniffi.aether_ffi.ServerInfo
 import uniffi.aether_ffi.Work
 import uniffi.aether_ffi.WorkDetail
@@ -87,6 +88,13 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     val pairingKind: StateFlow<PairingKind?> = _pairingKind
     private val _signingIn = MutableStateFlow(false)
     val signingIn: StateFlow<Boolean> = _signingIn
+    /** Pending second step of a sign-in (TOTP or passkey account); null otherwise. */
+    class MfaChallenge(val token: String, val totp: Boolean)
+    private val _mfa = MutableStateFlow<MfaChallenge?>(null)
+    val mfa: StateFlow<MfaChallenge?> = _mfa
+    /** Newer version published by the server when this app is older; null otherwise. */
+    private val _updateAvailable = MutableStateFlow<String?>(null)
+    val updateAvailable: StateFlow<String?> = _updateAvailable
     private val _works = MutableStateFlow<List<Work>>(emptyList())
     val works: StateFlow<List<Work>> = _works
     private val _detail = MutableStateFlow<WorkDetail?>(null)
@@ -159,6 +167,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     fun changeServer() {
         cancelPairing()
         client = null
+        _mfa.value = null
         _serverInfo.value = null
         _screen.value = Screen.Server
     }
@@ -168,8 +177,14 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         _signingIn.value = true
         viewModelScope.launch {
             try {
-                client.login(login, password)
-                signedIn()
+                val step = client.loginStep(login, password)
+                val token = step.mfaToken
+                if (step.user == null && token != null) {
+                    _error.value = null
+                    _mfa.value = MfaChallenge(token, step.totp)
+                } else {
+                    signedIn()
+                }
             } catch (e: ClientException.Unauthorized) {
                 _error.value = getApplication<Application>().getString(R.string.error_credentials)
             } catch (e: ClientException) {
@@ -178,6 +193,37 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
                 _signingIn.value = false
             }
         }
+    }
+
+    /** Second step: an authenticator code, or a backup code when [recovery]. */
+    fun submitSecondFactor(code: String, recovery: Boolean) {
+        val client = client ?: return
+        val challenge = _mfa.value ?: return
+        _signingIn.value = true
+        viewModelScope.launch {
+            try {
+                client.loginSecondFactor(challenge.token, code.trim(), recovery)
+                signedIn()
+            } catch (e: ClientException.Unauthorized) {
+                _error.value = getApplication<Application>().getString(R.string.error_code)
+            } catch (e: ClientException.Server) {
+                _error.value = if (e.status.toInt() == 401) {
+                    getApplication<Application>().getString(R.string.error_code)
+                } else {
+                    e.message
+                }
+            } catch (e: ClientException) {
+                _error.value = e.message
+            } finally {
+                _signingIn.value = false
+            }
+        }
+    }
+
+    /** Back from the code page to the identifiers. */
+    fun cancelSecondFactor() {
+        _mfa.value = null
+        _error.value = null
     }
 
     private fun showSignIn() {
@@ -205,6 +251,16 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     fun reopenBrowser() {
         _pairing.value?.let { openBrowser(it.url) }
     }
+
+    /** Best effort: a failure never shows anything. */
+    private fun checkUpdate() {
+        val client = client ?: return
+        viewModelScope.launch {
+            _updateAvailable.value = runCatching { client.checkUpdate() }.getOrNull()
+        }
+    }
+
+    fun openReleases() = openBrowser(releasesUrl())
 
     /** Only web addresses are ever handed to the system. */
     private fun openBrowser(url: String) {
@@ -251,6 +307,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun signedIn() {
+        _mfa.value = null
         pairingJob?.cancel()
         _pairing.value = null
         _pairingKind.value = null
@@ -262,6 +319,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun showCatalog() {
         _screen.value = Screen.Catalog
+        checkUpdate()
         loadCatalog(kind = "film", search = null)
         renewIncompleteDownloads()
     }

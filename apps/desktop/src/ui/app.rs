@@ -12,7 +12,10 @@ use crate::{
     state::{self, LibraryKind, LibraryState, Loadable, Navigator, Route},
     store::{self, Settings},
 };
-use aether_client::{Client, Error, Pairing, RecentProgress, ServerInfo, User, Work, WorkDetail};
+use aether_client::{
+    Client, Error, LoginStep, Pairing, RecentProgress, SecondFactor, ServerInfo, User, Work,
+    WorkDetail,
+};
 use futures::StreamExt;
 use gpui::{
     AnyElement, Context, Entity, FocusHandle, Focusable, FontWeight, Image, ImageFormat,
@@ -52,6 +55,8 @@ enum PairingKind {
 enum SignInStep {
     Server,
     Account,
+    /// Second step of a local sign-in: authenticator or backup code.
+    Code,
 }
 
 /// The Aether logo, shown on the sign-in screen and in the top bar.
@@ -61,6 +66,11 @@ struct SignIn {
     server: Entity<TextField>,
     login: Entity<TextField>,
     password: Entity<TextField>,
+    code: Entity<TextField>,
+    /// The pending second factor, kept between the two steps.
+    second: Option<SecondFactor>,
+    /// The code field takes a backup code instead of an authenticator code.
+    recovery: bool,
     step: SignInStep,
     /// The server the address answered as, known once the first page is validated.
     info: Option<ServerInfo>,
@@ -99,6 +109,8 @@ pub struct AetherApp {
     remote: Option<RemoteLink>,
     devices: Vec<RemoteDevice>,
     notice: Option<String>,
+    /// A newer release than this application, published by the server.
+    update_available: Option<String>,
     session_tasks: Vec<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -160,6 +172,7 @@ impl AetherApp {
         let server = cx.new(|cx| TextField::new(cx, "https://media.exemple.fr", false));
         let login = cx.new(|cx| TextField::new(cx, "Identifiant", false));
         let password = cx.new(|cx| TextField::new(cx, "Mot de passe", true));
+        let code = cx.new(|cx| TextField::new(cx, "Code à 6 chiffres", false));
         if let Some(saved) = &settings.server {
             server.update(cx, |field, cx| field.set_text(saved, cx));
         }
@@ -180,6 +193,11 @@ impl AetherApp {
                     FieldEvent::Next => this.focus_field(Field::Server, window, cx),
                 },
             ),
+            cx.subscribe_in(&code, window, |this, _, event, window, cx| {
+                if matches!(event, FieldEvent::Submit) {
+                    this.submit_second_factor(window, cx);
+                }
+            }),
         ];
         let mut app = Self {
             net,
@@ -193,6 +211,9 @@ impl AetherApp {
                 server,
                 login,
                 password,
+                code,
+                second: None,
+                recovery: false,
                 step: SignInStep::Server,
                 info: None,
                 pairing_kind: None,
@@ -213,6 +234,7 @@ impl AetherApp {
             remote: None,
             devices: Vec::new(),
             notice: None,
+            update_available: None,
             session_tasks: Vec::new(),
             _subscriptions: subscriptions,
         };
@@ -251,6 +273,7 @@ impl AetherApp {
             Field::Server => &self.sign_in.server,
             Field::Login => &self.sign_in.login,
             Field::Password => &self.sign_in.password,
+            Field::Code => &self.sign_in.code,
         };
         let handle = entity.read(cx).focus_handle(cx);
         window.focus(&handle);
@@ -333,6 +356,7 @@ impl AetherApp {
         let field = match self.sign_in.step {
             SignInStep::Server => Field::Server,
             SignInStep::Account => Field::Login,
+            SignInStep::Code => Field::Code,
         };
         self.focus_field(field, window, cx);
         cx.notify();
@@ -376,6 +400,7 @@ impl AetherApp {
     /// Back to page 1 to change the server.
     fn change_server(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sign_in.step = SignInStep::Server;
+        self.sign_in.second = None;
         self.sign_in.info = None;
         self.sign_in.error = None;
         self.sign_in.busy = false;
@@ -436,14 +461,85 @@ impl AetherApp {
             window,
             cx,
             move |this, result, window, cx| match result {
-                Ok(user) => {
+                Ok(LoginStep::SignedIn(user)) => {
                     this.save_token(&server, &user, &client, cx);
                     this.sign_in.password.update(cx, |f, cx| f.set_text("", cx));
                     this.signed_in(server, client, user, window, cx);
                 }
+                Ok(LoginStep::SecondFactor(second)) => {
+                    this.sign_in.password.update(cx, |f, cx| f.set_text("", cx));
+                    this.sign_in.code.update(cx, |f, cx| f.set_text("", cx));
+                    this.sign_in.recovery = false;
+                    this.sign_in.second = Some(second);
+                    this.sign_in.step = SignInStep::Code;
+                    this.show_sign_in(None, window, cx);
+                }
                 Err(error) => this.show_sign_in(Some(describe(&error)), window, cx),
             },
         );
+    }
+
+    /// Second step: the authenticator or backup code, sent with the token the
+    /// first step returned (five minutes, five wrong codes).
+    fn submit_second_factor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sign_in.busy {
+            return;
+        }
+        let Some(second) = self.sign_in.second.clone() else {
+            return;
+        };
+        let code = self.sign_in.code.read(cx).text().trim().to_owned();
+        if code.is_empty() {
+            self.sign_in.error = Some("Saisissez votre code.".into());
+            cx.notify();
+            return;
+        }
+        let Some((server, client)) = self.typed_client(cx) else {
+            return;
+        };
+        let recovery = self.sign_in.recovery;
+        self.sign_in.busy = true;
+        self.sign_in.error = None;
+        cx.notify();
+        let signing = client.clone();
+        let request = self
+            .net
+            .run(async move { signing.login_second_factor(&second, &code, recovery).await });
+        self.after(
+            request,
+            window,
+            cx,
+            move |this, result, window, cx| match result {
+                Ok(user) => {
+                    this.sign_in.second = None;
+                    this.sign_in.step = SignInStep::Account;
+                    this.sign_in.code.update(cx, |f, cx| f.set_text("", cx));
+                    this.save_token(&server, &user, &client, cx);
+                    this.signed_in(server, client, user, window, cx);
+                }
+                Err(Error::Server { status: 401, .. }) => {
+                    // Wrong code, or a challenge expired or spent after five
+                    // tries: "Retour" restarts from the password.
+                    this.show_sign_in(
+                        Some(
+                            "Code refusé ou expiré. Vérifiez-le ou recommencez la connexion."
+                                .into(),
+                        ),
+                        window,
+                        cx,
+                    );
+                }
+                Err(error) => this.show_sign_in(Some(describe(&error)), window, cx),
+            },
+        );
+    }
+
+    /// Back from the code page to the identifiers.
+    fn cancel_second_factor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sign_in.second = None;
+        self.sign_in.step = SignInStep::Account;
+        self.sign_in.error = None;
+        self.show_sign_in(None, window, cx);
     }
 
     /// Quick Connect: shows a code and a QR code, approved from a signed-in
@@ -553,6 +649,7 @@ impl AetherApp {
         }
         self.phase = Phase::Ready;
         self.nav = Navigator::default();
+        self.check_update(&client, window, cx);
         self.start_remote(&server, &client, window, cx);
         self.start_refresh(&server, window, cx);
         self.session = Some(Session {
@@ -596,6 +693,18 @@ impl AetherApp {
             }
         });
         self.session_tasks.push(listener);
+    }
+
+    /// Asks the server whether a newer release exists; best effort, silent on errors.
+    fn check_update(&mut self, client: &Arc<Client>, window: &Window, cx: &mut Context<Self>) {
+        self.update_available = None;
+        let checking = client.clone();
+        let request = self.net.run(async move { checking.check_update().await });
+        self.after(request, window, cx, move |this, result, _, _| {
+            if let Ok(latest) = result {
+                this.update_available = latest;
+            }
+        });
     }
 
     fn start_refresh(&mut self, server: &str, window: &Window, cx: &mut Context<Self>) {
@@ -905,6 +1014,7 @@ enum Field {
     Server,
     Login,
     Password,
+    Code,
 }
 
 // ---- Rendering --------------------------------------------------------------------
@@ -1092,6 +1202,7 @@ impl AetherApp {
         let mut card = match self.sign_in.step {
             SignInStep::Server => self.render_server_page(card, cx),
             SignInStep::Account => self.render_account_page(card, cx),
+            SignInStep::Code => self.render_code_page(card, cx),
         };
         if self.sign_in.can_retry {
             card = card.child(button(
@@ -1154,6 +1265,64 @@ impl AetherApp {
                     .child(label.to_owned()),
             )
             .child(field)
+    }
+
+    /// Second step of the sign-in: authenticator or backup code.
+    fn render_code_page(&self, card: gpui::Div, cx: &mut Context<Self>) -> gpui::Div {
+        let sign_in = &self.sign_in;
+        let totp = sign_in.second.as_ref().is_some_and(|second| second.totp);
+        let recovery = sign_in.recovery;
+        let intro = if totp {
+            if recovery {
+                "Saisissez l'un de vos codes de secours. Chaque code ne sert qu'une fois."
+            } else {
+                "Saisissez le code à 6 chiffres de votre application d'authentification."
+            }
+        } else {
+            "Ce compte n'utilise que des passkeys, que l'application ne sait pas encore présenter. Connectez-vous avec Quick Connect depuis un appareil déjà connecté, ou depuis le site web."
+        };
+        let mut card = card
+            .child(Self::card_intro("Vérification en deux étapes", intro))
+            .children(self.error_banner());
+        if totp {
+            card = card
+                .child(Self::labeled(
+                    if recovery { "Code de secours" } else { "Code" },
+                    sign_in.code.clone(),
+                ))
+                .child(wide_button(
+                    "second-factor",
+                    if sign_in.busy {
+                        "Vérification…"
+                    } else {
+                        "Valider"
+                    },
+                    Tone::Primary,
+                    cx.listener(|this, _, window, cx| this.submit_second_factor(window, cx)),
+                ))
+                .child(button(
+                    "toggle-recovery",
+                    if recovery {
+                        "Utiliser mon application d'authentification"
+                    } else {
+                        "Utiliser un code de secours"
+                    },
+                    Tone::Quiet,
+                    cx.listener(|this, _, window, cx| {
+                        this.sign_in.recovery = !this.sign_in.recovery;
+                        this.sign_in.error = None;
+                        this.sign_in.code.update(cx, |f, cx| f.set_text("", cx));
+                        this.focus_field(Field::Code, window, cx);
+                        cx.notify();
+                    }),
+                ));
+        }
+        card.child(button(
+            "second-factor-back",
+            "Retour",
+            Tone::Secondary,
+            cx.listener(|this, _, window, cx| this.cancel_second_factor(window, cx)),
+        ))
     }
 
     /// Page 1: the address of the server.
@@ -1461,6 +1630,30 @@ impl AetherApp {
             .flex()
             .flex_col()
             .child(self.render_top_bar(cx))
+            .when_some(self.update_available.clone(), |main, latest| {
+                main.child(
+                    div()
+                        .px_6()
+                        .py_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_4()
+                        .bg(theme::RAISED)
+                        .text_sm()
+                        .child(format!(
+                            "Une nouvelle version d'Aether est disponible ({latest}) : cette application est plus ancienne que votre serveur."
+                        ))
+                        .child(button(
+                            "update",
+                            "Télécharger",
+                            Tone::Primary,
+                            cx.listener(|_, _, _, cx| {
+                                open_in_browser(aether_client::RELEASES_URL, cx)
+                            }),
+                        )),
+                )
+            })
             .when_some(self.notice.clone(), |main, notice| {
                 main.child(
                     div()

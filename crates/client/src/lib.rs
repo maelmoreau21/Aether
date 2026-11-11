@@ -7,8 +7,10 @@
 //! native player, a Chromecast or AirPlay opens without any credential.
 
 mod model;
+mod update;
 
 pub use model::*;
+pub use update::{APP_VERSION, RELEASES_URL, is_outdated};
 
 use reqwest::{Method, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
@@ -211,11 +213,50 @@ impl Client {
             needs_bootstrap,
         })
     }
-    /// Local account sign-in; stores the device token.
-    pub async fn login(&self, login: &str, password: &str) -> Result<User> {
+    /// The newer release published by the server, when this application is older
+    /// (see [`RELEASES_URL`]). Public endpoint; `None` for a development build or
+    /// when the version cannot be compared. Call it after every sign-in or
+    /// session restore, and ignore its errors: it must never block anything.
+    pub async fn check_update(&self) -> Result<Option<String>> {
+        let Some(app) = APP_VERSION.filter(|v| !v.is_empty()) else {
+            return Ok(None);
+        };
+        let (_, config) = self
+            .call(Method::GET, "/api/v1/config", None, false)
+            .await?;
+        Ok(config["version"]
+            .as_str()
+            .filter(|server| is_outdated(app, server))
+            .map(str::to_owned))
+    }
+    /// Local account sign-in. Stores the device token, or, for an account with
+    /// two-step sign-in, returns the challenge to finish with
+    /// [`Client::login_second_factor`].
+    pub async fn login(&self, login: &str, password: &str) -> Result<LoginStep> {
         let body = json!({"login": login, "password": password, "tokenType": "bearer"});
         let (_, value) = self
             .call(Method::POST, "/api/v1/auth/login", Some(body), false)
+            .await?;
+        if value["mfaRequired"].as_bool() == Some(true) {
+            let token = value["mfaToken"].as_str().ok_or_else(missing)?.to_owned();
+            let totp = value["methods"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|v| v == "totp"));
+            return Ok(LoginStep::SecondFactor(SecondFactor { token, totp }));
+        }
+        self.grant(&value).map(LoginStep::SignedIn)
+    }
+    /// Second step: an authenticator code (6 digits) or, with `recovery`, a backup code.
+    pub async fn login_second_factor(
+        &self,
+        challenge: &SecondFactor,
+        code: &str,
+        recovery: bool,
+    ) -> Result<User> {
+        let key = if recovery { "recoveryCode" } else { "code" };
+        let body = json!({"mfaToken": challenge.token, key: code.trim()});
+        let (_, value) = self
+            .call(Method::POST, "/api/v1/auth/login/mfa", Some(body), false)
             .await?;
         self.grant(&value)
     }

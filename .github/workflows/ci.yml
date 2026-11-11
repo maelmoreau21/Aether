@@ -253,6 +253,17 @@ jobs:
           cargo test --locked --all-features -p media-poc --lib oidc::tests -- --test-threads=1
           cargo test --locked --all-features -p media-poc --test distributed_multi_node -- --test-threads=1
 
+      - name: Sauvegarde et restauration PostgreSQL 18 (pg_dump 18)
+        if: matrix.shard == 'checks'
+        env:
+          MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          pg_dump --version
+          cargo test --locked --all-features -p media-poc --test admin_postgres -- --ignored --test-threads=1
+
       - name: Conserver les temps de compilation Cargo
         if: always()
         uses: actions/upload-artifact@v4
@@ -634,9 +645,12 @@ jobs:
 
   clients:
     name: Applications clientes
+    needs: [calculate-beta]
     permissions:
       contents: read
     uses: ./.github/workflows/clients.yml
+    with:
+      version: ${{ needs.calculate-beta.outputs.version }}
     secrets: inherit
 
   beta-release:

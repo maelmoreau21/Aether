@@ -284,6 +284,9 @@ impl NodeRuntimeRegistry {
                 && let Some(h) = parsed.host_str()
             {
                 let scheme = parsed.scheme();
+                if scheme != "http" && scheme != "https" {
+                    continue;
+                }
                 let origin_str = if let Some(p) = parsed.port() {
                     format!("{scheme}://{h}:{p}")
                 } else {

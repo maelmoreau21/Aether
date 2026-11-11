@@ -66,11 +66,33 @@ fn configuration_rejects_ssrf_injection_and_redacts_secrets() {
             "email",
             &Config {
                 smtp_port: 25,
-                ..email
+                ..email.clone()
             }
         )
         .is_err()
     );
+    for forbidden_smtp in [
+        "localhost",
+        "127.0.0.1",
+        "10.0.0.1",
+        "192.168.1.1",
+        "169.254.169.254",
+        "relay.localhost",
+        "mail.local",
+        "smtp.internal",
+        "gateway.arpa",
+    ] {
+        assert!(
+            transport::validate(
+                "email",
+                &Config {
+                    smtp_host: forbidden_smtp.into(),
+                    ..email.clone()
+                }
+            )
+            .is_err()
+        );
+    }
     assert!(serde_json::from_value::<Config>(json!({"localTest":true})).is_err());
 }
 

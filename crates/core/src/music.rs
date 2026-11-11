@@ -252,7 +252,10 @@ async fn content(
     let node_id = row.get::<String, _>("node_id");
     if request.uri().path().ends_with("/download") {
         let actor = auth.authenticate(request.headers()).await?;
-        if !crate::user_media_policy::can_download(&auth.store, &actor.user.id).await? {
+        // Native applications only (see `permissions::require_media`).
+        if !actor.bearer
+            || !crate::user_media_policy::can_download(&auth.store, &actor.user.id).await?
+        {
             return Err(StatusCode::FORBIDDEN);
         }
     }

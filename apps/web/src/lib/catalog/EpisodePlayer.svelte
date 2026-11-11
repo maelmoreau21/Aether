@@ -114,8 +114,9 @@
   {#if episode.available === false}<span>{$t('the_server_hosting_this_episode_is')}</span>{:else if !versionIds.length}<span>{$t('no_version_available')}</span>{/if}
 </div>
 {#if launchError}<p role="alert">{launchError}</p>{/if}
-{#if versionIds.length > 1 || (!episode.synthetic && versionIds.length)}
-  <details class="episode-versions"><summary>{versionIds.length > 1 ? $t('versions_and_download') : 'Téléchargement'}</summary>
+{#if versionIds.length > 1}
+  <!-- Downloads are offered by the native applications only. -->
+  <details class="episode-versions"><summary>{$t('versions')}</summary>
     {#if versionIds.length > 1}
       <label>{$t('version')}<select aria-label={$t('version_of', { title: episode.title })} bind:value={selected} onfocus={prefetchVersions} onpointerenter={prefetchVersions}><option value="auto">{$t('best_available_version')}</option>{#each versionIds as id, index (id)}<option value={id}>{getLabel(id, index)}</option>{/each}</select></label>
     {/if}

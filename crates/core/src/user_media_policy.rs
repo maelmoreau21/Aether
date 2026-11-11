@@ -104,7 +104,8 @@ async fn own(
         effective_kinds(&auth.store, &actor.user.id).await?
     };
     Ok(Json(Policy {
-        allow_media_download: can_download(&auth.store, &actor.user.id).await?,
+        // Downloads belong to the native applications (bearer token), never the web.
+        allow_media_download: actor.bearer && can_download(&auth.store, &actor.user.id).await?,
         allowed_kinds: None,
         effective_kinds: Some(effective),
     }))

@@ -598,6 +598,18 @@ fn health_routes(mode: &'static str) -> Router {
             HeaderValue::from_static("nosniff"),
         ))
         .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
             header::CACHE_CONTROL,
             HeaderValue::from_static("no-store"),
         ))
@@ -645,6 +657,51 @@ fn public_routes(mode: &'static str, web_dist: std::path::PathBuf) -> Router {
 #[cfg(feature = "fixture-bench")]
 fn local_security(router: Router, origin: String) -> Router {
     local_security_with_store(router, origin, None, Vec::new())
+}
+
+fn is_safe_csp_origin(origin: &str) -> bool {
+    if !(origin.starts_with("http://") || origin.starts_with("https://")) {
+        return false;
+    }
+    if origin.contains(|c: char| {
+        c.is_whitespace()
+            || c.is_control()
+            || matches!(c, ';' | ',' | '\'' | '"' | '<' | '>' | '`' | '\\' | '(' | ')' | '*' | '?' | '#')
+    }) {
+        return false;
+    }
+    if let Ok(parsed) = url::Url::parse(origin) {
+        let scheme = parsed.scheme();
+        if scheme != "http" && scheme != "https" {
+            return false;
+        }
+        if parsed.host_str().is_none() {
+            return false;
+        }
+        if !parsed.username().is_empty() || parsed.password().is_some() {
+            return false;
+        }
+        if parsed.path() != "" && parsed.path() != "/" {
+            return false;
+        }
+        if parsed.query().is_some() || parsed.fragment().is_some() {
+            return false;
+        }
+        true
+    } else {
+        false
+    }
+}
+
+fn csp_origin_string(raw: &str) -> Option<String> {
+    if !is_safe_csp_origin(raw) {
+        return None;
+    }
+    let parsed = url::Url::parse(raw).ok()?;
+    let host = parsed.host_str()?;
+    let scheme = parsed.scheme();
+    let port = parsed.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Some(format!(" {scheme}://{host}{port}"))
 }
 
 pub fn local_security_with_store(
@@ -730,19 +787,22 @@ pub fn local_security_with_store(
                     .and_then(|h| h.to_str().ok())
                     .map(|s| s.to_owned());
                 let is_primary_origin = origin_header.as_deref() == Some(origin.as_str());
-                let is_cors_allowed = store.as_ref().is_some_and(|s| {
-                    if let Ok(hosts) = s.cors_origins.read() {
-                        origin_header
+                let (is_explicit_cors_allowed, is_wildcard_cors_allowed) = store
+                    .as_ref()
+                    .and_then(|s| s.cors_origins.read().ok())
+                    .map(|hosts| {
+                        let has_wildcard = hosts.iter().any(|h| h == "*");
+                        let matches_explicit = origin_header
                             .as_deref()
-                            .is_some_and(|cand| hosts.iter().any(|h| h == "*" || h == cand))
-                    } else {
-                        false
-                    }
-                });
-                let is_trusted_external = origin_header
+                            .is_some_and(|cand| hosts.iter().any(|h| h != "*" && h == cand));
+                        (matches_explicit, has_wildcard)
+                    })
+                    .unwrap_or((false, false));
+                let is_allowed_origin = origin_header
                     .as_deref()
-                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand))
-                    || is_cors_allowed;
+                    .is_some_and(|cand| allowed_origins.iter().any(|ao| ao.as_str() == cand));
+                let is_credentialed_external = is_allowed_origin || is_explicit_cors_allowed;
+                let is_trusted_external = is_credentialed_external || is_wildcard_cors_allowed;
                 let origin_matches = origin_header.is_none() || is_primary_origin || is_trusted_external;
 
                 let is_cross_site = req.headers().get("sec-fetch-site").is_some_and(|h| h == "cross-site");
@@ -762,10 +822,21 @@ pub fn local_security_with_store(
                 if method == axum::http::Method::OPTIONS && origin_matches && origin_header.is_some() {
                     let mut res = StatusCode::NO_CONTENT.into_response();
                     let headers = res.headers_mut();
-                    if let Some(oh) = &origin_header
-                        && let Ok(val) = HeaderValue::from_str(oh)
-                    {
-                        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                    if is_primary_origin || is_credentialed_external {
+                        if let Some(oh) = &origin_header
+                            && let Ok(val) = HeaderValue::from_str(oh)
+                        {
+                            headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                        }
+                        headers.insert(
+                            header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
+                            HeaderValue::from_static("true"),
+                        );
+                    } else if is_wildcard_cors_allowed {
+                        headers.insert(
+                            header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                            HeaderValue::from_static("*"),
+                        );
                     }
                     headers.insert(
                         header::ACCESS_CONTROL_ALLOW_METHODS,
@@ -776,10 +847,6 @@ pub fn local_security_with_store(
                         HeaderValue::from_static("content-type, authorization, x-csrf-token, range, x-playback-session-id"),
                     );
                     headers.insert(
-                        header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
-                        HeaderValue::from_static("true"),
-                    );
-                    headers.insert(
                         header::ACCESS_CONTROL_MAX_AGE,
                         HeaderValue::from_static("86400"),
                     );
@@ -787,11 +854,12 @@ pub fn local_security_with_store(
                 }
 
                 let mut res = next.run(req).await;
-                if let Some(oh) = &origin_header
-                    && (is_primary_origin || is_trusted_external)
-                    && let Ok(val) = HeaderValue::from_str(oh)
-                {
-                    res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                if is_primary_origin || is_credentialed_external {
+                    if let Some(oh) = &origin_header
+                        && let Ok(val) = HeaderValue::from_str(oh)
+                    {
+                        res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, val);
+                    }
                     res.headers_mut().insert(
                         header::ACCESS_CONTROL_ALLOW_CREDENTIALS,
                         HeaderValue::from_static("true"),
@@ -800,19 +868,28 @@ pub fn local_security_with_store(
                         header::ACCESS_CONTROL_EXPOSE_HEADERS,
                         HeaderValue::from_static("content-range, content-length, etag"),
                     );
+                } else if is_wildcard_cors_allowed {
+                    res.headers_mut().insert(
+                        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                        HeaderValue::from_static("*"),
+                    );
+                    res.headers_mut().insert(
+                        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                        HeaderValue::from_static("content-range, content-length, etag"),
+                    );
                 }
                 let mut extra_origins = String::new();
                 for ao in &allowed_origins {
-                    let origin_str = format!(" {ao}");
-                    if !extra_origins.contains(&origin_str) {
-                        extra_origins.push_str(&origin_str);
+                    if let Some(origin_str) = csp_origin_string(ao) {
+                        if !extra_origins.contains(&origin_str) {
+                            extra_origins.push_str(&origin_str);
+                        }
                     }
                 }
                 if let Some(store) = &store {
                     if let Ok(hosts) = store.cors_origins.read() {
                         for host in hosts.iter() {
-                            if host != "*" {
-                                let origin_str = format!(" {host}");
+                            if host != "*" && let Some(origin_str) = csp_origin_string(host) {
                                 if !extra_origins.contains(&origin_str) {
                                     extra_origins.push_str(&origin_str);
                                 }
@@ -821,14 +898,15 @@ pub fn local_security_with_store(
                     }
                     let _ = nodes::ensure_node_registry_warm(store).await;
                     for origin_url in store.node_registry.connected_public_origins() {
-                        let origin_str = format!(" {origin_url}");
-                        if !extra_origins.contains(&origin_str) {
-                            extra_origins.push_str(&origin_str);
+                        if let Some(origin_str) = csp_origin_string(&origin_url) {
+                            if !extra_origins.contains(&origin_str) {
+                                extra_origins.push_str(&origin_str);
+                            }
                         }
                     }
                 }
                 let csp = format!(
-                    "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; manifest-src 'self'; font-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; frame-ancestors 'none'"
+                    "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; manifest-src 'self'; font-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
                 );
                 if let Ok(val) = HeaderValue::from_str(&csp) {
                     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);
@@ -837,6 +915,12 @@ pub fn local_security_with_store(
             }
         }))
         .layer(SetResponseHeaderLayer::overriding(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff")))
+        .layer(SetResponseHeaderLayer::overriding(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY")))
+        .layer(SetResponseHeaderLayer::if_not_present(header::REFERRER_POLICY, HeaderValue::from_static("strict-origin-when-cross-origin")))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            axum::http::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+        ))
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
         .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../experiments/bench.js")) }))
 }
@@ -883,6 +967,42 @@ mod tests {
             configured_web_dist_from(Some(nonexistent)),
             std::path::PathBuf::from(nonexistent)
         );
+    }
+
+    #[test]
+    fn csp_origin_sanitizer_rejects_injections() {
+        assert!(is_safe_csp_origin("http://localhost:3000"));
+        assert!(is_safe_csp_origin("https://example.com"));
+        assert!(is_safe_csp_origin("https://sub.domain.com:8443"));
+
+        // Injections & malicious formats
+        assert!(!is_safe_csp_origin("https://"));
+        assert!(!is_safe_csp_origin("http://attacker.com; script-src *"));
+        assert!(!is_safe_csp_origin("javascript:alert(1)"));
+        assert!(!is_safe_csp_origin("data:text/html"));
+        assert!(!is_safe_csp_origin("http://evil.com/'"));
+        assert!(!is_safe_csp_origin("http://evil.com/\""));
+        assert!(!is_safe_csp_origin("http://evil.com/with space"));
+        assert!(!is_safe_csp_origin("https://evil.com\r\nInjected: yes"));
+        assert!(!is_safe_csp_origin("ftp://example.com"));
+        assert!(!is_safe_csp_origin("http://evil.com/path"));
+        assert!(!is_safe_csp_origin("http://evil.com?query=1"));
+        assert!(!is_safe_csp_origin("http://evil.com#hash"));
+        assert!(!is_safe_csp_origin("http://user:pass@evil.com"));
+        assert!(!is_safe_csp_origin("http://*"));
+        assert!(!is_safe_csp_origin("http://evil.com(test)"));
+        assert!(!is_safe_csp_origin("http://evil.com\\test"));
+
+        assert_eq!(
+            csp_origin_string("https://example.com/"),
+            Some(" https://example.com".to_string())
+        );
+        assert_eq!(
+            csp_origin_string("http://localhost:3000"),
+            Some(" http://localhost:3000".to_string())
+        );
+        assert_eq!(csp_origin_string("https://"), None);
+        assert_eq!(csp_origin_string("http://evil.com/path"), None);
     }
 }
 

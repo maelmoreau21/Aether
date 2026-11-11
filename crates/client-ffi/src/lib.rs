@@ -46,6 +46,16 @@ impl From<core::Error> for ClientError {
 
 type Result<T> = std::result::Result<T, ClientError>;
 
+/// First step of a password sign-in (see `Client::login_step`).
+#[derive(uniffi::Record)]
+pub struct LoginStep {
+    /// Set when signed in.
+    pub user: Option<User>,
+    /// Set when a second factor is needed.
+    pub mfa_token: Option<String>,
+    /// An authenticator or backup code can be entered (else: passkey only).
+    pub totp: bool,
+}
 #[derive(uniffi::Record)]
 pub struct Token {
     pub access: String,
@@ -233,8 +243,56 @@ impl AetherClient {
             needs_bootstrap: info.needs_bootstrap,
         })
     }
+    /// The newer version published by the server when this application is older
+    /// (open [`releases_url`] to get it). `None` when up to date or for a
+    /// development build. Best effort: ignore errors.
+    pub async fn check_update(&self) -> Result<Option<String>> {
+        Ok(self.inner.check_update().await?)
+    }
+    /// Password sign-in for accounts without a second factor; an account that
+    /// has one fails with `Server { status: 401, code: "mfa_required" }`:
+    /// use [`Self::login_step`] instead.
     pub async fn login(&self, login: String, password: String) -> Result<User> {
-        Ok(self.inner.login(&login, &password).await?.into())
+        match self.inner.login(&login, &password).await? {
+            core::LoginStep::SignedIn(user) => Ok(user.into()),
+            core::LoginStep::SecondFactor(_) => Err(ClientError::Server {
+                status: 401,
+                code: "mfa_required".into(),
+            }),
+        }
+    }
+    /// Password sign-in with two-step support: `user` is set once signed in,
+    /// otherwise ask for a code and call [`Self::login_second_factor`].
+    pub async fn login_step(&self, login: String, password: String) -> Result<LoginStep> {
+        Ok(match self.inner.login(&login, &password).await? {
+            core::LoginStep::SignedIn(user) => LoginStep {
+                user: Some(user.into()),
+                mfa_token: None,
+                totp: false,
+            },
+            core::LoginStep::SecondFactor(second) => LoginStep {
+                user: None,
+                mfa_token: Some(second.token),
+                totp: second.totp,
+            },
+        })
+    }
+    /// Second step with an authenticator code, or a backup code when `recovery`.
+    pub async fn login_second_factor(
+        &self,
+        mfa_token: String,
+        code: String,
+        recovery: bool,
+    ) -> Result<User> {
+        let challenge = core::SecondFactor {
+            token: mfa_token,
+            totp: true,
+        };
+        Ok(self
+            .inner
+            .login_second_factor(&challenge, &code, recovery)
+            .await?
+            .into())
     }
     pub async fn start_pairing(&self) -> Result<Pairing> {
         let p = self.inner.start_pairing().await?;
@@ -417,4 +475,10 @@ impl AetherClient {
         };
         Ok(self.inner.save_progress(&work_id, &update).await?.into())
     }
+}
+
+/// Where the applications of the latest release are published.
+#[uniffi::export]
+pub fn releases_url() -> String {
+    core::RELEASES_URL.to_owned()
 }

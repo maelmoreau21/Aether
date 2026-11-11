@@ -8,12 +8,21 @@ name: Applications clientes
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      version:
+        description: "Version du produit compilée dans les applications (elles préviennent quand le serveur est plus récent)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  # Lue par aether-client (option_env!) : vide ou absente = build de développement,
+  # qui ne signale jamais de mise à jour.
+  AETHER_CLIENT_VERSION: ${{ inputs.version }}
 
 jobs:
   android:

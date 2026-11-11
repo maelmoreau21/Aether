@@ -300,3 +300,20 @@ mod tests {
         assert_eq!(blank.sso_label(), "Se connecter avec SSO");
     }
 }
+
+/// Pending second step of a sign-in (TOTP or passkey account).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecondFactor {
+    /// Single-use token (5 minutes, five wrong codes) sent back with the code.
+    pub token: String,
+    /// An authenticator or backup code can be entered. When `false`, the account
+    /// only has passkeys: use Quick Connect or the web.
+    pub totp: bool,
+}
+
+/// Result of the first step of a local sign-in.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoginStep {
+    SignedIn(User),
+    SecondFactor(SecondFactor),
+}

@@ -9,6 +9,7 @@
   import Icon from '../../lib/ui/Icon.svelte';
   import QuickConnect from '../../lib/auth/QuickConnect.svelte';
   import { t } from '../../lib/i18n';
+  import { isSafeHttpUrl } from '../../lib/safe-url';
 
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
@@ -86,7 +87,7 @@
         throw new Error(code ? mapError(code) : $t('sso_is_unavailable_try_again_or'));
       }
       const data: { url: string } = await response.json();
-      if (!data.url) throw new Error($t('invalid_sso_redirect_url'));
+      if (!data.url || !isSafeHttpUrl(data.url)) throw new Error($t('invalid_sso_redirect_url'));
       window.location.assign(data.url);
     } catch (failure) {
       error = failure instanceof Error ? failure.message : $t('sso_sign_in_unavailable');

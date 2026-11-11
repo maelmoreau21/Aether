@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { session } from './session';
   import { t } from '../i18n';
+  import { isSafeHttpUrl } from '../safe-url';
   let { embedded = false }: { embedded?: boolean } = $props();
   let enabled = $state(false);
   let message = $state('');
@@ -18,6 +19,7 @@
       const response = await fetch('/api/v1/auth/oidc/link', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' }, body: JSON.stringify({ password }) });
       if (!response.ok) throw new Error($t('link_refused_check_your_local_password'));
       const data: { url: string } = await response.json();
+      if (!data.url || !isSafeHttpUrl(data.url)) throw new Error($t('link_unavailable'));
       window.location.assign(data.url);
     } catch (failure) { message = failure instanceof Error ? failure.message : $t('link_unavailable'); busy = false; }
     finally { password = ''; }

@@ -157,7 +157,7 @@ private fun App(model: AetherViewModel) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             when (val current = screen) {
                 Screen.Server -> ServerScreen(model)
-                Screen.SignIn -> SignInScreen(model)
+                Screen.SignIn -> if (model.mfa.collectAsState().value != null) SecondFactorScreen(model) else SignInScreen(model)
                 Screen.Catalog -> CatalogScreen(model)
                 Screen.Downloads -> DownloadsScreen(model)
                 Screen.Devices -> DevicesScreen(model)
@@ -320,6 +320,45 @@ private fun ServerScreen(model: AetherViewModel) {
             primary = true,
             enabled = address.isNotBlank() && !checking,
         ) { model.connect(address) }
+    }
+}
+
+/** Page 3: authenticator or backup code, when the account has a second factor. */
+@Composable
+private fun SecondFactorScreen(model: AetherViewModel) {
+    var code by remember { mutableStateOf("") }
+    var recovery by remember { mutableStateOf(false) }
+    val challenge by model.mfa.collectAsState()
+    val signingIn by model.signingIn.collectAsState()
+    val totp = challenge?.totp == true
+    AuthFrame("Aether") {
+        CardIntro(
+            stringResource(R.string.mfa_title),
+            stringResource(
+                when {
+                    !totp -> R.string.mfa_passkey_only
+                    recovery -> R.string.mfa_recovery_desc
+                    else -> R.string.mfa_totp_desc
+                },
+            ),
+        )
+        if (totp) {
+            LabeledField(
+                stringResource(if (recovery) R.string.mfa_recovery_label else R.string.mfa_code_label),
+                code,
+                { code = it },
+                if (recovery) KeyboardType.Text else KeyboardType.NumberPassword,
+            )
+            WideButton(
+                stringResource(if (signingIn) R.string.mfa_checking else R.string.mfa_submit),
+                primary = true,
+                enabled = code.isNotBlank() && !signingIn,
+            ) { model.submitSecondFactor(code, recovery) }
+            TextButton(onClick = { recovery = !recovery; code = "" }) {
+                Text(stringResource(if (recovery) R.string.mfa_use_app else R.string.mfa_use_recovery))
+            }
+        }
+        TextButton(onClick = model::cancelSecondFactor) { Text(stringResource(R.string.back)) }
     }
 }
 
@@ -522,7 +561,18 @@ private fun CatalogScreen(model: AetherViewModel) {
     }
     val posters = rememberPosterLoader(model)
     val download = rememberDownload(model)
+    val update by model.updateAvailable.collectAsState()
     Column(Modifier.fillMaxSize().padding(12.dp)) {
+        update?.let { latest ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel2).padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(R.string.update_available, latest), fontSize = 14.sp, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
+                TextButton(onClick = model::openReleases) { Text(stringResource(R.string.update_download)) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(kind == "film", { kind = "film" }, { Text(stringResource(R.string.films)) })
             FilterChip(kind == "series", { kind = "series" }, { Text(stringResource(R.string.series)) })

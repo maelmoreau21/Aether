@@ -207,6 +207,11 @@ pub async fn require_media(
     }
     let downloading = path.ends_with("/download");
     if downloading {
+        // Originals are downloaded by the native applications only: they let the
+        // person pick the version, language and tracks, which a browser cannot show.
+        if !identity.bearer {
+            return error(StatusCode::FORBIDDEN, "media_download_native_only");
+        }
         match crate::user_media_policy::can_download(&state.auth.store, &identity.user.id).await {
             Ok(true) => {}
             Ok(false) => return error(StatusCode::FORBIDDEN, "media_download_disabled"),

@@ -219,6 +219,8 @@ Le Core relaie les originaux distants pour cette action : un lien Node signé
 ne permet pas de contourner la permission de téléchargement de l'application.
 Les nouvelles copies chiffrées du coffre utilisent aussi cette route.
 
+**Applications natives uniquement (novembre 2026).** Le web ne télécharge plus : `/download` (vidéo et musique) répond `403 media_download_native_only` à une session par cookie et n'est servi qu'avec un jeton d'appareil (`Authorization: Bearer`). `GET /api/v1/me/media-policy` renvoie `allowMediaDownload:false` à une session web. Les applications, elles, laissent choisir la version, la langue et les pistes avant de télécharger, ce qu'un navigateur ne peut pas présenter. L'interface web n'offre plus de bouton ni d'entrée « Téléchargements ».
+
 La route `/content` reste lisible pour le lecteur. Un client qui reçoit les
 octets peut les enregistrer : ce réglage n'est pas un DRM. Les copies déjà
 présentes sur un appareil et les réponses déjà ouvertes ne sont pas révoquées.

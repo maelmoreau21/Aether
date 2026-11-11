@@ -47,6 +47,7 @@
   type Repository = { id: string; name: string; url: string; refreshedAt: number };
   // One entry per published version. Versioned catalogues (apiVersion 2) also give
   // the release date, changelog, owner and whether an image can be fetched.
+  import { isSafeHttpUrl } from '../safe-url';
   type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string; version?: string; timestamp?: string | null; changelog?: string | null; owner?: string | null; overview?: string | null; hasImage?: boolean };
   let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
   let category = $state('all');
@@ -604,7 +605,7 @@
             <div><dt>{$t('developer')}</dt><dd>{detail.group?.entries[0].owner || manifest.author}</dd></div>
             <div><dt>{$t('repository')}</dt><dd>
               <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- External link -->
-              {#if manifest.repository}<a href={manifest.repository} target="_blank" rel="noreferrer">{repositoryName ?? displayName(manifest.name)}</a>{:else}{repositoryName ?? '—'}{/if}
+              {#if manifest.repository && isSafeHttpUrl(manifest.repository)}<a href={manifest.repository} target="_blank" rel="noopener noreferrer">{repositoryName ?? displayName(manifest.name)}</a>{:else}{repositoryName ?? '—'}{/if}
             </dd></div>
             {#if !extension && latest}<div><dt>{$t('compatibility')}</dt><dd>{latest.compatible ? $t('compatible') : $t('incompatible')}</dd></div>{/if}
             <div><dt>{$t('permissions')}</dt><dd>{accessLabels(manifest.permissions) || $t('none')}</dd></div>

@@ -141,6 +141,7 @@ fn xml_response(body: String) -> Response {
         [
             (header::CONTENT_TYPE, "text/xml; charset=\"utf-8\""),
             (header::CACHE_CONTROL, "no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
         body,
     )

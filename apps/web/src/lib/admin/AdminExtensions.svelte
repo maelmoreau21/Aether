@@ -49,6 +49,7 @@
   // One entry per published version. Versioned catalogues (apiVersion 2) also give
   // the release date, changelog, owner and whether an image can be fetched.
   import { isSafeHttpUrl } from '../safe-url';
+  import { toBannerSrc } from './banner';
   type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string; version?: string; timestamp?: string | null; changelog?: string | null; owner?: string | null; overview?: string | null; hasImage?: boolean };
   let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
   let category = $state('all');
@@ -149,17 +150,6 @@
   const displayName = (name: string) => name.replace(/\s+\([^)]*\)$/, '');
   const shortDescription = (description: string) => description.split(' (')[0];
   const accessLabels = (permissions: string[]) => permissions.map(permission => permissionNames[permission] ?? permission).join(' · ');
-  function toBannerSrc(banner?: string): string | null {
-    if (!banner) return null;
-    const trimmed = banner.trim();
-    if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmed)}`;
-    }
-    if (trimmed.startsWith('data:image/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed;
-    }
-    return null;
-  }
   async function reload(updateRepositories = false) {
     busy = true; error = '';
     try {

@@ -1063,6 +1063,44 @@ fn image_cache() -> &'static ImageCache {
     static CACHE: std::sync::LazyLock<ImageCache> = std::sync::LazyLock::new(Default::default);
     &CACHE
 }
+fn is_safe_svg_text(lower: &str) -> bool {
+    let forbidden = [
+        "<script",
+        "<foreignobject",
+        "<iframe",
+        "<embed",
+        "<object",
+        "<use",
+        "<animate",
+        "<set",
+        "<!doctype",
+        "<!entity",
+        "javascript:",
+        "vbscript:",
+        "data:text/html",
+    ];
+    if forbidden.iter().any(|bad| lower.contains(bad)) {
+        return false;
+    }
+    for (i, _) in lower.match_indices("on") {
+        if i > 0 {
+            let prev = lower.as_bytes()[i - 1];
+            if !prev.is_ascii_whitespace() && prev != b'/' && prev != b'<' {
+                continue;
+            }
+        }
+        let rest = &lower[i + 2..];
+        let name_len = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+        if name_len >= 2 {
+            let after_name = rest[name_len..].trim_start();
+            if after_name.starts_with('=') {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Image types accepted from a catalogue `imageUrl`, recognised by content.
 fn image_type(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -1076,7 +1114,13 @@ fn image_type(bytes: &[u8]) -> Option<&'static str> {
     } else {
         let text = std::str::from_utf8(bytes).ok()?;
         let text = text.trim_start_matches('\u{feff}').trim_start();
-        (text.starts_with('<') && text.contains("<svg")).then_some("image/svg+xml")
+        if text.starts_with('<') && text.contains("<svg") {
+            let lower = text.to_ascii_lowercase();
+            if is_safe_svg_text(&lower) {
+                return Some("image/svg+xml");
+            }
+        }
+        None
     }
 }
 /// The catalogue image as a `data:` URL. The Web UI only loads same-origin or
@@ -1361,6 +1405,42 @@ mod tests {
         assert!(public_ip("8.8.8.8".parse().unwrap()));
         assert!(public_ip("2001:4860:4860::8888".parse().unwrap()));
         assert!(safe_url("https://example.com/manifest.json").is_ok());
+    }
+
+    #[test]
+    fn image_type_accepts_safe_svg_and_rejects_malicious_vectors() {
+        assert_eq!(
+            image_type(b"<svg xmlns=\"http://www.w3.org/2000/svg\"><rect/></svg>"),
+            Some("image/svg+xml")
+        );
+        assert_eq!(image_type(b"<svg><script>alert(1)</script></svg>"), None);
+        assert_eq!(image_type(b"<svg onload=\"alert(1)\"><rect/></svg>"), None);
+        assert_eq!(image_type(b"<svg onerror=\"alert(1)\"><rect/></svg>"), None);
+        assert_eq!(
+            image_type(b"<svg><foreignObject><script>alert(1)</script></foreignObject></svg>"),
+            None
+        );
+        assert_eq!(
+            image_type(b"<svg><a href=\"javascript:alert(1)\"><rect/></a></svg>"),
+            None
+        );
+        assert_eq!(
+            image_type(b"<svg onmouseover=\"alert(1)\"><rect/></svg>"),
+            None
+        );
+        assert_eq!(image_type(b"<svg onfocus=alert(1)><rect/></svg>"), None);
+        assert_eq!(
+            image_type(b"<svg><iframe src=\"https://evil.com\"/></svg>"),
+            None
+        );
+        assert_eq!(
+            image_type(b"<!DOCTYPE svg [<!ENTITY x \"test\">]><svg>&x;</svg>"),
+            None
+        );
+        assert_eq!(
+            image_type(b"<svg id=\"icon-one\"><polygon points=\"0,0 10,10\"/></svg>"),
+            Some("image/svg+xml")
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]

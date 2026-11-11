@@ -390,6 +390,37 @@ const QUIET: [&str; 4] = [
     "external_metadata_parental_unverified",
     "request_permission_denied",
 ];
+async fn tmdb_enabled(pool: &sqlx::AnyPool) -> bool {
+    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions WHERE id='tmdb' AND enabled=1")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    count > 0
+}
+
+async fn resolve_tmdb_api_key(pool: &sqlx::AnyPool) -> String {
+    let stored: Option<String> =
+        query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id='tmdb'")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    if let Some(json) = stored
+        && let Ok(val) = serde_json::from_str::<Value>(&json)
+        && let Some(key) = val
+            .get("api_key")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+    {
+        return key.trim().to_string();
+    }
+    std::env::var("MEDIA_TMDB_API_KEY")
+        .or_else(|_| std::env::var("TMDB_API_KEY"))
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .unwrap_or_else(|| crate::extensions::DEFAULT_COMMUNITY_TMDB_API_KEY.to_string())
+}
+
 async fn discover_kind(
     auth: &AuthState,
     actor: &Authenticated,
@@ -402,9 +433,41 @@ async fn discover_kind(
         return Ok(vec![]);
     }
     let found = async {
-        let server = choose(auth, actor, kind, None).await?;
-        let mut results = remote::search(&server, kind, q).await?;
+        // Without a destination the person can read, the reason is kept: it is
+        // reported (or kept quiet) exactly as before the public search existed.
+        let (server, unavailable) = match choose(auth, actor, kind, None).await {
+            Ok(server) => (Some(server), None),
+            Err(error) => (None, Some(error)),
+        };
+        let use_tmdb = matches!(kind, "film" | "series") && tmdb_enabled(auth.store.pool()).await;
+
+        let mut results = if use_tmdb {
+            let api_key = resolve_tmdb_api_key(auth.store.pool()).await;
+            match transport::public_tmdb_search(kind, q, &api_key).await {
+                Ok(res) => res,
+                Err(error) => match &server {
+                    Some(srv) => remote::search(srv, kind, q).await?,
+                    None => return Err(error),
+                },
+            }
+        } else {
+            match &server {
+                Some(srv) => remote::search(srv, kind, q).await?,
+                None => {
+                    return Err(unavailable
+                        .unwrap_or_else(|| err(StatusCode::NOT_FOUND, "no_acquisition_server")));
+                }
+            }
+        };
+
         results.truncate(12);
+        if let Some(srv) = &server {
+            for item in &mut results {
+                if item.get("serverId").is_none() {
+                    item["serverId"] = json!(srv.id);
+                }
+            }
+        }
         annotate(auth, actor, kind, &mut results).await?;
         Ok::<_, Error>(results)
     }
@@ -532,13 +595,27 @@ async fn annotate(
     }
     let requests = statement.fetch_all(auth.store.pool()).await.map_err(db)?;
     let works: Vec<(String, String, String)> = match kind {
-        "film" | "series" => {
-            let path = if kind == "film" { "$.tmdb" } else { "$.tvdb" };
+        "film" => {
             let sql = format!(
-                "SELECT CAST(json_extract(external_ids_json,'{path}') AS TEXT),id,library_id FROM inventory_works WHERE kind=? AND CAST(json_extract(external_ids_json,'{path}') AS TEXT) IN ({marks}) ORDER BY id LIMIT 200"
+                "SELECT CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT),id,library_id FROM inventory_works WHERE kind='film' AND CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT) IN ({marks}) ORDER BY id LIMIT 200"
             );
-            let mut statement =
-                query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql)).bind(kind);
+            let mut statement = query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql));
+            for id in &ids {
+                statement = statement.bind(id);
+            }
+            statement.fetch_all(auth.store.pool()).await.map_err(db)?
+        }
+        "series" => {
+            let sql = format!(
+                "SELECT CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT),id,library_id FROM inventory_works WHERE kind='series' AND CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT) IN ({marks}) \
+                 UNION ALL \
+                 SELECT CAST(json_extract(external_ids_json,'$.tvdb') AS TEXT),id,library_id FROM inventory_works WHERE kind='series' AND CAST(json_extract(external_ids_json,'$.tvdb') AS TEXT) IN ({marks}) \
+                 LIMIT 200"
+            );
+            let mut statement = query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql));
+            for id in &ids {
+                statement = statement.bind(id);
+            }
             for id in &ids {
                 statement = statement.bind(id);
             }

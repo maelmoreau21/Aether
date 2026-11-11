@@ -12,7 +12,7 @@ use base64::engine::general_purpose::STANDARD;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-pub(super) const DEFAULT_COMMUNITY_TMDB_API_KEY: &str = "4219e299c89411838049ab0dab19ebd5";
+pub const DEFAULT_COMMUNITY_TMDB_API_KEY: &str = "4219e299c89411838049ab0dab19ebd5";
 
 pub(super) fn resolve_effective_extension_settings(
     extension_id: &str,

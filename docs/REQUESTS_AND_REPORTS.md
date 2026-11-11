@@ -106,9 +106,11 @@ plutôt que d'exposer des titres sans classification vérifiée.
 Lors d'une recherche globale (`/search`) uniquement, si la requête correspond à des œuvres absentes
 de la bibliothèque, une étagère dédiée « Disponibles à la demande » apparaît en dessous des résultats
 locaux. Le filtrage des catalogues `/films` et `/series` n'affiche jamais cette étagère (11 novembre 2026).
-- Le Core interroge simultanément les serveurs de recherche configurés (`GET /requests/discover?q=...`),
-  déduplique par identifiant externe, supprime les œuvres déjà présentes en bibliothèque (`inLibrary`)
-  et indique l'état d'éventuelles demandes existantes.
+- Lorsque l'extension `tmdb` est active, le Core interroge directement l'API TheMovieDB (`/3/search/movie` et `/3/search/tv`)
+  pour une recherche instantanée de films et de séries sans surcharger Radarr/Sonarr, avec repli sur les serveurs
+  d'acquisition si besoin.
+- Le Core déduplique par identifiant externe, supprime les œuvres déjà présentes en bibliothèque (`inLibrary`,
+  par identifiant TMDb ou TVDB) et indique l'état d'éventuelles demandes existantes.
 - Les affiches proviennent exclusivement de TMDb (`image.tmdb.org`) et TheTVDB (`artworks.thetvdb.com`),
   mises en cache et relayées par le Core (`GET /requests/poster?src=...&path=...`) avec protection
   stricte contre les rebonds DNS et les attaques SSRF (IP publique épinglée, chemins sanitaires).

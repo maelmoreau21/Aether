@@ -24,5 +24,7 @@ describe('isSafeHttpUrl', () => {
     expect(isSafeHttpUrl('//protocol-relative.com')).toBe(false);
     expect(isSafeHttpUrl('/relative/path')).toBe(false);
     expect(isSafeHttpUrl('not a url')).toBe(false);
+    expect(isSafeHttpUrl('http://')).toBe(false);
+    expect(isSafeHttpUrl('https://')).toBe(false);
   });
 });

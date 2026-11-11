@@ -4,14 +4,14 @@
   import { SvelteSet } from 'svelte/reactivity';
   import { asset } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
-  import PlayerControls, { type Menu } from './PlayerControls.svelte';
+  import PlayerControls from './PlayerControls.svelte';
+  import type { Menu, TranscodeInfo } from './controls-props';
   import type { Media, Player, PlayerFactory, PlaybackState } from './types';
   import { preferredSubtitle, type SubtitlePreference } from './subtitle-preference';
   import { subtitleLine, subtitleStyleToCss, type SubtitleStyle } from './subtitle-style';
   import { maxBitrate, qualityChoice, qualityPreference, type AudioChannels, type QualityChoice, type ToneMapping } from './transcode';
   import { audioEnhancement, type AudioEnhancement } from './audio-enhancement';
   import { SLEEP_OFF, sleepDue, sleepRemaining, startSleep, type SleepChoice, type SleepTimer } from './sleep-timer';
-  import type { TranscodeInfo } from './PlayerControls.svelte';
   import { ProgressTracker } from './progress';
   import { PlaybackCollector, type EventKind, type Origin } from '../statistics/collector';
   import { PlaybackPresence } from './presence';
@@ -32,6 +32,8 @@
   import { remote, type RemoteCommand, type RemoteDevice } from '../remote/remote.svelte';
   import { isDirection, tvActive, tvKey, type TvKey } from '../tv/keys';
   import { moveFocus } from '../tv/navigation';
+  import StreamStatistics from './StreamStatistics.svelte';
+  import NextEpisodeCard from './NextEpisodeCard.svelte';
   let { catalogue, createPlayer, nextTitle, nextLabel = '', nextImage = '', onNext }: {
     catalogue: Media[]; createPlayer: PlayerFactory; nextTitle?: string;
     /** « Saison 1 · Épisode 3 » de l'épisode suivant. */
@@ -947,30 +949,7 @@
     {/if}
     {#if busy}<div class="loading" role="status"><img src={asset('images/logo-loading.svg')} alt="" class="player-spinner" width="40" height="40" /><span>{$t('loading_the_video')}</span><button onclick={close}>{$t('sched_cancel')}</button></div>{/if}
     {#if error}<div class="player-error" role="alert" data-failure-kind={errorKind || undefined}><Icon name="alert" size={24} /><strong>{$t('playback_interrupted')}</strong><p>{error}</p><button onclick={() => { if (active) void prepare(active, { ...playback, paused: false }); }}>{$t('request_retry')}</button></div>{/if}
-    {#if statistics}<section id="stream-statistics" class="stream-statistics" aria-label={$t('playback_data')}>
-      <header><strong>{$t('playback_data')}</strong><button onclick={() => { statistics = false; wake(); }}>{$t('close')}</button></header>
-      <p>{$t('browser_video_metrics_refreshed_every_second')}</p>
-      <dl>
-        <dt>{$t('state')}</dt><dd>{busy ? 'Chargement' : error ? 'Erreur' : paused ? $t('paused') : 'Lecture'}</dd>
-        <dt>{$t('decoded_video')}</dt><dd>{metrics.width} × {metrics.height}</dd>
-        <dt>{$t('frames_dropped')}</dt><dd>{metrics.frames} / {metrics.dropped}</dd>
-        <dt>{$t('buffered_video')}</dt><dd>{metrics.buffered.toFixed(1)} s</dd>
-        <dt>{$t('buffered_separate_audio')}</dt><dd>{metrics.audioBuffered === null ? $t('not_used') : `${metrics.audioBuffered.toFixed(1)} s`}</dd>
-        <dt>{$t('position_duration')}</dt><dd>{playback.position.toFixed(1)} / {playback.duration.toFixed(1)} s</dd>
-        <dt>{$t('speed')}</dt><dd>{playback.speed}×</dd>
-        <dt>{$t('readystate_networkstate')}</dt><dd>{metrics.ready} / {metrics.network}</dd>
-        <dt>{$t('server_node')}</dt><dd>{selectedSource?.nodeId ?? active?.nodeId ?? 'Local'}</dd>
-        <dt>{$t('transport_mode')}</dt><dd>{selectedSource?.directUrl ? $t('direct_node') : selectedSource?.relayUrl ? $t('core_relay') : 'Local'}</dd>
-        <dt>{$t('source_audio_track')}</dt><dd>{selectedSource?.id ?? $t('waiting')} / {audio || $t('waiting')}</dd>
-        <dt>{$t('container_language')}</dt><dd>{selectedSource?.mime ?? $t('stats_not_set')} / {selectedSource?.language ?? $t('not_specified')}</dd>
-        <dt>{$t('declared_audio_mode')}</dt><dd>{selectedSource?.audioSegmentUrl ? 'Segments' : selectedSource?.externalAudioUrl ? 'Séparé' : 'Interne'}</dd>
-        <dt>{$t('report_category_subtitles')}</dt><dd>{subtitle ?? 'Désactivés'}</dd>
-        <dt>{$t('transcoding')}</dt><dd>{transcodeInfo ? `${transcodeInfo.height ? `${transcodeInfo.height}p · ${(transcodeInfo.kbps / 1000).toFixed(1)} Mb/s` : $t('transcoding_audio_only')} · ${transcodeInfo.reason}${transcodeInfo.encoder ? ` · ${transcodeInfo.encoder}` : ''}` : $t('not_used')}</dd>
-      </dl>
-      {#each selectedSource?.tracks ?? [] as track, i (i)}<p>{$t('track_diagnostic', { index: track.index ?? i, type: track.codec_type, codec: track.codec_name, profile: track.profile ?? '', channels: track.channels ? `· ${$t('channels_count', { count: track.channels })}` : '' })}</p>{/each}
-      <p>{$t('technical_diagnostic', { detail: error || loadStage })}</p>
-      <p>{$t('declared_tracks_do_not_prove_physical')}</p>
-    </section>{/if}
+    <StreamStatistics bind:statistics {busy} {error} {wake} {active} {subtitle} {audio} {transcodeInfo} {paused} {playback} {metrics} {selectedSource} {loadStage} />
     <p class="fullscreen-notice" role="status">{notice}</p>
     {#if syncClient}
       <WatchPartyOverlay client={syncClient} controlsVisible={visible} onCloseParty={() => { syncClient?.leave(); syncClient = null; }} />
@@ -987,43 +966,21 @@
       {quality} {maxKbps} onQuality={setQuality} onMaxKbps={setMaxBitrate} transcode={transcodeInfo}
       {enhancement} onEnhancement={setEnhancement} sleep={sleepShown} onSleep={setSleep} />{/if}
     {#if showNextCard}
-      <aside class="next-card" class:raised={visible} aria-label={$t('next_episode')}>
-        <div class="next-thumb">
-          {#if nextImage && nextImageFailed !== nextImage}
-            <img src={nextImage} alt="" width="640" height="360" decoding="async" onerror={() => nextImageFailed = nextImage} />
-          {:else}
-            <Icon name="tv" size={28} />
-          {/if}
-        </div>
-        <div class="next-info">
-          <span class="next-kicker">{$t('up_next_label')}{nextLabel ? ` · ${nextLabel}` : ''}</span>
-          <strong title={nextTitle}>{nextTitle}</strong>
-          {#if autoplayNext}<small>{$t('autoplay_at_the_end')}</small>{/if}
-          <div class="next-actions">
-            <button type="button" class="next-play" onclick={() => onNext?.()}><Icon name="play" size={16} /><span>{$t('play_now')}</span></button>
-            {#if postCreditsScene && active?.credits}
-              {@const creditsEnd = active.credits.end}
-              <button type="button" class="next-secondary" onclick={() => { seek(creditsEnd, 'skip_credits'); wake(); }}>{$t('skip_credits')}</button>
-            {/if}
-          </div>
-        </div>
-        <button type="button" class="next-dismiss" aria-label={$t('hide_the_next_episode')} title={$t('hide')} onclick={() => { nextDismissed = true; surface?.focus(); }}><Icon name="close" size={16} /></button>
-      </aside>
+      <NextEpisodeCard onDismiss={() => { nextDismissed = true; surface?.focus(); }} {visible} {nextImage} bind:nextImageFailed {nextLabel} {nextTitle} {autoplayNext} {onNext} {postCreditsScene} {active} {seek} {wake} />
     {/if}
   </div>
 </dialog>
 
 <style>
   .marker-editor { position:absolute;z-index:10;top:90px;right:24px;display:grid;gap:10px;width:min(340px,calc(100% - 48px));padding:16px;background:#171923;color:white;border:1px solid #ffffff50;border-radius:10px; }
+
   .marker-editor label { display:grid;gap:4px; }
+
   .marker-detection { margin:0;padding:8px 10px;border-radius:8px;background:#ffffff14;font-size:13px;line-height:1.45; }
+
   .marker-detection p { margin:0; }
+
   .marker-detection p + p { margin-top:4px; }
-  .stream-statistics button { color:#eee; background:#ffffff15; border:1px solid #ffffff30; border-radius:8px; padding:10px 14px; cursor:pointer; }
-  .stream-statistics { position:absolute; z-index:7; top:90px; right:24px; width:min(460px,calc(100% - 48px)); max-height:calc(100dvh - 230px); overflow:auto; padding:20px; box-sizing:border-box; background:rgba(16,17,25,.96); color:#eee; border:1px solid #ffffff25; border-radius:12px; font-size:12px; overflow-wrap:anywhere; }
-  .stream-statistics header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-  .stream-statistics dl { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; }
-  .stream-statistics dd { margin:0; } .stream-statistics dt, .stream-statistics p { color:#bbb8ca; }
 
   video::cue {
     color: var(--sub-color, #ffffff);
@@ -1033,12 +990,33 @@
     font-family: var(--sub-font, system-ui, -apple-system, sans-serif);
     line-height: 1.35;
   }
-  .next-episode { margin-left:auto; max-width:50%; font-size:12px; } .next-episode label { display:flex; align-items:center; gap:8px; }
-  .title { min-width:0; flex:1; } .title>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .next-episode { margin-left:auto; max-width:50%; font-size:12px; }
+
+  .next-episode label { display:flex; align-items:center; gap:8px; }
+
+  .title { min-width:0; flex:1; }
+
+  .title>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
   :global(body.immersive-open) { overflow: hidden; }
-  .immersive-dialog { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: var(--color-text); overflow: hidden; }.immersive-dialog::backdrop { background: #000; }
-  .player-shell { width: 100%; height: 100%; position: relative; background: #000; outline: 0; overflow: hidden; }.player-shell:fullscreen { width: 100vw; height: 100dvh; }.inactive { cursor: none; }.inactive :global(*) { cursor: none; }
-  video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }.video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; }
+
+  .immersive-dialog { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; color: var(--color-text); overflow: hidden; }
+
+  .immersive-dialog::backdrop { background: #000; }
+
+  .player-shell { width: 100%; height: 100%; position: relative; background: #000; outline: 0; overflow: hidden; }
+
+  .player-shell:fullscreen { width: 100vw; height: 100dvh; }
+
+  .inactive { cursor: none; }
+
+  .inactive :global(*) { cursor: none; }
+
+  video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+
+  .video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; }
+
   .top-bar {
     display: flex;
     position: absolute;
@@ -1050,10 +1028,12 @@
     background: linear-gradient(180deg, rgba(9, 10, 16, 0.95) 0%, rgba(9, 10, 16, 0.6) 60%, transparent 100%);
     transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
+
   .concealed {
     opacity: 0;
     pointer-events: none;
   }
+
   .return {
     display: grid;
     place-items: center;
@@ -1067,12 +1047,14 @@
     color: #ffffff;
     transition: all var(--transition-fast);
   }
+
   .return:hover {
     background: rgba(255, 255, 255, 0.2);
     border-color: var(--color-accent-soft);
     transform: scale(1.06);
     box-shadow: 0 0 16px var(--color-accent-glow);
   }
+
   .title > span {
     display: block;
     font-size: 17px;
@@ -1094,14 +1076,18 @@
     font-weight: 500;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.9);
   }
+
   .loading { z-index:5; }
+
   .loading button { pointer-events:auto;min-height:44px;padding:10px 20px; }
+
   .player-spinner {
     width: 40px;
     height: 40px;
     display: block;
     filter: drop-shadow(0 0 16px var(--warn));
   }
+
   .player-error {
     position: absolute;
     z-index: 5;
@@ -1119,18 +1105,21 @@
     color: #fca5a5;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.85);
   }
+
   .player-error strong {
     display: block;
     margin: 12px 0 6px;
     font-size: 16px;
     color: var(--color-text-bright);
   }
+
   .player-error p {
     font-size: 13px;
     line-height: 1.6;
     overflow-wrap: anywhere;
     color: var(--color-muted);
   }
+
   .player-error button {
     border: 0;
     border-radius: var(--radius-sm);
@@ -1142,11 +1131,13 @@
     font-weight: 700;
     transition: all var(--transition-fast);
   }
+
   .player-error button:hover {
     background: #ffffff;
     box-shadow: 0 4px 16px rgba(255, 255, 255, 0.25);
     transform: translateY(-1px);
   }
+
   .fullscreen-notice {
     position: absolute;
     top: max(96px, env(safe-area-inset-top));
@@ -1157,26 +1148,26 @@
     pointer-events: none;
     text-shadow: 0 1px 4px black;
   }
-  @media (max-width: 700px) {
-    .top-bar {
-      padding: max(14px, env(safe-area-inset-top)) 16px 50px;
-      gap: 12px;
-    }
-    .return {
-      width: 42px;
-      height: 42px;
-    }
-    .title > span {
-      font-size: 14px;
-    }
 
-    .fullscreen-notice {
-      left: 18px;
-      top: 80px;
-      font-size: 10px;
-      max-width: calc(100% - 36px);
-    }
-  }
+  @media (max-width: 700px) {
+  .top-bar {
+          padding: max(14px, env(safe-area-inset-top)) 16px 50px;
+          gap: 12px;
+        }
+  .return {
+          width: 42px;
+          height: 42px;
+        }
+  .title > span {
+          font-size: 14px;
+        }
+  .fullscreen-notice {
+          left: 18px;
+          top: 80px;
+          font-size: 10px;
+          max-width: calc(100% - 36px);
+        }
+}
 
   /* ---------- Halo : barre supérieure, erreurs et épisode suivant ---------- */
   .top-bar {
@@ -1184,6 +1175,7 @@
     font-family: var(--font);
     transition: opacity var(--t-slow) ease;
   }
+
   .return {
     border: 0;
     border-radius: 16px;
@@ -1191,22 +1183,43 @@
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
   }
+
   .return:hover { background: rgb(255 255 255 / 0.14); border-color: transparent; transform: none; box-shadow: none; }
+
   .title > span { font-weight: 800; }
+
   .next-episode label { font-size: 13px; font-weight: 700; }
+
   .watch-together { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 16px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+
   .watch-together:hover { background: rgb(255 255 255 / 0.22); }
+
   .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
-  @media (max-width: 640px) { .watch-together span { display: none; } .watch-together { padding: 0 10px; } }
+
+  @media (max-width: 640px) {
+  .watch-together span { display: none; }
+  .watch-together { padding: 0 10px; }
+}
+
   .send-to { position: relative; }
+
   .send-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: grid; min-width: 200px; padding: 6px; border-radius: 14px; background: rgb(18 20 26 / 0.94); box-shadow: 0 12px 32px rgb(0 0 0 / 0.4); }
+
   .send-menu button { min-height: 40px; padding: 0 12px; border: 0; border-radius: 10px; background: none; color: #f4f6fb; font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
-  .send-menu button:hover, .send-menu button:focus-visible { background: rgb(255 255 255 / 0.14); outline: none; }
+
+  .send-menu button:hover,
+  .send-menu button:focus-visible { background: rgb(255 255 255 / 0.14); outline: none; }
+
   .next-episode input { accent-color: var(--ac); width: 18px; height: 18px; }
+
   .loading { font-family: var(--font); font-size: 14px; font-weight: 700; }
+
   .loading button { border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.16); color: #f4f6fb; font-weight: 700; }
+
   .loading button:hover { background: rgb(255 255 255 / 0.26); }
+
   .player-spinner { filter: none; }
+
   .player-error {
     padding: 28px;
     border: 0;
@@ -1216,11 +1229,16 @@
     box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
     font-family: var(--font);
   }
+
   .player-error strong { font-size: 18px; font-weight: 800; color: #fff; }
+
   .player-error p { font-size: 14px; color: #a2a9ba; }
+
   .player-error button { height: 48px; padding: 0 22px; border-radius: 16px; background: #eef1f8; color: #0b0e18; font-size: 14px; font-weight: 800; }
+
   .player-error button:hover { background: #fff; box-shadow: none; transform: none; }
-  .marker-editor, .stream-statistics {
+
+  .marker-editor {
     padding: 20px;
     border: 0;
     border-radius: 24px;
@@ -1231,92 +1249,28 @@
     box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
     font-family: var(--font);
   }
-  .stream-statistics { font-size: 13px; }
-  .stream-statistics dt, .stream-statistics p { color: #a2a9ba; }
-  .stream-statistics dd { font-family: var(--font-mono); font-size: 12px; }
+
   .marker-editor label { font-size: 14px; font-weight: 700; }
-  .stream-statistics button { min-height: 40px; border: 0; border-radius: 12px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
-  .stream-statistics button:hover { background: rgb(255 255 255 / 0.24); }
+
   .fullscreen-notice { color: #a2a9ba; font-size: 12px; font-weight: 600; }
+
   .marker-editor h2 { margin: 0 0 4px; font-size: 17px; font-weight: 800; }
-  .marker-editor select, .marker-editor input[type='number'] { height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 12px; background-color: rgb(255 255 255 / 0.07); color: #fff; box-shadow: none; }
-  .marker-editor select:focus, .marker-editor input[type='number']:focus { outline: none; border-color: var(--ac); }
+
+  .marker-editor select,
+  .marker-editor input[type='number'] { height: 44px; padding: 0 12px; border: 1px solid transparent; border-radius: 12px; background-color: rgb(255 255 255 / 0.07); color: #fff; box-shadow: none; }
+
+  .marker-editor select:focus,
+  .marker-editor input[type='number']:focus { outline: none; border-color: var(--ac); }
+
   .marker-editor input[type='checkbox'] { accent-color: var(--ac); width: 18px; height: 18px; }
+
   .marker-editor button { min-height: 44px; border: 0; border-radius: 14px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font-weight: 700; }
+
   .marker-editor button:first-of-type { background: #eef1f8; color: #0b0e18; }
+
   .marker-editor [role='alert'] { margin: 0; color: var(--err); font-weight: 600; }
 
-  /* Carte « À suivre » : panneau sombre du lecteur, en bas à droite, au-dessus des commandes quand elles sont visibles */
-  .next-card {
-    position: absolute;
-    z-index: 6;
-    right: max(var(--gutter, 40px), env(safe-area-inset-right));
-    bottom: max(28px, env(safe-area-inset-bottom));
-    display: flex;
-    gap: 14px;
-    align-items: stretch;
-    width: min(440px, calc(100% - 32px));
-    padding: 12px;
-    border-radius: 24px;
-    background: rgb(17 21 31 / 0.92);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
-    color: #f4f6fb;
-    font-family: var(--font);
-    animation: next-in var(--t-slow) var(--ease);
-    transition: bottom var(--t-slow) var(--ease);
-  }
-  /* Hauteur des commandes (PlayerControls) : barre 28 px + rangée 60 px + marges. */
-  .next-card.raised { bottom: calc(max(20px, env(safe-area-inset-bottom)) + 108px); }
-  @media (min-width: 1920px) { .next-card.raised { bottom: calc(max(32px, env(safe-area-inset-bottom)) + 124px); } }
   @keyframes next-in { from { opacity: 0; transform: translateY(16px) scale(0.98); } to { opacity: 1; transform: none; } }
-  .next-thumb {
-    flex: none;
-    display: grid;
-    place-items: center;
-    width: 160px;
-    aspect-ratio: 16 / 9;
-    overflow: hidden;
-    border-radius: 14px;
-    background: rgb(255 255 255 / 0.08);
-    color: #a2a9ba;
-  }
-  .next-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .next-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 2px 28px 2px 0; }
-  .next-kicker { font-size: 11.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: rgb(244 246 251 / 0.65); }
-  .next-info strong { font-size: 16px; font-weight: 800; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
-  .next-info small { font-size: 12px; color: rgb(244 246 251 / 0.6); }
-  .next-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 6px; }
-  .next-play, .next-secondary {
-    display: inline-flex; align-items: center; gap: 8px;
-    min-height: 40px; padding: 0 16px; border: 0; border-radius: 999px;
-    font: inherit; font-size: 13.5px; font-weight: 800; cursor: pointer;
-  }
-  .next-play { background: rgb(248 249 252 / 0.95); color: #0b0e18; }
-  .next-play:hover { background: #fff; }
-  .next-play :global(svg) { fill: currentColor; }
-  .next-secondary { background: rgb(255 255 255 / 0.12); color: #f4f6fb; }
-  .next-secondary:hover { background: rgb(255 255 255 / 0.2); }
-  .next-dismiss {
-    position: absolute; top: 8px; right: 8px;
-    display: grid; place-items: center;
-    width: 32px; height: 32px; min-height: 32px; padding: 0;
-    border: 0; border-radius: 50%;
-    background: transparent; color: rgb(244 246 251 / 0.7); cursor: pointer;
-  }
-  .next-dismiss:hover { background: rgb(255 255 255 / 0.12); color: #fff; }
-  .next-card button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
-  @media (max-width: 768px) {
-    .next-card { right: 12px; left: 12px; width: auto; padding: 10px; gap: 10px; border-radius: 20px; }
-    .next-card.raised { bottom: calc(max(20px, env(safe-area-inset-bottom)) + 96px); }
-    .next-thumb { width: 112px; }
-    .next-info strong { font-size: 14px; }
-  }
-  /* Téléphone : commandes sur trois rangées (barre, temps + options, transport). */
-  @media (max-width: 720px) {
-    .next-card.raised { bottom: calc(max(10px, env(safe-area-inset-bottom)) + 156px); }
-  }
-  @media (prefers-reduced-motion: reduce) { .next-card { animation: none; transition: none; } }
+
   .inactive :global(*) { cursor: none !important; }
 </style>

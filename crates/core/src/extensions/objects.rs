@@ -65,8 +65,22 @@ async fn lookup(
     if uuid::Uuid::parse_str(id).is_err() {
         return Err(error("object_not_found"));
     }
-    let row: Option<Row> = query_as("SELECT id,size,received,substr(sha256,1,65) AS sha256,substr(durability,1,16) AS durability,expires_at,complete FROM extension_objects WHERE id=? AND extension_id=? AND scope_kind=? AND scope_id=? AND (expires_at IS NULL OR expires_at>?) AND (complete=1 OR upload_expires_at>?)")
-        .bind(id).bind(&context.extension_id).bind(kind).bind(scope_id).bind(now).bind(now).fetch_optional(&mut *conn).await.map_err(database)?;
+    let row: Option<Row> = query_as(
+        "SELECT id,size,received,substr(sha256,1,65) AS sha256,substr(durability,1,16) AS \
+            durability,expires_at,complete \
+            FROM extension_objects \
+            WHERE id=? AND extension_id=? AND scope_kind=? AND scope_id=? AND (expires_at IS NULL \
+            OR expires_at>?) AND (complete=1 OR upload_expires_at>?)",
+    )
+    .bind(id)
+    .bind(&context.extension_id)
+    .bind(kind)
+    .bind(scope_id)
+    .bind(now)
+    .bind(now)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(database)?;
     let row = row.ok_or_else(|| error("object_not_found"))?;
     if !(0..=MAX_OBJECT_BYTES).contains(&row.size)
         || !(0..=row.size).contains(&row.received)

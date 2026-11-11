@@ -73,12 +73,21 @@ pub(super) fn random_bytes<const N: usize>() -> Result<[u8; N], Error> {
 
 /// Sliding one-minute budget per key, durable across restarts (same table as login).
 pub(super) async fn throttle(state: &AuthState, key: &str, limit: i64) -> Result<(), Error> {
-    let allowed: Option<i64> = query_scalar("INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<? RETURNING login_throttle.attempts")
-        .bind(key)
-        .bind(limit)
-        .fetch_optional(&state.store.pool)
-        .await
-        .map_err(db)?;
+    let allowed: Option<i64> = query_scalar(
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) \
+            ON CONFLICT(throttle_key) DO UPDATE \
+            SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 \
+            THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE \
+            WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+            ELSE login_throttle.attempts+1 END \
+            WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<? \
+            RETURNING login_throttle.attempts",
+    )
+    .bind(key)
+    .bind(limit)
+    .fetch_optional(&state.store.pool)
+    .await
+    .map_err(db)?;
     allowed
         .map(|_| ())
         .ok_or_else(|| fail(StatusCode::TOO_MANY_REQUESTS, "try_later"))

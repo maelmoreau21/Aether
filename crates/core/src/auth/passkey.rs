@@ -452,7 +452,9 @@ async fn register(
         name
     };
     let credential = b64(&raw_id);
-    let inserted = query("INSERT INTO user_passkeys(credential_id,user_id,name,algorithm,public_key,sign_count,created_at) SELECT ?,?,?,?,?,?,unixepoch() WHERE (SELECT COUNT(*) FROM user_passkeys WHERE user_id=?)<? AND EXISTS(SELECT 1 FROM local_credentials WHERE user_id=?) ON CONFLICT(credential_id) DO NOTHING")
+    let inserted = query("INSERT INTO user_passkeys(credential_id,user_id,name,algorithm,public_key,sign_count,created_at) SELECT ?,?,?,?,?,?,unixepoch() \
+            WHERE (SELECT COUNT(*) FROM user_passkeys WHERE user_id=?)<? AND EXISTS(SELECT 1 \
+            FROM local_credentials WHERE user_id=?) ON CONFLICT(credential_id) DO NOTHING")
         .bind(&credential)
         .bind(id)
         .bind(&name)

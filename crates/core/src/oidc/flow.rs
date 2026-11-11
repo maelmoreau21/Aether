@@ -246,10 +246,22 @@ impl Oidc {
         let mut conn = self.auth.store.pool.acquire().await.map_err(db)?;
         let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
         let linked_user: Option<String> = if let Some(ref session_hash) = flow.link_session_hash {
-            Some(crate::database::query_scalar(
-                "SELECT s.user_id FROM sessions s                  JOIN users u ON u.id=s.user_id                  JOIN local_credentials c ON c.user_id=u.id                  WHERE s.token_hash=? AND s.expires_at>unixepoch()                  AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
-                .bind(session_hash).bind(crate::auth::IDLE_SECONDS).fetch_optional(&mut *tx).await.map_err(db)?
-                .ok_or_else(|| deny(StatusCode::UNAUTHORIZED,"link_session_expired"))?)
+            Some(
+                crate::database::query_scalar(
+                    "SELECT s.user_id \
+                        FROM sessions s                  JOIN users u \
+                        ON u.id=s.user_id                  JOIN local_credentials c \
+                        ON c.user_id=u.id                  WHERE s.token_hash=? \
+                        AND s.expires_at>unixepoch()                  \
+                        AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL",
+                )
+                .bind(session_hash)
+                .bind(crate::auth::IDLE_SECONDS)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(db)?
+                .ok_or_else(|| deny(StatusCode::UNAUTHORIZED, "link_session_expired"))?,
+            )
         } else {
             None
         };

@@ -118,7 +118,16 @@ pub(super) async fn fixture(store: &IdentityStore) {
         .unwrap();
         query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES(?,?,?,?,100,'0','video/x-matroska','{}',1)").bind(id).bind(id).bind(library).bind(format!("{id}.mkv")).execute(&store.pool).await.unwrap();
     }
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,duration,codec,mime,scan_id,available) VALUES('stats-track','stats-music','/ro/stats-music','fixture.opus',100,'0','Fixture music','Fixture artist','Fixture album','Fixture artist',100.0,'opus','audio/ogg','fixture',1)").execute(&store.pool).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,duration,codec,mime,scan_id,available) \
+            VALUES('stats-track','stats-music','/ro/stats-music','fixture.opus',100,'0',\
+            'Fixture music','Fixture artist','Fixture album','Fixture artist',100.0,'opus',\
+            'audio/ogg','fixture',1)",
+    )
+    .execute(&store.pool)
+    .await
+    .unwrap();
     query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated) VALUES('stats-reader',12,1)").execute(&store.pool).await.unwrap();
 }
 fn event(sequence: i64, elapsed: f64, position: f64, kind: &str) -> Value {

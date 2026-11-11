@@ -123,8 +123,17 @@ pub(crate) async fn admit(
             }
         }
         TaskRef::Scan(library) => {
-            let available: i64 = query_scalar("SELECT COUNT(*) FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films','series','music') AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id)")
-                .bind(library).fetch_one(pool).await?;
+            let available: i64 = query_scalar(
+                "SELECT COUNT(*) \
+                    FROM libraries l \
+                    JOIN media_nodes n ON n.id=l.node_id \
+                    WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films','series','music') \
+                    AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked' \
+                    AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id)",
+            )
+            .bind(library)
+            .fetch_one(pool)
+            .await?;
             if available == 0 {
                 return Ok(Admission::Unavailable);
             }
@@ -166,7 +175,12 @@ const FIRE_BATCH: i64 = 64;
 /// One scheduling pass. Returns the number of runs queued.
 pub async fn fire_due(auth: &AuthState, now: i64) -> Result<usize, sqlx::Error> {
     repair(&auth.store, now).await?;
-    let due: Vec<TriggerRow> = query_as("SELECT id,task_kind,task_id,trigger_type,time_of_day_minutes,day_of_week,interval_minutes,max_runtime_seconds,enabled,next_fire_at,created_at FROM task_triggers WHERE enabled=1 AND trigger_type<>'startup' AND next_fire_at IS NOT NULL AND next_fire_at<=? ORDER BY next_fire_at,id LIMIT ?")
+    let due: Vec<TriggerRow> = query_as("SELECT id,task_kind,task_id,trigger_type,time_of_day_minutes,day_of_week,interval_minutes,max_runtime_seconds,enabled,next_fire_at,created_at \
+            FROM task_triggers \
+            WHERE enabled=1 AND trigger_type<>'startup' AND next_fire_at IS NOT NULL \
+            AND next_fire_at<=? \
+            ORDER BY next_fire_at,id \
+            LIMIT ?")
         .bind(now)
         .bind(FIRE_BATCH)
         .fetch_all(auth.store.pool())

@@ -353,7 +353,14 @@ async fn pin_hash(auth: &AuthState, id: &str) -> Result<Option<String>, Error> {
 /// Durable per-profile budget, so a 4-digit PIN cannot be brute-forced from many devices.
 async fn throttle(auth: &AuthState, id: &str) -> Result<(), Error> {
     let allowed: Option<i64> = query_scalar(
-        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<? RETURNING login_throttle.attempts",
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) \
+                VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE \
+                SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 \
+                THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE \
+                WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+                ELSE login_throttle.attempts+1 END \
+                WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<? \
+                RETURNING login_throttle.attempts",
     )
     .bind(format!("profile-pin:{id}"))
     .bind(PIN_ATTEMPTS)

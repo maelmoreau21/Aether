@@ -103,15 +103,64 @@ pub(crate) async fn queue_previews(
     // rather than rewriting one task for every file on every monitoring scan.
     loop {
         let assets: Vec<(String, i64, String, String, String)> = match scope {
-            PreviewScope::Scan(scan) => crate::database::query_as(
-                "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path JOIN libraries l ON l.id=a.library_id WHERE f.scan_id=? AND a.library_id=? AND a.id>? AND a.available=1 AND l.enabled=1 AND l.kind IN ('films','series') ORDER BY a.id LIMIT 128"
-            ).bind(scan).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?,
-            PreviewScope::Library => crate::database::query_as(
-                "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE (a.library_id=? OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND a.id>? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' AND l.kind IN ('films','series') AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) ORDER BY a.id LIMIT 128"
-            ).bind(library).bind(library).bind(&last_asset).fetch_all(&mut **tx).await?,
-            PreviewScope::Asset(asset) => crate::database::query_as(
-                "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.id>? AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' AND l.kind IN ('films','series') ORDER BY a.id LIMIT 1"
-            ).bind(asset).bind(&last_asset).fetch_all(&mut **tx).await?,
+            PreviewScope::Scan(scan) => {
+                crate::database::query_as(
+                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id \
+                        FROM scan_staging_files f \
+                        JOIN inventory_assets a ON a.library_id=f.library_id \
+                        AND a.relative_path=f.relative_path \
+                        JOIN libraries l ON l.id=a.library_id \
+                        WHERE f.scan_id=? AND a.library_id=? AND a.id>? AND a.available=1 \
+                        AND l.enabled=1 AND l.kind IN ('films','series') \
+                        ORDER BY a.id \
+                        LIMIT 128",
+                )
+                .bind(scan)
+                .bind(library)
+                .bind(&last_asset)
+                .fetch_all(&mut **tx)
+                .await?
+            }
+            PreviewScope::Library => {
+                crate::database::query_as(
+                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id \
+                        FROM inventory_assets a \
+                        JOIN inventory_sources s ON s.id=a.source_id \
+                        JOIN libraries l ON l.id=a.library_id \
+                        JOIN media_nodes n ON n.id=l.node_id \
+                        WHERE (a.library_id=? OR a.library_id IN (SELECT library_id \
+                        FROM library_folders WHERE parent_id=? AND active=1)) AND a.id>? \
+                        AND a.available=1 AND s.root_snapshot=l.root AND n.status!='revoked' \
+                        AND l.kind IN ('films','series') AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 \
+                        FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 \
+                        FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id \
+                        WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+                        ORDER BY a.id \
+                        LIMIT 128",
+                )
+                .bind(library)
+                .bind(library)
+                .bind(&last_asset)
+                .fetch_all(&mut **tx)
+                .await?
+            }
+            PreviewScope::Asset(asset) => {
+                crate::database::query_as(
+                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id \
+                        FROM inventory_assets a \
+                        JOIN inventory_sources s ON s.id=a.source_id \
+                        JOIN libraries l ON l.id=a.library_id \
+                        JOIN media_nodes n ON n.id=l.node_id \
+                        WHERE a.id=? AND a.id>? AND a.available=1 AND s.root_snapshot=l.root \
+                        AND n.status!='revoked' AND l.kind IN ('films','series') \
+                        ORDER BY a.id \
+                        LIMIT 1",
+                )
+                .bind(asset)
+                .bind(&last_asset)
+                .fetch_all(&mut **tx)
+                .await?
+            }
         };
         if assets.is_empty() {
             break;
@@ -192,7 +241,11 @@ pub(crate) async fn queue_previews(
                 }
                 continue;
             }
-            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,1,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL WHERE durable_tasks.error IN ('library_trickplay_disabled','library_chapter_images_disabled') AND durable_tasks.lease_until IS NULL")
+            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,1,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE \
+                    SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL \
+                    WHERE durable_tasks.error IN \
+                    ('library_trickplay_disabled','library_chapter_images_disabled') \
+                    AND durable_tasks.lease_until IS NULL")
                 .bind(uuid::Uuid::new_v4().to_string()).bind(&asset_library).bind(owner).bind(key).bind(node)
                 .bind(now).bind(now).bind(now).bind(asset).bind(component).bind(i64::from(options.trickplay_width))
                 .execute(&mut **tx).await?.rows_affected();

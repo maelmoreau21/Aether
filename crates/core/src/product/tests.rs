@@ -487,7 +487,8 @@ async fn parental_filters_overrides_lists_and_explicit_grouping() {
         value(request(&app, "/api/v1/feedback/unknown", "GET", &a, "", Value::Null).await).await["favorite"],
         true
     );
-    query("INSERT INTO inventory_tracks(id,asset_id,stream_index,metadata_json) VALUES('track-video','young',0,'{\"codec_type\":\"video\",\"codec_name\":\"av1\",\"height\":1080}'),('track-audio','young',1,'{\"codec_type\":\"audio\",\"codec_name\":\"opus\",\"tags\":{\"language\":\"fra\"}}')").execute(&store.pool).await.unwrap();
+    query("INSERT INTO inventory_tracks(id,asset_id,stream_index,metadata_json) \
+            VALUES('track-video','young',0,'{\"codec_type\":\"video\",\"codec_name\":\"av1\",\"height\":1080}'),('track-audio','young',1,'{\"codec_type\":\"audio\",\"codec_name\":\"opus\",\"tags\":{\"language\":\"fra\"}}')").execute(&store.pool).await.unwrap();
     let filtered = value(
         request(
             &app,
@@ -816,7 +817,17 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
         .await
         .unwrap();
     query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES('source','version','films',?)").bind(&root_string).execute(&store.pool).await.unwrap();
-    query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES('asset','source','films','clip.mp4',?,?,'video/mp4','{\"streams\":[],\"format\":{}}',1)").bind(opened.size() as i64).bind(opened.modified_ns()).execute(&store.pool).await.unwrap();
+    query(
+        "INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,\
+            mime,probe_json,available) \
+            VALUES('asset','source','films','clip.mp4',?,?,'video/mp4',\
+            '{\"streams\":[],\"format\":{}}',1)",
+    )
+    .bind(opened.size() as i64)
+    .bind(opened.modified_ns())
+    .execute(&store.pool)
+    .await
+    .unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let a = format!("aether_session={}", "a".repeat(64));
     let b_token = "b".repeat(64);
@@ -1323,7 +1334,16 @@ async fn mixed_playlists_share_only_with_authenticated_accounts_and_keep_library
             .unwrap();
     }
     query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json) VALUES('film','films','film','Synthetic Film','synthetic film','film','{}')").execute(&store.pool).await.unwrap();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,codec,mime,scan_id,lyrics) VALUES('song','music',?,'song.opus',1,'0','Song','Artist','Album','Artist','opus','audio/ogg','test','[00:00]Hello')").bind(&root).execute(&store.pool).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,codec,mime,scan_id,lyrics) \
+            VALUES('song','music',?,'song.opus',1,'0','Song','Artist','Album','Artist','opus',\
+            'audio/ogg','test','[00:00]Hello')",
+    )
+    .bind(&root)
+    .execute(&store.pool)
+    .await
+    .unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let owner_cookie = format!("aether_session={}", "b".repeat(64));
     let peer_cookie = format!("aether_session={}", "c".repeat(64));

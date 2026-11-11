@@ -17,8 +17,18 @@ pub async fn prepared(
 ) -> axum::response::Response {
     use axum::{body::Body, http::StatusCode, response::Response};
     use media_node::packaging::Component;
-    let row = query("SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,a.library_id,l.root,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
-        .bind(asset_id).fetch_optional(&store.pool).await;
+    let row = query(
+        "SELECT a.relative_path,a.size,a.modified_ns,a.probe_json,a.library_id,l.root,l.node_id \
+            FROM inventory_assets a \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN libraries l ON l.id=a.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root \
+            AND n.status != 'revoked'",
+    )
+    .bind(asset_id)
+    .fetch_optional(&store.pool)
+    .await;
     let row = match row {
         Ok(Some(row)) => row,
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "asset_unavailable"),
@@ -408,8 +418,19 @@ pub async fn audio(
     request: axum::extract::Request,
 ) -> axum::response::Response {
     use axum::{body::Body, http::StatusCode, response::Response};
-    let row = query("SELECT au.audios_json,l.root,l.node_id FROM inventory_audio au JOIN inventory_assets a ON a.id=au.asset_id JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root AND n.status != 'revoked'")
-        .bind(asset_id).fetch_optional(&store.pool).await;
+    let row = query(
+        "SELECT au.audios_json,l.root,l.node_id \
+            FROM inventory_audio au \
+            JOIN inventory_assets a ON a.id=au.asset_id \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN libraries l ON l.id=a.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE a.id=? AND a.available=1 AND l.enabled=1 AND s.root_snapshot=l.root \
+            AND n.status != 'revoked'",
+    )
+    .bind(asset_id)
+    .fetch_optional(&store.pool)
+    .await;
     let row = match row {
         Ok(Some(row)) => row,
         Ok(None) => return crate::error(StatusCode::NOT_FOUND, "audio_unavailable"),
@@ -471,8 +492,19 @@ pub async fn subtitle(
         http::{StatusCode, header},
         response::Response,
     };
-    let value: Result<Option<String>, _> = query_scalar("SELECT t.subtitles_json FROM inventory_subtitles t JOIN inventory_assets a ON a.id=t.asset_id JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status != 'revoked'")
-        .bind(asset_id).fetch_optional(&store.pool).await;
+    let value: Result<Option<String>, _> = query_scalar(
+        "SELECT t.subtitles_json \
+            FROM inventory_subtitles t \
+            JOIN inventory_assets a ON a.id=t.asset_id \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN libraries l ON l.id=a.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE a.id=? AND a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot \
+            AND n.status != 'revoked'",
+    )
+    .bind(asset_id)
+    .fetch_optional(&store.pool)
+    .await;
     let tracks: Vec<media_contracts::inventory::ExternalSubtitle> = match value {
         Ok(Some(text)) => match serde_json::from_str(&text) {
             Ok(tracks) => tracks,
@@ -536,7 +568,7 @@ pub async fn subtitle(
                     header::CONTENT_RANGE,
                     format!("bytes {}-{}/{}", range.start, range.end, bytes.len())
                         .parse()
-                        .unwrap(),
+                        .unwrap_or_else(|_| header::HeaderValue::from_static("bytes */*")),
                 );
                 &bytes[range.start as usize..=range.end as usize]
             }
@@ -544,7 +576,9 @@ pub async fn subtitle(
                 *response.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE;
                 response.headers_mut().insert(
                     header::CONTENT_RANGE,
-                    format!("bytes */{}", bytes.len()).parse().unwrap(),
+                    format!("bytes */{}", bytes.len())
+                        .parse()
+                        .unwrap_or_else(|_| header::HeaderValue::from_static("bytes */*")),
                 );
                 return response;
             }

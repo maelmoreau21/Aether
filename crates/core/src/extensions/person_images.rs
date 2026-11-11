@@ -92,11 +92,22 @@ async fn provider_for(
     library: &str,
     host: &str,
 ) -> Result<Option<Package>, Error> {
-    let rows: Vec<(String,)> = query_as("SELECT e.package_json FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) WHERE l.id=? AND e.enabled=1 AND p.active=1 ORDER BY e.id LIMIT 65")
-        .bind(library)
-        .fetch_all(auth.store.pool())
-        .await
-        .map_err(db)?;
+    let rows: Vec<(String,)> = query_as(
+        "SELECT e.package_json \
+            FROM extensions e \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+            WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 \
+            FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id \
+            WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) \
+            WHERE l.id=? AND e.enabled=1 AND p.active=1 \
+            ORDER BY e.id \
+            LIMIT 65",
+    )
+    .bind(library)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(rows
         .into_iter()
         .filter_map(|(stored,)| serde_json::from_str::<Package>(&stored).ok())

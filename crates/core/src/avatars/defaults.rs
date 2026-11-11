@@ -444,8 +444,19 @@ async fn assign_user_unconditionally(store: &IdentityStore, user: &str) -> Resul
     if existing != 0 {
         return Ok(0);
     }
-    let images: Vec<String> = query_scalar("SELECT sha256 FROM avatar_images UNION ALL SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id JOIN extensions e ON e.id=p.extension_id JOIN extension_publishers pub ON pub.id=e.publisher_id WHERE e.enabled=1 AND pub.active=1 LIMIT 16000")
-        .fetch_all(store.pool()).await?;
+    let images: Vec<String> = query_scalar(
+        "SELECT sha256 \
+            FROM avatar_images \
+            UNION ALL SELECT i.sha256 \
+            FROM extension_avatar_images i \
+            JOIN extension_avatar_packs p ON p.id=i.pack_id \
+            JOIN extensions e ON e.id=p.extension_id \
+            JOIN extension_publishers pub ON pub.id=e.publisher_id \
+            WHERE e.enabled=1 AND pub.active=1 \
+            LIMIT 16000",
+    )
+    .fetch_all(store.pool())
+    .await?;
     let sha256 = if images.is_empty() {
         store
             .assets()

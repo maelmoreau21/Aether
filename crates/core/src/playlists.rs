@@ -87,7 +87,21 @@ pub async fn access(
     if mutation {
         auth.require_csrf(headers, &actor)?;
     }
-    let count:i64=query_scalar("SELECT COUNT(*) FROM personal_lists p WHERE p.id=? AND (p.user_id=? OR (?=0 AND ((p.visibility='public' AND EXISTS(SELECT 1 FROM playlist_policy WHERE allow_public=1)) OR (p.visibility='shared' AND EXISTS(SELECT 1 FROM playlist_policy WHERE allow_sharing=1) AND EXISTS(SELECT 1 FROM playlist_shares s WHERE s.list_id=p.id AND s.user_id=?)))))").bind(id).bind(&actor.user.id).bind(i64::from(mutation)).bind(&actor.user.id).fetch_one(&auth.store.pool).await.map_err(|_|Error::INTERNAL_SERVER_ERROR)?;
+    let count: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM personal_lists p \
+            WHERE p.id=? AND (p.user_id=? OR (?=0 AND ((p.visibility='public' AND EXISTS(SELECT 1 \
+            FROM playlist_policy WHERE allow_public=1)) OR (p.visibility='shared' \
+            AND EXISTS(SELECT 1 FROM playlist_policy WHERE allow_sharing=1) AND EXISTS(SELECT 1 \
+            FROM playlist_shares s WHERE s.list_id=p.id AND s.user_id=?)))))",
+    )
+    .bind(id)
+    .bind(&actor.user.id)
+    .bind(i64::from(mutation))
+    .bind(&actor.user.id)
+    .fetch_one(&auth.store.pool)
+    .await
+    .map_err(|_| Error::INTERNAL_SERVER_ERROR)?;
     if count != 1 {
         return Err(Error::NOT_FOUND);
     }
@@ -206,7 +220,21 @@ async fn recipients(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let rows=query("SELECT u.id,COALESCE(u.display_name,c.login,u.id) AS name FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id WHERE u.disabled_at IS NULL AND u.id!=? AND lower(COALESCE(u.display_name,c.login,u.id)) LIKE ? ESCAPE '\\' ORDER BY name,u.id LIMIT 20").bind(actor.user.id).bind(term).fetch_all(&auth.store.pool).await.map_err(|_|Error::INTERNAL_SERVER_ERROR)?;
+    let rows = query(
+        "SELECT u.id,COALESCE(u.display_name,c.login,u.id) AS name \
+            FROM users u \
+            LEFT \
+            JOIN local_credentials c ON c.user_id=u.id \
+            WHERE u.disabled_at IS NULL AND u.id!=? \
+            AND lower(COALESCE(u.display_name,c.login,u.id)) LIKE ? ESCAPE '\\' \
+            ORDER BY name,u.id \
+            LIMIT 20",
+    )
+    .bind(actor.user.id)
+    .bind(term)
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(|_| Error::INTERNAL_SERVER_ERROR)?;
     Ok(Json(
         json!({"users":rows.iter().map(|r|json!({"id":r.get::<String,_>("id"),"name":r.get::<String,_>("name")})).collect::<Vec<_>>()}),
     ))
@@ -233,7 +261,16 @@ pub async fn insert_item(auth: &AuthState, id: &str, item: &str, music: bool) ->
         .await
         .map_err(|_| Error::INTERNAL_SERVER_ERROR)?;
     if exists == 0 {
-        let (count,position):(i64,i64)=crate::database::query_as("SELECT COUNT(*),COALESCE(MAX(position),-1)+1 FROM (SELECT position FROM personal_list_items WHERE list_id=? UNION ALL SELECT position FROM playlist_music_items WHERE list_id=?) entries").bind(id).bind(id).fetch_one(&mut *tx).await.map_err(|_|Error::INTERNAL_SERVER_ERROR)?;
+        let (count, position): (i64, i64) = crate::database::query_as(
+            "SELECT COUNT(*),COALESCE(MAX(position),-1)+1 \
+                FROM (SELECT position FROM personal_list_items WHERE list_id=? UNION ALL \
+                SELECT position FROM playlist_music_items WHERE list_id=?) entries",
+        )
+        .bind(id)
+        .bind(id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| Error::INTERNAL_SERVER_ERROR)?;
         if count >= 1000 {
             return Err(Error::CONFLICT);
         }

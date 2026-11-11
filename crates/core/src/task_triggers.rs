@@ -585,8 +585,17 @@ async fn collect(
     }
 
     // Library scans: one task per visible library (physical folders are its scopes).
-    let libraries: Vec<(String, String, String, i64, String, String)> = query_as("SELECT l.id,l.name,l.kind,l.enabled,l.node_id,n.status FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.kind IN ('films','series','music') AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) ORDER BY l.name,l.id")
-        .fetch_all(pool).await?;
+    let libraries: Vec<(String, String, String, i64, String, String)> = query_as(
+        "SELECT l.id,l.name,l.kind,l.enabled,l.node_id,n.status \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE l.kind IN ('films','series','music') \
+            AND l.id NOT IN ('fixture-films','fixture-series') AND n.status!='revoked' \
+            AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) \
+            ORDER BY l.name,l.id",
+    )
+    .fetch_all(pool)
+    .await?;
     let marker_extension = crate::library_media_tasks::marker_extension_enabled(store).await?;
     for (library, name, library_kind, enabled, node, node_status) in libraries {
         let reason = if enabled != 1 {
@@ -663,8 +672,19 @@ async fn scan_view(
         let progress = (state == "running")
             .then(|| current.iter().map(|(.., p)| *p).sum::<i64>() / current.len().max(1) as i64);
         // The most recent finished run over every scope of the library.
-        let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as("SELECT started_at,finished_at,status,error FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('completed','error','cancelled') ORDER BY COALESCE(finished_at,updated_at) DESC,id LIMIT 1")
-            .bind(library).bind(library).fetch_optional(pool).await?;
+        let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as(
+            "SELECT started_at,finished_at,status,error \
+                FROM durable_tasks \
+                WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? \
+                OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) \
+                AND status IN ('completed','error','cancelled') \
+                ORDER BY COALESCE(finished_at,updated_at) DESC,id \
+                LIMIT 1",
+        )
+        .bind(library)
+        .bind(library)
+        .fetch_optional(pool)
+        .await?;
         let job: Option<(String, String, i64, i64)> = query_as("SELECT status,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=?")
             .bind(library).fetch_optional(pool).await?;
         let issues: Vec<String> = job

@@ -32,7 +32,15 @@ pub(super) async fn fixture() -> (
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation,all_libraries) VALUES('media-requests','test',?,1,'first',1)").bind(json!(package).to_string()).execute(store.pool()).await.unwrap();
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('request-films','Films','films','local','/media',1)").execute(store.pool()).await.unwrap();
-    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,is_default,enabled,generation) VALUES('radarr-a','Radarr A','radarr','http://127.0.0.1:7878/','test-key','[\"127.0.0.1\"]','request-films','/movies',1,1,1,'g')").execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,\
+            library_id,root_folder,quality_profile_id,is_default,enabled,generation) \
+            VALUES('radarr-a','Radarr A','radarr','http://127.0.0.1:7878/','test-key',\
+            '[\"127.0.0.1\"]','request-films','/movies',1,1,1,'g')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     let mut sessions = vec![];
     for (id, role, token) in [
         ("owner", "user", "a".repeat(64)),
@@ -169,7 +177,18 @@ async fn routes_require_feature_csrf_administrator_and_ownership() {
         json!([])
     );
     let input = json!({"kind":"film","title":"Fixture","externalId":"123","externalProvider":"tmdb","serverId":"radarr-a"});
-    query("INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,created_at,updated_at) VALUES('fixture','owner','radarr-a','request-films','film','Fixture','123','tmdb',?,'pending',?,?)").bind(input.to_string()).bind(now()).bind(now()).execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,\
+            external_provider,input_json,status,created_at,updated_at) \
+            VALUES('fixture','owner','radarr-a','request-films','film','Fixture','123','tmdb',?,\
+            'pending',?,?)",
+    )
+    .bind(input.to_string())
+    .bind(now())
+    .bind(now())
+    .execute(store.pool())
+    .await
+    .unwrap();
     assert_eq!(
         request(
             &app,

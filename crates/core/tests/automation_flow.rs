@@ -1534,7 +1534,10 @@ async fn hundred_thousand_persistent_tasks_admission() {
             .bind(&node_id).bind(&node_id).execute(&mut *tx).await.unwrap();
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films',?,'/synthetic-read-only',1)")
             .bind(&library).bind(&library).bind(&node_id).execute(&mut *tx).await.unwrap();
-        query("WITH RECURSIVE sequence(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM sequence WHERE n<999) INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) SELECT ? || CAST(n AS TEXT),?,'benchmark',? || CAST(n AS TEXT),?,100,100,100 FROM sequence")
+        query("WITH RECURSIVE sequence(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM sequence \
+                WHERE n<999) INSERT INTO \
+                durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) SELECT ? || CAST(n AS TEXT),?,'benchmark',? || CAST(n AS TEXT),?,100,100,100 \
+                FROM sequence")
             .bind(format!("{node_id}-job-")) .bind(&library)
             .bind(format!("{node_id}-key-")) .bind(&node_id)
             .execute(&mut *tx).await.unwrap();
@@ -1707,7 +1710,15 @@ async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
         .await
         .unwrap();
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('music','Music','music','node-1','/synthetic-music',1)").execute(store.pool()).await.unwrap();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,duration,codec,mime,scan_id,available,lyrics) VALUES('song','music','/synthetic-music','song.opus',1,'1','Song','Artist','Album','Artist',180,'opus','audio/ogg','scan',1,'')").execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,duration,codec,mime,scan_id,available,lyrics) \
+            VALUES('song','music','/synthetic-music','song.opus',1,'1','Song','Artist','Album',\
+            'Artist',180,'opus','audio/ogg','scan',1,'')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     let output = json!({"apiVersion":1,"result":{"id":42,"trackName":"Song","artistName":"Artist","durationSecs":180,"instrumental":false,"plain":"Words","synced":"[00:01]Words"}}).to_string();
     let data = output
         .bytes()
@@ -1800,12 +1811,30 @@ async fn music_automation_pipeline_and_lyrics_provenance() {
         .execute(store.pool()).await.unwrap();
 
     // Insert a track without lyrics and unknown artist
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics) VALUES('track-1','library-music','/synthetic-music','track1.opus',5000,'100','Bohemian Rhapsody','Unknown Artist','Unknown Album','',1,1,354.0,'opus','audio/ogg','scan-1',1,'')")
-        .execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,\
+            available,lyrics) \
+            VALUES('track-1','library-music','/synthetic-music','track1.opus',5000,'100',\
+            'Bohemian Rhapsody','Unknown Artist','Unknown Album','',1,1,354.0,'opus','audio/ogg',\
+            'scan-1',1,'')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     // Insert another track that already has manual lyrics
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics) VALUES('track-manual','library-music','/synthetic-music','track2.opus',6000,'100','Imagine','John Lennon','Imagine','',1,1,183.0,'opus','audio/ogg','scan-1',1,'[00:01.00] Manual local lyrics')")
-        .execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,\
+            available,lyrics) \
+            VALUES('track-manual','library-music','/synthetic-music','track2.opus',6000,'100',\
+            'Imagine','John Lennon','Imagine','',1,1,183.0,'opus','audio/ogg','scan-1',1,\
+            '[00:01.00] Manual local lyrics')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     // Emit music snapshot
     let mut tx = store.pool().begin().await.unwrap();
@@ -2260,7 +2289,15 @@ async fn library_provider_allowlist_controls_admission_and_provenance_priority_m
         .execute(store.pool())
         .await
         .unwrap();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,codec,mime,scan_id,lyrics) VALUES('music','library-1','/read-only','legal.opus',100,'1','Song','Artist','Album','Artist','opus','audio/ogg','scan','Local lyrics')").execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,codec,mime,scan_id,lyrics) \
+            VALUES('music','library-1','/read-only','legal.opus',100,'1','Song','Artist','Album',\
+            'Artist','opus','audio/ogg','scan','Local lyrics')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     query("INSERT INTO automation_policies(extension_id,library_id,operation) VALUES('fixture.metadata','library-1','lyrics.get')").execute(store.pool()).await.unwrap();
     let mut tx = store.pool().begin().await.unwrap();
     automation::emit_music_snapshot(&mut tx, "library-1", 100)

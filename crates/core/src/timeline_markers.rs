@@ -72,8 +72,21 @@ async fn target(
     }
     auth.require_csrf(headers, &actor)?;
     let row: Option<(String, String)> = query_as(
-        "SELECT a.probe_json, w.kind FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND l.enabled=1 AND n.status!='revoked' AND s.root_snapshot=l.root")
-        .bind(asset).fetch_optional(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+        "SELECT a.probe_json, w.kind \
+                FROM inventory_assets a \
+                JOIN inventory_sources s ON s.id=a.source_id \
+                JOIN inventory_versions v ON v.id=s.version_id \
+                JOIN inventory_editions e ON e.id=v.edition_id \
+                JOIN inventory_works w ON w.id=e.work_id \
+                JOIN libraries l ON l.id=a.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                WHERE a.id=? AND a.available=1 AND l.enabled=1 AND n.status!='revoked' \
+                AND s.root_snapshot=l.root",
+    )
+    .bind(asset)
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let Some((probe, work_kind)) = row else {
         return Err(StatusCode::NOT_FOUND);
     };
@@ -654,7 +667,8 @@ async fn save(
     if !input.enabled && (input.start.is_some() || input.end.is_some()) {
         return Err(StatusCode::UNPROCESSABLE_ENTITY);
     }
-    query("INSERT INTO manual_timeline_markers(asset_id,marker_type,start_seconds,end_seconds,enabled,updated_by,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(asset_id,marker_type) DO UPDATE SET start_seconds=excluded.start_seconds,end_seconds=excluded.end_seconds,enabled=excluded.enabled,updated_by=excluded.updated_by,updated_at=excluded.updated_at")
+    query("INSERT INTO manual_timeline_markers(asset_id,marker_type,start_seconds,end_seconds,enabled,updated_by,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(asset_id,marker_type) DO UPDATE \
+            SET start_seconds=excluded.start_seconds,end_seconds=excluded.end_seconds,enabled=excluded.enabled,updated_by=excluded.updated_by,updated_at=excluded.updated_at")
         .bind(&asset).bind(&kind).bind(input.start).bind(input.end).bind(i64::from(input.enabled)).bind(&actor).bind(media_contracts::protocol::unix_now())
         .execute(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(StatusCode::NO_CONTENT)

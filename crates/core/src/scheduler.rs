@@ -310,10 +310,26 @@ async fn reconcile(auth: &AuthState) -> Result<(), sqlx::Error> {
     // Aggregate the durable request, including every physical folder. A transient
     // scan_jobs error is not the outcome of a task waiting for its controlled retry.
     // Exact prefix comparison avoids LIKE wildcard collisions in library identifiers.
-    crate::database::query("UPDATE scheduled_scans SET last_outcome=COALESCE((SELECT CASE WHEN SUM(CASE WHEN status='error' THEN 1 ELSE 0 END)>0 THEN 'error' WHEN SUM(CASE WHEN status='running' THEN 1 ELSE 0 END)>0 THEN 'running' WHEN SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END)>0 THEN 'queued' WHEN SUM(CASE WHEN status='paused' THEN 1 ELSE 0 END)>0 THEN 'paused' WHEN SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled' WHEN COUNT(*)>0 THEN 'completed' ELSE NULL END FROM durable_tasks j WHERE j.owner='scheduler' AND substr(j.idempotency_key,1,length(scheduled_scans.last_request_key)+1)=scheduled_scans.last_request_key || ':'),'interrupted') WHERE last_request_key!=''")
+    crate::database::query("UPDATE scheduled_scans \
+            SET last_outcome=COALESCE((SELECT CASE WHEN SUM(CASE WHEN status='error' THEN 1 \
+            ELSE 0 END)>0 THEN 'error' WHEN SUM(CASE WHEN status='running' THEN 1 ELSE 0 END)>0 \
+            THEN 'running' WHEN SUM(CASE WHEN status='queued' THEN 1 ELSE 0 END)>0 THEN 'queued' \
+            WHEN SUM(CASE WHEN status='paused' THEN 1 ELSE 0 END)>0 THEN 'paused' WHEN SUM(CASE \
+            WHEN status='cancelled' THEN 1 ELSE 0 END)>0 THEN 'cancelled' WHEN COUNT(*)>0 \
+            THEN 'completed' ELSE NULL END FROM durable_tasks j WHERE j.owner='scheduler' \
+            AND substr(j.idempotency_key,1,length(scheduled_scans.last_request_key)+1)=scheduled_scans.last_request_key || ':'),'interrupted') \
+            WHERE last_request_key!=''")
         .execute(&auth.store.pool).await?;
-    crate::database::query("UPDATE scheduled_scans SET last_outcome=(SELECT status FROM scan_jobs WHERE scan_jobs.library_id=scheduled_scans.library_id) WHERE last_request_key='' AND last_outcome IN ('queued','running') AND EXISTS(SELECT 1 FROM scan_jobs WHERE scan_jobs.library_id=scheduled_scans.library_id AND status IN ('completed','error'))")
-        .execute(&auth.store.pool).await?;
+    crate::database::query(
+        "UPDATE scheduled_scans \
+            SET last_outcome=(SELECT status FROM scan_jobs \
+            WHERE scan_jobs.library_id=scheduled_scans.library_id) \
+            WHERE last_request_key='' AND last_outcome IN ('queued','running') AND EXISTS(SELECT 1 \
+            FROM scan_jobs WHERE scan_jobs.library_id=scheduled_scans.library_id \
+            AND status IN ('completed','error'))",
+    )
+    .execute(&auth.store.pool)
+    .await?;
     crate::database::query("UPDATE scheduled_scans SET last_outcome='interrupted' WHERE last_request_key='' AND last_outcome IN ('queued','running') AND NOT EXISTS(SELECT 1 FROM scan_jobs WHERE scan_jobs.library_id=scheduled_scans.library_id)")
         .execute(&auth.store.pool).await?;
     Ok(())
@@ -345,8 +361,21 @@ pub async fn run_due(
 
 /// Periodic metadata refresh of one library (library option `automaticRefreshIntervalDays`).
 async fn run_metadata_refresh(auth: &AuthState, timestamp: i64) -> Result<(), sqlx::Error> {
-    let due: Option<(String,String,i64)> = crate::database::query_as("SELECT l.id,l.options_json,l.next_metadata_refresh_at FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND l.enabled=1 AND l.id NOT IN ('fixture-films','fixture-series') AND l.kind!='music' AND n.status!='revoked' AND l.next_metadata_refresh_at<=? AND CAST(COALESCE(json_extract(l.options_json,'$.automaticRefreshIntervalDays'),'0') AS BIGINT)>0 ORDER BY l.next_metadata_refresh_at,l.id LIMIT 1")
-        .bind(timestamp).fetch_optional(&auth.store.pool).await?;
+    let due: Option<(String, String, i64)> = crate::database::query_as(
+        "SELECT l.id,l.options_json,l.next_metadata_refresh_at \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) \
+            AND l.enabled=1 AND l.id NOT IN ('fixture-films','fixture-series') AND l.kind!='music' \
+            AND n.status!='revoked' AND l.next_metadata_refresh_at<=? \
+            AND CAST(COALESCE(json_extract(l.options_json,'$.automaticRefreshIntervalDays'),'0') \
+            AS BIGINT)>0 \
+            ORDER BY l.next_metadata_refresh_at,l.id \
+            LIMIT 1",
+    )
+    .bind(timestamp)
+    .fetch_optional(&auth.store.pool)
+    .await?;
     if let Some((id, encoded, previous)) = due {
         let options: crate::library_options::LibraryOptions = serde_json::from_str(&encoded)
             .map_err(|_| sqlx::Error::Protocol("invalid library options".into()))?;
@@ -364,8 +393,30 @@ const MONITOR_FAILURE_BACKOFF: i64 = 1800;
 /// One admission per pass, low priority and at most once a minute per library, never while
 /// another scan of the library is pending, and not again soon after a failed poll.
 async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), sqlx::Error> {
-    let watch: Option<String> = crate::database::query_scalar("SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.realtimeMonitoring'),'0') AS TEXT) IN ('1','true') AND NOT EXISTS(SELECT 1 FROM durable_tasks t WHERE t.owner='library-monitor' AND (t.library_id=l.id OR t.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id AND active=1)) AND (t.status IN ('queued','running','paused') OR t.created_at>? OR (t.status='error' AND COALESCE(t.finished_at,t.updated_at)>?))) AND NOT EXISTS(SELECT 1 FROM durable_tasks a WHERE a.category='scan' AND a.status IN ('queued','running','paused') AND (a.library_id=l.id OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id))) ORDER BY COALESCE((SELECT MAX(t.created_at) FROM durable_tasks t WHERE t.library_id=l.id AND t.owner='library-monitor'),0),l.id LIMIT 1")
-        .bind(timestamp-60).bind(timestamp-MONITOR_FAILURE_BACKOFF).fetch_optional(&auth.store.pool).await?;
+    let watch: Option<String> = crate::database::query_scalar(
+        "SELECT l.id \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE l.enabled=1 AND n.status!='revoked' \
+            AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 \
+            FROM library_folders f WHERE f.library_id=l.id) \
+            AND CAST(COALESCE(json_extract(l.options_json,'$.realtimeMonitoring'),'0') AS TEXT) IN \
+            ('1','true') AND NOT EXISTS(SELECT 1 FROM durable_tasks t \
+            WHERE t.owner='library-monitor' AND (t.library_id=l.id \
+            OR t.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id \
+            AND active=1)) AND (t.status IN ('queued','running','paused') OR t.created_at>? \
+            OR (t.status='error' AND COALESCE(t.finished_at,t.updated_at)>?))) \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks a WHERE a.category='scan' \
+            AND a.status IN ('queued','running','paused') AND (a.library_id=l.id \
+            OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id))) \
+            ORDER BY COALESCE((SELECT MAX(t.created_at) FROM durable_tasks t \
+            WHERE t.library_id=l.id AND t.owner='library-monitor'),0),l.id \
+            LIMIT 1",
+    )
+    .bind(timestamp - 60)
+    .bind(timestamp - MONITOR_FAILURE_BACKOFF)
+    .fetch_optional(&auth.store.pool)
+    .await?;
     if let Some(library) = watch {
         queue_scopes_with(
             auth,
@@ -382,8 +433,25 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
             .execute(&auth.store.pool)
             .await?;
     }
-    let online: Option<(String,String)> = crate::database::query_as("SELECT l.id,l.options_json FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND CAST(COALESCE(json_extract(l.options_json,'$.onlineRefreshIntervalDays'),'0') AS BIGINT)>0 AND NOT EXISTS(SELECT 1 FROM automation_sweeps s WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id='' AND (s.completed_at IS NULL OR s.created_at>?-CAST(json_extract(l.options_json,'$.onlineRefreshIntervalDays') AS BIGINT)*86400)) ORDER BY COALESCE((SELECT MAX(s.created_at) FROM automation_sweeps s WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id=''),0),l.id LIMIT 1")
-        .bind(timestamp).fetch_optional(&auth.store.pool).await?;
+    let online: Option<(String, String)> = crate::database::query_as(
+        "SELECT l.id,l.options_json \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE l.enabled=1 AND n.status!='revoked' \
+            AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 \
+            FROM library_folders f WHERE f.library_id=l.id) \
+            AND CAST(COALESCE(json_extract(l.options_json,'$.onlineRefreshIntervalDays'),'0') AS \
+            BIGINT)>0 AND NOT EXISTS(SELECT 1 FROM automation_sweeps s WHERE s.library_id=l.id \
+            AND s.kind='scheduled' AND s.extension_id='' AND (s.completed_at IS NULL \
+            OR s.created_at>?-CAST(json_extract(l.options_json,'$.onlineRefreshIntervalDays') AS \
+            BIGINT)*86400)) \
+            ORDER BY COALESCE((SELECT MAX(s.created_at) FROM automation_sweeps s \
+            WHERE s.library_id=l.id AND s.kind='scheduled' AND s.extension_id=''),0),l.id \
+            LIMIT 1",
+    )
+    .bind(timestamp)
+    .fetch_optional(&auth.store.pool)
+    .await?;
     if let Some((library, _)) = online {
         let mut tx = auth.store.pool.begin().await?;
         crate::automation::schedule_library(
@@ -606,8 +674,16 @@ pub async fn dispatch_once(
         let _ = crate::inventory::clean_staging(&auth.store, &scan).await;
     }
     // Old scan status cannot block a safely fenced retry forever after a crash.
-    crate::database::query("UPDATE scan_jobs SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 WHERE status IN ('queued','running') AND EXISTS(SELECT 1 FROM active_scan_runs r JOIN durable_tasks j ON j.library_id=r.library_id WHERE r.library_id=scan_jobs.library_id AND r.scan_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NULL)")
-        .execute(&auth.store.pool).await?;
+    crate::database::query(
+        "UPDATE scan_jobs \
+            SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
+            WHERE status IN ('queued','running') AND EXISTS(SELECT 1 FROM active_scan_runs r \
+            JOIN durable_tasks j ON j.library_id=r.library_id \
+            WHERE r.library_id=scan_jobs.library_id \
+            AND r.scan_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NULL)",
+    )
+    .execute(&auth.store.pool)
+    .await?;
     let nodes: Vec<String> = crate::database::query_scalar("SELECT DISTINCT node_id FROM durable_tasks WHERE status='queued' AND lease_until IS NULL AND available_at<=? LIMIT 100")
         .bind(timestamp).fetch_all(&auth.store.pool).await?;
     let mut ready = Vec::with_capacity(nodes.len());

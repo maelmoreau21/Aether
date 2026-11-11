@@ -50,9 +50,25 @@ async fn context(auth: &AuthState, asset: &str) -> Result<Context, Error> {
 // source is missing or its library is disabled. This lookup grants no playback
 // or provider authority; acquisition still uses the active context above.
 async fn admin_context(auth: &AuthState, asset: &str) -> Result<Context, Error> {
-    query_as("SELECT a.library_id,e.work_id,a.size,a.modified_ns,l.options_json,CAST(CASE WHEN a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0)) THEN 1 ELSE 0 END AS BIGINT) AS active FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=?")
-        .bind(asset).fetch_optional(auth.store.pool()).await.map_err(db)?
-        .ok_or_else(|| err(StatusCode::NOT_FOUND,"subtitle_asset_unavailable"))
+    query_as(
+        "SELECT a.library_id,e.work_id,a.size,a.modified_ns,l.options_json,CAST(CASE \
+            WHEN a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status!='revoked' \
+            AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0)) \
+            THEN 1 ELSE 0 END AS BIGINT) AS active \
+            FROM inventory_assets a \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN inventory_versions v ON v.id=s.version_id \
+            JOIN inventory_editions e ON e.id=v.edition_id \
+            JOIN libraries l ON l.id=a.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE a.id=?",
+    )
+    .bind(asset)
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(db)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "subtitle_asset_unavailable"))
 }
 fn availability(options: &crate::library_options::LibraryOptions) -> Option<&'static str> {
     if !options.subtitle_download_enabled {
@@ -279,7 +295,11 @@ async fn invoke(
     ] {
         input[key] = metadata[key].clone();
     }
-    if let Some((season,episode,title))=query_as::<_,(i64,i64,String)>("SELECT s.season_number,e.episode_number,COALESCE(json_extract(w.manual_json,'$.title'),w.title) FROM inventory_episodes e JOIN inventory_seasons s ON s.id=e.season_id JOIN inventory_works w ON w.id=s.series_id WHERE e.work_id=?")
+    if let Some((season,episode,title))=query_as::<_,(i64,i64,String)>("SELECT s.season_number,e.episode_number,COALESCE(json_extract(w.manual_json,'$.title'),w.title) \
+            FROM inventory_episodes e \
+            JOIN inventory_seasons s ON s.id=e.season_id \
+            JOIN inventory_works w ON w.id=s.series_id \
+            WHERE e.work_id=?")
         .bind(&ctx.work_id).fetch_optional(auth.store.pool()).await.map_err(db)? {
         input["seasonNumber"]=json!(season); input["episodeNumber"]=json!(episode);
         // Episode provider IDs remain episode IDs. Without one, search the series title.
@@ -584,8 +604,23 @@ pub(crate) async fn content(
     head: bool,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    let result:Result<Option<String>,_>=query_scalar("SELECT d.content FROM subtitle_downloads d JOIN inventory_assets a ON a.id=d.asset_id JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE d.id=? AND d.asset_id=? AND d.status='completed' AND d.fingerprint=CAST(a.size AS TEXT)||':'||a.modified_ns AND a.available=1 AND l.enabled=1 AND l.root=s.root_snapshot AND n.status!='revoked'")
-        .bind(id).bind(asset).fetch_optional(store.pool()).await;
+    let result: Result<Option<String>, _> = query_scalar(
+        "SELECT d.content \
+            FROM subtitle_downloads d \
+            JOIN inventory_assets a ON a.id=d.asset_id \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN inventory_versions v ON v.id=s.version_id \
+            JOIN inventory_editions e ON e.id=v.edition_id \
+            JOIN libraries l ON l.id=a.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE d.id=? AND d.asset_id=? AND d.status='completed' \
+            AND d.fingerprint=CAST(a.size AS TEXT)||':'||a.modified_ns AND a.available=1 \
+            AND l.enabled=1 AND l.root=s.root_snapshot AND n.status!='revoked'",
+    )
+    .bind(id)
+    .bind(asset)
+    .fetch_optional(store.pool())
+    .await;
     match result {
         Ok(Some(text)) => {
             let length = text.len();

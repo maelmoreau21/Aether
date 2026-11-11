@@ -18,7 +18,16 @@ async fn authenticated_catalogue_10000_entries() {
         .execute(store.pool())
         .await
         .unwrap();
-    query("WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM nums WHERE n<10000) INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json) SELECT 'w'||n,'bench','w'||n,'Film '||n,'film '||n,'film','{}' FROM nums").execute(store.pool()).await.unwrap();
+    query(
+        "WITH RECURSIVE nums(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM nums \
+            WHERE n<10000) INSERT INTO \
+            inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json) \
+            SELECT 'w'||n,'bench','w'||n,'Film '||n,'film '||n,'film','{}' \
+            FROM nums",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     for sql in [
         "INSERT INTO inventory_editions(id,work_id) SELECT id,id FROM inventory_works",
         "INSERT INTO inventory_versions(id,edition_id) SELECT id,id FROM inventory_works",

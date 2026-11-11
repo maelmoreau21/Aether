@@ -170,7 +170,19 @@ async fn resource(
         return Err(err(StatusCode::BAD_REQUEST, "resource_mismatch"));
     }
     if let (Some(asset), Some(work)) = (&input.asset_id, &input.work_id) {
-        let matches:i64=query_scalar("SELECT COUNT(*) FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE a.id=? AND e.work_id=?").bind(asset).bind(work).fetch_one(store.pool()).await.map_err(db)?;
+        let matches: i64 = query_scalar(
+            "SELECT COUNT(*) \
+                FROM inventory_assets a \
+                JOIN inventory_sources s ON s.id=a.source_id \
+                JOIN inventory_versions v ON v.id=s.version_id \
+                JOIN inventory_editions e ON e.id=v.edition_id \
+                WHERE a.id=? AND e.work_id=?",
+        )
+        .bind(asset)
+        .bind(work)
+        .fetch_one(store.pool())
+        .await
+        .map_err(db)?;
         if matches != 1 {
             return Err(err(StatusCode::BAD_REQUEST, "resource_mismatch"));
         }
@@ -379,7 +391,15 @@ async fn list(
     let scope = "(?='administrator' OR r.user_id=?) AND (?=0 OR r.user_id=?)";
     let mine = i64::from(page.mine);
     let sql = format!(
-        "SELECT r.* FROM media_reports r LEFT JOIN media_report_triage t ON t.report_id=r.id WHERE {scope} AND (? IS NULL OR r.status=? OR (?='active' AND r.status IN ('open','in_progress'))) AND (? IS NULL OR r.category=?) AND (? IS NULL OR COALESCE(t.priority,'normal')=?) ORDER BY {order} LIMIT 100 OFFSET ?"
+        "SELECT r.* \
+                FROM media_reports r \
+                LEFT \
+                JOIN media_report_triage t ON t.report_id=r.id \
+                WHERE {scope} AND (? IS NULL OR r.status=? OR (?='active' \
+                AND r.status IN ('open','in_progress'))) AND (? IS NULL OR r.category=?) \
+                AND (? IS NULL OR COALESCE(t.priority,'normal')=?) \
+                ORDER BY {order} \
+                LIMIT 100 OFFSET ?"
     );
     let rows: Vec<Record> = query_as(sqlx::AssertSqlSafe(sql))
         .bind(actor.user.role.as_str())

@@ -211,7 +211,12 @@ async fn two_real_cores_fence_an_inflight_extension_after_owner_crash() {
     });
     let run_id=tokio::time::timeout(Duration::from_secs(15),async {
         loop {
-            let blocked:i64=query_scalar("SELECT COUNT(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted AND objid::bigint=(hashtext('extension_state:fixture.failover')::bigint & 4294967295) AND classid::bigint=CASE WHEN hashtext('extension_state:fixture.failover')<0 THEN 4294967295 ELSE 0 END")
+            let blocked:i64=query_scalar("SELECT COUNT(*) \
+                    FROM pg_locks \
+                    WHERE locktype='advisory' AND NOT granted \
+                    AND objid::bigint=(hashtext('extension_state:fixture.failover')::bigint & \
+                    4294967295) AND classid::bigint=CASE \
+                    WHEN hashtext('extension_state:fixture.failover')<0 THEN 4294967295 ELSE 0 END")
                 .fetch_one(store.pool()).await.unwrap();
             let run:Option<String>=query_scalar("SELECT r.id FROM extension_runs r JOIN extension_run_owners o ON o.run_id=r.id WHERE r.extension_id=? AND r.status='running'")
                 .bind(EXTENSION).fetch_optional(store.pool()).await.unwrap();

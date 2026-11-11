@@ -141,8 +141,25 @@ pub(super) async fn works(
     if search.q.len() > 120 || search.offset > 1_000_000 {
         return Err(err(StatusCode::BAD_REQUEST, "invalid_search"));
     }
-    let rows: Vec<(String,String,String)> = query_as("SELECT w.id,w.title,w.library_id FROM inventory_works w JOIN extensions e ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=w.library_id)) JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND LOWER(w.title) LIKE ? ORDER BY w.title,w.id LIMIT 50 OFFSET ?")
-        .bind(id).bind(format!("%{}%",search.q.to_lowercase())).bind(i64::from(search.offset)).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String, String)> = query_as(
+        "SELECT w.id,w.title,w.library_id \
+            FROM inventory_works w \
+            JOIN extensions e ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+            WHERE g.extension_id=e.id AND g.library_id=w.library_id)) \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            JOIN libraries l ON l.id=w.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE e.id=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' \
+            AND LOWER(w.title) LIKE ? \
+            ORDER BY w.title,w.id \
+            LIMIT 50 OFFSET ?",
+    )
+    .bind(id)
+    .bind(format!("%{}%", search.q.to_lowercase()))
+    .bind(i64::from(search.offset))
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(Json(
         json!({"items":rows.into_iter().map(|(id,title,library)| json!({"id":id,"title":title,"libraryId":library})).collect::<Vec<_>>(),"offset":search.offset,"limit":50}),
     ))
@@ -164,8 +181,26 @@ pub(super) async fn permitted(
         return Ok(count == 1);
     }
     admin(auth, headers, false).await?;
-    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) JOIN media_nodes n ON n.id=l.node_id WHERE e.id=? AND l.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
-        .bind(id).bind(library).bind(generation).fetch_one(auth.store.pool()).await.map_err(db)?;
+    let count: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM extensions e \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            JOIN libraries l ON (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+            WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 \
+            FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id \
+            WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE e.id=? AND l.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 \
+            AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f \
+            JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 \
+            OR parent.enabled=0))",
+    )
+    .bind(id)
+    .bind(library)
+    .bind(generation)
+    .fetch_one(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(count == 1)
 }
 
@@ -643,8 +678,34 @@ pub(super) async fn worker_permitted(
         }
         Some(Background::Task(job)) => job,
     };
-    let valid: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks j JOIN users u ON u.id=j.owner JOIN extensions e ON e.id=? JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.id=? AND j.attempt=? AND j.status='running' AND j.lease_until>? AND u.role='administrator' AND u.disabled_at IS NULL AND NOT EXISTS(SELECT 1 FROM automation_policies policy WHERE policy.extension_id=e.id AND policy.library_id=l.id AND policy.mode='disabled') AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.id=? AND l.node_id=j.node_id AND l.enabled=1 AND n.status!='revoked' AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
-        .bind(id).bind(&job.id).bind(job.attempt).bind(now()).bind(generation).bind(library)
-        .fetch_one(auth.store.pool()).await.map_err(db)?;
+    let valid: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM durable_tasks j \
+            JOIN users u ON u.id=j.owner \
+            JOIN extensions e ON e.id=? \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            JOIN libraries l ON l.id=j.library_id \
+            JOIN media_nodes n ON n.id=j.node_id \
+            WHERE j.id=? AND j.attempt=? AND j.status='running' AND j.lease_until>? \
+            AND u.role='administrator' AND u.disabled_at IS NULL AND NOT EXISTS(SELECT 1 \
+            FROM automation_policies policy WHERE policy.extension_id=e.id \
+            AND policy.library_id=l.id AND policy.mode='disabled') AND e.generation=? \
+            AND e.enabled=1 AND p.active=1 AND l.id=? AND l.node_id=j.node_id AND l.enabled=1 \
+            AND n.status!='revoked' AND (e.all_libraries=1 OR EXISTS(SELECT 1 \
+            FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) \
+            OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f \
+            ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id \
+            AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))",
+    )
+    .bind(id)
+    .bind(&job.id)
+    .bind(job.attempt)
+    .bind(now())
+    .bind(generation)
+    .bind(library)
+    .fetch_one(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(valid == 1)
 }

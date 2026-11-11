@@ -214,7 +214,18 @@ pub(super) async fn list_works(
     if exists == 0 {
         return Err(err(StatusCode::NOT_FOUND, "unknown_library"));
     }
-    let rows: Vec<(String,String,String,Option<String>,i64)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json,(SELECT COUNT(*) FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster') FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? AND (CASE WHEN w.display_title_sort != '' THEN w.display_title_sort WHEN w.title_sort != '' THEN w.title_sort ELSE LOWER(w.title) END) LIKE ? ESCAPE '!' AND (?='all' OR (?='with' AND EXISTS(SELECT 1 FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster')) OR (?='without' AND NOT EXISTS(SELECT 1 FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster'))) ORDER BY w.id LIMIT ?")
+    let rows: Vec<(String,String,String,Option<String>,i64)> = query_as("SELECT w.id,w.title,w.editorial_json,w.manual_json,(SELECT COUNT(*) \
+            FROM work_image_entries i WHERE i.work_id=w.id AND i.kind='poster') \
+            FROM inventory_works w \
+            WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders \
+            WHERE parent_id=? AND active=1)) AND w.id>? AND (CASE WHEN w.display_title_sort != '' \
+            THEN w.display_title_sort WHEN w.title_sort != '' THEN w.title_sort \
+            ELSE LOWER(w.title) END) LIKE ? ESCAPE '!' AND (?='all' OR (?='with' \
+            AND EXISTS(SELECT 1 FROM work_image_entries i WHERE i.work_id=w.id \
+            AND i.kind='poster')) OR (?='without' AND NOT EXISTS(SELECT 1 FROM work_image_entries i \
+            WHERE i.work_id=w.id AND i.kind='poster'))) \
+            ORDER BY w.id \
+            LIMIT ?")
         .bind(&input.library_id).bind(&input.library_id).bind(input.after.as_deref().unwrap_or(""))
         .bind(pattern).bind(filter).bind(filter).bind(filter)
         .bind((input.limit + 1) as i64).fetch_all(auth.store.pool()).await.map_err(db)?;

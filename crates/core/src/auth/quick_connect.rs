@@ -31,8 +31,20 @@ fn db(_: sqlx::Error) -> Error {
     fail(StatusCode::INTERNAL_SERVER_ERROR, "internal_error")
 }
 async fn throttle(state: &AuthState, key: String) -> Result<(), Error> {
-    let allowed: Option<i64> = crate::database::query_scalar("INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 RETURNING attempts")
-        .bind(key).fetch_optional(&state.store.pool).await.map_err(db)?;
+    let allowed: Option<i64> = crate::database::query_scalar(
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) \
+            ON CONFLICT(throttle_key) DO UPDATE \
+            SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 \
+            THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE \
+            WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+            ELSE login_throttle.attempts+1 END \
+            WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 \
+            RETURNING attempts",
+    )
+    .bind(key)
+    .fetch_optional(&state.store.pool)
+    .await
+    .map_err(db)?;
     allowed
         .map(|_| ())
         .ok_or_else(|| fail(StatusCode::TOO_MANY_REQUESTS, "try_later"))
@@ -116,7 +128,12 @@ async fn approve(
 ) -> Result<StatusCode, Error> {
     let actor = actor(&state, &headers).await?;
     let code = normalize_code(&input.code)?;
-    let updated=crate::database::query("UPDATE device_connections SET approver_session_hash=? WHERE code_hash=? AND expires_at>unixepoch() AND approver_session_hash IS NULL AND EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL)")
+    let updated=crate::database::query("UPDATE device_connections \
+            SET approver_session_hash=? \
+            WHERE code_hash=? AND expires_at>unixepoch() AND approver_session_hash IS NULL \
+            AND EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? \
+            AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-? \
+            AND u.disabled_at IS NULL)")
         .bind(&actor.token_hash).bind(hash(&code)).bind(&actor.token_hash).bind(IDLE_SECONDS).execute(&state.store.pool).await.map_err(db)?;
     if updated.rows_affected() != 1 {
         return Err(fail(StatusCode::NOT_FOUND, "invalid_code"));
@@ -164,8 +181,22 @@ async fn poll(
     let device: Option<String>=crate::database::query_scalar("DELETE FROM device_connections WHERE requester_hash=? AND approver_session_hash=? AND expires_at>unixepoch() RETURNING device_label")
         .bind(&requester).bind(&approver).fetch_optional(&mut *tx).await.map_err(db)?;
     let device = device.ok_or_else(|| fail(StatusCode::GONE, "device_request_expired"))?;
-    let created=crate::database::query("INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) SELECT ?,s.user_id,?,unixepoch(),unixepoch(),unixepoch()+? FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
-        .bind(hash(&raw)).bind(device).bind(ABSOLUTE_SECONDS).bind(&approver).bind(IDLE_SECONDS).execute(&mut *tx).await.map_err(db)?;
+    let created = crate::database::query(
+        "INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) \
+            SELECT ?,s.user_id,?,unixepoch(),unixepoch(),unixepoch()+? \
+            FROM sessions s \
+            JOIN users u ON u.id=s.user_id \
+            WHERE s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-? \
+            AND u.disabled_at IS NULL",
+    )
+    .bind(hash(&raw))
+    .bind(device)
+    .bind(ABSOLUTE_SECONDS)
+    .bind(&approver)
+    .bind(IDLE_SECONDS)
+    .execute(&mut *tx)
+    .await
+    .map_err(db)?;
     if created.rows_affected() != 1 {
         return Err(fail(StatusCode::UNAUTHORIZED, "authentication_required"));
     }

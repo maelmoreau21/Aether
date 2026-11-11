@@ -115,8 +115,15 @@ async fn migrate_legacy(
     let actor = admin(&auth, &headers, true).await?;
     let _lock = MUTATIONS.lock().await;
     let mut tx = auth.store.pool().begin().await.map_err(db)?;
-    let conflicts: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM avatar_packs n JOIN extension_avatar_packs p ON p.id=n.id WHERE p.extension_id='avatars') + (SELECT COUNT(*) FROM avatar_images n JOIN extension_avatar_images i ON i.id=n.id JOIN extension_avatar_packs p ON p.id=i.pack_id WHERE p.extension_id='avatars')")
-        .fetch_one(&mut *tx).await.map_err(db)?;
+    let conflicts: i64 = query_scalar(
+        "SELECT (SELECT COUNT(*) FROM avatar_packs n JOIN extension_avatar_packs p ON p.id=n.id \
+            WHERE p.extension_id='avatars') + (SELECT COUNT(*) FROM avatar_images n \
+            JOIN extension_avatar_images i ON i.id=n.id JOIN extension_avatar_packs p \
+            ON p.id=i.pack_id WHERE p.extension_id='avatars')",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db)?;
     if conflicts != 0 {
         return Err(err(StatusCode::CONFLICT, "avatar_migration_id_conflict"));
     }
@@ -575,8 +582,15 @@ pub(crate) async fn assign_new_user(auth: &AuthState, user: &str) -> Result<(), 
     Ok(())
 }
 async fn fallback_available(auth: &AuthState) -> Result<bool, Error> {
-    let count: i64 = query_scalar("SELECT (SELECT COUNT(*) FROM avatar_images)+(SELECT COUNT(*) FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id JOIN extensions e ON e.id=p.extension_id JOIN extension_publishers pub ON pub.id=e.publisher_id WHERE e.enabled=1 AND pub.active=1)")
-        .fetch_one(auth.store.pool()).await.map_err(db)?;
+    let count: i64 = query_scalar(
+        "SELECT (SELECT COUNT(*) FROM avatar_images)+(SELECT COUNT(*) \
+            FROM extension_avatar_images i JOIN extension_avatar_packs p ON p.id=i.pack_id \
+            JOIN extensions e ON e.id=p.extension_id JOIN extension_publishers pub \
+            ON pub.id=e.publisher_id WHERE e.enabled=1 AND pub.active=1)",
+    )
+    .fetch_one(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(count == 0)
 }
 async fn account_packs(
@@ -586,7 +600,23 @@ async fn account_packs(
     auth.authenticate(&headers)
         .await
         .map_err(|s| err(s, "authentication_required"))?;
-    let rows:Vec<(String,String,i64)>=query_as("SELECT a.id,a.name,COUNT(i.id) FROM avatar_packs a JOIN avatar_images i ON i.pack_id=a.id GROUP BY a.id,a.name UNION ALL SELECT a.id,a.name,COUNT(i.id) FROM extension_avatar_packs a JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id JOIN extension_avatar_images i ON i.pack_id=a.id WHERE e.enabled=1 AND p.active=1 GROUP BY a.id,a.name ORDER BY 2").fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String, i64)> = query_as(
+        "SELECT a.id,a.name,COUNT(i.id) \
+            FROM avatar_packs a \
+            JOIN avatar_images i ON i.pack_id=a.id \
+            GROUP BY a.id,a.name \
+            UNION ALL SELECT a.id,a.name,COUNT(i.id) \
+            FROM extension_avatar_packs a \
+            JOIN extensions e ON e.id=a.extension_id \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            JOIN extension_avatar_images i ON i.pack_id=a.id \
+            WHERE e.enabled=1 AND p.active=1 \
+            GROUP BY a.id,a.name \
+            ORDER BY 2",
+    )
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     if rows.is_empty() {
         return Ok(Json(
             json!({"packs":[{"id":crate::avatars::defaults::FALLBACK_PACK,"name":"Orbites · galerie de secours","count":12}]}),
@@ -609,7 +639,25 @@ async fn images(
             json!({"images":crate::avatars::defaults::fallback_images()}),
         ));
     }
-    let rows:Vec<(String,String)>=query_as("SELECT i.id,i.name FROM avatar_images i JOIN avatar_packs a ON a.id=i.pack_id WHERE a.id=? UNION ALL SELECT i.id,i.name FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND e.enabled=1 AND p.active=1 ORDER BY 2 LIMIT 500").bind(&pack).bind(&pack).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String)> = query_as(
+        "SELECT i.id,i.name \
+            FROM avatar_images i \
+            JOIN avatar_packs a ON a.id=i.pack_id \
+            WHERE a.id=? \
+            UNION ALL SELECT i.id,i.name \
+            FROM extension_avatar_images i \
+            JOIN extension_avatar_packs a ON a.id=i.pack_id \
+            JOIN extensions e ON e.id=a.extension_id \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            WHERE a.id=? AND e.enabled=1 AND p.active=1 \
+            ORDER BY 2 \
+            LIMIT 500",
+    )
+    .bind(&pack)
+    .bind(&pack)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(Json(
         json!({"images":rows.into_iter().map(|(id,name)|json!({"id":id,"name":name,"url":format!("/api/v1/account/avatar/collections/{pack}/{id}")})).collect::<Vec<_>>()}),
     ))
@@ -626,7 +674,26 @@ async fn sha256(auth: &AuthState, pack: &str, image: &str) -> Result<String, Err
             .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "asset_store_error"))?
             .sha256);
     }
-    query_scalar("SELECT i.sha256 FROM avatar_images i JOIN avatar_packs a ON a.id=i.pack_id WHERE a.id=? AND i.id=? UNION ALL SELECT i.sha256 FROM extension_avatar_images i JOIN extension_avatar_packs a ON a.id=i.pack_id JOIN extensions e ON e.id=a.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1").bind(pack).bind(image).bind(pack).bind(image).fetch_optional(auth.store.pool()).await.map_err(db)?.ok_or_else(||err(StatusCode::NOT_FOUND,"avatar_not_found"))
+    query_scalar(
+        "SELECT i.sha256 \
+            FROM avatar_images i \
+            JOIN avatar_packs a ON a.id=i.pack_id \
+            WHERE a.id=? AND i.id=? \
+            UNION ALL SELECT i.sha256 \
+            FROM extension_avatar_images i \
+            JOIN extension_avatar_packs a ON a.id=i.pack_id \
+            JOIN extensions e ON e.id=a.extension_id \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            WHERE a.id=? AND i.id=? AND e.enabled=1 AND p.active=1",
+    )
+    .bind(pack)
+    .bind(image)
+    .bind(pack)
+    .bind(image)
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(db)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "avatar_not_found"))
 }
 async fn image(
     State(auth): State<AuthState>,

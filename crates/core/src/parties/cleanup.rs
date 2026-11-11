@@ -15,12 +15,15 @@ pub const PARTY_ABANDONED_SECONDS: i64 = 5 * 60;
 /// A party left open for a whole day ends even if a tab is still connected to it.
 pub const PARTY_MAX_IDLE_SECONDS: i64 = 86_400;
 
+/// Expired invites are kept this long (7 days) before being purged.
+const INVITE_RETENTION_SECONDS: i64 = 7 * 24 * 60 * 60;
+
 pub async fn clean_expired_parties(store: &IdentityStore) -> Result<u64, sqlx::Error> {
     let ended = end_abandoned_parties(store).await?;
 
     // Clean expired invites older than 7 days
     let _ = query("DELETE FROM watch_party_invites WHERE expires_at < ?")
-        .bind(current_epoch_s() - 604800)
+        .bind(current_epoch_s() - INVITE_RETENTION_SECONDS)
         .execute(&store.pool)
         .await;
 

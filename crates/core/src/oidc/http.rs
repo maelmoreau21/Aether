@@ -195,7 +195,13 @@ async fn link(
     // Reuse local login's persistent client rate limit before expensive Argon2 work.
     let client_key = auth::extract_client_key(&headers);
     let allowed = crate::database::query_scalar::<_, i64>(
-        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END, window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END RETURNING login_throttle.attempts",
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) \
+                VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE \
+                SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+                ELSE login_throttle.attempts+1 END, window_started=CASE \
+                WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() \
+                ELSE login_throttle.window_started END \
+                RETURNING login_throttle.attempts",
     )
     .bind(&client_key)
     .fetch_one(&s.auth.store.pool)

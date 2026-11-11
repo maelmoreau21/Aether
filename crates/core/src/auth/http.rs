@@ -244,7 +244,14 @@ async fn login(
     // Scoped throttle: budget per client IP, durable across restarts.
     let client_key = extract_client_key(&headers);
     let allowed = crate::database::query_scalar::<_, i64>(
-        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 RETURNING login_throttle.attempts",
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) \
+                VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE \
+                SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 \
+                THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE \
+                WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+                ELSE login_throttle.attempts+1 END \
+                WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 \
+                RETURNING login_throttle.attempts",
     )
     .bind(&client_key)
     .fetch_optional(&state.store.pool)
@@ -318,7 +325,21 @@ pub(crate) async fn issue_session(
     {
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
     }
-    if crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
+    if crate::database::query(
+        "INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) \
+            SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? \
+            FROM users \
+            WHERE id=? AND disabled_at IS NULL",
+    )
+    .bind(hash(&raw))
+    .bind(ABSOLUTE_SECONDS)
+    .bind(id)
+    .execute(&state.store.pool)
+    .await
+    .is_err()
+    {
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
+    }
     let _ = crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
         .bind(device_label(headers))
         .bind(hash(&raw))
@@ -444,7 +465,11 @@ async fn refresh(State(state): State<AuthState>, headers: HeaderMap) -> Response
     let rotated: Result<bool, sqlx::Error> = async {
         let mut conn = state.store.pool.acquire().await?;
         let mut tx = crate::database::begin_write(&mut conn).await?;
-        let created = crate::database::query("INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) SELECT ?,s.user_id,s.device_label,unixepoch(),unixepoch(),unixepoch()+? FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>unixepoch()+? AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
+        let created = crate::database::query("INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) SELECT ?,s.user_id,s.device_label,unixepoch(),unixepoch(),unixepoch()+? \
+                FROM sessions s \
+                JOIN users u ON u.id=s.user_id \
+                WHERE s.token_hash=? AND s.expires_at>unixepoch()+? \
+                AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
             .bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&identity.token_hash).bind(REFRESH_GRACE_SECONDS).bind(IDLE_SECONDS)
             .execute(&mut *tx).await?;
         if created.rows_affected() != 1 {

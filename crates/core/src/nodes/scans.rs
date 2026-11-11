@@ -43,8 +43,23 @@ pub(crate) async fn scan_run_authorized(
     node: &str,
     scan: &str,
 ) -> bool {
-    let valid: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM active_scan_runs r JOIN libraries l ON l.id=r.library_id JOIN media_nodes n ON n.id=l.node_id WHERE r.library_id=? AND r.node_id=? AND r.scan_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.node_id=r.node_id AND n.status!='revoked'")
-        .bind(library).bind(node).bind(scan).fetch_one(&store.pool).await.unwrap_or(0);
+    let valid: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) \
+            FROM active_scan_runs r \
+            JOIN libraries l ON l.id=r.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE r.library_id=? AND r.node_id=? AND r.scan_id=? AND ((l.enabled=1 \
+            AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) \
+            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+            AND l.node_id=r.node_id AND n.status!='revoked'",
+    )
+    .bind(library)
+    .bind(node)
+    .bind(scan)
+    .fetch_one(&store.pool)
+    .await
+    .unwrap_or(0);
     if valid != 1 {
         return false;
     }
@@ -73,8 +88,29 @@ pub(crate) async fn task_run_authorized(
     let Ok(attempt) = attempt.parse::<i64>() else {
         return false;
     };
-    let valid: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM active_task_runs r JOIN libraries l ON l.id=r.library_id JOIN media_nodes n ON n.id=l.node_id JOIN durable_tasks j ON j.id=? AND j.attempt=? AND j.node_id=r.node_id AND j.library_id=r.library_id WHERE r.run_id=? AND r.library_id=? AND r.node_id=? AND r.status='running' AND j.status='running' AND j.lease_until>? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.node_id=r.node_id AND n.status!='revoked'")
-        .bind(id).bind(attempt).bind(run).bind(library).bind(node).bind(unix_now()).fetch_one(&store.pool).await.unwrap_or(0);
+    let valid: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) \
+            FROM active_task_runs r \
+            JOIN libraries l ON l.id=r.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            JOIN durable_tasks j ON j.id=? AND j.attempt=? AND j.node_id=r.node_id \
+            AND j.library_id=r.library_id \
+            WHERE r.run_id=? AND r.library_id=? AND r.node_id=? AND r.status='running' \
+            AND j.status='running' AND j.lease_until>? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 \
+            FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 \
+            FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id \
+            WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.node_id=r.node_id \
+            AND n.status!='revoked'",
+    )
+    .bind(id)
+    .bind(attempt)
+    .bind(run)
+    .bind(library)
+    .bind(node)
+    .bind(unix_now())
+    .fetch_one(&store.pool)
+    .await
+    .unwrap_or(0);
     valid == 1
 }
 
@@ -284,7 +320,23 @@ pub(super) async fn receive_music_track(
     {
         return error(StatusCode::CONFLICT, "stale_scan_attempt");
     }
-    let valid:i64=crate::database::query_scalar("SELECT COUNT(*) FROM libraries l JOIN music_scan_runs run ON run.library_id=l.id WHERE l.id=? AND l.node_id=? AND l.kind='music' AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.root=? AND run.scan_id=?").bind(&submission.library_id).bind(&rec.id).bind(&submission.root_snapshot).bind(&submission.scan_id).fetch_one(&state.auth.store.pool).await.unwrap_or(0);
+    let valid: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) \
+            FROM libraries l \
+            JOIN music_scan_runs run ON run.library_id=l.id \
+            WHERE l.id=? AND l.node_id=? AND l.kind='music' AND ((l.enabled=1 \
+            AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) \
+            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+            AND l.root=? AND run.scan_id=?",
+    )
+    .bind(&submission.library_id)
+    .bind(&rec.id)
+    .bind(&submission.root_snapshot)
+    .bind(&submission.scan_id)
+    .fetch_one(&state.auth.store.pool)
+    .await
+    .unwrap_or(0);
     let path = std::path::Path::new(&submission.track.relative_path);
     if valid != 1
         || path.is_absolute()
@@ -351,7 +403,11 @@ pub(super) async fn receive_scan_batch(
 
     // Verify library belongs to this Node
     let owns_lib: i64 = crate::database::query_scalar(
-        "SELECT CAST(EXISTS(SELECT 1 FROM libraries l WHERE l.id=? AND l.node_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))) AS INTEGER)",
+        "SELECT CAST(EXISTS(SELECT 1 FROM libraries l WHERE l.id=? AND l.node_id=? \
+                AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+                WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+                JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
+                AND f.active=1 AND parent.enabled=1))) AS INTEGER)",
     )
     .bind(sub.library_id.as_str())
     .bind(&rec.id)
@@ -417,7 +473,12 @@ pub(super) async fn receive_scan_complete(
 
     // Update library root to canonical root_snapshot reported by the Node if needed
     let lib_row: Option<(String,)> = crate::database::query_as(
-        "SELECT root FROM libraries l WHERE l.id=? AND l.node_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))",
+        "SELECT root \
+                FROM libraries l \
+                WHERE l.id=? AND l.node_id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 \
+                FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 \
+                FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id \
+                WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))",
     )
     .bind(lib_id)
     .bind(&rec.id)

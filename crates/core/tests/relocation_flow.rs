@@ -552,11 +552,20 @@ async fn asset_at(store: &IdentityStore, library: &str, path: &str) -> Option<St
         .unwrap()
 }
 async fn series_of(store: &IdentityStore, asset: &str) -> String {
-    query_scalar("SELECT ss.series_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_episodes ie ON ie.work_id=e.work_id JOIN inventory_seasons ss ON ss.id=ie.season_id WHERE a.id=?")
-        .bind(asset)
-        .fetch_one(store.pool())
-        .await
-        .unwrap()
+    query_scalar(
+        "SELECT ss.series_id \
+            FROM inventory_assets a \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN inventory_versions v ON v.id=s.version_id \
+            JOIN inventory_editions e ON e.id=v.edition_id \
+            JOIN inventory_episodes ie ON ie.work_id=e.work_id \
+            JOIN inventory_seasons ss ON ss.id=ie.season_id \
+            WHERE a.id=?",
+    )
+    .bind(asset)
+    .fetch_one(store.pool())
+    .await
+    .unwrap()
 }
 
 #[tokio::test]

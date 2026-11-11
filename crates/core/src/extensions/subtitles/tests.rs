@@ -179,7 +179,10 @@ async fn duplicate_reservations_are_serialized_and_quotas_include_pending_attemp
         .0["error"],
         "subtitle_storage_quota"
     );
-    query("WITH RECURSIVE sequence(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM sequence WHERE n<240) INSERT INTO subtitle_downloads(id,asset_id,provider_id,file_id,fingerprint,track_json,status,created_at) SELECT 'global-'||n,'asset-2','fixture.provider',CAST(n AS TEXT),'100:1',?,'pending',0 FROM sequence")
+    query("WITH RECURSIVE sequence(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM sequence \
+            WHERE n<240) INSERT INTO \
+            subtitle_downloads(id,asset_id,provider_id,file_id,fingerprint,track_json,status,created_at) SELECT 'global-'||n,'asset-2','fixture.provider',CAST(n AS TEXT),'100:1',?,'pending',0 \
+            FROM sequence")
         .bind(candidate.to_string()).execute(store.pool()).await.unwrap();
     assert_eq!(
         reserve(

@@ -104,8 +104,22 @@ async fn locations(
     headers: HeaderMap,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
-    let rows:Vec<(String,String,String,String,String,String)>=query_as("SELECT l.id,COALESCE(parent.name,l.name),l.kind,n.id,n.name,l.root FROM libraries l JOIN media_nodes n ON n.id=l.node_id LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE l.enabled=1 AND n.status!='revoked' AND (parent.id IS NULL OR parent.enabled=1) AND NOT EXISTS(SELECT 1 FROM library_folders child WHERE child.parent_id=l.id AND child.active=1) ORDER BY COALESCE(parent.name,l.name),l.root,l.id")
-        .fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String, String, String, String, String)> = query_as(
+        "SELECT l.id,COALESCE(parent.name,l.name),l.kind,n.id,n.name,l.root \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            LEFT \
+            JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
+            LEFT \
+            JOIN libraries parent ON parent.id=f.parent_id \
+            WHERE l.enabled=1 AND n.status!='revoked' AND (parent.id IS NULL OR parent.enabled=1) \
+            AND NOT EXISTS(SELECT 1 FROM library_folders child WHERE child.parent_id=l.id \
+            AND child.active=1) \
+            ORDER BY COALESCE(parent.name,l.name),l.root,l.id",
+    )
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(Json(
         json!({"locations":rows.into_iter().map(|(id,name,kind,node_id,node_name,root)|json!({"id":id,"name":name,"kind":kind,"nodeId":node_id,"nodeName":node_name,"root":root})).collect::<Vec<_>>()}),
     ))
@@ -246,7 +260,13 @@ async fn save_server(
             .await
             .map_err(db)?;
     }
-    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,metadata_profile_id,is_default,enabled,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,base_url=excluded.base_url,api_key=excluded.api_key,allowed_ips_json=excluded.allowed_ips_json,library_id=excluded.library_id,root_folder=excluded.root_folder,quality_profile_id=excluded.quality_profile_id,metadata_profile_id=excluded.metadata_profile_id,is_default=excluded.is_default,enabled=excluded.enabled,generation=excluded.generation")
+    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,metadata_profile_id,is_default,enabled,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE \
+            SET name=excluded.name,kind=excluded.kind,base_url=excluded.base_url,\
+            api_key=excluded.api_key,allowed_ips_json=excluded.allowed_ips_json,\
+            library_id=excluded.library_id,root_folder=excluded.root_folder,\
+            quality_profile_id=excluded.quality_profile_id,\
+            metadata_profile_id=excluded.metadata_profile_id,is_default=excluded.is_default,\
+            enabled=excluded.enabled,generation=excluded.generation")
         .bind(&id).bind(input.name.trim()).bind(input.kind).bind(connection.base_url).bind(key).bind(json!(connection.allowed_ips).to_string()).bind(input.library_id).bind(input.root_folder).bind(input.quality_profile_id).bind(input.metadata_profile_id).bind(i64::from(input.is_default)).bind(i64::from(input.enabled)).bind(generation).execute(&mut *tx).await.map_err(db)?;
     crate::database::commit(tx).await.map_err(db)?;
     Ok(Json(
@@ -997,7 +1017,9 @@ async fn action(
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
         .await
         .map_err(db)?;
-    let changed=query("UPDATE media_requests SET status=?,error_code=?,server_id=?,library_id=?,input_json=?,updated_at=?,imported=CASE WHEN ?='approved' THEN 0 ELSE imported END WHERE id=? AND status=?").bind(status).bind(reason).bind(&server.id).bind(&server.library_id).bind(json!(selection).to_string()).bind(now()).bind(status).bind(&id).bind(&row.status).execute(&mut *tx).await.map_err(db)?.rows_affected();
+    let changed=query("UPDATE media_requests \
+            SET status=?,error_code=?,server_id=?,library_id=?,input_json=?,updated_at=?,imported=CASE WHEN ?='approved' THEN 0 ELSE imported END \
+            WHERE id=? AND status=?").bind(status).bind(reason).bind(&server.id).bind(&server.library_id).bind(json!(selection).to_string()).bind(now()).bind(status).bind(&id).bind(&row.status).execute(&mut *tx).await.map_err(db)?.rows_affected();
     if changed != 1 {
         return Err(err(StatusCode::CONFLICT, "request_changed"));
     }

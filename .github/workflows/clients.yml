@@ -1,6 +1,6 @@
 name: Applications clientes
 
-# Builds the client applications: Android (APK), desktop (GPUI) for Windows
+# Builds the client applications: Android (APK), desktop (the web interface in a native window) for Windows
 # (Setup installer and portable .zip), Linux and macOS, the TV shells (webOS .ipk, Tizen staged without signature) and the
 # Roku channel, as artifacts named aether-*. CI calls it on every push and pull
 # request; the beta pre-release (ci.yml) and the stable Release (release.yml)
@@ -132,12 +132,11 @@ jobs:
         with:
           shared-key: desktop-${{ matrix.name }}
 
-      - name: Bibliothèques de GPUI (Linux)
+      - name: Bibliothèques du moteur web (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libxkbcommon-x11-dev \
-            libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
 
       - name: Compiler aether-desktop
         run: cargo build --release --locked -p aether-desktop
@@ -145,12 +144,10 @@ jobs:
       - name: Archiver (Windows)
         if: matrix.archive == 'zip'
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $short = git rev-parse --short HEAD
 
-          # GPUI loads icon resource 1 for the window (title bar, taskbar):
+          # The application loads icon resource 1 for the window (title bar, taskbar):
           # fail the build if the executable does not carry it.
           Add-Type -TypeDefinition @"
           using System;
@@ -174,22 +171,6 @@ jobs:
           New-Item -ItemType Directory -Force dist, stage | Out-Null
           Copy-Item target/release/aether-desktop.exe stage/
           Copy-Item apps/desktop/README.md stage/
-
-          # libmpv (playback) from the shinchiro builds, placed next to the
-          # executable. Without it the application still starts and explains how
-          # to install it, so a failed download only warns.
-          try {
-            $release = Invoke-RestMethod -Headers @{ Authorization = "Bearer $env:GH_TOKEN" } `
-              "https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest"
-            $asset = $release.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d{8}-git-.*\.7z$' } | Select-Object -First 1
-            if (-not $asset) { throw "no mpv-dev-x86_64 asset in $($release.tag_name)" }
-            Invoke-WebRequest $asset.browser_download_url -OutFile mpv-dev.7z
-            7z e mpv-dev.7z libmpv-2.dll -ostage -y | Out-Null
-            if (-not (Test-Path stage/libmpv-2.dll)) { throw "libmpv-2.dll missing from $($asset.name)" }
-            Write-Host "libmpv: $($asset.name)"
-          } catch {
-            Write-Warning "libmpv not bundled: $_"
-          }
 
           # Real installer (Start menu, desktop shortcut, uninstaller).
           choco install innosetup --no-progress -y | Out-Null

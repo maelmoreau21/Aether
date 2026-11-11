@@ -1,5 +1,5 @@
-//! Embeds the Aether icon in the Windows executable. GPUI loads icon resource 1
-//! for its windows, and the Explorer shows it for `aether-desktop.exe`.
+//! Embeds the Aether icon in the Windows executable: the window loads icon
+//! resource 1, and the Explorer shows it for `aether-desktop.exe`.
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=assets/aether.rc");

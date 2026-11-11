@@ -39,7 +39,6 @@ COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
 COPY crates/client/Cargo.toml ./crates/client/
 COPY crates/client-ffi/Cargo.toml ./crates/client-ffi/
 COPY apps/desktop/Cargo.toml ./apps/desktop/
-COPY apps/desktop/vendor/ ./apps/desktop/vendor/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist

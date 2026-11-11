@@ -119,17 +119,6 @@ pub struct Work {
     /// forever, fetch it with the token (`Client::url` makes it absolute).
     #[serde(default)]
     pub poster_url: Option<String>,
-    #[serde(default)]
-    pub artwork: Artwork,
-}
-
-/// The other images of a work, server-relative like `poster_url`.
-#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Artwork {
-    /// The wide image shown behind a featured work.
-    #[serde(default)]
-    pub backdrop: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]

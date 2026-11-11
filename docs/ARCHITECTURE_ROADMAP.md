@@ -48,7 +48,7 @@ crates/node/                  package media-node, lib media_node
   src/{files,scanner,probe,nfo,images,stream,inventory}.rs
   src/bin/media-node.rs        ajouté au jalon distant seulement
 crates/core/                  package actuel conservé pendant la transition
-  migrations/                 fichiers existants inchangés, propriété du Core
+  schema/                     schéma SQL courant (SQLite, PostgreSQL, seed), propriété du Core
   src/lib.rs                  assemblage des routes et services
   src/{auth,identity,permissions,libraries,catalog,scans}.rs
   src/db/{mod,identity,catalog,inventory,jobs}.rs

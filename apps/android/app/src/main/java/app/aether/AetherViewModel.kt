@@ -102,10 +102,6 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
 
     private var pairingJob: Job? = null
 
-    init {
-        store.server?.let { connect(it) }
-    }
-
     fun clearError() {
         _error.value = null
     }
@@ -606,6 +602,13 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     /** The finished offline copy of this work, if any (reads the index: call off the main thread). */
     fun completedDownload(id: String): Download? =
         downloads.downloadIndex.getDownload(id)?.takeIf { it.state == Download.STATE_COMPLETED }
+
+    // Last on purpose: Kotlin initialises properties in source order, and a saved
+    // session reaches the remote control and the downloads without suspending
+    // (a token that is not due for refresh answers at once).
+    init {
+        store.server?.let { connect(it) }
+    }
 
     private companion object {
         const val REFRESH_MARGIN_SECONDS = 7L * 24 * 3600

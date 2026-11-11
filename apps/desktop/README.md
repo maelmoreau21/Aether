@@ -13,7 +13,10 @@ lecture par libmpv, API de la Core via le cœur client partagé `aether-client`.
   Keychain, Secret Service) ; seuls l'adresse et l'identifiant de télécommande
   vont dans `settings.json` (`%APPDATA%\Aether`, `~/Library/Application Support/Aether`,
   `~/.config/aether`).
-- Accueil « Continuer », bibliothèques Films/Séries avec affiches, fiche d'une œuvre.
+- Même présentation que le web (Halo) : barre avec les rubriques en pastille, la
+  recherche et le compte ; accueil avec une œuvre à l'affiche sur sa grande image,
+  « Reprendre » puis les rangées Films et Séries ; bibliothèques en grille
+  d'affiches ; fiche d'une œuvre sur son image de fond, saisons et épisodes.
 - Lecteur intégré : lecture directe de l'original (`/api/v1/assets/{id}/content`,
   jeton en en-tête), pistes audio et sous-titres, reprise et sauvegarde de la
   position. Clavier : espace, ←/→ (±10 s), ↑/↓ (volume), F (plein écran), Échap.

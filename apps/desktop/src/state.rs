@@ -38,6 +38,8 @@ pub enum Route {
     Library(LibraryKind),
     /// A film or a series, by work id.
     Work(String),
+    /// What the catalogue answers to these words.
+    Search(String),
 }
 
 /// Back/forward-less history: tabs (home, libraries) reset it, a work is pushed
@@ -237,6 +239,7 @@ mod tests {
             year: None,
             description: String::new(),
             poster_url: None,
+            artwork: Default::default(),
         }
     }
     fn recent(id: &str, series: Option<&str>, position: f64, updated_at: i64) -> RecentProgress {

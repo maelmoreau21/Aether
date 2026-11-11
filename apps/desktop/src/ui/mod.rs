@@ -25,6 +25,9 @@ pub mod theme {
     pub const SURFACE: Rgba = hex(0x11151f);
     pub const RAISED: Rgba = hex(0x171c28);
     pub const BORDER: Rgba = white(0.09);
+    pub const BORDER_STRONG: Rgba = white(0.16);
+    /// Outline of the card under the pointer.
+    pub const HIGHLIGHT: Rgba = white(0.55);
     pub const PANEL: Rgba = white(0.055);
     pub const PANEL_2: Rgba = white(0.09);
     pub const PANEL_3: Rgba = white(0.14);
@@ -49,6 +52,15 @@ pub mod theme {
         b: 107.0 / 255.0,
         a: 0.14,
     };
+    /// The background at `alpha`, to shade an image under text (`--media-shade`).
+    pub const fn shade(alpha: f32) -> Rgba {
+        Rgba {
+            r: 11.0 / 255.0,
+            g: 14.0 / 255.0,
+            b: 24.0 / 255.0,
+            a: alpha,
+        }
+    }
     pub const OVERLAY: Rgba = Rgba {
         r: 0.0,
         g: 0.0,
@@ -95,12 +107,12 @@ pub fn button(
     div()
         .id(id.into())
         .px_4()
-        .h(px(36.))
+        .h(px(40.))
         .flex()
         .flex_none()
         .items_center()
         .justify_center()
-        .rounded_md()
+        .rounded(px(12.))
         .bg(background)
         .text_color(text)
         .text_sm()
@@ -142,6 +154,59 @@ pub fn wide_button(
         .on_click(on_click)
         .child(label.into())
         .when(tone == Tone::Primary, |button| button.child("→"))
+}
+
+/// The large rounded action of a featured work (the web's hero buttons).
+pub fn hero_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    tone: Tone,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let (background, text, hover): (Rgba, Rgba, Rgba) = match tone {
+        Tone::Primary => (theme::BUTTON, theme::BUTTON_TEXT, theme::BUTTON_HOVER),
+        Tone::Secondary | Tone::Quiet => (theme::PANEL_3, theme::TEXT, theme::BORDER_STRONG),
+    };
+    div()
+        .id(id.into())
+        .h(px(50.))
+        .px_6()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(16.))
+        .bg(background)
+        .text_color(text)
+        .font_weight(FontWeight::BOLD)
+        .cursor_pointer()
+        .hover(move |style| style.bg(hover))
+        .on_click(on_click)
+        .child(label.into())
+}
+
+/// A square 44 px control of the top bar (the web's `icon-btn`).
+pub fn icon_button(
+    id: impl Into<ElementId>,
+    glyph: impl Into<SharedString>,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id(id.into())
+        .size(px(44.))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .rounded(px(14.))
+        .bg(theme::PANEL)
+        .text_color(theme::TEXT)
+        .text_lg()
+        .font_weight(FontWeight::BOLD)
+        .cursor_pointer()
+        .hover(|style| style.bg(theme::PANEL_2))
+        .on_click(on_click)
+        .child(glyph.into())
 }
 
 /// A thin progress bar, `fraction` in 0..=1.

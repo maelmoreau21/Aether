@@ -48,8 +48,7 @@
     <!-- Couche d'ambiance unique : teinte de l'œuvre à l'affiche (aucun formulaire sur l'accueil). -->
     <div class="ambient" aria-hidden="true" style:--ambient-tint={heroTint ?? 'transparent'}></div>
   {/if}
-  {#if allWorks.length}<SurprisePicker works={allWorks} {onPlay} {detailUrl} />{/if}
-  {#each sections as section (section)}
+  {#each sections as section, index (section)}
     {#if section === 'hero'}
       <HeroBanner featured={activeFeatured} candidates={heroCandidates} {onPlay} onTint={color => (heroTint = color)} />
     {:else if section === 'continue'}
@@ -70,7 +69,10 @@
       </MediaShelf>
     {/if}
     {#if section === 'tonight'}<RecommendationShelf />{/if}
+    <!-- Sous la première section (l'affiche) : jamais au-dessus, où il repoussait tout l'accueil. -->
+    {#if index === 0 && allWorks.length}<SurprisePicker works={allWorks} {onPlay} {detailUrl} />{/if}
   {/each}
+  {#if !sections.length && allWorks.length}<SurprisePicker works={allWorks} {onPlay} {detailUrl} />{/if}
   {#if sections.length && !sections.includes('tonight')}<RecommendationShelf />{/if}
   {#if allWorks.length}
     <DiscoverFeed {films} {series} exclude={shownAbove} {library} {detailUrl} />

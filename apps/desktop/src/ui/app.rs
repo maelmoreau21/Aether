@@ -3,6 +3,7 @@
 use super::{
     Tone, button,
     field::{FieldEvent, TextField},
+    hero_button, icon_button,
     player::{PlayerEvent, PlayerView, Prepared},
     progress_bar, theme, wide_button,
 };
@@ -13,14 +14,14 @@ use crate::{
     store::{self, Settings},
 };
 use aether_client::{
-    Client, Error, LoginStep, Pairing, RecentProgress, SecondFactor, ServerInfo, User, Work,
-    WorkDetail,
+    CatalogQuery, Client, Error, LoginStep, Pairing, RecentProgress, SecondFactor, ServerInfo,
+    User, Work, WorkDetail,
 };
 use futures::StreamExt;
 use gpui::{
     AnyElement, Context, Entity, FocusHandle, Focusable, FontWeight, Image, ImageFormat,
     KeyDownEvent, ObjectFit, SharedString, Subscription, Task, Window, canvas, div, fill, img,
-    point, prelude::*, px, size,
+    linear_color_stop, linear_gradient, point, prelude::*, px, size,
 };
 use std::{collections::HashMap, future::Future, path::PathBuf, rc::Rc, sync::Arc, time::Duration};
 
@@ -31,8 +32,13 @@ const REFRESH_EVERY: Duration = Duration::from_secs(6 * 3600);
 const PAIRING_POLL: Duration = Duration::from_secs(3);
 /// Concurrent poster downloads.
 const POSTER_REQUESTS: usize = 6;
-const POSTER_WIDTH: f32 = 160.;
-const POSTER_HEIGHT: f32 = 240.;
+const POSTER_WIDTH: f32 = 172.;
+const POSTER_HEIGHT: f32 = 258.;
+/// Side margin of the pages and of the top bar.
+const GUTTER: f32 = 40.;
+/// Posters in a row of the home page; the library page shows everything.
+const SHELF_ITEMS: usize = 20;
+const SEARCH_RESULTS: usize = 60;
 
 enum Phase {
     Starting,
@@ -104,6 +110,9 @@ pub struct AetherApp {
     libraries: HashMap<LibraryKind, LibraryState>,
     works: HashMap<String, Loadable<WorkDetail>>,
     posters: HashMap<String, Loadable<Arc<Image>>>,
+    /// The search box of the top bar and what the catalogue answered.
+    search: Entity<TextField>,
+    search_results: Loadable<Vec<Work>>,
     poster_slots: Arc<tokio::sync::Semaphore>,
     player: Option<(Entity<PlayerView>, Subscription)>,
     remote: Option<RemoteLink>,
@@ -173,6 +182,7 @@ impl AetherApp {
         let login = cx.new(|cx| TextField::new(cx, "Identifiant", false));
         let password = cx.new(|cx| TextField::new(cx, "Mot de passe", true));
         let code = cx.new(|cx| TextField::new(cx, "Code à 6 chiffres", false));
+        let search = cx.new(|cx| TextField::new(cx, "Rechercher un film, une série…", false));
         if let Some(saved) = &settings.server {
             server.update(cx, |field, cx| field.set_text(saved, cx));
         }
@@ -196,6 +206,11 @@ impl AetherApp {
             cx.subscribe_in(&code, window, |this, _, event, window, cx| {
                 if matches!(event, FieldEvent::Submit) {
                     this.submit_second_factor(window, cx);
+                }
+            }),
+            cx.subscribe_in(&search, window, |this, _, event, window, cx| {
+                if matches!(event, FieldEvent::Submit) {
+                    this.run_search(window, cx);
                 }
             }),
         ];
@@ -229,6 +244,8 @@ impl AetherApp {
             libraries: HashMap::new(),
             works: HashMap::new(),
             posters: HashMap::new(),
+            search,
+            search_results: Loadable::Idle,
             poster_slots: Arc::new(tokio::sync::Semaphore::new(POSTER_REQUESTS)),
             player: None,
             remote: None,
@@ -750,6 +767,7 @@ impl AetherApp {
         self.libraries.clear();
         self.works.clear();
         self.posters.clear();
+        self.search_results = Loadable::Idle;
         self.nav = Navigator::default();
         self.show_sign_in(message, window, cx);
     }
@@ -775,6 +793,15 @@ impl AetherApp {
         let Some(client) = self.client() else { return };
         if !matches!(self.home, Loadable::Ready(_)) {
             self.home = Loadable::Loading;
+        }
+        for kind in [LibraryKind::Films, LibraryKind::Series] {
+            if !self
+                .libraries
+                .get(&kind)
+                .is_some_and(|library| library.loaded_once || library.loading)
+            {
+                self.load_library(kind, window, cx);
+            }
         }
         let request = self.net.run(async move { client.recent_progress().await });
         self.after(
@@ -842,7 +869,11 @@ impl AetherApp {
             cx,
             move |this, result, window, cx| match result {
                 Ok(detail) => {
-                    if let Some(path) = detail.work.poster_url.clone() {
+                    let work = &detail.work;
+                    for path in [work.poster_url.clone(), work.artwork.backdrop.clone()]
+                        .into_iter()
+                        .flatten()
+                    {
                         this.load_poster(path, window, cx);
                     }
                     this.works.insert(id, Loadable::Ready(detail));
@@ -879,6 +910,44 @@ impl AetherApp {
         });
     }
 
+    /// Searches films and series for the words typed in the top bar.
+    fn run_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let words = self.search.read(cx).text().trim().to_owned();
+        let Some(client) = self.client() else { return };
+        if words.is_empty() {
+            return;
+        }
+        let route = Route::Search(words.clone());
+        self.notice = None;
+        self.search_results = Loadable::Loading;
+        self.nav.tab(route.clone());
+        let query = CatalogQuery {
+            search: Some(words),
+            limit: SEARCH_RESULTS,
+            ..CatalogQuery::default()
+        };
+        let request = self.net.run(async move { client.catalog(&query).await });
+        self.after(request, window, cx, move |this, result, window, cx| {
+            // Another search (or another page) may have replaced this one.
+            if this.nav.section() != &route {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    for path in page.items.iter().filter_map(|w| w.poster_url.clone()) {
+                        this.load_poster(path, window, cx);
+                    }
+                    this.search_results = Loadable::Ready(page.items);
+                }
+                Err(error) => {
+                    this.search_results = Loadable::Failed(describe(&error));
+                    this.check_unauthorized(&error, window, cx);
+                }
+            }
+        });
+        cx.notify();
+    }
+
     // ---- Navigation and playback ---------------------------------------------------
 
     fn go(&mut self, route: Route, tab: bool, window: &Window, cx: &mut Context<Self>) {
@@ -891,6 +960,7 @@ impl AetherApp {
                 }
             }
             Route::Work(id) => self.load_work(id, window, cx),
+            Route::Search(_) => {}
         }
         if tab {
             self.nav.tab(route);
@@ -1051,13 +1121,6 @@ fn centered(content: impl IntoElement) -> AnyElement {
         .justify_center()
         .child(content)
         .into_any_element()
-}
-
-fn heading(text: impl Into<SharedString>) -> impl IntoElement {
-    div()
-        .text_xl()
-        .font_weight(FontWeight::BOLD)
-        .child(text.into())
 }
 
 fn muted(text: impl Into<SharedString>) -> impl IntoElement {
@@ -1620,10 +1683,36 @@ impl AetherApp {
     }
 
     fn render_main(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let page = match self.nav.current().clone() {
-            Route::Home => self.render_home(cx),
-            Route::Library(kind) => self.render_library(kind, cx),
-            Route::Work(id) => self.render_work(&id, window, cx),
+        let (scroll_id, page) = match self.nav.current().clone() {
+            Route::Home => ("page-home", self.render_home(window, cx)),
+            Route::Library(LibraryKind::Films) => {
+                ("page-films", self.render_library(LibraryKind::Films, cx))
+            }
+            Route::Library(LibraryKind::Series) => {
+                ("page-series", self.render_library(LibraryKind::Series, cx))
+            }
+            Route::Work(id) => {
+                if !self.works.contains_key(&id) {
+                    self.load_work(&id, window, cx);
+                }
+                ("page-work", self.render_work(&id, cx))
+            }
+            Route::Search(query) => ("page-search", self.render_search(&query, cx)),
+        };
+        let banner = || {
+            div()
+                .mx(px(GUTTER))
+                .mb_2()
+                .px_4()
+                .py_2()
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_between()
+                .gap_4()
+                .rounded(px(12.))
+                .bg(theme::PANEL_2)
+                .text_sm()
         };
         div()
             .size_full()
@@ -1632,15 +1721,7 @@ impl AetherApp {
             .child(self.render_top_bar(cx))
             .when_some(self.update_available.clone(), |main, latest| {
                 main.child(
-                    div()
-                        .px_6()
-                        .py_2()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_4()
-                        .bg(theme::RAISED)
-                        .text_sm()
+                    banner()
                         .child(format!(
                             "Une nouvelle version d'Aether est disponible ({latest}) : cette application est plus ancienne que votre serveur."
                         ))
@@ -1655,26 +1736,22 @@ impl AetherApp {
                 )
             })
             .when_some(self.notice.clone(), |main, notice| {
-                main.child(
-                    div()
-                        .px_6()
-                        .py_2()
-                        .bg(theme::RAISED)
-                        .text_sm()
-                        .child(notice),
-                )
+                main.child(banner().child(notice))
             })
             .child(
-                div()
-                    .id("page")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .p_6()
-                    .child(page),
+                // One scroll position per kind of page.
+                div().id(scroll_id).flex_1().overflow_y_scroll().child(
+                    div()
+                        .px(px(GUTTER))
+                        .pt_2()
+                        .pb(px(56.))
+                        .child(page),
+                ),
             )
             .into_any_element()
     }
 
+    /// The web's header: brand, sections in a pill, search, account.
     fn render_top_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let section = self.nav.section().clone();
         let tab =
@@ -1682,15 +1759,21 @@ impl AetherApp {
                 let active = section == route;
                 div()
                     .id(id)
-                    .px_3()
-                    .py_1()
-                    .rounded_md()
+                    .h(px(38.))
+                    .px_4()
+                    .flex()
+                    .items_center()
+                    .rounded_full()
                     .cursor_pointer()
                     .text_sm()
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(if active { theme::TEXT } else { theme::MUTED })
-                    .when(active, |t| t.bg(theme::RAISED))
-                    .hover(|t| t.text_color(theme::TEXT))
+                    .text_color(if active {
+                        theme::BACKGROUND
+                    } else {
+                        theme::MUTED
+                    })
+                    .when(active, |tab| tab.bg(theme::TEXT))
+                    .when(!active, |tab| tab.hover(|tab| tab.text_color(theme::TEXT)))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.go(route.clone(), true, window, cx)
                     }))
@@ -1706,20 +1789,21 @@ impl AetherApp {
                     .unwrap_or_else(|| s.user.login.clone())
             })
             .unwrap_or_default();
+        let initial: String = user
+            .chars()
+            .next()
+            .map_or_else(|| "?".to_owned(), |c| c.to_uppercase().collect());
         div()
-            .h(px(56.))
-            .px_6()
+            .h(px(72.))
+            .px(px(GUTTER))
             .flex()
             .flex_none()
             .items_center()
-            .gap_2()
-            .border_b_1()
-            .border_color(theme::BORDER)
+            .gap_4()
             .when(self.nav.can_go_back(), |bar| {
-                bar.child(button(
+                bar.child(icon_button(
                     "back",
-                    "‹ Retour",
-                    Tone::Quiet,
+                    "‹",
                     cx.listener(|this, _, _, cx| {
                         this.nav.back();
                         cx.notify();
@@ -1728,33 +1812,82 @@ impl AetherApp {
             })
             .child(
                 div()
-                    .mr_4()
+                    .mr_2()
                     .flex()
+                    .flex_none()
                     .items_center()
-                    .gap_2()
-                    .child(img(self.logo.clone()).size(px(28.)).rounded_md())
+                    .gap(px(10.))
+                    .child(img(self.logo.clone()).size(px(28.)).rounded(px(7.)))
                     .child(
                         div()
-                            .text_lg()
-                            .font_weight(FontWeight::BOLD)
+                            .text_size(px(20.))
+                            .font_weight(FontWeight::EXTRA_BOLD)
                             .child("Aether"),
                     ),
             )
-            .child(tab("tab-home", "Accueil", Route::Home, cx))
-            .child(tab(
-                "tab-films",
-                "Films",
-                Route::Library(LibraryKind::Films),
-                cx,
-            ))
-            .child(tab(
-                "tab-series",
-                "Séries",
-                Route::Library(LibraryKind::Series),
-                cx,
-            ))
+            .child(
+                div()
+                    .p_1()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_1()
+                    .rounded_full()
+                    .bg(theme::PANEL)
+                    .child(tab("tab-home", "Accueil", Route::Home, cx))
+                    .child(tab(
+                        "tab-films",
+                        "Films",
+                        Route::Library(LibraryKind::Films),
+                        cx,
+                    ))
+                    .child(tab(
+                        "tab-series",
+                        "Séries",
+                        Route::Library(LibraryKind::Series),
+                        cx,
+                    )),
+            )
             .child(div().flex_1())
-            .child(muted(user))
+            .child(
+                div()
+                    .w(px(280.))
+                    .flex_shrink()
+                    .min_w(px(140.))
+                    .child(self.search.clone()),
+            )
+            .child(
+                div()
+                    .h(px(44.))
+                    .pl_1()
+                    .pr_3()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap_2()
+                    .rounded_full()
+                    .bg(theme::PANEL)
+                    .child(
+                        div()
+                            .size(px(36.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .bg(theme::ACCENT_SOFT)
+                            .text_color(theme::ACCENT)
+                            .font_weight(FontWeight::BOLD)
+                            .child(initial),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(160.))
+                            .truncate()
+                            .text_sm()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(user),
+                    ),
+            )
             .child(button(
                 "sign-out",
                 "Déconnexion",
@@ -1763,37 +1896,232 @@ impl AetherApp {
             ))
     }
 
-    fn render_home(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut page = div().flex().flex_col().gap_6();
-        page = page.child(heading("Continuer"));
-        page = match &self.home {
-            Loadable::Ready(items) if items.is_empty() => {
-                page.child(muted("Rien en cours. Choisissez un film ou une série."))
-            }
-            Loadable::Ready(items) => page.child(
-                div()
-                    .id("continue")
-                    .flex()
-                    .gap_4()
-                    .overflow_x_scroll()
-                    .pb_2()
-                    .children(
-                        items
-                            .iter()
-                            .enumerate()
-                            .map(|(i, item)| self.continue_card(i, item, cx)),
-                    ),
-            ),
-            Loadable::Failed(error) => page.child(error_text(error.clone())),
-            Loadable::Idle | Loadable::Loading => page.child(muted("Chargement…")),
+    /// A work this session already knows (a library page or an opened work).
+    fn known_work(&self, id: &str) -> Option<&Work> {
+        self.libraries
+            .values()
+            .flat_map(|library| library.items.iter())
+            .find(|work| work.id == id)
+            .or_else(|| {
+                self.works
+                    .get(id)
+                    .and_then(Loadable::ready)
+                    .map(|detail| &detail.work)
+            })
+    }
+
+    /// The work shown at the top of the home page: the first with a wide image.
+    fn featured(&self) -> Option<Work> {
+        let items = |kind| {
+            self.libraries
+                .get(&kind)
+                .map(|library| library.items.as_slice())
+                .unwrap_or_default()
         };
-        if !self.devices.is_empty() {
-            page = page.child(heading("Vos autres appareils"));
-            page = page.children(
-                self.devices
+        let all = items(LibraryKind::Films)
+            .iter()
+            .chain(items(LibraryKind::Series));
+        all.clone()
+            .find(|work| work.artwork.backdrop.is_some())
+            .or_else(|| all.clone().next())
+            .cloned()
+    }
+
+    /// A wide rounded frame: the image when it is loaded, shaded on the left
+    /// and at the bottom so the text placed over it stays readable.
+    fn backdrop(&self, path: Option<&str>, height: f32) -> gpui::Div {
+        let radius = px(28.);
+        let frame = div()
+            .relative()
+            .w_full()
+            .h(px(height))
+            .flex_none()
+            .rounded(radius)
+            .overflow_hidden()
+            .bg(theme::RAISED);
+        let frame = match path
+            .and_then(|p| self.posters.get(p))
+            .and_then(Loadable::ready)
+        {
+            Some(image) => frame.child(
+                img(image.clone())
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .rounded(radius),
+            ),
+            None => frame,
+        };
+        frame
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded(radius)
+                    .bg(linear_gradient(
+                        90.,
+                        linear_color_stop(theme::shade(0.94), 0.),
+                        linear_color_stop(theme::shade(0.), 0.75),
+                    )),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded(radius)
+                    .bg(linear_gradient(
+                        180.,
+                        linear_color_stop(theme::shade(0.), 0.4),
+                        linear_color_stop(theme::shade(0.88), 1.),
+                    )),
+            )
+    }
+
+    fn render_hero(&self, work: &Work, cx: &mut Context<Self>) -> AnyElement {
+        let series = work.kind == "series";
+        let (id, title, open) = (work.id.clone(), work.title.clone(), work.id.clone());
+        let mut actions = div().pt_2().flex().gap_3();
+        if !series {
+            actions = actions.child(hero_button(
+                "hero-play",
+                "▶  Lecture",
+                Tone::Primary,
+                cx.listener(move |this, _, window, cx| {
+                    this.play(id.clone(), title.clone(), None, window, cx)
+                }),
+            ));
+        }
+        actions = actions.child(hero_button(
+            "hero-open",
+            if series {
+                "Voir la série"
+            } else {
+                "Plus d'infos"
+            },
+            if series {
+                Tone::Primary
+            } else {
+                Tone::Secondary
+            },
+            cx.listener(move |this, _, window, cx| {
+                this.go(Route::Work(open.clone()), false, window, cx)
+            }),
+        ));
+        self.backdrop(work.artwork.backdrop.as_deref(), 440.)
+            .child(
+                div()
+                    .absolute()
+                    .left(px(40.))
+                    .right(px(40.))
+                    .bottom(px(40.))
+                    .child(
+                        div()
+                            .max_w(px(640.))
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(work_meta(
+                                if series { "Série" } else { "Film" },
+                                work.year,
+                                None,
+                            ))
+                            .child(
+                                div()
+                                    .text_size(px(44.))
+                                    .line_height(px(50.))
+                                    .font_weight(FontWeight::EXTRA_BOLD)
+                                    .line_clamp(2)
+                                    .child(work.title.clone()),
+                            )
+                            .when(!work.description.is_empty(), |column| {
+                                column.child(
+                                    div()
+                                        .line_height(px(24.))
+                                        .line_clamp(3)
+                                        .child(work.description.clone()),
+                                )
+                            })
+                            .child(actions),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn render_home(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let featured = self.featured();
+        if let Some(path) = featured
+            .as_ref()
+            .and_then(|work| work.artwork.backdrop.clone())
+        {
+            self.load_poster(path, window, cx);
+        }
+        let mut page = div().flex().flex_col().gap(px(40.));
+        if let Some(work) = &featured {
+            page = page.child(self.render_hero(work, cx));
+        }
+        match &self.home {
+            Loadable::Ready(items) if items.is_empty() => {
+                if featured.is_none() {
+                    page = page.child(muted("Rien en cours. Choisissez un film ou une série."));
+                }
+            }
+            Loadable::Ready(items) => {
+                let cards = items
                     .iter()
                     .enumerate()
-                    .map(|(i, d)| self.device_row(i, d, cx)),
+                    .map(|(i, item)| self.continue_card(i, item, cx))
+                    .collect();
+                page = page.child(shelf("shelf-continue", "Reprendre", None, cards));
+            }
+            Loadable::Failed(error) => page = page.child(error_text(error.clone())),
+            Loadable::Idle | Loadable::Loading => page = page.child(muted("Chargement…")),
+        }
+        for (index, kind) in [LibraryKind::Films, LibraryKind::Series]
+            .into_iter()
+            .enumerate()
+        {
+            let Some(library) = self.libraries.get(&kind) else {
+                continue;
+            };
+            if library.items.is_empty() {
+                continue;
+            }
+            let cards = library
+                .items
+                .iter()
+                .take(SHELF_ITEMS)
+                .enumerate()
+                .map(|(i, work)| self.work_card(i, work, cx))
+                .collect();
+            let view_all = button(
+                ("view-all", index),
+                "Tout voir ›",
+                Tone::Quiet,
+                cx.listener(move |this, _, window, cx| {
+                    this.go(Route::Library(kind), true, window, cx)
+                }),
+            )
+            .into_any_element();
+            let id = match kind {
+                LibraryKind::Films => "shelf-films",
+                LibraryKind::Series => "shelf-series",
+            };
+            page = page.child(shelf(id, kind.label(), Some(view_all), cards));
+        }
+        if !self.devices.is_empty() {
+            page = page.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .child(section_title("Vos autres appareils"))
+                    .children(
+                        self.devices
+                            .iter()
+                            .enumerate()
+                            .map(|(i, d)| self.device_row(i, d, cx)),
+                    ),
             );
         }
         page.into_any_element()
@@ -1806,34 +2134,52 @@ impl AetherApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (id, title) = (item.work_id.clone(), item.title.clone());
+        // An episode is shown with the poster of its series.
+        let poster = self
+            .known_work(&item.work_id)
+            .or_else(|| {
+                item.series_id
+                    .as_deref()
+                    .and_then(|series| self.known_work(series))
+            })
+            .and_then(|work| work.poster_url.as_deref());
         div()
             .id(("continue", index))
-            .w(px(260.))
+            .w(px(340.))
             .flex_none()
-            .p_4()
+            .p_3()
             .flex()
-            .flex_col()
-            .gap_2()
-            .rounded_lg()
-            .bg(theme::SURFACE)
+            .items_center()
+            .gap_4()
+            .rounded(px(16.))
+            .bg(theme::PANEL)
             .border_1()
             .border_color(theme::BORDER)
             .cursor_pointer()
-            .hover(|card| card.border_color(theme::ACCENT))
+            .hover(|card| card.bg(theme::PANEL_2).border_color(theme::BORDER_STRONG))
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.play(id.clone(), title.clone(), None, window, cx)
             }))
+            .child(self.poster(poster, 64., 96., 10.))
             .child(
                 div()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .truncate()
-                    .child(item.title.clone()),
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .line_clamp(2)
+                            .child(item.title.clone()),
+                    )
+                    .child(muted(
+                        state::remaining(item.position, item.duration)
+                            .unwrap_or_else(|| state::clock(item.position)),
+                    ))
+                    .child(progress_bar(state::fraction(item.position, item.duration))),
             )
-            .child(muted(
-                state::remaining(item.position, item.duration)
-                    .unwrap_or_else(|| state::clock(item.position)),
-            ))
-            .child(progress_bar(state::fraction(item.position, item.duration)))
             .into_any_element()
     }
 
@@ -1864,13 +2210,17 @@ impl AetherApp {
             .flex()
             .items_center()
             .gap_3()
-            .rounded_lg()
-            .bg(theme::SURFACE)
+            .rounded(px(16.))
+            .bg(theme::PANEL)
+            .border_1()
+            .border_color(theme::BORDER)
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .flex()
                     .flex_col()
+                    .gap_1()
                     .child(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
@@ -1913,60 +2263,92 @@ impl AetherApp {
         row.into_any_element()
     }
 
-    fn poster(&self, path: Option<&str>, width: f32, height: f32) -> AnyElement {
+    /// A poster frame; the image appears once downloaded.
+    fn poster(&self, path: Option<&str>, width: f32, height: f32, radius: f32) -> gpui::Div {
         let frame = div()
             .w(px(width))
             .h(px(height))
             .flex_none()
-            .rounded_md()
+            .rounded(px(radius))
             .overflow_hidden()
             .bg(theme::RAISED);
         match path
             .and_then(|p| self.posters.get(p))
             .and_then(Loadable::ready)
         {
-            Some(image) => frame
-                .child(img(image.clone()).size_full().object_fit(ObjectFit::Cover))
-                .into_any_element(),
-            None => frame.into_any_element(),
+            Some(image) => frame.child(
+                img(image.clone())
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .rounded(px(radius)),
+            ),
+            None => frame,
         }
+    }
+
+    fn work_grid(&self, works: &[Work], cx: &mut Context<Self>) -> impl IntoElement {
+        div().flex().flex_wrap().gap_5().children(
+            works
+                .iter()
+                .enumerate()
+                .map(|(i, work)| self.work_card(i, work, cx)),
+        )
     }
 
     fn render_library(&self, kind: LibraryKind, cx: &mut Context<Self>) -> AnyElement {
         let empty = LibraryState::default();
         let library = self.libraries.get(&kind).unwrap_or(&empty);
+        let count = library
+            .total
+            .map(|total| format!("{total} {}", kind.label().to_lowercase()));
         let mut page = div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(heading(match library.total {
-                Some(total) => format!("{} · {total}", kind.label()),
-                None => kind.label().to_owned(),
-            }));
+            .gap_6()
+            .child(page_title(kind.label(), count));
         if library.loaded_once && library.items.is_empty() {
             page = page.child(muted("Cette bibliothèque est vide."));
         }
-        page = page.child(
-            div().flex().flex_wrap().gap_4().children(
-                library
-                    .items
-                    .iter()
-                    .enumerate()
-                    .map(|(i, work)| self.work_card(i, work, cx)),
-            ),
-        );
+        page = page.child(self.work_grid(&library.items, cx));
         if let Some(error) = &library.error {
             page = page.child(error_text(error.clone()));
         }
         if library.loading {
             page = page.child(muted("Chargement…"));
         } else if library.has_more || library.error.is_some() {
-            page = page.child(button(
+            page = page.child(div().flex().justify_center().child(button(
                 "more",
                 "Afficher plus",
                 Tone::Secondary,
                 cx.listener(move |this, _, window, cx| this.load_library(kind, window, cx)),
-            ));
+            )));
+        }
+        page.into_any_element()
+    }
+
+    fn render_search(&self, query: &str, cx: &mut Context<Self>) -> AnyElement {
+        let mut page = div().flex().flex_col().gap_6();
+        match &self.search_results {
+            Loadable::Ready(works) => {
+                let found = match works.len() {
+                    0 => format!("aucun résultat pour « {query} »"),
+                    1 => format!("1 résultat pour « {query} »"),
+                    n => format!("{n} résultats pour « {query} »"),
+                };
+                page = page
+                    .child(page_title("Recherche", Some(found)))
+                    .child(self.work_grid(works, cx));
+            }
+            Loadable::Failed(error) => {
+                page = page
+                    .child(page_title("Recherche", None))
+                    .child(error_text(error.clone()));
+            }
+            Loadable::Idle | Loadable::Loading => {
+                page = page
+                    .child(page_title("Recherche", None))
+                    .child(muted("Recherche…"));
+            }
         }
         page.into_any_element()
     }
@@ -1975,69 +2357,108 @@ impl AetherApp {
         let id = work.id.clone();
         div()
             .id(("work", index))
+            .group("work-card")
             .w(px(POSTER_WIDTH))
             .flex()
+            .flex_none()
             .flex_col()
-            .gap_1()
+            .gap_2()
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, window, cx| {
                 this.go(Route::Work(id.clone()), false, window, cx)
             }))
-            .child(self.poster(work.poster_url.as_deref(), POSTER_WIDTH, POSTER_HEIGHT))
+            .child(
+                self.poster(work.poster_url.as_deref(), POSTER_WIDTH, POSTER_HEIGHT, 16.)
+                    .border_2()
+                    .border_color(gpui::transparent_black())
+                    .group_hover("work-card", |poster| poster.border_color(theme::HIGHLIGHT)),
+            )
             .child(
                 div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .truncate()
-                    .child(work.title.clone()),
+                    .px_1()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .truncate()
+                            .child(work.title.clone()),
+                    )
+                    .when_some(work.year, |card, year| card.child(muted(year.to_string()))),
             )
-            .when_some(work.year, |card, year| card.child(muted(year.to_string())))
             .into_any_element()
     }
 
-    fn render_work(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        if self.works.get(id).is_none_or(Loadable::needs_load)
-            && !matches!(self.works.get(id), Some(Loadable::Failed(_)))
-        {
-            self.load_work(id, window, cx);
-        }
+    fn render_work(&self, id: &str, cx: &mut Context<Self>) -> AnyElement {
         let detail = match self.works.get(id) {
             Some(Loadable::Ready(detail)) => detail,
             Some(Loadable::Failed(error)) => return error_text(error.clone()).into_any_element(),
             _ => return muted("Chargement…").into_any_element(),
         };
         let work = &detail.work;
+        let series = !detail.seasons.is_empty();
+        let seasons = match detail.seasons.len() {
+            0 => None,
+            1 => Some("1 saison".to_owned()),
+            n => Some(format!("{n} saisons")),
+        };
         let mut info = div()
             .flex_1()
+            .min_w_0()
             .flex()
             .flex_col()
             .gap_3()
+            .child(work_meta(
+                if series || work.kind == "series" {
+                    "Série"
+                } else {
+                    "Film"
+                },
+                work.year,
+                seasons,
+            ))
             .child(
                 div()
-                    .text_3xl()
-                    .font_weight(FontWeight::BOLD)
+                    .text_size(px(40.))
+                    .line_height(px(46.))
+                    .font_weight(FontWeight::EXTRA_BOLD)
+                    .line_clamp(2)
                     .child(work.title.clone()),
             )
-            .when_some(work.year, |info, year| info.child(muted(year.to_string())))
-            .child(div().max_w(px(720.)).child(work.description.clone()));
-        if detail.seasons.is_empty() {
+            .when(!work.description.is_empty(), |info| {
+                info.child(
+                    div()
+                        .max_w(px(760.))
+                        .line_height(px(24.))
+                        .line_clamp(5)
+                        .child(work.description.clone()),
+                )
+            });
+        if !series {
             let (id, title) = (work.id.clone(), work.title.clone());
-            info = info.child(div().flex().child(button(
+            info = info.child(div().pt_2().flex().child(hero_button(
                 "play",
-                "▶ Lire",
+                "▶  Lecture",
                 Tone::Primary,
                 cx.listener(move |this, _, window, cx| {
                     this.play(id.clone(), title.clone(), None, window, cx)
                 }),
             )));
         }
-        let mut page = div().flex().flex_col().gap_8().child(
+        let hero = self.backdrop(work.artwork.backdrop.as_deref(), 460.).child(
             div()
+                .absolute()
+                .left(px(40.))
+                .right(px(40.))
+                .bottom(px(40.))
                 .flex()
-                .gap_6()
-                .child(self.poster(work.poster_url.as_deref(), 240., 360.))
+                .items_end()
+                .gap_8()
+                .child(self.poster(work.poster_url.as_deref(), 200., 300., 16.))
                 .child(info),
         );
+        let mut page = div().flex().flex_col().gap(px(40.)).child(hero);
         for (s, season) in detail.seasons.iter().enumerate() {
             let name = if season.title.is_empty() {
                 season
@@ -2046,44 +2467,158 @@ impl AetherApp {
             } else {
                 season.title.clone()
             };
-            let mut list = div().flex().flex_col().gap_2().child(heading(name));
+            let mut list = div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(div().pb_2().child(section_title(name)));
             for (e, episode) in season.episodes.iter().enumerate() {
                 let (id, title) = (episode.id.clone(), episode.title.clone());
-                let number = episode.number.map(|n| format!("{n}. ")).unwrap_or_default();
+                let number = episode
+                    .number
+                    .map_or_else(|| "·".to_owned(), |n| n.to_string());
                 list = list.child(
                     div()
                         .id(("episode", s * 1000 + e))
-                        .p_3()
+                        .p_4()
                         .flex()
-                        .flex_col()
-                        .gap_1()
-                        .rounded_md()
-                        .bg(theme::SURFACE)
+                        .items_center()
+                        .gap_4()
+                        .rounded(px(16.))
+                        .bg(theme::PANEL)
                         .cursor_pointer()
-                        .hover(|row| row.bg(theme::RAISED))
+                        .hover(|row| row.bg(theme::PANEL_2))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.play(id.clone(), title.clone(), None, window, cx)
                         }))
                         .child(
                             div()
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .child(format!("{number}{}", episode.title)),
+                                .w(px(40.))
+                                .flex_none()
+                                .text_xl()
+                                .font_weight(FontWeight::EXTRA_BOLD)
+                                .text_color(theme::MUTED_2)
+                                .child(number),
                         )
-                        .when(!episode.description.is_empty(), |row| {
-                            row.child(
-                                div()
-                                    .text_sm()
-                                    .text_color(theme::MUTED)
-                                    .line_clamp(2)
-                                    .child(episode.description.clone()),
-                            )
-                        }),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(
+                                    div()
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(episode.title.clone()),
+                                )
+                                .when(!episode.description.is_empty(), |row| {
+                                    row.child(
+                                        div()
+                                            .text_sm()
+                                            .text_color(theme::MUTED)
+                                            .line_clamp(2)
+                                            .child(episode.description.clone()),
+                                    )
+                                }),
+                        )
+                        .child(div().flex_none().text_color(theme::MUTED).child("▶")),
                 );
             }
             page = page.child(list);
         }
         page.into_any_element()
     }
+}
+
+/// The title of a row or of a list (the web's shelf heading).
+fn section_title(text: impl Into<SharedString>) -> impl IntoElement {
+    div()
+        .text_size(px(22.))
+        .font_weight(FontWeight::EXTRA_BOLD)
+        .child(text.into())
+}
+
+/// The title of a page, with a quieter detail beside it ("Films  24 films").
+fn page_title(title: impl Into<SharedString>, detail: Option<String>) -> impl IntoElement {
+    div()
+        .pt_4()
+        .flex()
+        .items_end()
+        .gap_3()
+        .child(
+            div()
+                .text_size(px(32.))
+                .font_weight(FontWeight::EXTRA_BOLD)
+                .child(title.into()),
+        )
+        .when_some(detail, |row, detail| {
+            row.child(
+                div()
+                    .pb_1()
+                    .text_color(theme::MUTED)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(detail),
+            )
+        })
+}
+
+/// "Film  2001  2 saisons": the kind in a chip, then the facts.
+fn work_meta(kind: &'static str, year: Option<i64>, extra: Option<String>) -> impl IntoElement {
+    let fact = |text: String| {
+        div()
+            .text_sm()
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(text)
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .h(px(24.))
+                .px_2()
+                .flex()
+                .items_center()
+                .rounded(px(8.))
+                .bg(theme::PANEL_3)
+                .text_size(px(12.))
+                .font_weight(FontWeight::BOLD)
+                .child(kind),
+        )
+        .when_some(year, |row, year| row.child(fact(year.to_string())))
+        .when_some(extra, |row, extra| row.child(fact(extra)))
+}
+
+/// A titled row that scrolls sideways, with an optional action on the right.
+fn shelf(
+    id: &'static str,
+    title: &'static str,
+    action: Option<AnyElement>,
+    cards: Vec<AnyElement>,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap_4()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(section_title(title))
+                .children(action),
+        )
+        .child(
+            div()
+                .id(id)
+                .flex()
+                .gap_5()
+                .overflow_x_scroll()
+                .pb_2()
+                .children(cards),
+        )
 }
 
 #[cfg(test)]

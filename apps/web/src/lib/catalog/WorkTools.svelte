@@ -881,11 +881,21 @@
     max-width: min(340px, calc(100vw - 32px));
   }
 
-  @media (max-width: 720px) {
+  /* Téléphone : les boutons passent à la ligne, un menu ancré à son bouton sortait
+     de l'écran. Feuille fixée au-dessus de la barre de navigation mobile. */
+  @media (max-width: 760px) {
     .dropdown-menu,
     .list-dropdown-menu {
-      left: auto;
-      right: 0;
+      position: fixed;
+      top: auto;
+      left: 12px;
+      right: 12px;
+      bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+      min-width: 0;
+      max-width: none;
+      max-height: min(70dvh, 520px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
     }
   }
 

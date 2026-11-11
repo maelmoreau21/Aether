@@ -124,6 +124,27 @@ async fn request(
         .await
         .unwrap()
 }
+async fn request_bearer(
+    app: &Router,
+    path: &str,
+    method: &str,
+    token: &str,
+    body: Value,
+) -> Response {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .method(method)
+                .header("host", "127.0.0.1:3000")
+                .header("authorization", format!("Bearer {token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+}
 async fn value(response: Response) -> Value {
     serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap()
 }
@@ -798,7 +819,8 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
     query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES('asset','source','films','clip.mp4',?,?,'video/mp4','{\"streams\":[],\"format\":{}}',1)").bind(opened.size() as i64).bind(opened.modified_ns()).execute(&store.pool).await.unwrap();
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let a = format!("media_session={}", "a".repeat(64));
-    let b = format!("media_session={}", "b".repeat(64));
+    let b_token = "b".repeat(64);
+    let b = format!("media_session={b_token}");
     let csrf = format!(
         "{:x}",
         Sha256::digest(format!("csrf:{}", "a".repeat(64)).as_bytes())
@@ -826,6 +848,7 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
             StatusCode::FORBIDDEN
         );
     }
+    // Cookie sessions cannot download (media_download_native_only); native bearer sessions can
     assert_eq!(
         request(
             &app,
@@ -833,6 +856,18 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
             "GET",
             &b,
             "",
+            Value::Null
+        )
+        .await
+        .status(),
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        request_bearer(
+            &app,
+            "/api/v1/assets/asset/download",
+            "GET",
+            &b_token,
             Value::Null
         )
         .await
@@ -864,6 +899,18 @@ async fn granular_parental_tags_schedules_downloads_and_library_images() {
                 method,
                 &b,
                 "",
+                Value::Null
+            )
+            .await
+            .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            request_bearer(
+                &app,
+                "/api/v1/assets/asset/download",
+                method,
+                &b_token,
                 Value::Null
             )
             .await

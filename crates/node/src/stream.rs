@@ -139,7 +139,10 @@ pub fn serve_opened_parts(
                         .status(StatusCode::PARTIAL_CONTENT)
                         .header(header::CONTENT_TYPE, content_type)
                         .header(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"))
-                        .header(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"))
+                        .header(
+                            header::X_CONTENT_TYPE_OPTIONS,
+                            HeaderValue::from_static("nosniff"),
+                        )
                         .header(header::CONTENT_LENGTH, length.to_string())
                         .header(header::CONTENT_RANGE, content_range)
                         .header(header::ETAG, etag_value);
@@ -161,7 +164,10 @@ pub fn serve_opened_parts(
                         .status(StatusCode::RANGE_NOT_SATISFIABLE)
                         .header(header::CONTENT_TYPE, content_type)
                         .header(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"))
-                        .header(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"))
+                        .header(
+                            header::X_CONTENT_TYPE_OPTIONS,
+                            HeaderValue::from_static("nosniff"),
+                        )
                         .header(header::CONTENT_LENGTH, "0")
                         .header(header::CONTENT_RANGE, content_range)
                         .body(empty_body())
@@ -182,7 +188,10 @@ pub fn serve_opened_parts(
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
                 .header(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"))
-                .header(header::X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"))
+                .header(
+                    header::X_CONTENT_TYPE_OPTIONS,
+                    HeaderValue::from_static("nosniff"),
+                )
                 .header(header::CONTENT_LENGTH, file_size.to_string())
                 .header(header::ETAG, etag_value)
                 .body(body)

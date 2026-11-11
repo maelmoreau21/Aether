@@ -666,7 +666,10 @@ fn is_safe_csp_origin(origin: &str) -> bool {
     if origin.contains(|c: char| {
         c.is_whitespace()
             || c.is_control()
-            || matches!(c, ';' | ',' | '\'' | '"' | '<' | '>' | '`' | '\\' | '(' | ')' | '*' | '?' | '#')
+            || matches!(
+                c,
+                ';' | ',' | '\'' | '"' | '<' | '>' | '`' | '\\' | '(' | ')' | '*' | '?' | '#'
+            )
     }) {
         return false;
     }

@@ -214,10 +214,7 @@ async fn adversarial_web_dist_serving_and_security_under_app() {
         res.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
         "nosniff"
     );
-    assert_eq!(
-        res.headers().get(header::X_FRAME_OPTIONS).unwrap(),
-        "DENY"
-    );
+    assert_eq!(res.headers().get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
     assert_eq!(
         res.headers().get(header::REFERRER_POLICY).unwrap(),
         "strict-origin-when-cross-origin"
@@ -344,10 +341,7 @@ async fn adversarial_security_headers_and_csp_injection_prevention() {
     let res = router.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
 
-    assert_eq!(
-        res.headers().get(header::X_FRAME_OPTIONS).unwrap(),
-        "DENY"
-    );
+    assert_eq!(res.headers().get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
     assert_eq!(
         res.headers().get(header::REFERRER_POLICY).unwrap(),
         "strict-origin-when-cross-origin"

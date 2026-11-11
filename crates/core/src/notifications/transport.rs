@@ -41,9 +41,7 @@ fn url(config: &Config) -> Result<reqwest::Url> {
     {
         return Err("notification_destination_denied");
     }
-    if !local
-        && let Some(host) = value.host_str()
-    {
+    if !local && let Some(host) = value.host_str() {
         let lower = host.trim_matches(['[', ']']).to_ascii_lowercase();
         if lower == "localhost"
             || lower.ends_with(".localhost")
@@ -103,7 +101,10 @@ pub(super) fn validate(kind: &str, config: &Config) -> Result<()> {
                 return Err("notification_invalid_config");
             }
             if !config.local_test() {
-                let lower = config.smtp_host.trim_matches(['[', ']']).to_ascii_lowercase();
+                let lower = config
+                    .smtp_host
+                    .trim_matches(['[', ']'])
+                    .to_ascii_lowercase();
                 if let Ok(ip) = lower.parse::<std::net::IpAddr>() {
                     if !crate::extensions::repositories::public_ip(ip) {
                         return Err("notification_destination_denied");

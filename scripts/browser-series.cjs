@@ -529,7 +529,7 @@ fs.mkdirSync(out, {recursive: true});
       for (const url of chunkUrls) {
         const mod = await import(url);
         for (const val of Object.values(mod)) {
-          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/login')) loginFn = val;
+          if (typeof val === 'function' && /\/api\/v1\/auth\/login["'`]/.test(val.toString())) loginFn = val;
           if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
           if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
         }
@@ -617,7 +617,7 @@ fs.mkdirSync(out, {recursive: true});
       for (const url of chunkUrls) {
         const mod = await import(url);
         for (const val of Object.values(mod)) {
-          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/login')) loginFn = val;
+          if (typeof val === 'function' && /\/api\/v1\/auth\/login["'`]/.test(val.toString())) loginFn = val;
           if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
           if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
         }

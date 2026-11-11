@@ -105,10 +105,10 @@ pub(super) fn validate(kind: &str, config: &Config) -> Result<()> {
                     .smtp_host
                     .trim_matches(['[', ']'])
                     .to_ascii_lowercase();
-                if let Ok(ip) = lower.parse::<std::net::IpAddr>() {
-                    if !crate::extensions::repositories::public_ip(ip) {
-                        return Err("notification_destination_denied");
-                    }
+                if let Ok(ip) = lower.parse::<std::net::IpAddr>()
+                    && !crate::extensions::repositories::public_ip(ip)
+                {
+                    return Err("notification_destination_denied");
                 }
                 if lower == "localhost"
                     || lower.ends_with(".localhost")

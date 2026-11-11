@@ -883,28 +883,29 @@ pub fn local_security_with_store(
                 }
                 let mut extra_origins = String::new();
                 for ao in &allowed_origins {
-                    if let Some(origin_str) = csp_origin_string(ao) {
-                        if !extra_origins.contains(&origin_str) {
-                            extra_origins.push_str(&origin_str);
-                        }
+                    if let Some(origin_str) = csp_origin_string(ao)
+                        && !extra_origins.contains(&origin_str)
+                    {
+                        extra_origins.push_str(&origin_str);
                     }
                 }
                 if let Some(store) = &store {
                     if let Ok(hosts) = store.cors_origins.read() {
                         for host in hosts.iter() {
-                            if host != "*" && let Some(origin_str) = csp_origin_string(host) {
-                                if !extra_origins.contains(&origin_str) {
-                                    extra_origins.push_str(&origin_str);
-                                }
+                            if host != "*"
+                                && let Some(origin_str) = csp_origin_string(host)
+                                && !extra_origins.contains(&origin_str)
+                            {
+                                extra_origins.push_str(&origin_str);
                             }
                         }
                     }
                     let _ = nodes::ensure_node_registry_warm(store).await;
                     for origin_url in store.node_registry.connected_public_origins() {
-                        if let Some(origin_str) = csp_origin_string(&origin_url) {
-                            if !extra_origins.contains(&origin_str) {
-                                extra_origins.push_str(&origin_str);
-                            }
+                        if let Some(origin_str) = csp_origin_string(&origin_url)
+                            && !extra_origins.contains(&origin_str)
+                        {
+                            extra_origins.push_str(&origin_str);
                         }
                     }
                 }

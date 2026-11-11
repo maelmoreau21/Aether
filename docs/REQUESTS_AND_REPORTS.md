@@ -32,6 +32,9 @@ du catalogue. Les rôles restent `administrator` et `user`.
 
 `/requests` réunit recherche externe, création et suivi personnel ;
 `/requests/admin` gère les serveurs, destinations, validation et migration.
+Ce même écran d'acquisition (connexions Radarr/Sonarr/Lidarr) s'ouvre aussi depuis
+le bouton « Paramètres » de l'extension dans l'administration des extensions.
+Depuis 0.2.2, le nom affiché du paquet `media-requests` est « Requests ».
 L'administrateur voit toutes les demandes autorisées par les grants d'extension.
 
 Plusieurs instances de chaque service sont configurables. Une destination lie
@@ -100,9 +103,9 @@ plutôt que d'exposer des titres sans classification vérifiée.
 
 ### Découverte intégrée au catalogue et affiches distantes
 
-Lors d'une recherche dans le catalogue global (`/films`, `/series`, `/music`), si la requête
-correspond à des œuvres absentes de la bibliothèque, une étagère dédiée « Disponibles à la demande »
-apparaît en dessous des résultats locaux.
+Lors d'une recherche globale (`/search`) uniquement, si la requête correspond à des œuvres absentes
+de la bibliothèque, une étagère dédiée « Disponibles à la demande » apparaît en dessous des résultats
+locaux. Le filtrage des catalogues `/films` et `/series` n'affiche jamais cette étagère (11 novembre 2026).
 - Le Core interroge simultanément les serveurs de recherche configurés (`GET /requests/discover?q=...`),
   déduplique par identifiant externe, supprime les œuvres déjà présentes en bibliothèque (`inLibrary`)
   et indique l'état d'éventuelles demandes existantes.

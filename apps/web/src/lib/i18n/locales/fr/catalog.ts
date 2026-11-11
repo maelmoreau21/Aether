@@ -158,6 +158,7 @@ export const catalog = {
   back_to_extension: 'Retour à la fiche',
   all_extensions: 'Toutes les extensions',
   no_settings: 'Aucun paramètre à configurer.',
+  requests_settings_enable_first: 'Activez l’extension pour connecter Radarr, Sonarr et Lidarr.',
   required_server: 'Serveur requis',
   current_version_installed: 'Version actuelle installée',
   confirm_restore: 'Je confirme la restauration des données précédentes.',

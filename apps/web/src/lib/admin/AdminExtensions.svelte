@@ -3,6 +3,7 @@
   import ExtensionSettings from './ExtensionSettings.svelte';
   import { settingsFields, settingsDefaults } from './extension-settings';
   import AvatarCollections from './AvatarCollections.svelte';
+  import AcquisitionAdmin from '../applications/AcquisitionAdmin.svelte';
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
@@ -499,7 +500,11 @@
         <div class="settings-screen">
           <h2 id="extensions-heading">{$t('extension_settings_for', { name: displayName(extension.manifest.name) })}</h2>
           {#if extension.manifest.permissions.includes('metadata.read')}<p>{$t('metadata_language_note')}</p>{/if}
-          {#if settingsFields(extension.manifest).length}
+          {#if extension.manifest.id === 'media-requests'}
+            <!-- Connections (Radarr, Sonarr, Lidarr), destinations and rules are Core-owned: the
+                 plugin settings screen opens them; the requests themselves keep their own page. -->
+            {#if extension.enabled}<AcquisitionAdmin embedded />{:else}<p>{$t('requests_settings_enable_first')}</p>{/if}
+          {:else if settingsFields(extension.manifest).length}
             <ExtensionSettings fields={settingsFields(extension.manifest)} bind:values={editingSettings[extension.manifest.id]} {busy} onsave={()=>void saveSettings(extension.manifest.id)} />
           {:else}<p>{$t('no_settings')}</p>{/if}
           {#if extension.manifest.permissions.includes('avatars')}<AvatarCollections extensionId={extension.manifest.id} />{/if}

@@ -197,7 +197,9 @@
 
   $effect(() => {
     const trimmed = query.trim();
-    if (!$features.requests || trimmed.length < 2) {
+    // Titles missing from Aether are offered only on the global search page, never while
+    // filtering the films or series catalogue.
+    if (section !== 'search' || !$features.requests || trimmed.length < 2) {
       discoverResults = [];
       return;
     }
@@ -512,7 +514,7 @@
   {/if}
 
   <!-- On-Demand Discovery Shelf -->
-  {#if $features.requests && query.trim().length >= 2 && discoverMissing.length > 0}
+  {#if section === 'search' && $features.requests && query.trim().length >= 2 && discoverMissing.length > 0}
     <section class="shelf discover-shelf" aria-labelledby="discover-shelf-title">
       <div class="section-heading">
         <div class="discover-title-wrap">

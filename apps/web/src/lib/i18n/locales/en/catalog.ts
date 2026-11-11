@@ -160,6 +160,7 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   back_to_extension: 'Back to extension',
   all_extensions: 'All extensions',
   no_settings: 'No settings to configure.',
+  requests_settings_enable_first: 'Enable the extension to connect Radarr, Sonarr and Lidarr.',
   required_server: 'Required server',
   current_version_installed: 'Current version installed',
   confirm_restore: 'I confirm restoring the previous data.',

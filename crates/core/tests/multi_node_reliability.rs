@@ -492,9 +492,7 @@ impl Cluster {
     /// the last sign of life simply gets older than the heartbeat tolerance.
     async fn silence(&self, node: &str) {
         let stale = unix_now() - 3_600;
-        self.store
-            .node_registry()
-            .record_success(node, None, stale);
+        self.store.node_registry().record_success(node, None, stale);
         let _ = query("UPDATE media_nodes SET last_seen_at=? WHERE id=?")
             .bind(stale)
             .bind(node)

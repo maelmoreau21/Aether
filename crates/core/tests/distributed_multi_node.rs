@@ -1586,18 +1586,28 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     .await
     .unwrap();
     let failure_progress = std::time::Instant::now();
-    let (scan_status, _, scan_error) = http_request(
-        &core_origin,
-        Method::POST,
-        &format!("/api/v1/admin/libraries/{lib2_id}/scan"),
-        &[
-            ("origin", &core_origin),
-            ("cookie", &admin_cookie),
-            ("x-csrf-token", &admin_csrf),
-        ],
-        vec![],
-    )
-    .await;
+    // Real-time monitoring may already have a poll of this library in flight, which
+    // answers 409; retry until that poll ends so the manual scan sees the new file.
+    let mut scan_attempt = 0;
+    let (scan_status, _, scan_error) = loop {
+        let response = http_request(
+            &core_origin,
+            Method::POST,
+            &format!("/api/v1/admin/libraries/{lib2_id}/scan"),
+            &[
+                ("origin", &core_origin),
+                ("cookie", &admin_cookie),
+                ("x-csrf-token", &admin_csrf),
+            ],
+            vec![],
+        )
+        .await;
+        scan_attempt += 1;
+        if response.0 != StatusCode::CONFLICT || scan_attempt >= 100 {
+            break response;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     assert_eq!(
         scan_status,
         StatusCode::ACCEPTED,

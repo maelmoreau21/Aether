@@ -48,6 +48,7 @@ export class NativePlayer implements Player {
   private progressiveVideo?: ProgressiveVideo;
   private subtitle: string | null = null;
   private subtitleRevision = 0;
+  private subtitleAbort?: AbortController;
   /** libass (ASS/SSA) or PGS bitmaps drawn over the video. */
   private ass?: { timeOffset: number; destroy(): Promise<void> };
   private streamOptions: TranscodeOptions = { quality: 'auto', maxKbps: 0, toneMapping: 'auto', audioChannels: 'stereo' };
@@ -580,6 +581,9 @@ export class NativePlayer implements Player {
   }
   async selectSubtitle(id: string | null) {
     const revision = ++this.subtitleRevision;
+    this.subtitleAbort?.abort();
+    const subtitleController = new AbortController();
+    this.subtitleAbort = subtitleController;
     this.subtitle = id;
     const previousAss = this.ass; this.ass = undefined;
     if (previousAss) await previousAss.destroy().catch(() => {});
@@ -588,7 +592,10 @@ export class NativePlayer implements Player {
     const subtitle = id === null ? undefined : this.media?.subtitles.find(s => s.id === id);
     if (id !== null && !subtitle) throw new Error(tr('subtitles_unavailable'));
     // Bitmaps the browser cannot draw (VobSub, DVB, PGS without canvas) are burnt in.
-    const { PgsRenderer } = subtitle?.image === 'pgs' ? await import('./pgs') : { PgsRenderer: undefined };
+    const [, { PgsRenderer }] = await Promise.all([
+      subtitle?.image === 'pgs' && subtitle.url.includes('/prepared/') ? this.prepareUrl(subtitle.url) : Promise.resolve(),
+      subtitle?.image === 'pgs' ? import('./pgs') : Promise.resolve({ PgsRenderer: undefined })
+    ]);
     if (this.destroyed || revision !== this.subtitleRevision) return;
     const needsBurn = subtitle?.image === 'burn' || (subtitle?.image === 'pgs' && !PgsRenderer?.supported());
     const burn = needsBurn ? subtitle?.burnIndex ?? undefined : undefined;
@@ -604,9 +611,7 @@ export class NativePlayer implements Player {
     }
     if (!subtitle || burn !== undefined) return;
     if (subtitle.image === 'pgs' && PgsRenderer) {
-      if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
-      if (this.destroyed || revision !== this.subtitleRevision) return;
-      const renderer = await PgsRenderer.create(this.video, subtitle.url, this.subtitleOffset);
+      const renderer = await PgsRenderer.create(this.video, assertSafeMediaUrl(subtitle.url), this.subtitleOffset, subtitleController.signal);
       if (this.destroyed || revision !== this.subtitleRevision) { await renderer.destroy(); return; }
       this.ass = renderer;
       return;
@@ -715,6 +720,7 @@ export class NativePlayer implements Player {
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
+    this.subtitleAbort?.abort();
     for (const stop of this.startupObservers) stop();
     this.startupObservers = [];
     if (this.ass) { void this.ass.destroy().catch(() => {}); this.ass = undefined; }

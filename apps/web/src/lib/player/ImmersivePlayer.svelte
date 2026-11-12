@@ -176,7 +176,11 @@
     paused = snapshot.paused;
     bufferedUntil = bufferedEnd(playback.position);
     const running = engine.transcodeState?.() ?? null;
-    transcodeInfo = running ? { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap } : null;
+    if (!running) {
+      if (transcodeInfo !== null) transcodeInfo = null;
+    } else if (!transcodeInfo || transcodeInfo.height !== running.plan.height || transcodeInfo.kbps !== running.plan.kbps || transcodeInfo.reason !== running.plan.reason || transcodeInfo.encoder !== running.encoder || transcodeInfo.tonemap !== running.tonemap) {
+      transcodeInfo = { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap };
+    }
     if (!busy) { progressTracker?.save(playback); reportRemote(); }
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {

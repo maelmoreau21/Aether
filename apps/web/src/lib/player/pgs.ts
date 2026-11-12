@@ -187,8 +187,8 @@ export class PgsRenderer {
     this.loop();
   }
 
-  static async create(video: HTMLVideoElement, url: string, offset: number): Promise<PgsRenderer> {
-    const response = await fetch(url, { credentials: 'same-origin' });
+  static async create(video: HTMLVideoElement, url: string, offset: number, signal?: AbortSignal): Promise<PgsRenderer> {
+    const response = await fetch(url, { credentials: 'same-origin', signal });
     if (!response.ok) throw new Error(tr('pgs_subtitles_unavailable'));
     const sets = parsePgs(new Uint8Array(await response.arrayBuffer()));
     if (!sets.length) throw new Error(tr('pgs_subtitles_unavailable'));
@@ -203,13 +203,18 @@ export class PgsRenderer {
     });
   }
 
-  private schedule = () => { this.draw(); };
+  private schedule = () => {
+    this.draw();
+    if (!this.video.paused && this.frame === undefined) this.loop();
+  };
 
   private loop() {
     if (this.disposed) return;
+    this.frame = undefined;
     this.draw();
+    if (this.video.paused) return;
     const video = this.video as HTMLVideoElement & { requestVideoFrameCallback?: (callback: () => void) => number };
-    if (!this.video.paused && video.requestVideoFrameCallback) this.frame = video.requestVideoFrameCallback(() => this.loop());
+    if (video.requestVideoFrameCallback) this.frame = video.requestVideoFrameCallback(() => this.loop());
     else this.frame = requestAnimationFrame(() => this.loop());
   }
 

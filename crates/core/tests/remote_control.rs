@@ -1,8 +1,8 @@
 //! Remote control over `/api/v1/remote/ws` on a real Core: an account's devices
 //! see each other and what they play, relay commands, and never reach another
 //! account's devices.
+use aether_core::{auth::AuthState, database::query, identity::IdentityStore, node::Inventory};
 use futures_util::{SinkExt, StreamExt};
-use media_poc::{auth::AuthState, database::query, identity::IdentityStore, node::Inventory};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
@@ -36,7 +36,7 @@ async fn serve() -> (tempfile::TempDir, String) {
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
     let auth = AuthState::new(store, origin.clone()).await.unwrap();
-    let app = media_poc::secure_app(Inventory::local(media).await.unwrap(), address.port(), auth)
+    let app = aether_core::secure_app(Inventory::local(media).await.unwrap(), address.port(), auth)
         .await
         .unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

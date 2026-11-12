@@ -39,6 +39,31 @@ pub(super) struct Callback {
     pub(super) error: Option<String>,
 }
 
+/// A native application starting single sign-on in the system browser.
+#[derive(Deserialize)]
+pub(super) struct AppStart {
+    /// SHA-256 (hex) of the verifier the application keeps to itself.
+    pub(super) challenge: String,
+    /// Where the browser hands the one-time code back to the application.
+    pub(super) redirect: String,
+}
+
+#[derive(Deserialize)]
+pub(super) struct AppToken {
+    pub(super) code: String,
+    pub(super) verifier: String,
+    #[serde(default, rename = "tokenType")]
+    pub(super) token_type: String,
+}
+
+/// How a completed callback signs the person in.
+pub(super) enum SignIn {
+    /// Browser flow: the raw session token for the cookie.
+    Browser(String),
+    /// Application flow: the user the one-time code will stand for.
+    App(String),
+}
+
 #[derive(Deserialize)]
 pub(super) struct Link {
     pub(super) password: String,

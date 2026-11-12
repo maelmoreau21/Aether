@@ -15,7 +15,13 @@ pub const MAX_BYTES: i64 = 64 * 1024 * 1024;
 
 // The same predicate guards transaction mutations, enumeration and atomic Get.
 // Aliases e/l/n/u always denote extension/library/node/authenticated user.
-const LIBRARY_ACCESS: &str = "l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) AND (u.role='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions lp WHERE lp.user_id=u.id AND lp.library_id=l.id))";
+const LIBRARY_ACCESS: &str = "l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f \
+        JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 \
+        OR parent.enabled=0)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+        WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g \
+        JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id \
+        AND f.library_id=l.id AND f.active=1)) AND (u.role='administrator' OR EXISTS(SELECT 1 \
+        FROM effective_library_permissions lp WHERE lp.user_id=u.id AND lp.library_id=l.id))";
 
 fn private_permission(manifest: Option<&str>) -> Result<(), Error> {
     let manifest: media_extension_sdk::Manifest =
@@ -218,7 +224,23 @@ struct GetRow {
 
 fn get_sql(scope: &str) -> Result<String, Error> {
     Ok(format!(
-        "SELECT json_extract(e.package_json,'$.manifest') AS manifest,substr(d.key,1,257) AS key,substr(d.value,1,16385) AS value,substr(d.version,1,81) AS version,d.expires_at,substr(d.durability,1,16) AS durability,d.value_bytes,substr(d.sha256,1,65) AS sha256 FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id JOIN users u ON u.id=? LEFT JOIN extension_data_namespaces ns ON ns.extension_id=e.id LEFT JOIN extension_data d ON d.extension_id=e.id AND d.scope=? AND d.scope_id=? AND d.key=? AND (d.expires_at IS NULL OR d.expires_at>?) WHERE e.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 AND u.disabled_at IS NULL AND (ns.extension_id IS NULL OR (ns.publisher_id=e.publisher_id AND ns.publisher_key=p.public_key)) AND (?='' OR EXISTS(SELECT 1 FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND {LIBRARY_ACCESS})) AND {}",
+        "SELECT json_extract(e.package_json,'$.manifest') AS manifest,substr(d.key,1,257) AS \
+                key,substr(d.value,1,16385) AS value,substr(d.version,1,81) AS \
+                version,d.expires_at,substr(d.durability,1,16) AS \
+                durability,d.value_bytes,substr(d.sha256,1,65) AS sha256 \
+                FROM extensions e \
+                JOIN extension_publishers p ON p.id=e.publisher_id \
+                JOIN users u ON u.id=? \
+                LEFT \
+                JOIN extension_data_namespaces ns ON ns.extension_id=e.id \
+                LEFT \
+                JOIN extension_data d ON d.extension_id=e.id AND d.scope=? AND d.scope_id=? \
+                AND d.key=? AND (d.expires_at IS NULL OR d.expires_at>?) \
+                WHERE e.id=? AND e.generation=? AND e.enabled=1 AND p.active=1 \
+                AND u.disabled_at IS NULL AND (ns.extension_id IS NULL \
+                OR (ns.publisher_id=e.publisher_id AND ns.publisher_key=p.public_key)) AND (?='' \
+                OR EXISTS(SELECT 1 FROM libraries l JOIN media_nodes n ON n.id=l.node_id \
+                WHERE l.id=? AND {LIBRARY_ACCESS})) AND {}",
         scope_access(scope)?
     ))
 }
@@ -358,10 +380,29 @@ async fn execute_inner(
     authorize_scope(&mut tx, c, scope, &id).await?;
     let mut response = StorageResponse::default();
     if writing {
-        query("INSERT INTO extension_data_namespaces(extension_id,publisher_id,publisher_key) SELECT e.id,e.publisher_id,p.public_key FROM extensions e JOIN extension_publishers p ON p.id=e.publisher_id WHERE e.id=? ON CONFLICT(extension_id) DO NOTHING").bind(&c.extension_id).execute(&mut *tx).await?;
+        query(
+            "INSERT INTO extension_data_namespaces(extension_id,publisher_id,publisher_key) \
+                SELECT e.id,e.publisher_id,p.public_key \
+                FROM extensions e \
+                JOIN extension_publishers p ON p.id=e.publisher_id \
+                WHERE e.id=? ON CONFLICT(extension_id) DO NOTHING",
+        )
+        .bind(&c.extension_id)
+        .execute(&mut *tx)
+        .await?;
     }
     // A different publisher cannot inherit retained data by reusing an extension ID.
-    let mismatch:i64=query_scalar("SELECT COUNT(*) FROM extension_data_namespaces n JOIN extensions e ON e.id=n.extension_id JOIN extension_publishers p ON p.id=e.publisher_id WHERE n.extension_id=? AND (n.publisher_id!=e.publisher_id OR n.publisher_key!=p.public_key)").bind(&c.extension_id).fetch_one(&mut *tx).await?;
+    let mismatch: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM extension_data_namespaces n \
+            JOIN extensions e ON e.id=n.extension_id \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            WHERE n.extension_id=? AND (n.publisher_id!=e.publisher_id \
+            OR n.publisher_key!=p.public_key)",
+    )
+    .bind(&c.extension_id)
+    .fetch_one(&mut *tx)
+    .await?;
     if mismatch != 0 {
         return Err(Error::Forbidden);
     }
@@ -371,7 +412,24 @@ async fn execute_inner(
             if after.len() > 256 || !(1..=100).contains(&limit) {
                 return Err(Error::Invalid);
             }
-            let rows:Vec<Row>=query_as("SELECT substr(key,1,257) AS key,substr(value,1,16385) AS value,substr(version,1,81) AS version,expires_at,substr(durability,1,16) AS durability,value_bytes,substr(sha256,1,65) AS sha256 FROM extension_data WHERE extension_id=? AND scope=? AND scope_id=? AND key>? AND (expires_at IS NULL OR expires_at>?) ORDER BY extension_data.key LIMIT ?").bind(&c.extension_id).bind(scope).bind(&id).bind(&after).bind(now).bind(i64::from(limit)+1).fetch_all(&mut *tx).await?;
+            let rows: Vec<Row> = query_as(
+                "SELECT substr(key,1,257) AS key,substr(value,1,16385) AS \
+                    value,substr(version,1,81) AS version,expires_at,substr(durability,1,16) AS \
+                    durability,value_bytes,substr(sha256,1,65) AS sha256 \
+                    FROM extension_data \
+                    WHERE extension_id=? AND scope=? AND scope_id=? AND key>? \
+                    AND (expires_at IS NULL OR expires_at>?) \
+                    ORDER BY extension_data.key \
+                    LIMIT ?",
+            )
+            .bind(&c.extension_id)
+            .bind(scope)
+            .bind(&id)
+            .bind(&after)
+            .bind(now)
+            .bind(i64::from(limit) + 1)
+            .fetch_all(&mut *tx)
+            .await?;
             let mut bytes = 0;
             let mut more = false;
             for row in rows {
@@ -439,7 +497,8 @@ async fn execute_inner(
             }
             let version = uuid::Uuid::new_v4().to_string();
             let hash = format!("{:x}", Sha256::digest(value.as_bytes()));
-            query("INSERT INTO extension_data(extension_id,scope,scope_id,key,value,version,expires_at,durability,value_bytes,sha256) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(extension_id,scope,scope_id,key) DO UPDATE SET value=excluded.value,version=excluded.version,expires_at=excluded.expires_at,durability=excluded.durability,value_bytes=excluded.value_bytes,sha256=excluded.sha256")
+            query("INSERT INTO extension_data(extension_id,scope,scope_id,key,value,version,expires_at,durability,value_bytes,sha256) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(extension_id,scope,scope_id,key) DO UPDATE \
+                    SET value=excluded.value,version=excluded.version,expires_at=excluded.expires_at,durability=excluded.durability,value_bytes=excluded.value_bytes,sha256=excluded.sha256")
  .bind(&c.extension_id).bind(scope).bind(&id).bind(&key).bind(&value).bind(&version).bind(expires_at).bind(&durability).bind(bytes).bind(hash).execute(&mut *tx).await?;
             response.entries.push(StorageEntry {
                 key,

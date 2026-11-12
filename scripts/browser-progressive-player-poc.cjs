@@ -30,14 +30,17 @@ const server=http.createServer((req,res)=>{
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));browser=await chromium.launch({channel:'chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});report.provenance.browserVersion=browser.version();
     for(const format of ['mkv','mp4']){
       const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}/`);
-      for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','native']){
+      const bundleDir=fs.mkdtempSync(path.join(out,'bundle-'));
+      try{for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','native']){
         const source=fs.readFileSync(path.resolve('apps/web/src/lib/player',`${name}.ts`),'utf8');
         const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
         const sourceSha256=hash(source),transpiledSha256=hash(code);
         if(report.provenance.modules[name]&&report.provenance.modules[name].sourceSha256!==sourceSha256)throw new Error(`Player module changed during POC: ${name}`);
         report.provenance.modules[name]={sourceSha256,transpiledSha256};
-        await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});
-      }
+        const scriptPath=path.join(bundleDir,`${name}.js`);
+        fs.writeFileSync(scriptPath,`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`);
+        await page.addScriptTag({path:scriptPath});
+      }}finally{fs.rmSync(bundleDir,{recursive:true,force:true});}
       const result={format};report.formats.push(result);
       result.browser=await page.evaluate(async format=>{
         const video=document.querySelector('video'),errors=[],events=[],frames=[],pcm=[];

@@ -1,7 +1,5 @@
 //! Focused real-TCP chapter preview test: signed direct Node, then outbound relay.
-use axum::http::{Method, StatusCode, header};
-use media_node::server::{NodeServerConfig, NodeServerState};
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     database::{query, query_scalar},
     identity::IdentityStore,
@@ -9,6 +7,8 @@ use media_poc::{
     scans::ScanJobs,
     secure_app_with_jobs,
 };
+use axum::http::{Method, StatusCode, header};
+use media_node::server::{NodeServerConfig, NodeServerState};
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
@@ -302,7 +302,7 @@ async fn chapter_preview_direct_and_outbound_preserve_head_range_and_permissions
                 .execute(store.pool())
                 .await
                 .unwrap();
-            let refreshed = media_poc::nodes::refresh_node_in_registry(&store, node_id)
+            let refreshed = aether_core::nodes::refresh_node_in_registry(&store, node_id)
                 .await
                 .unwrap()
                 .unwrap();
@@ -313,7 +313,7 @@ async fn chapter_preview_direct_and_outbound_preserve_head_range_and_permissions
         };
         if outbound {
             let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-            while !media_poc::nodes::ACTIVE_CHANNELS
+            while !aether_core::nodes::ACTIVE_CHANNELS
                 .read()
                 .await
                 .contains_key(node_id)

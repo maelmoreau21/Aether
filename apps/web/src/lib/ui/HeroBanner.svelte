@@ -528,8 +528,8 @@
     .hero { border-radius: var(--r-lg); }
     .cap, .main.has-clearart .cap { max-width: none; }
     .acts { width: 100%; }
-    .play { flex: 1; justify-content: center; height: 50px; }
-    .more { height: 50px; }
+    /* Libellés sur une ligne : s'ils ne tiennent pas côte à côte, les boutons s'empilent. */
+    .play, .more { flex: 1 1 auto; justify-content: center; height: 50px; padding: 0 16px; white-space: nowrap; }
     .title-logo { max-width: 80%; max-height: 96px; }
     .clearart { display: none; }
   }

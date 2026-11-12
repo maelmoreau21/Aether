@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { session } from '../auth/session';
-import { applicationRequest, errorMessage, features, formatPosition, groupCount, loadFeatures, parseSelection, reportPayload, requestPayload, requestStep, seasonRanges, statusTone, workHref } from './api';
+import { applicationRequest, discoverRequests, errorMessage, features, formatPosition, groupCount, loadFeatures, parseSelection, posterUrl, reportPayload, requestPayload, requestStep, seasonRanges, statusTone, workHref } from './api';
 
 afterEach(() => { session.set(null); vi.unstubAllGlobals(); });
 describe('demandes et signalements', () => {
@@ -70,5 +70,18 @@ describe('demandes et signalements', () => {
     expect(workHref('episode', 'x')).toBeNull();
     expect(errorMessage('request_already_exists')).toBe(errorMessage('duplicate_request'));
     expect(errorMessage('unknown_code')).toContain('unknown_code');
+  });
+  it('builds safe proxied artwork URLs for missing media posters', () => {
+    expect(posterUrl(undefined)).toBe('');
+    expect(posterUrl(null)).toBe('');
+    expect(posterUrl({ src: 'tmdb', path: '/test.jpg' })).toBe('/api/v1/requests/poster?src=tmdb&path=%2Ftest.jpg');
+    expect(posterUrl({ src: 'tvdb', path: 'posters/123.jpg' })).toBe('/api/v1/requests/poster?src=tvdb&path=posters%2F123.jpg');
+  });
+  it('calls the discovery endpoint with a trimmed query', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ results: [], errors: [] })));
+    vi.stubGlobal('fetch', fetcher);
+    const data = await discoverRequests(' Dune 2 ');
+    expect(data.results).toEqual([]);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/v1/requests/discover?q=Dune%202');
   });
 });

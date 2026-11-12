@@ -1,5 +1,5 @@
 //! Disposable browser series scan/playback evidence.
-use media_poc::identity::IdentityStore;
+use aether_core::identity::IdentityStore;
 use std::{path::Path, process::Stdio, time::Duration};
 use zeroize::Zeroizing;
 
@@ -142,7 +142,7 @@ async fn browser_series_flow_and_playback() {
     let store = IdentityStore::open(&db).await.unwrap();
     // These synthetic fixtures exercise local scanning/playback, not providers.
     // Keep their deliberately synthetic external IDs without resolving real films.
-    media_poc::database::query("UPDATE extensions SET enabled=0")
+    aether_core::database::query("UPDATE extensions SET enabled=0")
         .execute(store.pool())
         .await
         .unwrap();

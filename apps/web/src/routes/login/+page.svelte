@@ -3,11 +3,13 @@
   import { goto } from '$app/navigation';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
-  import { login, bootstrapAdmin } from '../../lib/auth/session';
-  import { PROFILES_AFTER_LOGIN } from '../../lib/auth/profiles';
+  import { login, bootstrapAdmin, completeSecondFactor, loginWithPasskey, type MfaChallenge } from '../../lib/auth/session';
+  import { getAssertion, passkeysSupported } from '../../lib/auth/webauthn';
+  import { type DeviceAccount, accountInitial, loadAccounts, switchAccount } from '../../lib/auth/accounts';
   import Icon from '../../lib/ui/Icon.svelte';
   import QuickConnect from '../../lib/auth/QuickConnect.svelte';
   import { t } from '../../lib/i18n';
+  import { isSafeHttpUrl } from '../../lib/safe-url';
 
   let name = $state(DEFAULT_NAME);
   let identifier = $state('');
@@ -19,6 +21,11 @@
   let needsBootstrap = $state(false);
   let busy = $state(false);
   let error = $state('');
+  let mfa = $state<MfaChallenge | null>(null);
+  let mfaCode = $state('');
+  let useRecovery = $state(false);
+  let canUsePasskeys = $state(false);
+  let deviceAccounts = $state<DeviceAccount[]>([]);
 
   // Bootstrap form fields
   let bootstrapLogin = $state('admin');
@@ -68,6 +75,14 @@
     if (busy) return;
     busy = true;
     error = '';
+    // The desktop application signs in through the computer's own browser and
+    // comes back by itself; the button is free again in case it is closed.
+    const desktop = (window as { aetherDesktop?: { sso?: () => void } }).aetherDesktop;
+    if (desktop?.sso) {
+      desktop.sso();
+      setTimeout(() => (busy = false), 4000);
+      return;
+    }
     try {
       const response = await fetch('/api/v1/auth/oidc/start', {
         method: 'POST',
@@ -81,7 +96,7 @@
         throw new Error(code ? mapError(code) : $t('sso_is_unavailable_try_again_or'));
       }
       const data: { url: string } = await response.json();
-      if (!data.url) throw new Error($t('invalid_sso_redirect_url'));
+      if (!data.url || !isSafeHttpUrl(data.url)) throw new Error($t('invalid_sso_redirect_url'));
       window.location.assign(data.url);
     } catch (failure) {
       error = failure instanceof Error ? failure.message : $t('sso_sign_in_unavailable');
@@ -95,15 +110,91 @@
     busy = true;
     error = '';
     try {
-      await login(identifier, password);
+      const challenge = await login(identifier, password);
       password = '';
-      // "Who's watching?" forwards straight to the catalogue when the account has a single profile.
-      sessionStorage.setItem(PROFILES_AFTER_LOGIN, '1');
-      await goto(resolve('profiles/'), { replaceState: true });
+      if (challenge) {
+        mfa = challenge;
+        mfaCode = '';
+        useRecovery = false;
+        return;
+      }
+      await signedIn();
     } catch (failure) {
       error = failure instanceof Error ? failure.message : $t('sign_in_is_unavailable_try_again');
     } finally {
       password = '';
+      busy = false;
+    }
+  }
+
+  async function signedIn() {
+    await goto(resolve('/'), { replaceState: true });
+  }
+
+  // Accounts already signed in on this browser and set aside: one click to come back.
+  async function resume(account: DeviceAccount) {
+    if (busy) return;
+    busy = true;
+    error = '';
+    try {
+      await switchAccount('', account.id);
+      window.location.assign(resolve('/'));
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : $t('accounts_unavailable');
+      deviceAccounts = deviceAccounts.filter((known) => known.id !== account.id);
+      busy = false;
+    }
+  }
+
+  function passkeyError(failure: unknown): string {
+    // The browser rejects with NotAllowedError when the user dismisses its dialog.
+    if (failure instanceof DOMException) return $t('passkey_cancelled_or_unavailable');
+    return failure instanceof Error ? failure.message : $t('sign_in_is_unavailable_try_again');
+  }
+
+  async function submitSecondFactor(event: SubmitEvent) {
+    event.preventDefault();
+    if (busy || !mfa) return;
+    busy = true;
+    error = '';
+    try {
+      await completeSecondFactor(mfa, useRecovery ? { recoveryCode: mfaCode } : { code: mfaCode.replace(/\s/g, '') });
+      mfa = null;
+      await signedIn();
+    } catch (failure) {
+      error = failure instanceof Error ? failure.message : $t('sign_in_is_unavailable_try_again');
+      if (error === $t('mfa_step_expired_sign_in_again')) mfa = null;
+    } finally {
+      mfaCode = '';
+      busy = false;
+    }
+  }
+
+  async function secondFactorPasskey() {
+    if (busy || !mfa?.passkey) return;
+    busy = true;
+    error = '';
+    try {
+      await completeSecondFactor(mfa, { passkey: await getAssertion(mfa.passkey) });
+      mfa = null;
+      await signedIn();
+    } catch (failure) {
+      error = passkeyError(failure);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function signInWithPasskey() {
+    if (busy) return;
+    busy = true;
+    error = '';
+    try {
+      await loginWithPasskey();
+      await signedIn();
+    } catch (failure) {
+      error = passkeyError(failure);
+    } finally {
       busy = false;
     }
   }
@@ -142,12 +233,17 @@
 
   $effect(() => {
     const controller = new AbortController();
+    canUsePasskeys = passkeysSupported();
 
     // Check query params for redirected errors
     const errParam = page.url.searchParams.get('error');
     if (errParam) {
       error = mapError(errParam);
     }
+
+    loadAccounts(controller.signal)
+      .then((device) => { deviceAccounts = device.accounts.filter((account) => !account.current); })
+      .catch(() => { deviceAccounts = []; });
 
     // Check bootstrap status (is this the first run?)
     fetch('/api/v1/auth/bootstrap/status', { signal: controller.signal })
@@ -348,6 +444,19 @@
           </div>
         {/if}
 
+        {#if deviceAccounts.length && !mfa}
+          <div class="known-accounts">
+            <p class="known-title">{$t('accounts_continue_as')}</p>
+            {#each deviceAccounts as account (account.id)}
+              <button type="button" class="known-account" disabled={busy} onclick={() => resume(account)}>
+                <span class="known-avatar" aria-hidden="true">{accountInitial(account.name)}</span>
+                <span class="known-name">{account.name}</span>
+                <Icon name="chevron" size={14} />
+              </button>
+            {/each}
+          </div>
+        {/if}
+
         {#if ssoEnabled}
           <div class="sso-section">
             <button
@@ -379,7 +488,39 @@
           {/if}
         {/if}
 
-        {#if localLoginEnabled}
+        {#if localLoginEnabled && mfa}
+          <form class="login-form" onsubmit={submitSecondFactor} aria-busy={busy}>
+            {#if mfa.methods.includes('totp')}
+              <div class="field-group">
+                <label for="mfa-code" class="field-label">
+                  <span>{useRecovery ? $t('recovery_code') : $t('authenticator_app_code')}</span>
+                </label>
+                <div class="input-container">
+                  <span class="input-icon" aria-hidden="true"><Icon name="shield" size={17} /></span>
+                  {#if useRecovery}
+                    <input id="mfa-code" name="recovery-code" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="11" required bind:value={mfaCode} disabled={busy} />
+                  {:else}
+                    <input id="mfa-code" name="one-time-code" autocomplete="one-time-code" inputmode="numeric" maxlength="7" required bind:value={mfaCode} disabled={busy} />
+                  {/if}
+                </div>
+                <span class="field-hint">{useRecovery ? $t('each_recovery_code_works_once') : $t('enter_the_6_digit_code_shown')}</span>
+              </div>
+              <button type="submit" class="btn-submit" disabled={busy}>
+                <span class="btn-submit-text">{busy ? $t('signing_in') : $t('verify')}</span>
+                <span class="arrow-glyph" aria-hidden="true">→</span>
+              </button>
+              <button type="button" class="btn-link" onclick={() => { useRecovery = !useRecovery; mfaCode = ''; }} disabled={busy}>
+                {useRecovery ? $t('use_the_authenticator_app') : $t('use_a_recovery_code')}
+              </button>
+            {/if}
+            {#if mfa.passkey && canUsePasskeys}
+              <button type="button" class="btn-sso" onclick={secondFactorPasskey} disabled={busy}>
+                <span class="btn-sso-left"><span class="sso-icon"><Icon name="shield" size={20} /></span><span class="btn-sso-text">{$t('confirm_with_a_passkey')}</span></span>
+              </button>
+            {/if}
+            <button type="button" class="btn-link" onclick={() => { mfa = null; error = ''; }} disabled={busy}>{$t('back')}</button>
+          </form>
+        {:else if localLoginEnabled}
           <form class="login-form" onsubmit={submit} aria-busy={busy}>
             <div class="field-group">
               <label for="login" class="field-label">
@@ -426,6 +567,11 @@
               <span class="btn-submit-text">{busy ? $t('signing_in') : $t('sign_in')}</span>
               <span class="arrow-glyph" aria-hidden="true">→</span>
             </button>
+            {#if canUsePasskeys}
+              <button type="button" class="btn-sso" onclick={signInWithPasskey} disabled={busy}>
+                <span class="btn-sso-left"><span class="sso-icon"><Icon name="shield" size={20} /></span><span class="btn-sso-text">{$t('sign_in_with_a_passkey')}</span></span>
+              </button>
+            {/if}
           </form>
         {/if}
 
@@ -569,6 +715,14 @@
   }
 
   .error-banner > :global(svg) { flex: none; margin-top: 2px; }
+  .known-accounts { display: flex; flex-direction: column; gap: 8px; }
+  .known-title { margin: 0; color: var(--mu); font-size: 13px; font-weight: 600; }
+  .known-account { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 14px 6px 6px; border: 1px solid var(--line); border-radius: 16px; background: var(--pn); color: var(--tx); font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
+  .known-account:hover:not(:disabled) { background: var(--pn-2); }
+  .known-account:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  .known-account:disabled { opacity: .6; cursor: default; }
+  .known-avatar { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 12px; background: var(--pn-2); font-weight: 800; }
+  .known-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .error-text {
     margin: 0;
@@ -788,6 +942,21 @@
   .btn-submit:hover:not(:disabled) .arrow-glyph {
     transform: translateX(3px);
   }
+
+  .btn-link {
+    align-self: center;
+    padding: 6px 8px;
+    border: 0;
+    background: none;
+    color: var(--mu);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .btn-link:hover:not(:disabled) { color: var(--tx); }
+  .btn-link:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
 
   .card-footer {
     padding-top: 16px;

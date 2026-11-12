@@ -1,5 +1,5 @@
 //! Real Chrome + AV1/Opus playback and optional statistics, on a disposable local Core.
-use media_poc::{database::query, identity::IdentityStore};
+use aether_core::{database::query, identity::IdentityStore};
 use std::{
     path::Path,
     process::Stdio,
@@ -101,8 +101,27 @@ async fn browser_statistics_video_music_and_restart() {
             .success()
     );
     let metadata = std::fs::metadata(&song).unwrap();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,duration,codec,mime,scan_id,available) VALUES('statistics-song','statistics-music',?,'statistics.opus',?,?,'Statistics Song','Statistics Artist','Statistics Album','Statistics Artist',12.0,'opus','audio/ogg','fixture',1)")
-        .bind(music.to_string_lossy().as_ref()).bind(metadata.len() as i64).bind(metadata.modified().unwrap().duration_since(UNIX_EPOCH).unwrap().as_nanos().to_string()).execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,duration,codec,mime,scan_id,available) \
+            VALUES('statistics-song','statistics-music',?,'statistics.opus',?,?,'Statistics Song',\
+            'Statistics Artist','Statistics Album','Statistics Artist',12.0,'opus','audio/ogg',\
+            'fixture',1)",
+    )
+    .bind(music.to_string_lossy().as_ref())
+    .bind(metadata.len() as i64)
+    .bind(
+        metadata
+            .modified()
+            .unwrap()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string(),
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     store.close().await;
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();

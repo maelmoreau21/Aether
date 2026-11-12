@@ -422,7 +422,10 @@ async fn ensure_activity_cleanup(
     )
     .execute(store.pool())
     .await?;
-    crate::database::query("INSERT INTO system_task_schedules(id,name,description,category,interval_minutes,enabled,next_due_at) VALUES('clean-activity-log','Nettoyer le journal des extensions','Supprime au plus 500 événements du journal des extensions antérieurs à la rétention configurée.','Maintenance',1440,1,?) ON CONFLICT(id) DO NOTHING")
+    crate::database::query("INSERT INTO system_task_schedules(id,name,description,category,interval_minutes,\
+            enabled,next_due_at) \
+            VALUES('clean-activity-log','Nettoyer le journal des extensions',\
+            'Supprime au plus 500 événements du journal des extensions antérieurs à la rétention configurée.','Maintenance',1440,1,?) ON CONFLICT(id) DO NOTHING")
         .bind(now().saturating_add(86400)).execute(store.pool()).await?;
     Ok(())
 }
@@ -591,12 +594,25 @@ async fn execute_inner(
     let started = now();
     // Claim task execution
     let claimed = crate::database::query(
-        "UPDATE system_task_schedules SET last_started_at=?, last_completed_at=NULL, last_outcome='running', last_error_kind=NULL, last_error_scope=NULL, last_message=NULL WHERE id=? AND (last_outcome!='running' OR (?!='' AND NOT EXISTS(SELECT 1 FROM durable_tasks previous WHERE previous.category='system' AND previous.target_id=? AND previous.id<>? AND previous.status='running' AND previous.lease_until>?))) AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? AND attempt=? AND status='running' AND lease_until>?))"
+        "UPDATE system_task_schedules \
+                SET last_started_at=?, last_completed_at=NULL, last_outcome='running', \
+                last_error_kind=NULL, last_error_scope=NULL, last_message=NULL \
+                WHERE id=? AND (last_outcome!='running' OR (?!='' AND NOT EXISTS(SELECT 1 \
+                FROM durable_tasks previous WHERE previous.category='system' \
+                AND previous.target_id=? AND previous.id<>? AND previous.status='running' \
+                AND previous.lease_until>?))) AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks \
+                WHERE id=? AND attempt=? AND status='running' AND lease_until>?))",
     )
     .bind(started)
     .bind(id)
-    .bind(task_id).bind(id).bind(task_id).bind(started)
-    .bind(task_id).bind(task_id).bind(attempt).bind(started)
+    .bind(task_id)
+    .bind(id)
+    .bind(task_id)
+    .bind(started)
+    .bind(task_id)
+    .bind(task_id)
+    .bind(attempt)
+    .bind(started)
     .execute(&state.auth.store.pool)
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -811,9 +827,21 @@ async fn task_clean_activity_log(
         current_time.saturating_sub(i64::from(settings.activity_log_retention_days) * 86400);
     let task_id = job.map_or("", |j| j.id.as_str());
     let attempt = job.map_or(0, |j| j.attempt);
-    let done = crate::database::query("DELETE FROM extension_audit WHERE id IN (SELECT id FROM extension_audit WHERE created_at<? ORDER BY created_at,id LIMIT 500) AND created_at<? AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? AND attempt=? AND status='running' AND lease_until>unixepoch()))")
-        .bind(cutoff).bind(cutoff).bind(task_id).bind(task_id).bind(attempt)
-        .execute(state.auth.store.pool()).await.map_err(|e| TaskFailure::database("extension_audit", e))?;
+    let done = crate::database::query(
+        "DELETE \
+            FROM extension_audit \
+            WHERE id IN (SELECT id FROM extension_audit WHERE created_at<? ORDER BY created_at,id \
+            LIMIT 500) AND created_at<? AND (?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? \
+            AND attempt=? AND status='running' AND lease_until>unixepoch()))",
+    )
+    .bind(cutoff)
+    .bind(cutoff)
+    .bind(task_id)
+    .bind(task_id)
+    .bind(attempt)
+    .execute(state.auth.store.pool())
+    .await
+    .map_err(|e| TaskFailure::database("extension_audit", e))?;
     Ok(TaskReport {
         summary: format!(
             "{} extension audit event(s) removed; retention {} day(s), maximum 500 per run",

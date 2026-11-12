@@ -1,10 +1,10 @@
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{path::Path, time::Duration};
@@ -196,13 +196,13 @@ async fn nfo_portraits_are_served_only_through_core_for_credited_people() {
         request(&app, "GET", &image_url, &cookie, None, Value::Null, None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["error"], "person_image_host_denied");
-    let cached: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM person_images")
+    let cached: i64 = aether_core::database::query_scalar("SELECT COUNT(*) FROM person_images")
         .fetch_one(store.pool())
         .await
         .unwrap();
     assert_eq!(cached, 0);
     // A recent failure is remembered and answered without a new download.
-    media_poc::database::query(
+    aether_core::database::query(
         "INSERT INTO person_images(source_hash,sha256,error_code,fetched_at) VALUES(?,NULL,'download_failed',?)",
     )
     .bind(&source_hash)

@@ -49,7 +49,7 @@ async fn session(auth: &AuthState, user: &str, token: &str) -> (String, String) 
     query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)")
         .bind(crate::auth::hash(token)).bind(user).bind(now).bind(now).bind(now + 3600)
         .execute(auth.store.pool()).await.unwrap();
-    let cookie = format!("media_session={token}");
+    let cookie = format!("aether_session={token}");
     let mut headers = HeaderMap::new();
     headers.insert(header::COOKIE, cookie.parse().unwrap());
     let csrf = auth.authenticate(&headers).await.unwrap().csrf_token;
@@ -168,7 +168,7 @@ async fn profiles_are_owned_pin_protected_and_inherit_library_access() {
         call(&app, "POST", &switch, &owner, json!({"pin":"1234"})).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(switched["user"]["id"], kid);
-    assert!(cookie.unwrap().starts_with("media_session="));
+    assert!(cookie.unwrap().starts_with("aether_session="));
     // The owner's session on this device is closed by the switch.
     assert_eq!(
         count(

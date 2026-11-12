@@ -87,4 +87,6 @@ dependencies {
     implementation("androidx.mediarouter:mediarouter:1.7.0")
     // The Cast route picker is an AppCompat dialog: it needs an AppCompat theme.
     implementation("androidx.appcompat:appcompat:1.7.0")
+    // Single sign-on in the phone's own browser (a tab over the application).
+    implementation("androidx.browser:browser:1.8.0")
 }

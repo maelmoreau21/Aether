@@ -21,8 +21,8 @@ Depuis la racine du dépôt, terminal local interactif :
 ```powershell
 New-Item -ItemType Directory -Path data
 $env:MEDIA_DB_PATH = Join-Path (Get-Location) 'data/core.sqlite3'
-cargo run --locked -p media-poc --bin media-bootstrap
-cargo run --locked -p media-poc --bin aether-core
+cargo run --locked -p aether-core --bin media-bootstrap
+cargo run --locked -p aether-core --bin aether-core
 ```
 
 Choisir son propre login et son propre mot de passe ; aucune valeur prédéfinie.

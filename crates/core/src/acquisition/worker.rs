@@ -21,8 +21,23 @@ impl DispatchGuard {
         )
         .await?;
         unrestricted(&self.store, &self.user_id).await?;
-        let count:i64=query_scalar("SELECT COUNT(*) FROM acquisition_jobs j JOIN media_requests r ON r.id=j.request_id JOIN acquisition_servers s ON s.id=r.server_id WHERE j.request_id=? AND j.lease_token=? AND j.lease_until>? AND r.status IN ('approved','submitted','acquiring','imported','partial') AND s.id=? AND s.generation=? AND s.enabled=1")
-            .bind(&self.request_id).bind(&self.lease).bind(now()).bind(&self.server_id).bind(&self.generation).fetch_one(self.store.pool()).await.map_err(db)?;
+        let count: i64 = query_scalar(
+            "SELECT COUNT(*) \
+                FROM acquisition_jobs j \
+                JOIN media_requests r ON r.id=j.request_id \
+                JOIN acquisition_servers s ON s.id=r.server_id \
+                WHERE j.request_id=? AND j.lease_token=? AND j.lease_until>? \
+                AND r.status IN ('approved','submitted','acquiring','imported','partial') \
+                AND s.id=? AND s.generation=? AND s.enabled=1",
+        )
+        .bind(&self.request_id)
+        .bind(&self.lease)
+        .bind(now())
+        .bind(&self.server_id)
+        .bind(&self.generation)
+        .fetch_one(self.store.pool())
+        .await
+        .map_err(db)?;
         if count != 1 {
             return Err(err(
                 StatusCode::CONFLICT,
@@ -43,8 +58,20 @@ async fn claim(store: &IdentityStore) -> Result<Option<Claimed>, Error> {
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
         .await
         .map_err(db)?;
-    let next:Option<(String,String,i64)>=query_as("SELECT j.request_id,j.phase,j.attempts FROM acquisition_jobs j JOIN media_requests r ON r.id=j.request_id WHERE j.available_at<=? AND j.lease_until<=? AND r.status IN ('approved','submitted','acquiring','imported','partial') ORDER BY j.available_at,j.request_id LIMIT 1")
-        .bind(now()).bind(now()).fetch_optional(&mut *tx).await.map_err(db)?;
+    let next: Option<(String, String, i64)> = query_as(
+        "SELECT j.request_id,j.phase,j.attempts \
+            FROM acquisition_jobs j \
+            JOIN media_requests r ON r.id=j.request_id \
+            WHERE j.available_at<=? AND j.lease_until<=? \
+            AND r.status IN ('approved','submitted','acquiring','imported','partial') \
+            ORDER BY j.available_at,j.request_id \
+            LIMIT 1",
+    )
+    .bind(now())
+    .bind(now())
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db)?;
     let Some((id, phase, attempts)) = next else {
         crate::database::commit(tx).await.map_err(db)?;
         return Ok(None);
@@ -160,8 +187,22 @@ pub(super) async fn indexed(
                 found += 1;
             }
         } else {
-            let work:Option<String>=query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id WHERE a.library_id=? AND a.relative_path=? AND a.available=1 AND s.root_snapshot=l.root LIMIT 1")
-                .bind(&server.library_id).bind(&path).fetch_optional(store.pool()).await.map_err(db)?;
+            let work: Option<String> = query_scalar(
+                "SELECT e.work_id \
+                    FROM inventory_assets a \
+                    JOIN inventory_sources s ON s.id=a.source_id \
+                    JOIN inventory_versions v ON v.id=s.version_id \
+                    JOIN inventory_editions e ON e.id=v.edition_id \
+                    JOIN libraries l ON l.id=a.library_id \
+                    WHERE a.library_id=? AND a.relative_path=? AND a.available=1 \
+                    AND s.root_snapshot=l.root \
+                    LIMIT 1",
+            )
+            .bind(&server.library_id)
+            .bind(&path)
+            .fetch_optional(store.pool())
+            .await
+            .map_err(db)?;
             if let Some(work) = work {
                 found += 1;
                 if work_id.is_none() {

@@ -141,6 +141,7 @@ fn xml_response(body: String) -> Response {
         [
             (header::CONTENT_TYPE, "text/xml; charset=\"utf-8\""),
             (header::CACHE_CONTROL, "no-store"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
         body,
     )
@@ -410,7 +411,10 @@ async fn viewer(store: &IdentityStore, token: &str) -> Result<Viewer, StatusCode
 const LIBRARY_SQL: &str = "l.enabled=1 AND n.status!='revoked' AND EXISTS(SELECT 1 FROM api_key_libraries kl WHERE kl.library_id=l.id AND kl.key_id=?) AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))";
 
 /// One playable copy of work `w`.
-const ASSET_SQL: &str = "(SELECT a.id FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root ORDER BY a.size DESC, a.id LIMIT 1)";
+const ASSET_SQL: &str = "(SELECT a.id FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id \
+        JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id \
+        WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root \
+        ORDER BY a.size DESC, a.id LIMIT 1)";
 
 #[derive(Debug, PartialEq)]
 enum Object {
@@ -620,7 +624,14 @@ impl DlnaState {
     /// Seasons of a series the key may read: (id, number, title, episodes).
     async fn seasons(&self, viewer: &Viewer, series: &str) -> Rows<(String, i64, String, i64)> {
         let sql = format!(
-            "SELECT se.id,se.season_number,se.title,(SELECT COUNT(*) FROM inventory_episodes ep WHERE ep.season_id=se.id) FROM inventory_seasons se JOIN inventory_works w ON w.id=se.series_id JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE se.series_id=? AND {LIBRARY_SQL} AND {} ORDER BY se.season_number",
+            "SELECT se.id,se.season_number,se.title,(SELECT COUNT(*) \
+                    FROM inventory_episodes ep WHERE ep.season_id=se.id) \
+                    FROM inventory_seasons se \
+                    JOIN inventory_works w ON w.id=se.series_id \
+                    JOIN libraries l ON l.id=w.library_id \
+                    JOIN media_nodes n ON n.id=l.node_id \
+                    WHERE se.series_id=? AND {LIBRARY_SQL} AND {} \
+                    ORDER BY se.season_number",
             crate::product::policy_sql()
         );
         query_as(sqlx::AssertSqlSafe(sql))
@@ -942,7 +953,15 @@ async fn media(
         return not_found();
     };
     let sql = format!(
-        "SELECT COUNT(*) FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id JOIN libraries l ON l.id=a.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND {LIBRARY_SQL} AND {}",
+        "SELECT COUNT(*) \
+                FROM inventory_assets a \
+                JOIN inventory_sources s ON s.id=a.source_id \
+                JOIN inventory_versions v ON v.id=s.version_id \
+                JOIN inventory_editions e ON e.id=v.edition_id \
+                JOIN inventory_works w ON w.id=e.work_id \
+                JOIN libraries l ON l.id=a.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                WHERE a.id=? AND {LIBRARY_SQL} AND {}",
         crate::product::policy_sql()
     );
     let allowed: Result<(i64,), _> = query_as(sqlx::AssertSqlSafe(sql))

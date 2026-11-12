@@ -1,19 +1,28 @@
 name: Applications clientes
 
-# Builds the client applications: Android (APK), desktop (GPUI) for Windows, Linux
-# and macOS, the TV shells (webOS .ipk, Tizen staged without signature) and the
+# Builds the client applications: Android (APK), desktop (the web interface in a native window) for Windows
+# (Setup installer and portable .zip), Linux and macOS, the TV shells (webOS .ipk, Tizen staged without signature) and the
 # Roku channel, as artifacts named aether-*. CI calls it on every push and pull
 # request; the beta pre-release (ci.yml) and the stable Release (release.yml)
 # attach those artifacts. The iPhone, iPad and Apple TV apps are built by apple.yml.
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      version:
+        description: "Version du produit compilée dans les applications (elles préviennent quand le serveur est plus récent)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  # Lue par aether-client (option_env!) : vide ou absente = build de développement,
+  # qui ne signale jamais de mise à jour.
+  AETHER_CLIENT_VERSION: ${{ inputs.version }}
 
 jobs:
   android:
@@ -123,12 +132,11 @@ jobs:
         with:
           shared-key: desktop-${{ matrix.name }}
 
-      - name: Bibliothèques de GPUI (Linux)
+      - name: Bibliothèques du moteur web (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libxkbcommon-x11-dev \
-            libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
 
       - name: Compiler aether-desktop
         run: cargo build --release --locked -p aether-desktop
@@ -138,9 +146,38 @@ jobs:
         shell: pwsh
         run: |
           $short = git rev-parse --short HEAD
+
+          # The application loads icon resource 1 for the window (title bar, taskbar):
+          # fail the build if the executable does not carry it.
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class IconCheck {
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+            static extern IntPtr LoadLibraryExW(string file, IntPtr handle, uint flags);
+            [DllImport("kernel32.dll", SetLastError = true)]
+            static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+            public static bool HasWindowIcon(string path) {
+              IntPtr module = LoadLibraryExW(path, IntPtr.Zero, 0x22);
+              if (module == IntPtr.Zero) throw new Exception("cannot open " + path);
+              return FindResourceW(module, (IntPtr)1, (IntPtr)14) != IntPtr.Zero;
+            }
+          }
+          "@
+          $exe = (Resolve-Path target/release/aether-desktop.exe).Path
+          if (-not [IconCheck]::HasWindowIcon($exe)) { throw "aether-desktop.exe has no icon resource 1" }
+          Write-Host "Icon resource present in aether-desktop.exe"
+
           New-Item -ItemType Directory -Force dist, stage | Out-Null
           Copy-Item target/release/aether-desktop.exe stage/
           Copy-Item apps/desktop/README.md stage/
+
+          # Real installer (Start menu, desktop shortcut, uninstaller).
+          choco install innosetup --no-progress -y | Out-Null
+          $version = (Select-String -Path apps/desktop/Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DStageDir=$((Resolve-Path stage).Path)" "/DAppVersion=$version-$short" "/DOutputDir=$((Resolve-Path dist).Path)" apps/desktop/installer/aether.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
           Compress-Archive -Path stage/* -DestinationPath "dist/Aether-desktop-windows-x64-$short.zip"
           Get-ChildItem dist
 

@@ -450,7 +450,6 @@
   /* Téléphone : affiche réduite à côté du titre, puis actions et fiche en pleine largeur. */
   @media (max-width: 760px) {
     .masthead { border-radius: var(--r-lg); }
-    .masthead.has-backdrop { min-height: min(78dvh, 640px); }
     .layout,
     .layout.has-aside {
       grid-template-columns: 104px minmax(0, 1fr);
@@ -471,5 +470,26 @@
     .tagline { display: none; }
     .synopsis { font-size: 14px; }
     .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding: 14px; }
+  }
+  /* Écran en hauteur (téléphone, tablette tenue droite) : étirée sur tout le bandeau, l'image
+     large perdait ses deux côtés. Elle s'affiche entière en 16:9 en haut de la fiche, se fond
+     dans le fond du bandeau, et l'affiche vient chevaucher son bord inférieur. */
+  @media (max-width: 760px), (orientation: portrait) {
+    .masthead.has-backdrop { display: block; min-height: 0; }
+    .media:not(.ambient) {
+      position: relative;
+      inset: auto;
+      aspect-ratio: 16 / 9;
+      border-radius: var(--r-xl) var(--r-xl) 0 0;
+    }
+    .media:not(.ambient) .backdrop { object-position: center; }
+    .media:not(.ambient) .shade {
+      background: linear-gradient(0deg, #06080e 0%, rgb(6 8 14 / 0.72) 18%, rgb(6 8 14 / 0.18) 46%, rgb(6 8 14 / 0) 70%);
+    }
+    .media:not(.ambient) + .layout { margin-top: -64px; padding-top: 20px; }
+    .media.ambient + .layout { padding-top: 28px; }
+  }
+  @media (max-width: 760px) {
+    .media:not(.ambient) { border-radius: var(--r-lg) var(--r-lg) 0 0; }
   }
 </style>

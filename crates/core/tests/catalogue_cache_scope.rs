@@ -6,7 +6,7 @@
 //! synthetic SQLite catalogues of several sizes. Timings are printed for comparison
 //! between builds on the same machine; they are not NAS measurements.
 
-use media_poc::{
+use aether_core::{
     database::query,
     identity::IdentityStore,
     inventory::{

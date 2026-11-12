@@ -1,13 +1,13 @@
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
+    secure_app_with_jobs,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
-    secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use std::{
     path::Path,

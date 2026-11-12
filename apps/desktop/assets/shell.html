@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+<title>Aether</title>
+<style>
+  /* Halo, dark theme (apps/web/src/lib/styles/halo.css): the page shown before the server's own interface. */
+  :root { color-scheme: dark; --bg: #0b0e18; --bg-2: #11151f; --pn: rgb(255 255 255 / 0.055); --pn-2: rgb(255 255 255 / 0.09); --line: rgb(255 255 255 / 0.09); --tx: #eef1f8; --mu: #a2a9ba; --mu-2: #8189a0; --ac: #ff7b47; --err: #ff6b6b; --err-soft: rgb(255 107 107 / 0.14); }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { display: grid; place-items: center; padding: 40px 16px; background: var(--bg); color: var(--tx); font: 15px/1.5 'Manrope', 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  main { width: 100%; max-width: 440px; display: flex; flex-direction: column; gap: 24px; }
+  header { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .brand { display: flex; align-items: center; gap: 12px; font-size: 28px; font-weight: 800; letter-spacing: -0.03em; }
+  .tagline { color: var(--mu); font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+  .card { display: flex; flex-direction: column; gap: 16px; padding: 28px; border: 1px solid var(--line); border-radius: 22px; background: var(--bg-2); }
+  h1 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+  p { margin: 0; color: var(--mu); }
+  label { display: flex; flex-direction: column; gap: 6px; color: var(--mu); font-size: 13px; font-weight: 600; }
+  input { height: 46px; padding: 0 14px; border: 1px solid transparent; border-radius: 12px; background: var(--pn); color: var(--tx); font: inherit; outline: none; }
+  input:hover { background: var(--pn-2); }
+  input:focus { border-color: var(--ac); }
+  input::placeholder { color: var(--mu-2); }
+  button { height: 48px; border: 0; border-radius: 16px; background: var(--tx); color: var(--bg); font: inherit; font-weight: 700; cursor: pointer; }
+  button:hover { background: #d9dde8; }
+  button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  button:disabled { opacity: 0.6; cursor: default; }
+  button.ghost { border: 1px solid var(--line); background: var(--pn); color: var(--tx); }
+  button.ghost:hover { background: var(--pn-2); }
+  .notice { padding: 10px 14px; border-radius: 12px; background: var(--err-soft); color: var(--err); font-size: 14px; font-weight: 600; }
+  .hint { color: var(--mu-2); font-size: 13px; }
+  footer { color: var(--mu-2); font-size: 13px; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 256 256" width="44" height="44" aria-hidden="true">
+        <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#ef4444"/></linearGradient></defs>
+        <path d="M64 192 V48 L216 128 L116 180" fill="none" stroke="url(#g)" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>Aether</span>
+    </div>
+    <div class="tagline" data-t="tagline"></div>
+  </header>
+  <form class="card" id="form">
+    <h1 data-t="title"></h1>
+    <p data-t="intro"></p>
+    <div class="notice" id="error" role="alert" hidden></div>
+    <label><span data-t="label"></span>
+      <input id="server" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://media.exemple.fr">
+    </label>
+    <button id="submit" type="submit"></button>
+    <button id="offline" type="button" class="ghost" data-t="offline" hidden></button>
+    <div class="hint" data-t="hint"></div>
+  </form>
+  <footer data-t="footer"></footer>
+</main>
+<script>
+  const french = (navigator.language || 'fr').toLowerCase().startsWith('fr');
+  const text = french ? {
+    tagline: 'Votre cinéma, chez vous', title: 'Votre serveur', intro: 'Indiquez l’adresse de votre serveur Aether : l’application ouvre ensuite son interface.',
+    label: 'Adresse du serveur', offline: 'Mes téléchargements hors ligne', go: 'Continuer →', busy: 'Connexion…', hint: 'Pour changer de serveur plus tard : Ctrl + Maj + S.', footer: 'Aether · Votre cinéma, autrement.',
+    errors: { empty: 'Indiquez l’adresse de votre serveur Aether.', invalid: 'Adresse de serveur invalide.', 'not-aether': 'Cette adresse ne répond pas comme un serveur Aether. Vérifiez l’adresse et le port.', unreachable: 'Serveur injoignable. Vérifiez l’adresse et votre connexion.', timeout: 'Le serveur ne répond pas. Vérifiez l’adresse et votre connexion.' }
+  } : {
+    tagline: 'Your cinema, at home', title: 'Your server', intro: 'Enter the address of your Aether server: the application then opens its interface.',
+    label: 'Server address', offline: 'My offline downloads', go: 'Continue →', busy: 'Connecting…', hint: 'To change server later: Ctrl + Shift + S.', footer: 'Aether · Your cinema, differently.',
+    errors: { empty: 'Enter the address of your Aether server.', invalid: 'Invalid server address.', 'not-aether': 'This address does not answer like an Aether server. Check the address and the port.', unreachable: 'Server unreachable. Check the address and your connection.', timeout: 'The server does not answer. Check the address and your connection.' }
+  };
+  for (const node of document.querySelectorAll('[data-t]')) node.textContent = text[node.dataset.t];
+  const form = document.getElementById('form');
+  const input = document.getElementById('server');
+  const submit = document.getElementById('submit');
+  const error = document.getElementById('error');
+  const post = message => window.ipc && window.ipc.postMessage(JSON.stringify(message));
+  const busy = on => { submit.disabled = on; input.readOnly = on; submit.textContent = on ? text.busy : text.go; };
+  // The native side answers `ready` and `connect` with the state to show.
+  window.aetherShell = {
+    state(state) {
+      if (typeof state.server === 'string' && !input.value) input.value = state.server;
+      error.hidden = !state.error;
+      error.textContent = state.error ? (text.errors[state.error] || text.errors.unreachable) : '';
+      busy(Boolean(state.checking));
+      document.getElementById('offline').hidden = !state.offline;
+      if (!state.checking) input.focus();
+    }
+  };
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (submit.disabled) return;
+    error.hidden = true;
+    busy(true);
+    post({ type: 'connect', server: input.value });
+  });
+  document.getElementById('offline').addEventListener('click', () => post({ type: 'offline' }));
+  busy(false);
+  post({ type: 'ready', change: location.hash === '#change' });
+</script>
+</body>
+</html>

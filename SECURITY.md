@@ -2,12 +2,14 @@
 
 ## Versions prises en charge
 
-Le projet est actuellement en phase active de développement (jalons initiaux P0/P1). Seule la branche principale est suivie activement pour les correctifs de sécurité :
+Seule la dernière version mineure stable reçoit les correctifs de sécurité ; les versions antérieures doivent être mises à jour (depuis la 0.2 : [docs/UPGRADE_1.0.md](docs/UPGRADE_1.0.md)).
 
 | Version / Branche | Prise en charge |
 | ----------------- | --------------- |
-| `main`            | :white_check_mark: |
-| Releases futures  | :white_check_mark: |
+| `1.0.x` (dernière mineure stable) | :white_check_mark: |
+| `main` (prochaine publication)    | :white_check_mark: |
+| `develop` (bêtas)                 | Correctifs avant fusion uniquement |
+| `< 1.0` (dont `0.2.x`)            | :x: Mettre à jour |
 
 ---
 

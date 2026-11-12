@@ -121,7 +121,7 @@ Chromecast.
   AV1 et sur un H.264 à GOP de 2 s et 3 B-frames, en MKV et en MP4. La vidéo
   contient chaque paquet d'origine exactement une fois ; l'audio ne perd ni ne
   répète aucun paquet aux jonctions.
-- `cargo test -p media-poc --test postgres -- --include-ignored` : émission,
+- `cargo test -p aether-core --test postgres -- --include-ignored` : émission,
   playlist maîtresse avec CORS pour une origine Chromecast, playlist média,
   refus sur un autre asset, survie au renouvellement et fin à la déconnexion,
   sur SQLite et PostgreSQL 18.

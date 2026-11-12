@@ -123,8 +123,20 @@ pub(crate) async fn run_automated(
         return Err(err(StatusCode::FORBIDDEN, "extension_revoked"));
     }
     let (work_id, context, music_track): TargetResolution = {
-        let work_id: Option<String> = query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root")
-            .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+        let work_id: Option<String> = query_scalar(
+            "SELECT e.work_id \
+                FROM inventory_assets a \
+                JOIN inventory_sources s ON s.id=a.source_id \
+                JOIN inventory_versions v ON v.id=s.version_id \
+                JOIN inventory_editions e ON e.id=v.edition_id \
+                JOIN libraries l ON l.id=a.library_id \
+                WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root",
+        )
+        .bind(&job.target_id)
+        .bind(&job.library_id)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
         if let Some(work_id) = work_id {
             let context = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
                 .bind(&work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
@@ -252,7 +264,20 @@ pub(crate) async fn run_automated(
         }
         let scope: (String, String, i64) = query_as("SELECT ep.season_id,se.series_id,se.season_number FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id WHERE ep.work_id=?")
             .bind(work_id).fetch_one(auth.store.pool()).await.map_err(db)?;
-        let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) FROM inventory_episodes ep JOIN inventory_editions e ON e.work_id=ep.work_id JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=a.library_id JOIN automation_observations obs ON obs.asset_id=a.id JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' AND t.component='fingerprint' AND t.status='completed' WHERE ep.season_id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id LIMIT 12")
+        let candidates: Vec<(String,String,String,String,String,String,String)> = query_as("SELECT a.id,t.result_json,t.idempotency_key,obs.fingerprint,a.probe_json,ep.work_id,CAST(ep.episode_number AS TEXT) \
+                FROM inventory_episodes ep \
+                JOIN inventory_editions e ON e.work_id=ep.work_id \
+                JOIN inventory_versions v ON v.edition_id=e.id \
+                JOIN inventory_sources s ON s.version_id=v.id \
+                JOIN inventory_assets a ON a.source_id=s.id \
+                JOIN libraries l ON l.id=a.library_id \
+                JOIN automation_observations obs ON obs.asset_id=a.id \
+                JOIN durable_tasks t ON t.target_id=a.id AND t.category='analyze' \
+                AND t.component='fingerprint' AND t.status='completed' \
+                WHERE ep.season_id=? AND a.library_id=? AND a.available=1 \
+                AND s.root_snapshot=l.root \
+                ORDER BY CASE WHEN a.id=? THEN 0 ELSE 1 END,t.finished_at DESC,a.id \
+                LIMIT 12")
             .bind(&scope.0).bind(&job.library_id).bind(&job.target_id).fetch_all(auth.store.pool()).await.map_err(db)?;
         let order = marker_peer_order(
             &candidates

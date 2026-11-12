@@ -111,8 +111,27 @@ async fn library_allowed(
 ) -> Result<(), Error> {
     let id = extension_id(cap)?;
     package(store, cap).await?;
-    let count:i64=query_scalar("SELECT COUNT(*) FROM libraries l JOIN media_nodes n ON n.id=l.node_id JOIN extensions e ON e.id=? WHERE l.id=? AND l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))")
-        .bind(id).bind(library).bind(role).bind(user_id).fetch_one(store.pool()).await.map_err(db)?;
+    let count: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            JOIN extensions e ON e.id=? \
+            WHERE l.id=? AND l.enabled=1 AND n.status!='revoked' AND (?='administrator' \
+            OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+            AND p.user_id=?)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+            WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 \
+            FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id \
+            WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) \
+            AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0))",
+    )
+    .bind(id)
+    .bind(library)
+    .bind(role)
+    .bind(user_id)
+    .fetch_one(store.pool())
+    .await
+    .map_err(db)?;
     if count != 1 {
         return Err(err(StatusCode::FORBIDDEN, "library_permission_denied"));
     }

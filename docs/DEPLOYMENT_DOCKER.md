@@ -15,7 +15,7 @@ La distribution Docker autonome d'Aether rassemble dans une image unique :
 
 ### Invariants architecturaux
 1. **Zéro runtime Node.js permanent** : Le frontend SvelteKit est compilé statiquement lors de la première étape de build (`adapter-static`) et servi en fichiers statiques par Axum. Aucun interpréteur Node.js n'est présent dans l'image d'exécution.
-2. **Processus unique** : Core et Media Node local s'exécutent au sein d'un seul binaire natif (`media-poc`), sans serveur HTTP secondaire ni dépendance externe obligatoire (pas de PostgreSQL ni Valkey pour le mode autonome).
+2. **Processus unique** : Core et Media Node local s'exécutent au sein d'un seul binaire natif (`aether-core`), sans serveur HTTP secondaire ni dépendance externe obligatoire (pas de PostgreSQL ni Valkey pour le mode autonome).
 3. **Moindre privilège** : L'image s'exécute sous un utilisateur non-root dédié `aether` (`UID:GID 10001:10001`). Les capacités Linux sont révoquées (`cap_drop: ALL`) et l'élévation de privilèges est interdite (`no-new-privileges: true`).
 4. **Volumes étanches** : Séparation stricte entre les bibliothèques médias en lecture seule (`:ro`) et l'état persistant de l'application (`/data`).
 
@@ -87,8 +87,8 @@ Aether protège toutes les routes applicatives et les sessions via quatre mécan
    - Toute requête portant `Sec-Fetch-Site: cross-site` est immédiatement rejetée (`403 Forbidden`).
    - Dès qu'un en-tête `Origin` est présent (et **obligatoirement** sur toutes les mutations `POST`/`PUT` d'authentification et d'administration), sa valeur doit correspondre à l'octet près à l'origine canonique configurée dans `MEDIA_PUBLIC_URL`.
 3. **Cookies de session `HttpOnly`, `SameSite=Strict` et `Secure`** :
-   - Le cookie `media_session` est toujours émis avec `Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`. Aucun secret de session n'est accessible en JavaScript ni stocké dans `localStorage`.
-   - Lorsque `MEDIA_PUBLIC_URL` utilise le schéma `https://`, l'attribut `; Secure` est **automatiquement ajouté** au cookie `media_session`, interdisant au navigateur de transmettre le cookie sur une connexion non chiffrée.
+   - Le cookie `aether_session` est toujours émis avec `Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`. Aucun secret de session n'est accessible en JavaScript ni stocké dans `localStorage`.
+   - Lorsque `MEDIA_PUBLIC_URL` utilise le schéma `https://`, l'attribut `; Secure` est **automatiquement ajouté** au cookie `aether_session`, interdisant au navigateur de transmettre le cookie sur une connexion non chiffrée.
 4. **Protection CSRF liée à la session (`x-csrf-token`)** :
    - Toute mutation authentifiée (`POST /api/v1/auth/logout`, création/modification de bibliothèque, déclenchement de scan) exige à la fois l'en-tête `Origin` exact et l'en-tête `x-csrf-token` dérivé cryptographiquement (`SHA-256`) du jeton de session courant, comparé en temps constant.
 
@@ -241,7 +241,7 @@ Aether est configuré avec `stop_signal: SIGINT` et `stop_grace_period: 15s`. Lo
 ```bash
 docker compose down
 ```
-- Le processus `tini` transmet le signal `SIGINT` à `media-poc`.
+- Le processus `tini` transmet le signal `SIGINT` à `aether-core`.
 - Les tâches de scan en cours sont annulées proprement.
 - Les connexions SQLite sont vidées et le journal WAL est synchronisé.
 - Au redémarrage (`docker compose up -d`), les scans interrompus sont automatiquement marqués en état `error` avec le libellé `"Scan interrompu par un redémarrage"` et l'inventaire existant est intégralement préservé.

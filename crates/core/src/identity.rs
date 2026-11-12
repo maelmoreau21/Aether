@@ -83,7 +83,7 @@ pub struct IdentityStore {
     pub(crate) assets: std::sync::Arc<crate::assets::AssetStore>,
     pub(crate) task_writes: std::sync::Arc<tokio::sync::Mutex<()>>,
     pub(crate) node_registry: std::sync::Arc<crate::nodes::NodeRuntimeRegistry>,
-    pub(crate) cors_origins: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
+    pub cors_origins: std::sync::Arc<std::sync::RwLock<Vec<String>>>,
     /// Identity of the opened database, shared by every clone and never reused in this
     /// process. Process-wide caches key on it; a clone's address changes per request.
     pub(crate) cache_scope: u64,

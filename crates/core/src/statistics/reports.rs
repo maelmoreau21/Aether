@@ -91,7 +91,20 @@ pub(super) async fn select(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let mut sql="FROM statistics_sessions s JOIN users u ON u.id=s.user_id LEFT JOIN local_credentials c ON c.user_id=u.id LEFT JOIN libraries l ON l.id=s.library_id LEFT JOIN media_nodes n ON n.id=l.node_id LEFT JOIN inventory_works w ON w.id=s.media_id AND s.kind!='music' LEFT JOIN music_tracks t ON t.id=s.media_id AND s.kind='music' WHERE s.started_at>=CAST(? AS BIGINT) AND s.started_at<CAST(? AS BIGINT)".to_owned();
+    let mut sql = "FROM statistics_sessions s \
+            JOIN users u ON u.id=s.user_id \
+            LEFT \
+            JOIN local_credentials c ON c.user_id=u.id \
+            LEFT \
+            JOIN libraries l ON l.id=s.library_id \
+            LEFT \
+            JOIN media_nodes n ON n.id=l.node_id \
+            LEFT \
+            JOIN inventory_works w ON w.id=s.media_id AND s.kind!='music' \
+            LEFT \
+            JOIN music_tracks t ON t.id=s.media_id AND s.kind='music' \
+            WHERE s.started_at>=CAST(? AS BIGINT) AND s.started_at<CAST(? AS BIGINT)"
+        .to_owned();
     let mut binds = vec![from.to_string(), to.to_string()];
     for (column, value) in [
         ("s.user_id", &f.user_id),
@@ -110,7 +123,11 @@ pub(super) async fn select(
         binds.extend([f.media_id.clone(), f.media_id.clone(), f.media_id.clone()]);
     }
     if !admin {
-        sql.push_str(" AND s.user_id=? AND l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND ((s.kind='music' AND t.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM parental_policies p WHERE p.user_id=? AND p.allow_unrated=0)) OR (s.kind!='music' AND w.id IS NOT NULL AND ");
+        sql.push_str(" AND s.user_id=? AND l.enabled=1 AND n.status!='revoked' AND (?='administrator' \
+                OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+                AND p.user_id=?)) AND ((s.kind='music' AND t.id IS NOT NULL AND NOT EXISTS(SELECT 1 \
+                FROM parental_policies p WHERE p.user_id=? AND p.allow_unrated=0)) \
+                OR (s.kind!='music' AND w.id IS NOT NULL AND ");
         sql.push_str(&crate::product::policy_sql());
         sql.push_str("))");
         binds.extend([
@@ -178,7 +195,25 @@ async fn report(
 ) -> Outcome<Json<Value>> {
     let (actor, selection) = select(&auth, &headers, &f, admin).await?;
     let epoch = now();
-    let row=selection.statement(&format!("SELECT COUNT(*) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.canonical_id ELSE NULL END) AS media,COALESCE(SUM(s.seconds),0.0) AS seconds,COALESCE(SUM(s.covered_seconds),0.0) AS coverage,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed,CAST(COALESCE(SUM(CASE WHEN s.ended_at IS NULL AND s.updated_at>=unixepoch()-90 THEN 1 ELSE 0 END),0) AS BIGINT) AS active,CAST(COALESCE(SUM(CASE WHEN {} THEN 1 ELSE 0 END),0) AS BIGINT) AS qualified", super::aggregate::QUALIFIED_SQL), "").fetch_one(&auth.store.pool).await.map_err(db)?;
+    let row = selection
+        .statement(
+            &format!(
+                "SELECT COUNT(*) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id \
+            ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.canonical_id \
+            ELSE NULL END) AS media,COALESCE(SUM(s.seconds),0.0) AS \
+            seconds,COALESCE(SUM(s.covered_seconds),0.0) AS \
+            coverage,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS \
+            completed,CAST(COALESCE(SUM(CASE WHEN s.ended_at IS NULL \
+            AND s.updated_at>=unixepoch()-90 THEN 1 \
+            ELSE 0 END),0) AS BIGINT) AS active,CAST(COALESCE(SUM(CASE WHEN {} THEN 1 \
+            ELSE 0 END),0) AS BIGINT) AS qualified",
+                super::aggregate::QUALIFIED_SQL
+            ),
+            "",
+        )
+        .fetch_one(&auth.store.pool)
+        .await
+        .map_err(db)?;
     let plays = count(&row, "plays");
     let summary = json!({"plays":plays,"qualifiedPlays":count(&row,"qualified"),"users":count(&row,"users"),"media":count(&row,"media"),"seconds":number(&row,"seconds"),"coveredSeconds":number(&row,"coverage"),"completed":count(&row,"completed"),"active":count(&row,"active")});
     let limit = f.limit.unwrap_or(50);
@@ -203,7 +238,13 @@ async fn report(
         format!(" AND f.user_id={}", "?")
     };
     let popular_select = format!(
-        "SELECT s.canonical_id,s.kind,MAX(s.title) AS title,COUNT(*) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id ELSE NULL END) AS users,COALESCE(SUM(s.seconds),0.0) AS seconds,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed,(SELECT COUNT(*) FROM work_feedback f WHERE f.work_id=s.canonical_id AND f.favorite=1{feedback_user}) AS favorites,(SELECT COALESCE(AVG(f.rating),0.0) FROM work_feedback f WHERE f.work_id=s.canonical_id{feedback_user}) AS rating"
+        "SELECT s.canonical_id,s.kind,MAX(s.title) AS title,COUNT(*) AS plays,COUNT(DISTINCT \
+                CASE WHEN s.seconds>0 THEN s.user_id \
+                ELSE NULL END) AS users,COALESCE(SUM(s.seconds),0.0) AS \
+                seconds,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed,(SELECT COUNT(*) \
+                FROM work_feedback f WHERE f.work_id=s.canonical_id \
+                AND f.favorite=1{feedback_user}) AS favorites,(SELECT COALESCE(AVG(f.rating),0.0) \
+                FROM work_feedback f WHERE f.work_id=s.canonical_id{feedback_user}) AS rating"
     );
     let order = match f.rank.as_str() {
         "seconds" => "seconds DESC",
@@ -266,7 +307,11 @@ async fn report(
         behavior.insert(field.into(), json!(number(&row, field)));
     }
     behavior.insert("startupMs".into(), json!(number(&row, "startup")));
-    let row=selection.statement("SELECT COUNT(*) AS plays,COUNT(DISTINCT CAST(length(s.user_id) AS TEXT) || ':' || s.user_id || s.canonical_id) AS pairs,CAST(COALESCE(SUM(CASE WHEN s.kind='music' AND s.end_reason='next' THEN 1 ELSE 0 END),0) AS DOUBLE PRECISION) AS music_skips,COALESCE(SUM(CAST(COALESCE(json_extract(s.state_json,'$.mediaSeconds'),'0') AS DOUBLE PRECISION)-s.covered_seconds),0.0) AS repeated_seconds", "").fetch_one(&auth.store.pool).await.map_err(db)?;
+    let row=selection.statement("SELECT COUNT(*) AS plays,COUNT(DISTINCT CAST(length(s.user_id) AS TEXT) || ':' || \
+            s.user_id || s.canonical_id) AS pairs,CAST(COALESCE(SUM(CASE WHEN s.kind='music' \
+            AND s.end_reason='next' THEN 1 \
+            ELSE 0 END),0) AS DOUBLE PRECISION) AS \
+            music_skips,COALESCE(SUM(CAST(COALESCE(json_extract(s.state_json,'$.mediaSeconds'),'0') AS DOUBLE PRECISION)-s.covered_seconds),0.0) AS repeated_seconds", "").fetch_one(&auth.store.pool).await.map_err(db)?;
     behavior.insert(
         "additionalSessions".into(),
         json!(count(&row, "plays") - count(&row, "pairs")),

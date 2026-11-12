@@ -561,8 +561,17 @@ mod tests {
             crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES(?,?,'films','local','/fixture',1,?)")
                 .bind(id).bind(id).bind(options).execute(&store.pool).await.unwrap();
         }
-        let visible: Vec<String> = crate::database::query_scalar("SELECT id FROM libraries l WHERE l.id IN ('hidden','shown') AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')")
-            .fetch_all(&store.pool).await.unwrap();
+        let visible: Vec<String> = crate::database::query_scalar(
+            "SELECT id \
+                FROM libraries l \
+                WHERE l.id IN ('hidden','shown') AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT \
+                JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT \
+                JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+                AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap();
         assert_eq!(visible, vec!["shown".to_string()]);
     }
 

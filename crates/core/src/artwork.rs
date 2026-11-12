@@ -153,9 +153,37 @@ pub async fn entries(store: &IdentityStore, ids: &[String]) -> Result<Vec<Entry>
     }
     let mut result = vec![];
     for sql in [
-        "SELECT e.id,e.work_id,e.kind,COALESCE(o.position,e.position) AS position,e.width,e.height,'/api/v1/works/'||e.work_id||'/images/'||e.id AS url,CASE WHEN e.provider IS NULL THEN 'manual' ELSE 'provider' END AS origin,e.language,e.provider,(SELECT sha256 FROM work_image_data WHERE image_id=e.id AND width=0) AS content_hash,(SELECT COUNT(*) FROM work_image_data WHERE image_id=e.id) AS representation_count FROM work_image_entries e LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id WHERE e.work_id IN (",
-        "SELECT i.id,i.work_id,i.role AS kind,COALESCE(o.position,10000+i.priority) AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/assets/'||i.id||'/image?v='||i.modified_ns||'-'||i.size AS url,'local' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id LEFT JOIN work_image_order o ON o.work_id=i.work_id AND o.image_id=i.id WHERE i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND h.image_id IS NULL AND i.role IN ('poster','thumb','logo','illustration','backdrop','banner','disc','landscape') AND i.work_id IN (",
-        "SELECT 'legacy-poster' AS id,p.work_id,'poster' AS kind,5000 AS position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS height,'/api/v1/works/'||p.work_id||'/poster' AS url,'legacy' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider FROM work_posters p WHERE p.work_id IN (",
+        "SELECT e.id,e.work_id,e.kind,COALESCE(o.position,e.position) AS \
+                position,e.width,e.height,'/api/v1/works/'||e.work_id||'/images/'||e.id AS url,CASE \
+                WHEN e.provider IS NULL THEN 'manual' \
+                ELSE 'provider' END AS origin,e.language,e.provider,(SELECT sha256 \
+                FROM work_image_data WHERE image_id=e.id \
+                AND width=0) AS content_hash,(SELECT COUNT(*) FROM work_image_data \
+                WHERE image_id=e.id) AS representation_count \
+                FROM work_image_entries e \
+                LEFT \
+                JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id \
+                WHERE e.work_id IN (",
+        "SELECT i.id,i.work_id,i.role AS kind,COALESCE(o.position,10000+i.priority) AS \
+                position,CAST(NULL AS BIGINT) AS width,CAST(NULL AS BIGINT) AS \
+                height,'/api/v1/assets/'||i.id||'/image?v='||i.modified_ns||'-'||i.size AS \
+                url,'local' AS origin,CAST(NULL AS TEXT) AS language,CAST(NULL AS TEXT) AS provider \
+                FROM inventory_images i \
+                JOIN libraries l ON l.id=i.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                LEFT \
+                JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+                LEFT \
+                JOIN work_image_order o ON o.work_id=i.work_id AND o.image_id=i.id \
+                WHERE i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 \
+                AND n.status='connected' AND h.image_id IS NULL \
+                AND i.role IN ('poster','thumb','logo','illustration','backdrop','banner','disc','landscape') AND i.work_id IN (",
+        "SELECT 'legacy-poster' AS id,p.work_id,'poster' AS kind,5000 AS position,CAST(NULL \
+                AS BIGINT) AS width,CAST(NULL AS BIGINT) AS \
+                height,'/api/v1/works/'||p.work_id||'/poster' AS url,'legacy' AS origin,CAST(NULL \
+                AS TEXT) AS language,CAST(NULL AS TEXT) AS provider \
+                FROM work_posters p \
+                WHERE p.work_id IN (",
     ] {
         let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(sql);
         let mut values = builder.separated(",");
@@ -660,8 +688,22 @@ async fn reusable(
     digest: &str,
     kind: &str,
 ) -> Result<Option<Encoded>, StatusCode> {
-    let entry: Option<(String,i64,i64,String)> = query_as("SELECT e.id,e.width,e.height,e.fingerprint FROM artwork_annotations a JOIN work_image_entries e ON e.work_id=a.work_id AND e.id=a.image_id JOIN work_image_data d ON d.image_id=e.id AND d.width=0 WHERE a.encoding=? AND a.kind=? AND (a.source_sha256=? OR d.sha256=?) AND e.fingerprint IS NOT NULL LIMIT 1")
-        .bind(crate::image_import::ENCODING).bind(kind).bind(digest).bind(digest).fetch_optional(store.pool()).await.map_err(db)?;
+    let entry: Option<(String, i64, i64, String)> = query_as(
+        "SELECT e.id,e.width,e.height,e.fingerprint \
+            FROM artwork_annotations a \
+            JOIN work_image_entries e ON e.work_id=a.work_id AND e.id=a.image_id \
+            JOIN work_image_data d ON d.image_id=e.id AND d.width=0 \
+            WHERE a.encoding=? AND a.kind=? AND (a.source_sha256=? OR d.sha256=?) \
+            AND e.fingerprint IS NOT NULL \
+            LIMIT 1",
+    )
+    .bind(crate::image_import::ENCODING)
+    .bind(kind)
+    .bind(digest)
+    .bind(digest)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(db)?;
     let Some((id, width, height, fingerprint)) = entry else {
         return Ok(None);
     };
@@ -1180,7 +1222,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri(uri)
-                    .header(header::COOKIE, format!("media_session={token}"))
+                    .header(header::COOKIE, format!("aether_session={token}"))
                     .body(Body::empty())
                     .unwrap(),
             )

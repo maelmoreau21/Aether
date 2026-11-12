@@ -15,7 +15,6 @@
   import Requests from '../applications/Requests.svelte';
   import Reports from '../applications/Reports.svelte';
   import Statistics from '../statistics/Statistics.svelte';
-  import DownloadsPanel from './DownloadsPanel.svelte';
   import LanguagePreferences from './LanguagePreferences.svelte';
   import Icon from '../ui/Icon.svelte';
   import type { IconName } from '../ui/Icon.svelte';
@@ -26,6 +25,7 @@
   import { defaultArtworkRotationPolicy, setArtworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rotation-policy.svelte';
   import { playbackPreferences, trackPreferences, SKIP_SECONDS, segmentBehavior, segmentBehaviorPatch, segmentBehaviors, skippableKinds, type SegmentBehavior, type SkippableKind } from '../player/playback-preferences';
   import { invalidateLatestCatalog } from './page-cache';
+  import { isSafeHttpUrl } from '../safe-url';
 
   let serverConfig = $state<AppServerConfig | null>(null);
   let statisticsVisible = $state(false);
@@ -70,6 +70,8 @@
   let playDefaultAudioTrack = $state(trackPreferences(preferences()).playDefaultAudioTrack);
   let selectionEdited = false;
   let hidePlayedInLatest = $state(preferences().hidePlayedInLatest === true);
+  let autoPlaylists = $state(preferences().autoPlaylists !== false);
+  let autoPlaylistsEdited = false;
   // Streaming: quality, remote ceiling, HDR, channels, night mode, accessibility tracks.
   const readStreaming = (saved: ReturnType<typeof preferences>) => ({
     streamingQuality: saved.streamingQuality ?? 'auto',
@@ -97,6 +99,10 @@
     latestEdited = true;
     if (await savePreferences({ hidePlayedInLatest })) invalidateLatestCatalog();
   }
+  function saveAutoPlaylists() {
+    autoPlaylistsEdited = true;
+    void savePreferences({ autoPlaylists });
+  }
   function savePlaybackDefaults() {
     playbackEdited = true;
     savePreferences({ ...playbackDefaults });
@@ -123,7 +129,6 @@
     { id: 'requests', labelKey: 'settings_requests', icon: 'sparkles', groupKey: 'settings_group_me', feature: 'requests' },
     { id: 'reports', labelKey: 'settings_reports', icon: 'warning', groupKey: 'settings_group_me', feature: 'reports' },
     { id: 'statistics', labelKey: 'settings_statistics', icon: 'clock', groupKey: 'settings_group_me' },
-    { id: 'downloads', labelKey: 'downloads', icon: 'download', groupKey: 'settings_group_me' },
     { id: 'playback', labelKey: 'settings_nav_playback', icon: 'play', groupKey: 'settings_group_experience' },
     { id: 'display', labelKey: 'settings_nav_display', icon: 'image', groupKey: 'settings_group_experience' },
     { id: 'languages', labelKey: 'lang_nav', icon: 'globe', groupKey: 'settings_group_experience' },
@@ -147,6 +152,7 @@
         playDefaultAudioTrack = policy.playDefaultAudioTrack;
       }
       if (!latestEdited) hidePlayedInLatest = saved.hidePlayedInLatest === true;
+      if (!autoPlaylistsEdited) autoPlaylists = saved.autoPlaylists !== false;
       if (!streamingEdited) streaming = readStreaming(saved);
       if (!offsetsEdited) {
         audioOffset = saved.offsets?.audio ?? 0;
@@ -278,6 +284,11 @@
           <h2 id="home-preferences-heading">{$t('home_preferences')}</h2>
           <label class="checkbox-row"><input type="checkbox" bind:checked={hidePlayedInLatest} onchange={() => void saveLatestPreference()} /> {$t('hide_watched_new')}</label>
         </section>
+        <section class="card" aria-labelledby="auto-playlists-heading">
+          <h2 id="auto-playlists-heading">{$t('auto_playlists_title')}</h2>
+          <p class="muted">{$t('auto_playlists_note')}</p>
+          <label class="checkbox-row"><input type="checkbox" bind:checked={autoPlaylists} onchange={saveAutoPlaylists} /> {$t('auto_playlists_label')}</label>
+        </section>
         <form class="card offsets" onsubmit={saveArtworkRotation}>
           <h2>{$t('artwork_rotation')}</h2>
           <p class="muted">{$t('artwork_rotation_note')}</p>
@@ -299,7 +310,6 @@
       <div class="embedded-panel" hidden={current !== 'requests'}>{#if current === 'requests'}<h2>{$t('settings_requests')}</h2><Requests embedded />{/if}</div>
       <div class="embedded-panel" hidden={current !== 'reports'}>{#if current === 'reports'}<h2>{$t('settings_reports')}</h2><Reports embedded />{/if}</div>
       <div class="embedded-panel" hidden={current !== 'statistics'}>{#if current === 'statistics' && statisticsVisible}<Statistics embedded />{/if}</div>
-      <div hidden={current !== 'downloads'}>{#if current === 'downloads'}<section class="card"><DownloadsPanel embedded /></section>{/if}</div>
       <div hidden={current !== 'security'}><section class="card"><h2>{$t('security')}</h2><AccountSecurity mode="security" /><h3>{$t('sso_connection')}</h3><OidcSettings embedded /></section><section class="card"><NotificationSettings /></section></div>
       <div hidden={current !== 'devices'}><section class="card"><h2>{$t('settings_nav_devices')}</h2><AccountSecurity mode="devices" /></section></div>
       <div hidden={current !== 'playback'}><section class="card" aria-labelledby="playback-heading"><h2 id="playback-heading">{$t('playback')}</h2><p class="muted">{$t('playback_account_note')}</p>
@@ -547,7 +557,7 @@
                 <span class="val">{serverConfig.build_date}</span>
               </div>
             {/if}
-            {#if serverConfig?.release_url}
+            {#if serverConfig?.release_url && isSafeHttpUrl(serverConfig.release_url)}
               <div class="info-row">
                 <span class="label">{$t('release_notes')}</span>
                 <span class="val">

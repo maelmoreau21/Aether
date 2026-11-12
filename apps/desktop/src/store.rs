@@ -1,8 +1,6 @@
-//! What survives a restart. Plain settings (the server address, this device's
-//! remote-control id) go to a JSON file in the user's configuration folder;
-//! the device token goes to the system keychain only (Windows Credential
-//! Manager, macOS Keychain, Secret Service on Linux) through GPUI.
-use aether_client::Token;
+//! What survives a restart: the address of the server, in a JSON file of the
+//! user's configuration folder. The session itself is the web interface's
+//! cookie, kept by the web engine in the `webview` folder next to it.
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -11,12 +9,42 @@ const SETTINGS_FILE: &str = "settings.json";
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
-    /// The last Core signed in to; its token is in the keychain under this URL.
+    /// The Core opened at start-up.
     #[serde(default)]
     pub server: Option<String>,
-    /// Stable id of this computer on the remote-control channel.
+    /// The window as it was left.
     #[serde(default)]
-    pub device_id: Option<String>,
+    pub window: Option<WindowState>,
+}
+
+/// Size (logical pixels) of the window when it is not maximized.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowState {
+    pub width: u32,
+    pub height: u32,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+impl Default for WindowState {
+    fn default() -> Self {
+        Self {
+            width: 1280,
+            height: 800,
+            maximized: false,
+        }
+    }
+}
+
+impl WindowState {
+    /// A size the window can really take, whatever the file says.
+    pub fn size(self) -> (f64, f64) {
+        (
+            f64::from(self.width.clamp(480, 7680)),
+            f64::from(self.height.clamp(480, 4320)),
+        )
+    }
 }
 
 impl Settings {
@@ -33,12 +61,6 @@ impl Settings {
         let temporary = dir.join(format!("{SETTINGS_FILE}.tmp"));
         std::fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
         std::fs::rename(temporary, dir.join(SETTINGS_FILE))
-    }
-    /// The remote-control id, created on first use.
-    pub fn device_id(&mut self) -> String {
-        self.device_id
-            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
-            .clone()
     }
 }
 
@@ -57,7 +79,7 @@ pub fn config_dir(var: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
         .map(|d| d.join("aether"))
 }
 
-/// This computer's name in the account's sessions and on the remote control.
+/// This computer's name, sent with the request that identifies the server.
 pub fn device_name(var: impl Fn(&str) -> Option<String>) -> String {
     ["COMPUTERNAME", "HOSTNAME"]
         .iter()
@@ -65,21 +87,6 @@ pub fn device_name(var: impl Fn(&str) -> Option<String>) -> String {
         .map(|name| name.trim().chars().take(48).collect::<String>())
         .filter(|name| !name.is_empty() && name.chars().all(|c| !c.is_control()))
         .unwrap_or_else(|| "Aether Desktop".to_owned())
-}
-
-/// Keychain entry key for a server: one entry per Core.
-pub fn keychain_url(server: &str) -> String {
-    format!("{}#aether-desktop", server.trim_end_matches('/'))
-}
-
-/// The keychain stores the token as JSON bytes.
-pub fn encode_token(token: &Token) -> Vec<u8> {
-    serde_json::to_vec(token).unwrap_or_default()
-}
-pub fn decode_token(bytes: &[u8]) -> Option<Token> {
-    serde_json::from_slice(bytes)
-        .ok()
-        .filter(|t: &Token| !t.access.is_empty())
 }
 
 /// Normalizes what the person typed: adds `https://` when no scheme is given
@@ -91,6 +98,17 @@ pub fn normalize_server(input: &str) -> String {
     } else {
         format!("https://{trimmed}")
     }
+}
+
+/// What was downloaded from a Core, readable without it (the web interface
+/// keeps this page and the encrypted media in the web engine's storage).
+pub fn downloads_url(server: &str) -> String {
+    format!("{}downloads/", app_url(server))
+}
+
+/// The web interface of a Core.
+pub fn app_url(server: &str) -> String {
+    format!("{}/app/", server.trim_end_matches('/'))
 }
 
 #[cfg(test)]
@@ -107,16 +125,32 @@ mod tests {
     }
 
     #[test]
-    fn settings_round_trip_and_keep_a_stable_device_id() {
-        let dir = std::env::temp_dir().join(format!("aether-desktop-{}", uuid::Uuid::new_v4()));
+    fn settings_round_trip() {
+        let dir = std::env::temp_dir().join(format!("aether-desktop-{}", std::process::id()));
         assert_eq!(Settings::load(&dir), Settings::default());
         let mut settings = Settings {
             server: Some("https://media.example".into()),
-            device_id: None,
+            window: Some(WindowState {
+                width: 1600,
+                height: 900,
+                maximized: true,
+            }),
         };
-        let id = settings.device_id();
-        assert_eq!(settings.device_id(), id);
         settings.save(&dir).unwrap();
+        assert_eq!(Settings::load(&dir), settings);
+        settings.window = None;
+        let tiny = WindowState {
+            width: 1,
+            height: 99999,
+            maximized: false,
+        };
+        assert_eq!(tiny.size(), (480.0, 4320.0));
+        // A file written by an earlier version keeps working.
+        std::fs::write(
+            dir.join(SETTINGS_FILE),
+            br#"{"server":"https://media.example","deviceId":"old"}"#,
+        )
+        .unwrap();
         assert_eq!(Settings::load(&dir), settings);
         std::fs::write(dir.join(SETTINGS_FILE), b"{broken").unwrap();
         assert_eq!(Settings::load(&dir), Settings::default());
@@ -124,7 +158,7 @@ mod tests {
     }
 
     #[test]
-    fn folders_names_and_tokens() {
+    fn folders_names_and_addresses() {
         let dir = config_dir(env(&[
             ("APPDATA", "C:\\Users\\a\\AppData\\Roaming"),
             ("HOME", "/home/a"),
@@ -146,23 +180,16 @@ mod tests {
         assert_eq!(device_name(env(&[("HOSTNAME", "a\nb")])), "Aether Desktop");
         assert_eq!(device_name(env(&[])), "Aether Desktop");
         assert_eq!(
-            keychain_url("https://media.example/"),
-            "https://media.example#aether-desktop"
-        );
-        let token = Token {
-            access: "secret".into(),
-            expires_at: 42,
-        };
-        assert_eq!(decode_token(&encode_token(&token)), Some(token));
-        assert_eq!(decode_token(br#"{"access":"","expires_at":1}"#), None);
-        assert_eq!(decode_token(b"garbage"), None);
-        assert_eq!(
             normalize_server(" media.example/ "),
             "https://media.example"
         );
         assert_eq!(
             normalize_server("http://10.0.0.2:8080/"),
             "http://10.0.0.2:8080"
+        );
+        assert_eq!(
+            app_url("https://media.example/"),
+            "https://media.example/app/"
         );
     }
 }

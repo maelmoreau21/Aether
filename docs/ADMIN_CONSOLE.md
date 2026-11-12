@@ -19,7 +19,7 @@ Le système d'extensions à dépôts/catalogue et permissions accordées par adm
 
 ## Vérification
 
-Commandes et résultats effectivement exécutés consignés dans .ai/MEMORY.md et docs/TEST_PLAN.md. `apps/web/scripts/test-admin-ui.mjs` est un test d'interface avec API simulée ; `cargo test -p media-poc --test browser_admin -- --ignored` exerce le vrai Core avec SQLite sur un dossier temporaire et sans média personnel. `scripts/test-admin-postgres.ps1` vise uniquement un PostgreSQL18 jetable pour sauvegarde complète et restauration réelle.
+Commandes et résultats effectivement exécutés consignés dans .ai/MEMORY.md et docs/TEST_PLAN.md. `apps/web/scripts/test-admin-ui.mjs` est un test d'interface avec API simulée ; `cargo test -p aether-core --test browser_admin -- --ignored` exerce le vrai Core avec SQLite sur un dossier temporaire et sans média personnel. `scripts/test-admin-postgres.ps1` vise uniquement un PostgreSQL18 jetable pour sauvegarde complète et restauration réelle.
 
 ## Présentation et thèmes — 19 octobre 2026
 
@@ -70,7 +70,7 @@ Captures actuelles : `docs/evidence/2026-10-19/settings-jellyfin/`.
 
 Vérification de ce parcours : check/lint, 54 tests unitaires et build Web réussis.
 Le test navigateur simulé couvre les deux thèmes et cinq largeurs. Le test
-`cargo test -p media-poc --test browser_admin -- --ignored --nocapture` passe aussi
+`cargo test -p aether-core --test browser_admin -- --ignored --nocapture` passe aussi
 sur vrai Core/SQLite temporaire : scans et suppression relue, archivage de
 l'ancien format chiffré,
 planification/lancement/désactivation des backups depuis Tâches, préférences

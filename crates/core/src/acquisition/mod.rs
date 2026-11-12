@@ -1,5 +1,6 @@
 //! Optional requests application: administrator-owned connections and durable acquisitions.
 mod http;
+mod policy;
 mod remote;
 mod singles;
 pub mod transport;
@@ -417,7 +418,9 @@ pub async fn import_legacy(
             } else {
                 previous_source_status.as_deref()
             };
-            query("UPDATE media_requests SET source_status=?,updated_at=?,user_id=COALESCE(user_id,?),server_id=COALESCE(server_id,?),library_id=COALESCE(library_id,?),input_json=?,source_remote_id=COALESCE(?,source_remote_id),author_label=?,external_id=?,external_provider=?,title=? WHERE id=? AND status='suspended'")
+            query("UPDATE media_requests \
+                    SET source_status=?,updated_at=?,user_id=COALESCE(user_id,?),server_id=COALESCE(server_id,?),library_id=COALESCE(library_id,?),input_json=?,source_remote_id=COALESCE(?,source_remote_id),author_label=?,external_id=?,external_provider=?,title=? \
+                    WHERE id=? AND status='suspended'")
                 .bind(delta_status).bind(updated.max(previous_updated)).bind(user_id).bind(server.as_ref().map(|s|s.id.as_str())).bind(server.as_ref().map(|s|s.library_id.as_str())).bind(json!(input).to_string()).bind(&source_remote_id).bind(author.chars().take(128).collect::<String>()).bind(&external_id).bind(external_provider).bind(title.chars().take(512).collect::<String>()).bind(&id).execute(&mut *tx).await.map_err(db)?;
             event(&mut tx, &id, None, "suspended", Some("legacy_delta_import")).await?;
             crate::database::commit(tx).await.map_err(db)?;
@@ -426,9 +429,32 @@ pub async fn import_legacy(
         crate::database::commit(tx).await.map_err(db)?;
         return Ok(false);
     }
-    let result=query("INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,error_code,remote_id,created_at,updated_at,imported,source_key,author_label,source_status,source_remote_id) VALUES(?,?,?,?,?,?,?,?,?,'suspended',NULL,NULL,?,?,?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING")
-        .bind(&id).bind(user_id).bind(server.as_ref().map(|s|s.id.as_str())).bind(server.as_ref().map(|s|s.library_id.as_str())).bind(kind).bind(title.chars().take(512).collect::<String>()).bind(external_id).bind(external_provider).bind(json!(input).to_string())
-        .bind(created).bind(updated).bind(1i64).bind(source_key).bind(author.chars().take(128).collect::<String>()).bind(source_status).bind(source_remote_id).execute(&mut *tx).await.map_err(db)?;
+    let result = query(
+        "INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,\
+            external_provider,input_json,status,error_code,remote_id,created_at,updated_at,\
+            imported,source_key,author_label,source_status,source_remote_id) \
+            VALUES(?,?,?,?,?,?,?,?,?,'suspended',NULL,NULL,?,?,?,?,?,?,?) \
+            ON CONFLICT(source_key) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(user_id)
+    .bind(server.as_ref().map(|s| s.id.as_str()))
+    .bind(server.as_ref().map(|s| s.library_id.as_str()))
+    .bind(kind)
+    .bind(title.chars().take(512).collect::<String>())
+    .bind(external_id)
+    .bind(external_provider)
+    .bind(json!(input).to_string())
+    .bind(created)
+    .bind(updated)
+    .bind(1i64)
+    .bind(source_key)
+    .bind(author.chars().take(128).collect::<String>())
+    .bind(source_status)
+    .bind(source_remote_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(db)?;
     let inserted = result.rows_affected() > 0;
     if inserted {
         event(&mut tx, &id, None, "suspended", Some("legacy_import")).await?;

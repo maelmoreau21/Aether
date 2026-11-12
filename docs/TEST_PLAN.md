@@ -119,11 +119,11 @@ de sélection sont inclus dans `npm test --prefix apps/web`.
 
 ## Administration complète — 19 octobre 2026
 
-Vérifications ciblées : `cargo test --locked -p media-poc --test admin_backups --test backup_bundle --test full_backup_restore_e2e`. Le format courant non chiffré couvre sauvegarde/restauration SQLite, corruption, troncature, ancien format refusé et destination existante. Les tests des autres domaines sont distincts ; le checksum ne prouve pas l'authenticité contre un tiers ayant accès au fichier.
+Vérifications ciblées : `cargo test --locked -p aether-core --test admin_backups --test backup_bundle --test full_backup_restore_e2e`. Le format courant non chiffré couvre sauvegarde/restauration SQLite, corruption, troncature, ancien format refusé et destination existante. Les tests des autres domaines sont distincts ; le checksum ne prouve pas l'authenticité contre un tiers ayant accès au fichier.
 
 PostgreSQL réel : `pwsh -NoProfile -File scripts/test-admin-postgres.ps1` — base18 jetable, vrais pg_dump/pg_restore, paquet non chiffré, extraction, restauration dans une base vide, comparaison de toutes les tables et des paramètres. Les clients du conteneur sont invoqués via un pont de test, sans identifiants dans les arguments. Ce parcours doit être relancé après le changement de format.
 
-Navigateur : build Web puis `cargo test --locked -p media-poc --test browser_admin -- --ignored --nocapture`. Vrai Core/SQLite jetable, création compte/groupe, planification/scan, création/révocation de clé API, sauvegarde/téléchargement et planification, largeur mobile et erreurs JS. Ce scénario ne cible aucun média personnel. `test-admin-ui.mjs` reste un contrôle séparé avec API simulée.
+Navigateur : build Web puis `cargo test --locked -p aether-core --test browser_admin -- --ignored --nocapture`. Vrai Core/SQLite jetable, création compte/groupe, planification/scan, création/révocation de clé API, sauvegarde/téléchargement et planification, largeur mobile et erreurs JS. Ce scénario ne cible aucun média personnel. `test-admin-ui.mjs` reste un contrôle séparé avec API simulée.
 
 Les images applicatives complètes, le NAS et la charge ne sont pas validés par ces essais. La cible Docker `backup-runtime` seule a été construite ; pg_dump/pg_restore18.6 exécutés avec succès.
 
@@ -146,7 +146,7 @@ npm run check --prefix apps/web
 npm run lint --prefix apps/web
 npm test --prefix apps/web
 npm run build --prefix apps/web
-cargo test --locked -p media-poc --test browser_scanner --test browser_series -- --ignored --nocapture
+cargo test --locked -p aether-core --test browser_scanner --test browser_series -- --ignored --nocapture
 ./scripts/test-postgres.ps1
 ./scripts/raw-poc.ps1
 ```
@@ -203,7 +203,7 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
-MEDIA_FIXTURE_DIR=tests/fixtures/generated cargo run -p media-poc
+MEDIA_FIXTURE_DIR=tests/fixtures/generated cargo run -p aether-core
 ```
 
 Le binaire lancé est `aether-core` (`default-run`). Sans `MEDIA_LIBRARY_ROOT` ni
@@ -265,7 +265,7 @@ principal et le code de sortie 0 concernent la lecture native et ses erreurs.
 Une sélection réellement tentée mais échouée rendrait le code de sortie non nul.
 La branche FR/EN/FR du scénario reste NT. MSE : annonce seulement, pas d'append.
 
-Serveur relancé : `cargo run --locked -p media-poc`. Commandes effectivement
+Serveur relancé : `cargo run --locked -p aether-core`. Commandes effectivement
 exécutées dans trois processus PowerShell séparés (ne pas conserver le chemin
 Edge pour le lancement de Firefox/Chrome) :
 
@@ -317,7 +317,7 @@ probes et décodage. Rapport complet local dans le dossier généré ; copie
 compacte des comparaisons dans `evidence/2026-10-15/remux/preparation.json`.
 Les grandes listes de hashes de paquets restent dans le rapport local complet.
 
-Serveur redémarré avec `cargo run --locked -p media-poc`. Série finale réellement
+Serveur redémarré avec `cargo run --locked -p aether-core`. Série finale réellement
 exécutée dans un même PowerShell, séquentiellement pour éviter la contention :
 
 ```powershell
@@ -376,7 +376,7 @@ copient AV1/Opus et vérifient chaque paquet/init. Texte SRT→mov_text explicit
 converti. Rapport complet local `representative/generation.json` ; copie compacte
 sans les listes volumineuses de paquets dans les preuves du dépôt.
 
-Serveur redémarré : `cargo run --locked -p media-poc`. Chrome lancé seul, puis
+Serveur redémarré : `cargo run --locked -p aether-core`. Chrome lancé seul, puis
 Edge/Firefox séquentiellement. Équivalent reproductible des commandes exécutées :
 
 ```powershell
@@ -423,7 +423,7 @@ générations fraîches. Ce n'est pas un succès de rendu de sous-titres navigat
 ## MSE P0C limité
 
 Préparation : python scripts/prepare-mse.py (dossier neuf uniquement), puis
-cargo run --locked -p media-poc. Test : node scripts/browser-mse.cjs, avec
+cargo run --locked -p aether-core. Test : node scripts/browser-mse.cjs, avec
 MEDIA_BROWSER_CHANNEL et MEDIA_BROWSER_EXECUTABLE/REPORT_DIR appropriés.
 [Commandes complètes et méthode](archive/player-experiments/P0C_MSE_EXPERIMENT.md).
 8 tests Rust, dont whitelist MSE, MIME, octets Range et416/Origin ; navigateurs
@@ -435,7 +435,7 @@ La CI génère le packaging, sans prétendre exécuter ces tests Windows.
 ## Comparaison Shaka/MSE P0C
 
 Préparer python scripts/prepare-dash.py et python scripts/prepare-shaka.py,
-puis cargo run --locked -p media-poc. Scénario commun
+puis cargo run --locked -p aether-core. Scénario commun
 node scripts/browser-player-comparison.cjs, MEDIA_PLAYER_ENGINE=mse ou shaka,
 MEDIA_BROWSER_CHANNEL=chrome/msedge/firefox. Dossier neuf via MEDIA_REPORT_DIR.
 [Commandes, tolérances et résultats](archive/player-experiments/P0C_SHAKA_EXPERIMENT.md).
@@ -652,7 +652,7 @@ Aucun NAS ni ingestion/scanner ; pas de nouvelle preuve audio/codec.
 ## Extensions locales — parcours synthétique vérifié
 
 Après build Web et compilation de la fixture SDK pour wasm32-unknown-unknown :
-`cargo test --locked -p media-poc --test extensions -j 1 -- --include-ignored --test-threads=1 --nocapture`.
+`cargo test --locked -p aether-core --test extensions -j 1 -- --include-ignored --test-threads=1 --nocapture`.
 Inclut Chrome réel, SDK compilé, signatures, limites runtime, consentements,
 révocation pendant exécution et cycle d'installation/désinstallation.
 Résultats et frontières : [evidence/2026-10-20/extensions/README.md](evidence/2026-10-20/extensions/README.md).
@@ -660,12 +660,12 @@ Résultats et frontières : [evidence/2026-10-20/extensions/README.md](evidence/
 
 Contrats et limites : [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md).
 
-- `cargo test --locked -p media-poc --lib product_tests -j 1 -- --test-threads=1` :
+- `cargo test --locked -p aether-core --lib product_tests -j 1 -- --test-threads=1` :
   migration de la version 31 avec conservation bibliothèques/droits/progression,
   scan musical réel et UUID stables, Range, restrictions/HEAD/ressources dérivées,
   filtres avant pagination, affiches, listes privées, groupes, partage de progression
   et de favoris, préférences sur deux sessions, isolation des comptes et clés API.
-- `cargo test --locked -p media-poc --test account -j 1 -- --test-threads=1` :
+- `cargo test --locked -p aether-core --test account -j 1 -- --test-threads=1` :
   secret actuel, CSRF, changement de mot de passe et révocation des cookies existants.
 - `cargo test --locked -p media-node --lib -j 1 -- --test-threads=1` : arrêt brutal
   d’un sous-processus pendant une écriture cache, récupération et préservation d’une
@@ -696,9 +696,9 @@ Contrats et limites : [PRODUCT_FEATURES.md](PRODUCT_FEATURES.md).
 - `browser_series -- --ignored --test-threads=1` : clics de notes rapprochés pendant
   une écriture retenue, dernier choix persistant, listes via +, version/audio uniques
   masqués, multi-version conservée, vidéo décodée, pause/seek et transitions.
-- `cargo test --locked -p media-poc --lib extensions::repositories -j 1 -- --test-threads=1` :
+- `cargo test --locked -p aether-core --lib extensions::repositories -j 1 -- --test-threads=1` :
   formats, adresses privées, bornes, droits/CSRF, signatures et snapshots des dépôts.
-- `cargo test --locked -p media-poc --lib browser_repository_catalogue_version_trust_and_install -j 1 -- --ignored --nocapture --test-threads=1` :
+- `cargo test --locked -p aether-core --lib browser_repository_catalogue_version_trust_and_install -j 1 -- --ignored --nocapture --test-threads=1` :
   vrai Core/SQLite et navigateur, choix de deux versions, approbation explicite,
   installation désactivée, actualisation, persistance et retrait. Les documents
   HTTPS sont substitués uniquement sous `cfg(test)` ; ce n'est pas un essai d'hébergement public.

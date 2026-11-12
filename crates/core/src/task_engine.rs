@@ -193,7 +193,10 @@ async fn enqueue_spec(
     let mut conn = store.pool().acquire().await?;
     let mut tx = begin_write_serialized(&mut conn, TASK_ADMISSION_LOCK).await?;
     let existing: Option<Job> =
-        query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE owner=? AND idempotency_key=?")
+        query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
+                node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error \
+                FROM durable_tasks \
+                WHERE owner=? AND idempotency_key=?")
             .bind(owner)
             .bind(key)
             .fetch_optional(&mut *tx)
@@ -212,7 +215,17 @@ async fn enqueue_spec(
         crate::database::commit(tx).await?;
         return Ok(job);
     }
-    let node_target: Option<(String,i64)>=query_as("SELECT l.node_id,CAST(CASE WHEN (n.id='local' OR n.status='connected') AND NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=l.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup'))) THEN 1 ELSE 0 END AS BIGINT) FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films','series','music') AND n.status!='revoked' AND l.id NOT IN ('fixture-films','fixture-series')").bind(library_id).fetch_optional(&mut *tx).await?;
+    let node_target: Option<(String,i64)>=query_as("SELECT l.node_id,CAST(CASE WHEN (n.id='local' OR n.status='connected') \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=l.node_id \
+            AND busy.lease_until IS NOT NULL AND (busy.category<>'system' \
+            OR busy.target_id IN ('optimize-database','backup'))) THEN 1 ELSE 0 END AS BIGINT) \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE l.id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+            WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+            JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 \
+            AND parent.enabled=1)) AND l.kind IN ('films','series','music') AND n.status!='revoked' \
+            AND l.id NOT IN ('fixture-films','fixture-series')").bind(library_id).fetch_optional(&mut *tx).await?;
     let (node, can_wake) = node_target.ok_or(EngineError::Unavailable)?;
     if category != "scan" {
         let sql = if category == "image" {
@@ -258,8 +271,31 @@ async fn enqueue_spec(
         return Err(EngineError::Capacity);
     }
     let id = uuid::Uuid::new_v4().to_string();
-    query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,refresh_mode,category,target_id,component,width) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(&id).bind(library_id).bind(owner).bind(key).bind(node).bind(priority).bind(now).bind(now).bind(now).bind(mode).bind(category).bind(target).bind(component).bind(width).execute(&mut *tx).await?;
-    let job = query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE id=?")
+    query(
+        "INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,\
+            created_at,updated_at,available_at,refresh_mode,category,target_id,component,width) \
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(&id)
+    .bind(library_id)
+    .bind(owner)
+    .bind(key)
+    .bind(node)
+    .bind(priority)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .bind(mode)
+    .bind(category)
+    .bind(target)
+    .bind(component)
+    .bind(width)
+    .execute(&mut *tx)
+    .await?;
+    let job = query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
+            node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error \
+            FROM durable_tasks \
+            WHERE id=?")
         .bind(id)
         .fetch_one(&mut *tx)
         .await?;
@@ -301,13 +337,22 @@ pub async fn record_result(
 }
 
 pub async fn get(store: &IdentityStore, id: &str) -> Result<Option<Job>, sqlx::Error> {
-    query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE id=?")
+    query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
+            node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error \
+            FROM durable_tasks \
+            WHERE id=?")
         .bind(id)
         .fetch_optional(store.pool())
         .await
 }
 pub async fn leased(store: &IdentityStore, limit: i64) -> Result<Vec<Job>, sqlx::Error> {
-    query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,'{}' AS result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE lease_until IS NOT NULL ORDER BY id LIMIT ?")
+    query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
+            node_id,category,target_id,component,width,'{}' AS \
+            result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error \
+            FROM durable_tasks \
+            WHERE lease_until IS NOT NULL \
+            ORDER BY id \
+            LIMIT ?")
         .bind(limit.clamp(1, 1000))
         .fetch_all(store.pool())
         .await
@@ -362,7 +407,38 @@ pub async fn claim_batch(
         }
         sql.push_str("(?)");
     }
-    sql.push_str(") , candidates AS MATERIALIZED (SELECT (SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=ready.node_id AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks prerequisite ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id FROM ready WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup')))) UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id IN (SELECT id FROM candidates WHERE id IS NOT NULL) RETURNING id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error");
+    sql.push_str(
+        ") , candidates AS MATERIALIZED (SELECT (SELECT j.id FROM durable_tasks j \
+            JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id \
+            WHERE j.node_id=ready.node_id AND j.status='queued' AND j.lease_until IS NULL \
+            AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 \
+            FROM automation_dependencies d JOIN durable_tasks prerequisite \
+            ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id \
+            AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 \
+            AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) \
+            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+            AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id \
+            AND active.lease_until IS NOT NULL) \
+            AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
+            FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
+            FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
+            ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id \
+            FROM ready \
+            WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id \
+            AND busy.lease_until IS NOT NULL AND (busy.category<>'system' \
+            OR busy.target_id IN ('optimize-database','backup')))) UPDATE durable_tasks \
+            SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,\
+            started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',\
+            processed_items=0,progress=0 WHERE id IN (SELECT id \
+            FROM candidates \
+            WHERE id IS NOT NULL) \
+            RETURNING id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
+            node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,\
+            attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,\
+            started_at,finished_at,lease_until,error",
+    );
     let mut mutation = query_as::<sqlx::Any, Job>(sqlx::AssertSqlSafe(sql));
     for node in nodes {
         mutation = mutation.bind(node);
@@ -396,10 +472,34 @@ async fn claim_in_transaction(
     if active >= node_limit {
         return Ok(None);
     }
-    let id:Option<String>=query_scalar("SELECT j.id FROM durable_tasks j JOIN libraries l ON l.id=j.library_id JOIN media_nodes n ON n.id=j.node_id WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks prerequisite ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1").bind(node_id).bind(now).bind(now.saturating_sub(45)).fetch_optional(&mut **tx).await?;
+    let id:Option<String>=query_scalar("SELECT j.id \
+            FROM durable_tasks j \
+            JOIN libraries l ON l.id=j.library_id \
+            JOIN media_nodes n ON n.id=j.node_id \
+            WHERE j.node_id=? AND j.status='queued' AND j.lease_until IS NULL AND j.available_at<=? \
+            AND j.failure_count<j.max_attempts AND NOT EXISTS(SELECT 1 \
+            FROM automation_dependencies d JOIN durable_tasks prerequisite \
+            ON prerequisite.id=d.prerequisite_id WHERE d.task_id=j.id \
+            AND prerequisite.status!='completed') AND l.node_id=j.node_id AND ((l.enabled=1 \
+            AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) \
+            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+            AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id \
+            AND active.lease_until IS NOT NULL) \
+            AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
+            FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
+            FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
+            ORDER BY j.priority DESC,j.created_at,j.id \
+            LIMIT 1").bind(node_id).bind(now).bind(now.saturating_sub(45)).fetch_optional(&mut **tx).await?;
     let Some(id) = id else { return Ok(None) };
-    query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut **tx).await?;
-    let job = query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error FROM durable_tasks WHERE id=?")
+    query("UPDATE durable_tasks \
+            SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 \
+            WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut **tx).await?;
+    let job = query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
+            node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error \
+            FROM durable_tasks \
+            WHERE id=?")
         .bind(id)
         .fetch_one(&mut **tx)
         .await?;
@@ -451,7 +551,12 @@ async fn filter_automation_claims(
             .bind(provider).fetch_one(&mut **tx).await?;
         let extension_active: i64 = query_scalar("SELECT COUNT(*) FROM automation_task_links a JOIN durable_tasks t ON t.id=a.task_id WHERE a.extension_id=? AND t.lease_until IS NOT NULL")
             .bind(extension).fetch_one(&mut **tx).await?;
-        let library_active: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks t WHERE t.lease_until IS NOT NULL AND COALESCE((SELECT parent_id FROM library_folders WHERE library_id=t.library_id AND active=1),t.library_id)=COALESCE((SELECT parent_id FROM library_folders WHERE library_id=? AND active=1),?)")
+        let library_active: i64 = query_scalar("SELECT COUNT(*) \
+                FROM durable_tasks t \
+                WHERE t.lease_until IS NOT NULL AND COALESCE((SELECT parent_id FROM library_folders \
+                WHERE library_id=t.library_id \
+                AND active=1),t.library_id)=COALESCE((SELECT parent_id FROM library_folders \
+                WHERE library_id=? AND active=1),?)")
             .bind(&job.library_id).bind(&job.library_id).fetch_one(&mut **tx).await?;
         if next > now
             || provider_active > provider_limit
@@ -485,7 +590,23 @@ pub async fn renew(
         return Ok(false);
     }
     let _writer = store.task_writes.lock().await;
-    Ok(query("UPDATE durable_tasks SET lease_until=?,updated_at=?,progress=CASE WHEN progress>? THEN progress ELSE ? END WHERE id=? AND attempt=? AND node_id=? AND status='running' AND lease_until>?").bind(now.saturating_add(lease_seconds)).bind(now).bind(progress).bind(progress).bind(id).bind(attempt).bind(node_id).bind(now).execute(store.pool()).await?.rows_affected()==1)
+    Ok(query(
+        "UPDATE durable_tasks \
+            SET lease_until=?,updated_at=?,progress=CASE WHEN progress>? THEN progress ELSE ? END \
+            WHERE id=? AND attempt=? AND node_id=? AND status='running' AND lease_until>?",
+    )
+    .bind(now.saturating_add(lease_seconds))
+    .bind(now)
+    .bind(progress)
+    .bind(progress)
+    .bind(id)
+    .bind(attempt)
+    .bind(node_id)
+    .bind(now)
+    .execute(store.pool())
+    .await?
+    .rows_affected()
+        == 1)
 }
 
 /// A stopped worker acknowledges paused/cancelled work without reviving it.
@@ -521,7 +642,40 @@ pub async fn finish(
             .saturating_add(jitter as i64)
     };
     let _writer = store.task_writes.lock().await;
-    let changed=query("UPDATE durable_tasks SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN ?='' THEN 'completed' WHEN failure_count+? >= max_attempts OR ?=1 THEN 'error' ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN ? ELSE 0 END,progress=CASE WHEN status='running' AND ?='' THEN 100 ELSE progress END,lease_until=NULL,updated_at=?,finished_at=CASE WHEN status='cancelled' OR (status='running' AND (?='' OR failure_count+? >= max_attempts OR ?=1)) THEN ? ELSE NULL END,available_at=CASE WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? WHERE id=? AND attempt=? AND node_id=? AND lease_until>? AND status IN ('running','paused','cancelled')").bind(&error).bind(failed).bind(exhausted).bind(failed).bind(&error).bind(now).bind(&error).bind(failed).bind(exhausted).bind(now).bind(now).bind(now.saturating_add(delay)).bind(error).bind(id).bind(attempt).bind(node_id).bind(now).execute(store.pool()).await?.rows_affected()==1;
+    let changed = query(
+        "UPDATE durable_tasks \
+            SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN ?='' \
+            THEN 'completed' WHEN failure_count+? >= max_attempts OR ?=1 THEN 'error' \
+            ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN ? \
+            ELSE 0 END,progress=CASE WHEN status='running' AND ?='' THEN 100 \
+            ELSE progress END,lease_until=NULL,updated_at=?,finished_at=CASE \
+            WHEN status='cancelled' OR (status='running' AND (?='' \
+            OR failure_count+? >= max_attempts OR ?=1)) THEN ? ELSE NULL END,available_at=CASE \
+            WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? \
+            WHERE id=? AND attempt=? AND node_id=? AND lease_until>? \
+            AND status IN ('running','paused','cancelled')",
+    )
+    .bind(&error)
+    .bind(failed)
+    .bind(exhausted)
+    .bind(failed)
+    .bind(&error)
+    .bind(now)
+    .bind(&error)
+    .bind(failed)
+    .bind(exhausted)
+    .bind(now)
+    .bind(now)
+    .bind(now.saturating_add(delay))
+    .bind(error)
+    .bind(id)
+    .bind(attempt)
+    .bind(node_id)
+    .bind(now)
+    .execute(store.pool())
+    .await?
+    .rows_affected()
+        == 1;
     if changed {
         WAKE.notify_one();
     }
@@ -547,7 +701,23 @@ pub async fn recover_expired(store: &IdentityStore, now: i64) -> Result<u64, sql
     }
     let _effects = EFFECT_GATE.lock().await;
     let _writer = store.task_writes.lock().await;
-    Ok(query("UPDATE durable_tasks SET status=CASE WHEN status IN ('paused','cancelled') THEN status WHEN failure_count+1>=max_attempts THEN 'error' ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN 1 ELSE 0 END,lease_until=NULL,updated_at=?,available_at=?,finished_at=CASE WHEN (status='running' AND failure_count+1>=max_attempts) OR status='cancelled' THEN ? ELSE NULL END,error='Worker lease expired; retry fenced' WHERE lease_until<=?").bind(now).bind(now.saturating_add(5)).bind(now).bind(now).execute(store.pool()).await?.rows_affected())
+    Ok(query(
+        "UPDATE durable_tasks \
+            SET status=CASE WHEN status IN ('paused','cancelled') THEN status \
+            WHEN failure_count+1>=max_attempts THEN 'error' \
+            ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN 1 \
+            ELSE 0 END,lease_until=NULL,updated_at=?,available_at=?,finished_at=CASE \
+            WHEN (status='running' AND failure_count+1>=max_attempts) OR status='cancelled' THEN ? \
+            ELSE NULL END,error='Worker lease expired; retry fenced' \
+            WHERE lease_until<=?",
+    )
+    .bind(now)
+    .bind(now.saturating_add(5))
+    .bind(now)
+    .bind(now)
+    .execute(store.pool())
+    .await?
+    .rows_affected())
 }
 
 /// Running controls retain capacity until stop acknowledgment or lease expiry.
@@ -672,16 +842,33 @@ async fn list(
     // The history spans every task ever recorded, including rows written by older
     // versions: every column is normalised in SQL so one odd row (a REAL progress, a
     // NULL text) cannot make the whole page fail to decode.
-    let jobs: Vec<Job> =
-        query_as("SELECT id,COALESCE(library_id,'') AS library_id,COALESCE(owner,'') AS owner,COALESCE(node_id,'') AS node_id,COALESCE(category,'') AS category,COALESCE(target_id,'') AS target_id,COALESCE(component,'') AS component,CAST(COALESCE(width,0) AS BIGINT) AS width,'{}' AS result_json,COALESCE(refresh_mode,'') AS refresh_mode,COALESCE(status,'') AS status,CAST(COALESCE(priority,0) AS BIGINT) AS priority,CAST(COALESCE(attempt,0) AS BIGINT) AS attempt,CAST(COALESCE(failure_count,0) AS BIGINT) AS failure_count,CAST(COALESCE(max_attempts,1) AS BIGINT) AS max_attempts,CAST(COALESCE(progress,0) AS BIGINT) AS progress,CAST(COALESCE(processed_items,0) AS BIGINT) AS processed_items,CAST(COALESCE(created_at,0) AS BIGINT) AS created_at,CAST(COALESCE(updated_at,0) AS BIGINT) AS updated_at,CAST(started_at AS BIGINT) AS started_at,CAST(finished_at AS BIGINT) AS finished_at,CAST(lease_until AS BIGINT) AS lease_until,COALESCE(error,'') AS error FROM durable_tasks ORDER BY created_at DESC,id LIMIT ? OFFSET ?")
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(auth.store.pool())
-            .await
-            .map_err(|error| {
-                eprintln!("Task history could not be listed: {error}");
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let jobs: Vec<Job> = query_as(
+        "SELECT id,COALESCE(library_id,'') AS library_id,COALESCE(owner,'') AS \
+                owner,COALESCE(node_id,'') AS node_id,COALESCE(category,'') AS \
+                category,COALESCE(target_id,'') AS target_id,COALESCE(component,'') AS \
+                component,CAST(COALESCE(width,0) AS BIGINT) AS width,'{}' AS \
+                result_json,COALESCE(refresh_mode,'') AS refresh_mode,COALESCE(status,'') AS \
+                status,CAST(COALESCE(priority,0) AS BIGINT) AS priority,CAST(COALESCE(attempt,0) \
+                AS BIGINT) AS attempt,CAST(COALESCE(failure_count,0) AS BIGINT) AS \
+                failure_count,CAST(COALESCE(max_attempts,1) AS BIGINT) AS \
+                max_attempts,CAST(COALESCE(progress,0) AS BIGINT) AS \
+                progress,CAST(COALESCE(processed_items,0) AS BIGINT) AS \
+                processed_items,CAST(COALESCE(created_at,0) AS BIGINT) AS \
+                created_at,CAST(COALESCE(updated_at,0) AS BIGINT) AS updated_at,CAST(started_at AS \
+                BIGINT) AS started_at,CAST(finished_at AS BIGINT) AS finished_at,CAST(lease_until \
+                AS BIGINT) AS lease_until,COALESCE(error,'') AS error \
+                FROM durable_tasks \
+                ORDER BY created_at DESC,id \
+                LIMIT ? OFFSET ?",
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(|error| {
+        eprintln!("Task history could not be listed: {error}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     Ok(Json(
         serde_json::json!({"jobs":jobs,"limit":limit,"offset":offset}),
     ))

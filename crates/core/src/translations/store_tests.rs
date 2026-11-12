@@ -401,55 +401,6 @@ async fn manual_edits_nfo_and_identification_keep_their_priority(backend: &Backe
     assert!(ids.contains("tt0111161"));
 }
 
-async fn legacy_blobs_are_materialised_once_and_survive_a_restart(backend: &Backend) {
-    let work;
-    {
-        let store = backend.open().await;
-        work = film(&store).await;
-        query("UPDATE inventory_works SET editorial_json=? WHERE id=?")
-            .bind(
-                json!({"translations": {
-                    "fr": {"title": "Les Évadés", "overview": "Résumé"},
-                    "en-GB": {"title": "The Shawshank Redemption"},
-                    "bad tag": {"title": "ignored"},
-                    "de": {"title": "  "}
-                }})
-                .to_string(),
-            )
-            .bind(&work)
-            .execute(&store.pool)
-            .await
-            .unwrap();
-        let mut tx = store.pool.begin().await.unwrap();
-        assert_eq!(backfill_legacy_blobs(&mut tx).await.unwrap(), 2);
-        tx.commit().await.unwrap();
-        let mut tx = store.pool.begin().await.unwrap();
-        assert_eq!(
-            backfill_legacy_blobs(&mut tx).await.unwrap(),
-            0,
-            "idempotent"
-        );
-        tx.commit().await.unwrap();
-        // The source JSON is kept: the migration is non-destructive.
-        let blob: String = query_scalar("SELECT editorial_json FROM inventory_works WHERE id=?")
-            .bind(&work)
-            .fetch_one(&store.pool)
-            .await
-            .unwrap();
-        assert!(blob.contains("Résumé"));
-    }
-    // Restart: the schema steps run again and keep the rows.
-    let store = backend.open().await;
-    let count: i64 = query_scalar("SELECT COUNT(*) FROM work_translations WHERE work_id=?")
-        .bind(&work)
-        .fetch_one(&store.pool)
-        .await
-        .unwrap();
-    assert_eq!(count, 2);
-    account(&store, "bob", json!({"metadataLocale": "en-GB"})).await;
-    assert_eq!(listed(&store, "bob").await.0, "The Shawshank Redemption");
-}
-
 async fn seasons_and_episodes_are_localized_in_one_pass(backend: &Backend) {
     let store = backend.open().await;
     film(&store).await;
@@ -722,41 +673,6 @@ async fn a_work_is_found_by_translated_and_original_titles_without_being_duplica
     );
 }
 
-async fn the_search_index_is_filled_for_databases_that_predate_it(backend: &Backend) {
-    let store = backend.open().await;
-    let work = film(&store).await;
-    account(&store, "ana", json!({"locale": "fr"})).await;
-    put(
-        &store,
-        &work,
-        "en-US",
-        "provider:tmdb",
-        "Redemption Song",
-        "A banker.",
-    )
-    .await;
-    query("DELETE FROM work_search_titles")
-        .execute(&store.pool)
-        .await
-        .unwrap();
-    assert!(
-        titles_for(&store, "ana", "redemption", "title-asc")
-            .await
-            .is_empty()
-    );
-    let mut conn = store.pool.acquire().await.unwrap();
-    assert_eq!(search::backfill(&mut conn).await.unwrap(), 1);
-    // A second run changes nothing.
-    assert_eq!(search::backfill(&mut conn).await.unwrap(), 1);
-    drop(conn);
-    assert_eq!(
-        titles_for(&store, "ana", "redemption", "title-asc")
-            .await
-            .len(),
-        1
-    );
-}
-
 async fn titles_sort_in_the_readers_language_and_fall_back_to_the_library_title(backend: &Backend) {
     let store = backend.open().await;
     let ids = films(&store, &["Alpha", "Bravo", "Charlie"]).await;
@@ -809,10 +725,8 @@ on_both_engines!(
     regions_missing_languages_and_explicit_request,
     cache_follows_translation_edits_and_never_mixes_languages,
     manual_edits_nfo_and_identification_keep_their_priority,
-    legacy_blobs_are_materialised_once_and_survive_a_restart,
     seasons_and_episodes_are_localized_in_one_pass,
     invalid_rows_are_rejected_without_touching_the_cache,
     a_work_is_found_by_translated_and_original_titles_without_being_duplicated,
-    the_search_index_is_filled_for_databases_that_predate_it,
     titles_sort_in_the_readers_language_and_fall_back_to_the_library_title,
 );

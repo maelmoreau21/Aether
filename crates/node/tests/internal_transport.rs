@@ -132,14 +132,14 @@ async fn real_https_certificate_chain_hostname_and_expiry() {
     let directory = std::path::PathBuf::from(
         std::env::var_os("MEDIA_TLS_TEST_DIR").expect("certificate directory"),
     );
-    for (certificate, hostname, expected) in [
+    for (case_name, hostname, expected) in [
         ("valid", "localhost", true),
         ("valid", "127.0.0.1", false),
         ("untrusted", "localhost", false),
         ("expired", "localhost", false),
     ] {
         let identity = native_tls::Identity::from_pkcs12(
-            &std::fs::read(directory.join(format!("{certificate}.p12"))).unwrap(),
+            &std::fs::read(directory.join(format!("{case_name}.p12"))).unwrap(),
             "",
         )
         .unwrap();
@@ -151,7 +151,7 @@ async fn real_https_certificate_chain_hostname_and_expiry() {
             let _ = acceptor.accept(socket).await;
         });
         let result = media_node::transport::connect(&format!("https://{hostname}:{port}")).await;
-        assert_eq!(result.is_ok(), expected, "{certificate} {hostname}");
+        assert_eq!(result.is_ok(), expected, "{case_name} {hostname}");
         server.await.unwrap();
     }
 }

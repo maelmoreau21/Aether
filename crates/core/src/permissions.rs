@@ -64,7 +64,16 @@ pub async fn require_media(
     };
     // Read permissions are live; fixture associations remain separate from indexed assets.
     // A library with `adminAccess: false` reaches administrators only through an explicit grant.
-    let rows = crate::database::query_as::<_, (String,String,String)>("SELECT id,root,kind FROM libraries WHERE enabled=1 AND EXISTS(SELECT 1 FROM media_nodes n WHERE n.id=libraries.node_id AND n.status != 'revoked') AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=libraries.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=libraries.id AND p.user_id=?))")
+    let rows = crate::database::query_as::<_, (String,String,String)>("SELECT id,root,kind \
+            FROM libraries \
+            WHERE enabled=1 AND EXISTS(SELECT 1 FROM media_nodes n WHERE n.id=libraries.node_id \
+            AND n.status != 'revoked') AND ((?='administrator' AND NOT EXISTS(SELECT 1 \
+            FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id \
+            AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id \
+            WHERE hx.id=libraries.id \
+            AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+            OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=libraries.id \
+            AND p.user_id=?))")
         .bind(identity.user.role.as_str()).bind(&identity.user.id).fetch_all(&state.auth.store.pool).await;
     let rows = match rows {
         Ok(rows) => rows,
@@ -207,6 +216,11 @@ pub async fn require_media(
     }
     let downloading = path.ends_with("/download");
     if downloading {
+        // Originals are downloaded by the native applications only: they let the
+        // person pick the version, language and tracks, which a browser cannot show.
+        if !identity.bearer {
+            return error(StatusCode::FORBIDDEN, "media_download_native_only");
+        }
         match crate::user_media_policy::can_download(&state.auth.store, &identity.user.id).await {
             Ok(true) => {}
             Ok(false) => return error(StatusCode::FORBIDDEN, "media_download_disabled"),

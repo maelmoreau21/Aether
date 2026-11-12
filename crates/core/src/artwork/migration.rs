@@ -12,8 +12,23 @@ pub(crate) async fn migrate_one(store: &IdentityStore) -> Result<bool, StatusCod
         .as_secs() as i64;
     // Rebuild all representations from the best stored source, never from an
     // already resized derivative. Existing image identities and aliases survive.
-    let entry: Option<(String,String,String,String)> = query_as("SELECT e.work_id,e.id,e.kind,d.sha256 FROM work_image_entries e JOIN work_image_data d ON d.image_id=e.id AND d.width=0 LEFT JOIN artwork_annotations a ON a.work_id=e.work_id AND a.image_id=e.id LEFT JOIN image_migration_attempts m ON m.sha256='entry:'||e.id WHERE (a.encoding IS NULL OR a.encoding!=?) AND (m.sha256 IS NULL OR m.retry_at<=?) ORDER BY e.id LIMIT 1")
-        .bind(crate::image_import::ENCODING).bind(timestamp).fetch_optional(store.pool()).await.map_err(db)?;
+    let entry: Option<(String, String, String, String)> = query_as(
+        "SELECT e.work_id,e.id,e.kind,d.sha256 \
+            FROM work_image_entries e \
+            JOIN work_image_data d ON d.image_id=e.id AND d.width=0 \
+            LEFT \
+            JOIN artwork_annotations a ON a.work_id=e.work_id AND a.image_id=e.id \
+            LEFT \
+            JOIN image_migration_attempts m ON m.sha256='entry:'||e.id \
+            WHERE (a.encoding IS NULL OR a.encoding!=?) AND (m.sha256 IS NULL OR m.retry_at<=?) \
+            ORDER BY e.id \
+            LIMIT 1",
+    )
+    .bind(crate::image_import::ENCODING)
+    .bind(timestamp)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(db)?;
     if let Some((work, id, kind, sha)) = entry {
         let key = format!("entry:{id}");
         let result = migrate_entry(store, &work, &id, &kind, &sha).await;
@@ -29,7 +44,17 @@ pub(crate) async fn migrate_one(store: &IdentityStore) -> Result<bool, StatusCod
         .collect::<Vec<_>>()
         .join(" OR ");
     let sql = format!(
-        "SELECT a.sha256 FROM assets a LEFT JOIN image_migration_attempts m ON m.sha256=a.sha256 WHERE (a.mime IN ('image/jpeg','image/png') OR (a.mime='image/webp' AND EXISTS(SELECT 1 FROM work_posters p WHERE p.sha256=a.sha256 AND NOT EXISTS(SELECT 1 FROM poster_previews pv WHERE pv.work_id=p.work_id)))) AND (m.sha256 IS NULL OR (m.outcome!='completed' AND m.retry_at<=?)) AND ({referenced}) ORDER BY a.sha256 LIMIT 1"
+        "SELECT a.sha256 \
+                FROM assets a \
+                LEFT \
+                JOIN image_migration_attempts m ON m.sha256=a.sha256 \
+                WHERE (a.mime IN ('image/jpeg','image/png') OR (a.mime='image/webp' \
+                AND EXISTS(SELECT 1 FROM work_posters p WHERE p.sha256=a.sha256 \
+                AND NOT EXISTS(SELECT 1 FROM poster_previews pv WHERE pv.work_id=p.work_id)))) \
+                AND (m.sha256 IS NULL OR (m.outcome!='completed' AND m.retry_at<=?)) \
+                AND ({referenced}) \
+                ORDER BY a.sha256 \
+                LIMIT 1"
     );
     let sha: Option<String> = query_scalar(sqlx::AssertSqlSafe(sql))
         .bind(timestamp)

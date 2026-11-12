@@ -1,11 +1,11 @@
 //! Integration tests for healthcheck probe resilience when MEDIA_PUBLIC_URL is configured
 //! to an external origin (e.g. reverse proxy / Synology NAS domain).
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
 

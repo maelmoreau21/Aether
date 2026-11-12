@@ -1,10 +1,4 @@
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode, header},
-};
-use http_body_util::BodyExt;
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     identity::IdentityStore,
     inventory::{InventoryBatch, NfoOutcome, ScannedFile},
@@ -12,6 +6,12 @@ use media_poc::{
     scans::{ScanJobs, router as scans_router},
     secure_app, secure_app_with_jobs,
 };
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode, header},
+};
+use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::{
     path::Path,
@@ -477,7 +477,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
 
     let rss_before_scan_cache = current_rss_bytes();
     let t_scan_cache = Instant::now();
-    let scan_cache = media_poc::inventory::load_scan_cache(&store, "lib-main")
+    let scan_cache = aether_core::inventory::load_scan_cache(&store, "lib-main")
         .await
         .unwrap();
     let dur_scan_cache = t_scan_cache.elapsed();
@@ -495,7 +495,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
 
     let rss_before_cache = current_rss_bytes();
     let t_cache = Instant::now();
-    let cache = media_poc::inventory::load_cache(&store, "lib-main")
+    let cache = aether_core::inventory::load_cache(&store, "lib-main")
         .await
         .unwrap();
     let dur_cache = t_cache.elapsed();
@@ -531,7 +531,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
                     size: 1048576,
                     modified_ns: "1700000000".into(),
                     mime: "video/x-matroska".into(),
-                    probe: media_poc::media::Probe::default(),
+                    probe: aether_core::media::Probe::default(),
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: true,
@@ -547,7 +547,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
             warnings: vec![],
         };
         let t_stage = Instant::now();
-        media_poc::inventory::stage_batch(&store, &scan_id, "lib-main", &batch)
+        aether_core::inventory::stage_batch(&store, &scan_id, "lib-main", &batch)
             .await
             .unwrap();
         let dur = t_stage.elapsed();
@@ -566,7 +566,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
 
     // Test atomic publish of 10,000 entries
     let t_publish = Instant::now();
-    media_poc::inventory::publish_staged_scan(
+    aether_core::inventory::publish_staged_scan(
         &store,
         &scan_id,
         "lib-main",
@@ -598,7 +598,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
                     size: 1048576,
                     modified_ns: "1700000000".into(),
                     mime: "video/x-matroska".into(),
-                    probe: media_poc::media::Probe::default(),
+                    probe: aether_core::media::Probe::default(),
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: true,
@@ -613,12 +613,12 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
             errors: vec![],
             warnings: vec![],
         };
-        media_poc::inventory::stage_batch(&store, &scan_id_rescan, "lib-main", &batch)
+        aether_core::inventory::stage_batch(&store, &scan_id_rescan, "lib-main", &batch)
             .await
             .unwrap();
     }
     let t_publish_rescan = Instant::now();
-    media_poc::inventory::publish_staged_scan(
+    aether_core::inventory::publish_staged_scan(
         &store,
         &scan_id_rescan,
         "lib-main",
@@ -636,7 +636,7 @@ async fn benchmark_10000_entries_cache_and_catalog_latency() {
 
     // Test catalogue latency with 10,000 items
     let t_cat = Instant::now();
-    let cat_res = media_poc::inventory::catalogue(
+    let cat_res = aether_core::inventory::catalogue(
         &store,
         &["lib-main".into()],
         Some("film"),
@@ -748,7 +748,7 @@ async fn test_scan_cancellation_and_restart_recovery() {
             size: 1048576,
             modified_ns: "1700".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
@@ -760,7 +760,7 @@ async fn test_scan_cancellation_and_restart_recovery() {
             message: "synthetic warning".into(),
         }],
     };
-    media_poc::inventory::stage_batch(&store, &scan_id, "orphan-lib", &orphan_batch)
+    aether_core::inventory::stage_batch(&store, &scan_id, "orphan-lib", &orphan_batch)
         .await
         .unwrap();
 
@@ -1275,7 +1275,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
             errors: vec![],
             warnings: vec![],
         };
-        media_poc::inventory::stage_batch(&store, &scan_id, "lib-cold", &batch)
+        aether_core::inventory::stage_batch(&store, &scan_id, "lib-cold", &batch)
             .await
             .unwrap();
     }
@@ -1300,7 +1300,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
 
     // Publish all 10,000 brand new media atomically
     let t_publish = Instant::now();
-    media_poc::inventory::publish_staged_scan(&store, &scan_id, "lib-cold", root_path, true)
+    aether_core::inventory::publish_staged_scan(&store, &scan_id, "lib-cold", root_path, true)
         .await
         .unwrap();
     let dur_publish = t_publish.elapsed();
@@ -1362,7 +1362,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
     assert_eq!(staging_remaining, 0);
 
     // Verify catalogue query on 10,000 items
-    let cat_res = media_poc::inventory::catalogue(
+    let cat_res = aether_core::inventory::catalogue(
         &store,
         &["lib-cold".into()],
         Some("film"),
@@ -1377,7 +1377,7 @@ async fn test_10000_new_synthetic_media_cold_ingestion_benchmark() {
     assert_eq!(cat_res["items"].as_array().unwrap().len(), 24);
 
     // Verify search
-    let cat_search = media_poc::inventory::catalogue(
+    let cat_search = aether_core::inventory::catalogue(
         &store,
         &["lib-cold".into()],
         Some("film"),
@@ -1430,7 +1430,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 1000000 + i as u64,
             modified_ns: "1700000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1455,10 +1455,10 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
         errors: vec![],
         warnings: vec![],
     };
-    media_poc::inventory::stage_batch(&store, &scan_id1, "lib-mixed", &batch1)
+    aether_core::inventory::stage_batch(&store, &scan_id1, "lib-mixed", &batch1)
         .await
         .unwrap();
-    media_poc::inventory::publish_staged_scan(&store, &scan_id1, "lib-mixed", root_path, true)
+    aether_core::inventory::publish_staged_scan(&store, &scan_id1, "lib-mixed", root_path, true)
         .await
         .unwrap();
 
@@ -1503,7 +1503,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 1000000 + i as u64,
             modified_ns: "1700000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1534,7 +1534,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 2000000 + i as u64,         // changed
             modified_ns: "1720000000".into(), // changed
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1565,7 +1565,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 1000000 + i as u64,
             modified_ns: "1700000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Updated Title {:03}", i), 2025),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1596,7 +1596,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 1000000 + i as u64,
             modified_ns: "1700000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1632,7 +1632,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 1000000 + i as u64,
             modified_ns: "1700000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Original Movie {:03}", i), 2020),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1663,7 +1663,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
             size: 3000000 + i as u64,
             modified_ns: "1730000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: make_meta(&format!("Brand New Movie {:03}", i), 2024),
                 path: format!("movie_{:03}/movie.nfo", i),
@@ -1688,11 +1688,11 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
         errors: errors2,
         warnings: vec![],
     };
-    media_poc::inventory::stage_batch(&store, &scan_id2, "lib-mixed", &batch2)
+    aether_core::inventory::stage_batch(&store, &scan_id2, "lib-mixed", &batch2)
         .await
         .unwrap();
 
-    media_poc::inventory::publish_staged_scan(&store, &scan_id2, "lib-mixed", root_path, true)
+    aether_core::inventory::publish_staged_scan(&store, &scan_id2, "lib-mixed", root_path, true)
         .await
         .unwrap();
 
@@ -1787,7 +1787,7 @@ async fn test_mixed_diff_difficult_cases_and_atomic_publication() {
     assert_eq!(total_active_assets, 100);
 
     // Catalogue must also return total = 100
-    let cat_res = media_poc::inventory::catalogue(
+    let cat_res = aether_core::inventory::catalogue(
         &store,
         &["lib-mixed".into()],
         Some("film"),
@@ -1900,7 +1900,7 @@ async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
                     size: 1048576,
                     modified_ns: "1700000000".into(),
                     mime: "video/x-matroska".into(),
-                    probe: media_poc::media::Probe::default(),
+                    probe: aether_core::media::Probe::default(),
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: false,
@@ -1915,7 +1915,7 @@ async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
             errors: vec![],
             warnings: vec![],
         };
-        media_poc::inventory::stage_batch(&store, &scan_id, &library, &batch)
+        aether_core::inventory::stage_batch(&store, &scan_id, &library, &batch)
             .await
             .unwrap();
     }
@@ -1927,7 +1927,7 @@ async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
     let films_pub = films.clone();
     let publish_task = tokio::spawn(async move {
         let t0 = Instant::now();
-        media_poc::inventory::publish_staged_scan(
+        aether_core::inventory::publish_staged_scan(
             &store_pub,
             &scan_id_pub,
             &library_pub,
@@ -2067,7 +2067,7 @@ async fn test_crash_cancellation_permissions_and_rollback() {
             size: 1048576,
             modified_ns: "1700".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
@@ -2076,7 +2076,7 @@ async fn test_crash_cancellation_permissions_and_rollback() {
         errors: vec![],
         warnings: vec![],
     };
-    media_poc::inventory::stage_batch(&store, &scan_id, &library, &batch)
+    aether_core::inventory::stage_batch(&store, &scan_id, &library, &batch)
         .await
         .unwrap();
 
@@ -2089,14 +2089,14 @@ async fn test_crash_cancellation_permissions_and_rollback() {
 
     // publish_staged_scan MUST fail and rollback
     let pub_res =
-        media_poc::inventory::publish_staged_scan(&store, &scan_id, &library, &films, true).await;
+        aether_core::inventory::publish_staged_scan(&store, &scan_id, &library, &films, true).await;
     assert!(
         pub_res.is_err(),
         "Must reject publication when root does not match"
     );
 
     // Clean staging
-    media_poc::inventory::clean_staging(&store, &scan_id)
+    aether_core::inventory::clean_staging(&store, &scan_id)
         .await
         .unwrap();
     let remaining_staging: i64 =
@@ -2185,7 +2185,7 @@ async fn test_crash_cancellation_permissions_and_rollback() {
             size: 1048576,
             modified_ns: "1700".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Missing,
             poster: None,
             reused: false,
@@ -2194,10 +2194,10 @@ async fn test_crash_cancellation_permissions_and_rollback() {
         errors: vec![],
         warnings: vec![],
     };
-    media_poc::inventory::stage_batch(&store, &scan_id_ok, &library, &batch_ok)
+    aether_core::inventory::stage_batch(&store, &scan_id_ok, &library, &batch_ok)
         .await
         .unwrap();
-    media_poc::inventory::publish_staged_scan(&store, &scan_id_ok, &library, &films, true)
+    aether_core::inventory::publish_staged_scan(&store, &scan_id_ok, &library, &films, true)
         .await
         .unwrap();
 
@@ -2210,12 +2210,18 @@ async fn test_crash_cancellation_permissions_and_rollback() {
         errors: vec![],
         warnings: vec![],
     };
-    media_poc::inventory::stage_batch(&store, &scan_id_incomplete, &library, &batch_empty)
+    aether_core::inventory::stage_batch(&store, &scan_id_incomplete, &library, &batch_empty)
         .await
         .unwrap();
-    media_poc::inventory::publish_staged_scan(&store, &scan_id_incomplete, &library, &films, false)
-        .await
-        .unwrap();
+    aether_core::inventory::publish_staged_scan(
+        &store,
+        &scan_id_incomplete,
+        &library,
+        &films,
+        false,
+    )
+    .await
+    .unwrap();
 
     // Verify file1 is STILL available!
     let file1_avail: i64 = sqlx::query_scalar(

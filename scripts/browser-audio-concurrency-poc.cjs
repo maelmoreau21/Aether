@@ -57,9 +57,13 @@ const modules=['startup-buffer','errors','compatibility','source-selection','ext
           let ctx;const graphs=new Map(),context=()=>{ctx??=new AudioContext();window.audioContext=ctx;return ctx;};window.startAudioContext=()=>context().resume();
           new MutationObserver(()=>{for(const a of document.querySelectorAll('audio'))if(!graphs.has(a)){const source=context().createMediaElementSource(a),analyser=context().createAnalyser();source.connect(analyser);analyser.connect(context().destination);graphs.set(a,{source,analyser});}for(const[a,g]of graphs)if(!a.isConnected){g.source.disconnect();g.analyser.disconnect();graphs.delete(a);}}).observe(document.body,{childList:true,subtree:true});
         });
-        for(const name of modules){const source=baseline&&name==='external-audio'?execFileSync('git',['show',`${baselineCommit}:apps/web/src/lib/player/external-audio.ts`],{encoding:'utf8'}):fs.readFileSync(path.resolve('apps/web/src/lib/player',name+'.ts'),'utf8');const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+        const bundleDir=fs.mkdtempSync(path.join(temp,'bundle-'));
+        try{for(const name of modules){const source=baseline&&name==='external-audio'?execFileSync('git',['show',`${baselineCommit}:apps/web/src/lib/player/external-audio.ts`],{encoding:'utf8'}):fs.readFileSync(path.resolve('apps/web/src/lib/player',name+'.ts'),'utf8');const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
           const sha=hash(source);if(report.provenance.modules[name]&&report.provenance.modules[name].sourceSha256!==sha)throw new Error('Module changed during POC: '+name);report.provenance.modules[name]={sourceSha256:sha,transpiledSha256:hash(code)};
-          await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});}
+          const scriptPath=path.join(bundleDir,`${name}.js`);
+          fs.writeFileSync(scriptPath,`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`);
+          await page.addScriptTag({path:scriptPath});
+        }}finally{fs.rmSync(bundleDir,{recursive:true,force:true});}
         await page.evaluate(({probe,native,waitResume,saved})=>{
           window.errors=[];const video=document.querySelector('video');window.player=new window.native.NativePlayer(video,message=>window.errors.push(message));
           const media={id:'poc',title:'Synthetic',subtitles:[],sources:probe.streams.filter(s=>s.codec_type==='audio').map(s=>({id:`track-${s.index}`,audioTrackId:`internal-${s.index}`,language:s.tags?.language||'und',url:'/original',mime:'video/mp4',externalAudioUrl:'/unused',audioSegmentUrl:`/audio-${s.index}-chunk-`,durationSeconds:Number(probe.format.duration),audioSegmentMode:native?'absolute':'rebased'}))};

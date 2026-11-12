@@ -17,7 +17,12 @@ pub async fn load_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let rows = query(
-        "SELECT relative_path,size,modified_ns,probe_json FROM inventory_assets WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
+        "SELECT relative_path,size,modified_ns,probe_json \
+                FROM inventory_assets \
+                WHERE library_id=? AND available=1 AND source_id IN (SELECT s.id \
+                FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n \
+                ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') \
+                AND n.status != 'revoked')",
     )
     .bind(library_id)
     .fetch_all(&store.pool)
@@ -49,7 +54,15 @@ pub async fn load_scan_cache(
     library_id: &str,
 ) -> Result<HashMap<String, CachedFile>, sqlx::Error> {
     let mut rows = query(
-        "SELECT a.relative_path,a.size,a.modified_ns,f.fingerprint FROM inventory_assets a LEFT JOIN inventory_asset_fingerprints f ON f.asset_id=a.id AND f.size=a.size AND f.modified_ns=a.modified_ns WHERE a.library_id=? AND a.available=1 AND a.source_id IN (SELECT s.id FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked')",
+        "SELECT a.relative_path,a.size,a.modified_ns,f.fingerprint \
+                FROM inventory_assets a \
+                LEFT \
+                JOIN inventory_asset_fingerprints f ON f.asset_id=a.id AND f.size=a.size \
+                AND f.modified_ns=a.modified_ns \
+                WHERE a.library_id=? AND a.available=1 AND a.source_id IN (SELECT s.id \
+                FROM inventory_sources s JOIN libraries l ON l.id=s.library_id JOIN media_nodes n \
+                ON n.id=l.node_id WHERE s.root_snapshot=l.root AND l.kind IN ('films', 'series') \
+                AND n.status != 'revoked')",
     )
     .bind(library_id)
     .fetch(&store.pool);
@@ -151,12 +164,19 @@ pub async fn ingest(
         options.filter_file(&mut filtered);
         let file = &filtered;
         let identity_key = format!("{}\n{}", _root.to_string_lossy(), file.identity_key);
-        let existing =
-            query("SELECT a.id,w.identity_key,s.root_snapshot FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id WHERE a.library_id=? AND a.relative_path=?")
-                .bind(library_id)
-                .bind(&file.relative_path)
-                .fetch_optional(&mut *tx)
-                .await?;
+        let existing = query(
+            "SELECT a.id,w.identity_key,s.root_snapshot \
+                    FROM inventory_assets a \
+                    JOIN inventory_sources s ON s.id=a.source_id \
+                    JOIN inventory_versions v ON v.id=s.version_id \
+                    JOIN inventory_editions e ON e.id=v.edition_id \
+                    JOIN inventory_works w ON w.id=e.work_id \
+                    WHERE a.library_id=? AND a.relative_path=?",
+        )
+        .bind(library_id)
+        .bind(&file.relative_path)
+        .fetch_optional(&mut *tx)
+        .await?;
         let previous_asset_id = existing.as_ref().map(|r| r.get::<String, _>("id"));
         let asset_id = if let Some(row) = existing.filter(|row| {
             row.get::<String, _>("identity_key") == identity_key
@@ -298,7 +318,8 @@ pub async fn ingest(
         if let Some(image) = &file.poster {
             let work_id: String = query_scalar("SELECT e.work_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id WHERE a.id=?")
                 .bind(&asset_id).fetch_one(&mut *tx).await?;
-            query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?,?,?,?,?,?,?,?,?,1) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,priority=excluded.priority,available=1")
+            query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available) VALUES(?,?,?,?,?,?,?,?,?,1) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE \
+                    SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,priority=excluded.priority,available=1")
                 .bind(id()).bind(work_id).bind(library_id).bind(_root.to_string_lossy().as_ref())
                 .bind(&image.path).bind(image.size_bytes as i64).bind(&image.modified_ns)
                 .bind(&image.mime).bind(i64::from(image.priority)).execute(&mut *tx).await?;

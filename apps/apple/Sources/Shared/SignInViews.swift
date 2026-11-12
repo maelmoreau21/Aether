@@ -57,6 +57,17 @@ struct SignInView: View {
 
     private var form: some View {
         VStack(spacing: 20) {
+            // Accounts already signed in on this device and set aside: one touch to come back.
+            let known = model.accounts.filter { !$0.current }
+            if !known.isEmpty {
+                VStack(spacing: 8) {
+                    Text("Comptes déjà connectés sur cet appareil").font(.footnote).foregroundStyle(.secondary)
+                    ForEach(known) { account in
+                        Button(account.name) { model.switchAccount(account.id) }
+                            .buttonStyle(.bordered)
+                    }
+                }
+            }
             Text("Connexion").font(.title.bold())
             TextField("Identifiant", text: $login)
                 .textContentType(.username)

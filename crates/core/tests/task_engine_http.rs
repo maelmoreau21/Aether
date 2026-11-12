@@ -1,15 +1,15 @@
+use aether_core::{
+    auth::{self, AuthState},
+    database::query,
+    identity::IdentityStore,
+    task_engine,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::{self, AuthState},
-    database::query,
-    identity::IdentityStore,
-    task_engine,
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -55,7 +55,7 @@ async fn jobs_require_live_admin_csrf_validate_input_and_deduplicate() {
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic-root',1)").execute(store.pool()).await.unwrap();
@@ -242,7 +242,7 @@ async fn jobs_require_live_admin_csrf_validate_input_and_deduplicate() {
             .status(),
         StatusCode::ACCEPTED
     );
-    let grouped_count: i64 = media_poc::database::query_scalar(
+    let grouped_count: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM durable_tasks WHERE refresh_mode='full'",
     )
     .fetch_one(store.pool())

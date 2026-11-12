@@ -103,7 +103,20 @@ async fn accessible(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let actor = state.auth.authenticate(&headers).await?;
-    let rows:Vec<(String,String,String)> = crate::database::query_as("SELECT l.id,l.name,l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) AND l.enabled=1 AND (n.status!='revoked' OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries child ON child.id=f.library_id JOIN media_nodes cn ON cn.id=child.node_id WHERE f.parent_id=l.id AND f.active=1 AND cn.status!='revoked')) AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) ORDER BY l.name,l.id")
+    let rows:Vec<(String,String,String)> = crate::database::query_as("SELECT l.id,l.name,l.kind \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) \
+            AND l.enabled=1 AND (n.status!='revoked' OR EXISTS(SELECT 1 FROM library_folders f \
+            JOIN libraries child ON child.id=f.library_id JOIN media_nodes cn \
+            ON cn.id=child.node_id WHERE f.parent_id=l.id AND f.active=1 AND cn.status!='revoked')) \
+            AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT \
+            JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT \
+            JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+            AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+            OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+            AND p.user_id=?)) \
+            ORDER BY l.name,l.id")
         .bind(actor.user.role.as_str()).bind(actor.user.id).fetch_all(&state.auth.store.pool).await.map_err(database)?;
     Ok(Json(
         serde_json::json!({"libraries":rows.into_iter().map(|(id,name,kind)|serde_json::json!({"id":id,"name":name,"kind":kind})).collect::<Vec<_>>()}),
@@ -199,7 +212,29 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
         .await
         .map_err(database)?;
         library.image_versions = revisions.into_iter().collect();
-        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/images/' || wi.id || '?width=320' FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster' ORDER BY wi.position,wi.id LIMIT 1),(SELECT '/api/v1/works/' || w.id || '/poster' FROM work_posters wp WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url FROM inventory_works w JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE (l.id=? OR l.id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND l.enabled=1 AND n.status='connected' AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root)) ORDER BY w.title_sort,w.id LIMIT 4")
+        library.cover_urls = crate::database::query_scalar("SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/images/' || wi.id || \
+                '?width=320' FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster' \
+                ORDER BY wi.position,wi.id LIMIT 1),(SELECT '/api/v1/works/' || w.id || '/poster' \
+                FROM work_posters wp \
+                WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' \
+                FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 \
+                AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url \
+                FROM inventory_works w \
+                JOIN libraries l ON l.id=w.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                WHERE (l.id=? OR l.id IN (SELECT library_id FROM library_folders WHERE parent_id=? \
+                AND active=1)) AND l.enabled=1 AND n.status='connected' \
+                AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 \
+                FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id \
+                JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca \
+                ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 \
+                AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_image_entries wi \
+                WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp \
+                WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i \
+                WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 \
+                AND i.root_snapshot=l.root)) \
+                ORDER BY w.title_sort,w.id \
+                LIMIT 4")
             .bind(&library.id).bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
     }
     let grants = crate::database::query(
@@ -944,7 +979,8 @@ async fn save(
         let previous_id: Option<String> = crate::database::query_scalar("SELECT l.id FROM libraries l JOIN library_folders f ON f.library_id=l.id WHERE f.parent_id=? AND l.node_id=? AND l.root=?")
             .bind(&id).bind(&folder.node_id).bind(&folder.root).fetch_optional(&mut *tx).await.map_err(database)?;
         let folder_id = previous_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,excluded_patterns,options_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,enabled=excluded.enabled,excluded_patterns=excluded.excluded_patterns,options_json=excluded.options_json")
+        crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,excluded_patterns,options_json) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE \
+                SET name=excluded.name,kind=excluded.kind,enabled=excluded.enabled,excluded_patterns=excluded.excluded_patterns,options_json=excluded.options_json")
             .bind(&folder_id).bind(&input.name).bind(&input.kind).bind(&folder.node_id).bind(&folder.root).bind(i64::from(input.enabled)).bind(input.excluded_patterns.trim()).bind(&options_json).execute(&mut *tx).await.map_err(database)?;
         crate::database::query("INSERT INTO library_folders(library_id,parent_id,active) VALUES(?,?,1) ON CONFLICT(library_id) DO UPDATE SET active=1")
             .bind(&folder_id).bind(&id).execute(&mut *tx).await.map_err(database)?;
@@ -1371,7 +1407,7 @@ mod http_tests {
             crate::database::query("INSERT INTO local_credentials(user_id,login,password_hash) VALUES(?,?,'unused-test-hash')").bind(id).bind(id).execute(&store.pool).await.unwrap();
             let hash = format!("{:x}", Sha256::digest(raw.as_bytes()));
             crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(hash).bind(id).execute(&store.pool).await.unwrap();
-            cookies.push(format!("media_session={raw}"));
+            cookies.push(format!("aether_session={raw}"));
         }
         let csrf = format!(
             "{:x}",

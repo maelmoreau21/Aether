@@ -28,7 +28,7 @@ Aether respecte strictement le standard **Semantic Versioning 2.0.0** :
 Tous les composants de la plateforme partagent rigoureusement la **même version produit** :
 1. **Backend Rust Aether Core** (`aether-core`)
 2. **Media Node Rust** (`aether-node`)
-3. **Serveur autonome** (`aether` / `media-poc`)
+3. **Serveur autonome** (`aether` / `aether-core`)
 4. **Interface Web SvelteKit** (`apps/web`)
 5. **Images Docker GHCR** (`ghcr.io/maelmoreau21/aether`, `aether-core`, `aether-node`)
 

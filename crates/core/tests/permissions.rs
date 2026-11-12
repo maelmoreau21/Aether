@@ -1,13 +1,13 @@
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode, header},
-};
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     identity::{IdentityStore, Role},
     node::Inventory,
     secure_app,
+};
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode, header},
 };
 use std::path::PathBuf;
 use tower::ServiceExt;
@@ -59,10 +59,10 @@ async fn assert_denied(router: &Router, cookie: Option<&str>, expected: StatusCo
 
 #[tokio::test]
 async fn auth_precedes_all_fixture_metadata_streams_and_derived_resources() {
-    assert!(media_poc::permissions::can_read_fixture_library(
+    assert!(aether_core::permissions::can_read_fixture_library(
         Role::Administrator
     ));
-    assert!(!media_poc::permissions::can_read_fixture_library(
+    assert!(!aether_core::permissions::can_read_fixture_library(
         Role::User
     ));
     let temp = tempfile::tempdir().unwrap();
@@ -85,7 +85,7 @@ async fn auth_precedes_all_fixture_metadata_streams_and_derived_resources() {
     assert_denied(&router, None, StatusCode::UNAUTHORIZED).await;
     assert_denied(
         &router,
-        Some("media_session=invalid"),
+        Some("aether_session=invalid"),
         StatusCode::UNAUTHORIZED,
     )
     .await;

@@ -129,7 +129,20 @@ async fn list(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     administrator(&auth, &headers, false).await?;
-    let users:Vec<Account>=query_as("SELECT u.id,COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id) AS login,u.role,u.display_name,u.disabled_at,(SELECT MAX(s.last_seen_at) FROM sessions s WHERE s.user_id=u.id) AS last_seen_at,CAST(EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=u.id) AS INTEGER) AS has_avatar,CAST((c.login IS NULL) AS INTEGER) AS sso FROM users u LEFT JOIN local_credentials c ON c.user_id=u.id ORDER BY login,u.id").fetch_all(&auth.store.pool).await.map_err(db)?;
+    let users: Vec<Account> = query_as(
+        "SELECT u.id,COALESCE(u.sso_username,c.login,u.display_name,'sso-' || u.id) AS \
+            login,u.role,u.display_name,u.disabled_at,(SELECT MAX(s.last_seen_at) FROM sessions s \
+            WHERE s.user_id=u.id) AS last_seen_at,CAST(EXISTS(SELECT 1 FROM user_avatars a \
+            WHERE a.user_id=u.id) AS INTEGER) AS has_avatar,CAST((c.login IS NULL) AS INTEGER) AS \
+            sso \
+            FROM users u \
+            LEFT \
+            JOIN local_credentials c ON c.user_id=u.id \
+            ORDER BY login,u.id",
+    )
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(db)?;
     Ok(Json(serde_json::json!({"users":users})))
 }
 async fn avatar(
@@ -234,7 +247,13 @@ async fn recheck_actor(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     actor: &Authenticated,
 ) -> Result<(), ApiError> {
-    let valid:i64=query_scalar("SELECT COUNT(*) FROM users u JOIN sessions s ON s.user_id=u.id WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL AND s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-604800").bind(&actor.user.id).bind(&actor.token_hash).fetch_one(&mut **tx).await.map_err(db)?;
+    let valid:i64=query_scalar(
+        "SELECT COUNT(*) FROM users u JOIN sessions s ON s.user_id=u.id          WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL          AND s.token_hash=? AND s.expires_at>unixepoch() AND s.last_seen_at>unixepoch()-?",
+    )
+    .bind(&actor.user.id)
+    .bind(&actor.token_hash)
+    .bind(crate::auth::IDLE_SECONDS)
+    .fetch_one(&mut **tx).await.map_err(db)?;
     if valid != 1 {
         return Err(error(StatusCode::FORBIDDEN, "administrator_required"));
     }

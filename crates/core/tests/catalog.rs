@@ -1,9 +1,9 @@
+use aether_core::{app, node::Inventory};
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use http_body_util::BodyExt;
-use media_poc::{app, node::Inventory};
 use serde_json::Value;
 use std::path::PathBuf;
 use tower::ServiceExt;
@@ -165,7 +165,7 @@ async fn catalog_search_pagination_errors_and_origin_guards() {
 async fn unprepared_p1_inventory_exposes_an_empty_catalog_and_no_details() {
     let temp = tempfile::tempdir().unwrap();
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/generated");
-    for (_, name, _) in media_poc::node::FIXTURES {
+    for (_, name, _) in aether_core::node::FIXTURES {
         std::fs::copy(root.join(name), temp.path().join(name)).unwrap();
     }
     let router = app(Inventory::load(temp.path().to_owned()).await.unwrap(), 3000);

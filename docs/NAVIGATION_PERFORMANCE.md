@@ -123,9 +123,9 @@ npm test --prefix apps/web
 npm run check --prefix apps/web
 npm run lint --prefix apps/web
 npm run build --prefix apps/web
-cargo test --locked -p media-poc --test catalog_performance --test scanner_flow --test distributed_multi_node -j 1 -- --test-threads=1
+cargo test --locked -p aether-core --test catalog_performance --test scanner_flow --test distributed_multi_node -j 1 -- --test-threads=1
 $env:MEDIA_REPORT_DIR='target/navigation-performance/core-scanner'
-cargo test --locked -p media-poc --test browser_scanner -j 1 -- --ignored --nocapture
+cargo test --locked -p aether-core --test browser_scanner -j 1 -- --ignored --nocapture
 # Terminal séparé :
 npm run dev --prefix apps/web -- --port 5179
 # Autre terminal :
@@ -240,10 +240,10 @@ npm test --prefix apps/web
 npm run check --prefix apps/web
 npm run lint --prefix apps/web
 npm run build --prefix apps/web
-cargo test --locked -p media-poc --test catalog_performance -j 1 -- --nocapture --test-threads=1
+cargo test --locked -p aether-core --test catalog_performance -j 1 -- --nocapture --test-threads=1
 cargo test --locked -p media-node --lib images:: -j 1 -- --test-threads=1
 cargo test --locked -p media-node --lib scanner::tests:: -j 1 -- --test-threads=1
-cargo test --locked -p media-poc --test posters_flow -j 1 -- --test-threads=1
+cargo test --locked -p aether-core --test posters_flow -j 1 -- --test-threads=1
 cargo fmt --check
 cargo clippy --locked --all-targets -j 1 -- -D warnings
 node scripts/browser-navigation-performance.cjs

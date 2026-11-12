@@ -232,10 +232,38 @@ async fn resolve(auth: &AuthState, actor: &Authenticated, id: &str, music: bool)
     }
     let role = actor.user.role.as_str();
     let found: Option<Media> = if music {
-        query_as("SELECT t.id AS media_id,t.library_id,l.node_id,'music' AS kind,t.title,t.artist,t.album FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.id=? AND t.available=1 AND t.root_snapshot=l.root AND l.enabled=1 AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND NOT EXISTS(SELECT 1 FROM parental_policies p WHERE p.user_id=? AND p.allow_unrated=0)")
-            .bind(id).bind(role).bind(&actor.user.id).bind(&actor.user.id).fetch_optional(&auth.store.pool).await.map_err(db)?
+        query_as(
+            "SELECT t.id AS media_id,t.library_id,l.node_id,'music' AS \
+                kind,t.title,t.artist,t.album \
+                FROM music_tracks t \
+                JOIN libraries l ON l.id=t.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                WHERE t.id=? AND t.available=1 AND t.root_snapshot=l.root AND l.enabled=1 \
+                AND n.status!='revoked' AND (?='administrator' OR EXISTS(SELECT 1 \
+                FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) \
+                AND NOT EXISTS(SELECT 1 FROM parental_policies p WHERE p.user_id=? \
+                AND p.allow_unrated=0)",
+        )
+        .bind(id)
+        .bind(role)
+        .bind(&actor.user.id)
+        .bind(&actor.user.id)
+        .fetch_optional(&auth.store.pool)
+        .await
+        .map_err(db)?
     } else {
-        query_as("SELECT w.id AS media_id,s.library_id,l.node_id,w.kind,COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title,'' AS artist,'' AS album FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_works w ON w.id=e.work_id JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND n.status!='revoked' AND w.kind IN ('film','episode') AND (?='administrator' OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
+        query_as("SELECT w.id AS media_id,s.library_id,l.node_id,w.kind,COALESCE(json_extract(w.manual_json,'$.title'),w.title) AS title,'' AS artist,'' AS album \
+                FROM inventory_assets a \
+                JOIN inventory_sources s ON s.id=a.source_id \
+                JOIN inventory_versions v ON v.id=s.version_id \
+                JOIN inventory_editions e ON e.id=v.edition_id \
+                JOIN inventory_works w ON w.id=e.work_id \
+                JOIN libraries l ON l.id=s.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                WHERE a.id=? AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 \
+                AND n.status!='revoked' AND w.kind IN ('film','episode') AND (?='administrator' \
+                OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+                AND p.user_id=?))")
             .bind(id).bind(role).bind(&actor.user.id).fetch_optional(&auth.store.pool).await.map_err(db)?
     };
     let media = found.ok_or(StatusCode::FORBIDDEN)?;

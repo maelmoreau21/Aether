@@ -2,7 +2,7 @@
 use crate::applications::{Error, err};
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     time::Duration,
@@ -193,9 +193,308 @@ pub async fn request(
         .map_err(|_| err(StatusCode::BAD_GATEWAY, "invalid_remote_response"))
 }
 
+/// Artwork hosts the interface may show for titles that are not in the library yet.
+/// The host is fixed here and the path is validated by the caller: no URL is client input.
+const IMAGE_HOSTS: [&str; 2] = ["image.tmdb.org", "artworks.thetvdb.com"];
+static IMAGE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
+/// Unlike an administrator-configured connection, a public host must never resolve to a
+/// private, loopback or link-local address (DNS rebinding towards the local network).
+fn public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            !(ip.is_private()
+                || ip.is_loopback()
+                || ip.is_link_local()
+                || ip.is_unspecified()
+                || ip.is_broadcast()
+                || ip.is_multicast()
+                || ip.is_documentation()
+                || a == 0
+                || a >= 240
+                || (a == 100 && (64..128).contains(&b)))
+        }
+        IpAddr::V6(ip) => {
+            if let Some(v4) = ip.to_ipv4_mapped() {
+                return public_ip(IpAddr::V4(v4));
+            }
+            let first = ip.segments()[0];
+            !(ip.is_unspecified()
+                || ip.is_loopback()
+                || ip.is_multicast()
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80)
+        }
+    }
+}
+
+/// One small poster from a fixed artwork host: HTTPS only, resolved address pinned and public,
+/// no redirect, bounded size, and only image types the browser may render.
+pub async fn public_image(host: &str, path: &str) -> Result<(Vec<u8>, &'static str), Error> {
+    if !IMAGE_HOSTS.contains(&host)
+        || !path.starts_with('/')
+        || path.contains(['?', '#', '%', '\\'])
+    {
+        return Err(err(StatusCode::FORBIDDEN, "connection_path_forbidden"));
+    }
+    let _slot = IMAGE_SLOTS
+        .try_acquire()
+        .map_err(|_| err(StatusCode::TOO_MANY_REQUESTS, "image_busy"))?;
+    let resolved =
+        tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((host, 443)))
+            .await
+            .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_dns_timeout"))?
+            .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_dns_failed"))?;
+    let sockets: Vec<_> = resolved.collect();
+    if sockets.is_empty() || sockets.iter().any(|socket| !public_ip(socket.ip())) {
+        return Err(err(StatusCode::FORBIDDEN, "connection_address_forbidden"));
+    }
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, &sockets)
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?;
+    let mut response = client
+        .get(format!("https://{host}{path}"))
+        .header(
+            "User-Agent",
+            "Media-Requests/0.1 (self-hosted media manager)",
+        )
+        .send()
+        .await
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?;
+    if !response.status().is_success() {
+        return Err(err(StatusCode::NOT_FOUND, "image_not_found"));
+    }
+    let content_type = match response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.split(';').next().unwrap_or("").trim())
+    {
+        Some("image/jpeg") => "image/jpeg",
+        Some("image/png") => "image/png",
+        Some("image/webp") => "image/webp",
+        _ => return Err(err(StatusCode::BAD_GATEWAY, "invalid_remote_response")),
+    };
+    let mut data = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?
+    {
+        if data.len() + chunk.len() > 1_500_000 {
+            return Err(err(StatusCode::BAD_GATEWAY, "remote_response_too_large"));
+        }
+        data.extend_from_slice(&chunk);
+    }
+    if data.is_empty() {
+        return Err(err(StatusCode::BAD_GATEWAY, "invalid_remote_response"));
+    }
+    Ok((data, content_type))
+}
+
+/// Direct search on TheMovieDB API (for films and series) with pinned public IP address.
+pub async fn public_tmdb_search(kind: &str, q: &str, api_key: &str) -> Result<Vec<Value>, Error> {
+    if !matches!(kind, "film" | "series") {
+        return Ok(vec![]);
+    }
+    let host = "api.themoviedb.org";
+    let endpoint = if kind == "film" {
+        "/3/search/movie"
+    } else {
+        "/3/search/tv"
+    };
+
+    let resolved =
+        tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((host, 443)))
+            .await
+            .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_dns_timeout"))?
+            .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_dns_failed"))?;
+    let sockets: Vec<_> = resolved.collect();
+    if sockets.is_empty() || sockets.iter().any(|socket| !public_ip(socket.ip())) {
+        return Err(err(StatusCode::FORBIDDEN, "connection_address_forbidden"));
+    }
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve_to_addrs(host, &sockets)
+        .timeout(Duration::from_secs(6))
+        .build()
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?;
+
+    let is_bearer = api_key.starts_with("ey") || api_key.len() > 40;
+    let trimmed_key = api_key.trim();
+    if trimmed_key.is_empty() || trimmed_key.chars().any(|c| !c.is_ascii_graphic()) {
+        return Err(err(StatusCode::UNAUTHORIZED, "connection_auth_failed"));
+    }
+    let query_clean: String = q.chars().filter(|c| !c.is_control()).take(200).collect();
+    let query_trimmed = query_clean.trim();
+    if query_trimmed.is_empty() {
+        return Ok(vec![]);
+    }
+    let mut url = reqwest::Url::parse(&format!("https://{host}{endpoint}"))
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs
+            .append_pair("include_adult", "false")
+            .append_pair("language", "fr-FR")
+            .append_pair("query", query_trimmed);
+        if !is_bearer {
+            pairs.append_pair("api_key", trimmed_key);
+        }
+    }
+
+    let mut request = client
+        .get(url)
+        .header(
+            "User-Agent",
+            "Media-Requests/0.1 (self-hosted media manager)",
+        )
+        .header("Accept", "application/json");
+    if is_bearer {
+        request = request.header("Authorization", format!("Bearer {trimmed_key}"));
+    }
+
+    let mut response = request
+        .send()
+        .await
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?;
+
+    if !response.status().is_success() {
+        let code = match response.status().as_u16() {
+            401 | 403 => "connection_auth_failed",
+            404 => "remote_content_not_found",
+            429 => "connection_rate_limited",
+            _ => "remote_request_failed",
+        };
+        return Err(err(StatusCode::BAD_GATEWAY, code));
+    }
+
+    let mut body_bytes = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "connection_failed"))?
+    {
+        if body_bytes.len() + chunk.len() > 2_000_000 {
+            return Err(err(StatusCode::BAD_GATEWAY, "remote_response_too_large"));
+        }
+        body_bytes.extend_from_slice(&chunk);
+    }
+
+    let data: Value = serde_json::from_slice(&body_bytes)
+        .map_err(|_| err(StatusCode::BAD_GATEWAY, "invalid_remote_response"))?;
+
+    let Some(results) = data["results"].as_array() else {
+        return Ok(vec![]);
+    };
+
+    let mut items = Vec::new();
+    for v in results {
+        let Some(id) = v["id"]
+            .as_i64()
+            .filter(|id| *id > 0)
+            .map(|id| id.to_string())
+        else {
+            continue;
+        };
+        let raw_title = if kind == "series" {
+            v["name"].as_str().or_else(|| v["original_name"].as_str())
+        } else {
+            v["title"].as_str().or_else(|| v["original_title"].as_str())
+        };
+        let Some(raw_title) = raw_title.filter(|s| !s.trim().is_empty()) else {
+            continue;
+        };
+        let title: String = raw_title
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(200)
+            .collect();
+        if title.trim().is_empty() {
+            continue;
+        }
+        let year = if kind == "series" {
+            v["first_air_date"]
+                .as_str()
+                .and_then(|d| d.get(..4)?.parse::<i64>().ok())
+        } else {
+            v["release_date"]
+                .as_str()
+                .and_then(|d| d.get(..4)?.parse::<i64>().ok())
+        }
+        .filter(|y| (1800..=3000).contains(y));
+
+        let summary = v["overview"].as_str().map(|s| {
+            s.chars()
+                .filter(|c| !c.is_control() || *c == '\n')
+                .take(600)
+                .collect::<String>()
+        });
+
+        let poster = v["poster_path"].as_str().and_then(|path| {
+            if super::remote::valid_poster_path(path) {
+                Some(json!({"src": "tmdb", "path": path}))
+            } else {
+                None
+            }
+        });
+
+        items.push(json!({
+            "kind": kind,
+            "title": title,
+            "year": year,
+            "externalId": id,
+            "externalProvider": "tmdb",
+            "summary": summary,
+            "poster": poster,
+        }));
+    }
+    Ok(items)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn artwork_hosts_never_resolve_to_the_local_network() {
+        for ip in [
+            "127.0.0.1",
+            "10.0.0.5",
+            "192.168.1.4",
+            "172.16.0.1",
+            "169.254.169.254",
+            "100.64.0.1",
+            "0.0.0.0",
+            "::1",
+            "fd00::1",
+            "fe80::1",
+            "::ffff:192.168.1.4",
+        ] {
+            assert!(!public_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["8.8.8.8", "104.18.20.1", "2606:4700::1"] {
+            assert!(public_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+    #[tokio::test]
+    async fn only_fixed_artwork_hosts_and_plain_paths_are_fetched() {
+        for (host, path) in [
+            ("example.com", "/a.jpg"),
+            ("127.0.0.1", "/a.jpg"),
+            ("image.tmdb.org", "a.jpg"),
+            ("image.tmdb.org", "/a.jpg?x=1"),
+            ("image.tmdb.org", "/%2e%2e/a.jpg"),
+        ] {
+            assert!(public_image(host, path).await.is_err(), "{host}{path}");
+        }
+    }
     #[test]
     fn connection_policy_keeps_admin_lan_but_denies_metadata() {
         assert!(allowed_ip("127.0.0.1".parse().unwrap()));

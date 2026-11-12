@@ -8,7 +8,7 @@ conservation et effacement personnel. Contrat : [STATISTICS.md](STATISTICS.md).
 
 - Web : `npm run check` (zéro erreur et avertissement), `npm run lint`, build
   statique et 62 tests ciblés dans `collector`, `progress`, `native`, `navigation`.
-- Dépôt courant : `cargo test --offline --locked -j 1 -p media-poc --lib statistics
+- Dépôt courant : `cargo test --offline --locked -j 1 -p aether-core --lib statistics
   -- --nocapture` : deux tests de calcul et le contrat HTTP SQLite passent.
 - Le même contrat HTTP passe sur PostgreSQL 18 jetable, y compris les droits
   implicites de l'administrateur dans sa vue personnelle. Le test ignoré
@@ -39,7 +39,7 @@ restent à atteindre dans ce scénario. Les tests unitaires du collecteur musiqu
 et sa séparation en sessions passent ; ils ne remplacent pas cette vérification.
 
 Reprise : construire le Web, puis exécuter
-`cargo test --offline --locked -j 1 -p media-poc --test browser_statistics -- --ignored --nocapture`.
+`cargo test --offline --locked -j 1 -p aether-core --test browser_statistics -- --ignored --nocapture`.
 Les rapports locaux sont dans `output/playwright/statistics/`. Sur cette machine
 chargée, la dernière exécution utilisait `MEDIA_ARGON2_MEMORY_KIB=19456` uniquement
 pour les comptes jetables du test ; les paramètres de production sont inchangés.

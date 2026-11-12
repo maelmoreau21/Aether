@@ -43,7 +43,7 @@ fn main(){
     if ($LASTEXITCODE -ne 0) { throw 'Client bridge build failed.' }
     Copy-Item -LiteralPath (Join-Path $testStage 'pg_dump.exe') -Destination (Join-Path $testStage 'pg_restore.exe')
     $env:PATH = $testStage + [IO.Path]::PathSeparator + $env:PATH
-    & cargo test --locked -p media-poc --test admin_postgres -- --ignored --test-threads=1
+    & cargo test --locked -p aether-core --test admin_postgres -- --ignored --test-threads=1
     if ($LASTEXITCODE -ne 0) { throw 'Full PostgreSQL backup/restore validation failed.' }
     Write-Host 'Real PostgreSQL 18 full unencrypted backup and restore passed.'
 } finally {

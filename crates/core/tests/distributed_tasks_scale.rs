@@ -1,5 +1,11 @@
 //! In-process HTTP responsiveness under durable-queue contention. Simulated nodes
 //! execute no media: these measurements do not establish video playback stability.
+use aether_core::{
+    auth::{self, AuthState},
+    database::{query, query_scalar},
+    identity::IdentityStore,
+    task_engine as engine,
+};
 use axum::{
     Router,
     body::Body,
@@ -7,12 +13,6 @@ use axum::{
     routing::get,
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::{self, AuthState},
-    database::{query, query_scalar},
-    identity::IdentityStore,
-    task_engine as engine,
-};
 use serde_json::{Value, json};
 use std::{collections::HashSet, time::Instant};
 use tower::ServiceExt;
@@ -171,7 +171,7 @@ async fn backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness() {
     let seed_ms = seed_start.elapsed().as_secs_f64() * 1000.0;
 
     let (cpu_before, rss_before) = process_usage();
-    let statements_before = media_poc::database::statement_calls();
+    let statements_before = aether_core::database::statement_calls();
     let wall = Instant::now();
     let mut workers = tokio::task::JoinSet::new();
     for node in 0..100 {
@@ -258,7 +258,7 @@ async fn backlog_and_one_hundred_claimers_preserve_admin_http_responsiveness() {
     let (mut navigation, mut health) = reader.await.unwrap();
     let elapsed = wall.elapsed().as_secs_f64();
     let (cpu_after, rss_after) = process_usage();
-    let statement_calls = media_poc::database::statement_calls()
+    let statement_calls = aether_core::database::statement_calls()
         .zip(statements_before)
         .map(|(after, before)| after - before);
     let completed: i64 =
@@ -389,7 +389,7 @@ async fn ten_thousand_real_admissions_keep_authenticated_navigation_served() {
         samples
     });
     let (cpu_before, rss_before) = process_usage();
-    let statements_before = media_poc::database::statement_calls();
+    let statements_before = aether_core::database::statement_calls();
     let wall = Instant::now();
     let mut admission = Vec::with_capacity(10_000);
     for index in 0..10_000 {
@@ -411,7 +411,7 @@ async fn ten_thousand_real_admissions_keep_authenticated_navigation_served() {
     finished.store(true, Ordering::Release);
     let mut navigation = reader.await.unwrap();
     let (cpu_after, rss_after) = process_usage();
-    let statement_calls = media_poc::database::statement_calls()
+    let statement_calls = aether_core::database::statement_calls()
         .zip(statements_before)
         .map(|(after, before)| after - before);
     let admitted: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE status='queued'")

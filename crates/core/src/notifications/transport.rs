@@ -41,6 +41,17 @@ fn url(config: &Config) -> Result<reqwest::Url> {
     {
         return Err("notification_destination_denied");
     }
+    if !local && let Some(host) = value.host_str() {
+        let lower = host.trim_matches(['[', ']']).to_ascii_lowercase();
+        if lower == "localhost"
+            || lower.ends_with(".localhost")
+            || lower.ends_with(".local")
+            || lower.ends_with(".internal")
+            || lower.ends_with(".arpa")
+        {
+            return Err("notification_destination_denied");
+        }
+    }
     if config.destination.len() > 2048
         || value.host_str().is_none()
         || (!local && (value.scheme() != "https" || value.port_or_known_default() != Some(443)))
@@ -88,6 +99,25 @@ pub(super) fn validate(kind: &str, config: &Config) -> Result<()> {
                 || !mailbox(&config.recipient)
             {
                 return Err("notification_invalid_config");
+            }
+            if !config.local_test() {
+                let lower = config
+                    .smtp_host
+                    .trim_matches(['[', ']'])
+                    .to_ascii_lowercase();
+                if let Ok(ip) = lower.parse::<std::net::IpAddr>()
+                    && !crate::extensions::repositories::public_ip(ip)
+                {
+                    return Err("notification_destination_denied");
+                }
+                if lower == "localhost"
+                    || lower.ends_with(".localhost")
+                    || lower.ends_with(".local")
+                    || lower.ends_with(".internal")
+                    || lower.ends_with(".arpa")
+                {
+                    return Err("notification_destination_denied");
+                }
             }
             if !config.username.is_empty() && config.secret.as_deref().is_none_or(|s| s.is_empty())
             {

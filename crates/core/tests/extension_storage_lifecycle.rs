@@ -1,10 +1,10 @@
-use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
-use media_poc::{
+use aether_core::{
     database::{begin_write, begin_write_scoped, query, query_scalar},
     extensions::data::{self as extension_data, Context},
     extensions::data_lifecycle as extension_data_lifecycle,
     identity::IdentityStore,
 };
+use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
 
 async fn fixture(store: &IdentityStore) -> Context {
     query("INSERT INTO users(id,role) VALUES('lifecycle-admin','administrator') ON CONFLICT DO NOTHING").execute(store.pool()).await.unwrap();
@@ -111,7 +111,7 @@ async fn uninstall_contract(store: &IdentityStore) {
     };
     // Completed durable objects survive; cache and incomplete reservations do not.
     for (durability, complete) in [("durable", true), ("cache", true), ("durable", false)] {
-        let object = media_poc::extensions::objects::execute(
+        let object = aether_core::extensions::objects::execute(
             store,
             &c,
             objects(ObjectOperation::Begin {
@@ -127,7 +127,7 @@ async fn uninstall_contract(store: &IdentityStore) {
         .metadata
         .unwrap();
         if complete {
-            media_poc::extensions::objects::execute(
+            aether_core::extensions::objects::execute(
                 store,
                 &c,
                 objects(ObjectOperation::Finish { id: object.id }),

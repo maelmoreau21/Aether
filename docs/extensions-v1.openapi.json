@@ -2275,7 +2275,7 @@
       "session": {
         "type": "apiKey",
         "in": "cookie",
-        "name": "media_session"
+        "name": "aether_session"
       }
     },
     "schemas": {

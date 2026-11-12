@@ -694,6 +694,12 @@ impl AssetStore {
         }
         let content_type =
             HeaderValue::from_str(&meta.mime).map_err(|_| AssetError::InvalidMime)?;
+        if meta.mime == "image/svg+xml" {
+            builder = builder.header(
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            );
+        }
         builder = builder
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, content_type)

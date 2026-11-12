@@ -470,6 +470,22 @@ fn attachment_kind(name: &str) -> Option<u8> {
         _ => None,
     }
 }
+fn random_salt() -> Result<[u8; SALT_LEN], BundleError> {
+    let mut buffer = [0u8; SALT_LEN];
+    SystemRandom::new()
+        .fill(&mut buffer)
+        .map_err(|_| BundleError::Worker)?;
+    Ok(buffer)
+}
+
+fn read_salt(input: &mut File) -> Result<[u8; SALT_LEN], BundleError> {
+    let mut buffer = [0u8; SALT_LEN];
+    input
+        .read_exact(&mut buffer)
+        .map_err(|_| BundleError::InvalidBundle)?;
+    Ok(buffer)
+}
+
 fn create_sync(
     database: &Path,
     mut config: BTreeMap<String, String>,
@@ -556,10 +572,7 @@ fn create_sync(
             Sealer::plain()
         }
         Protection::Encrypted(key) => {
-            let mut salt = [0u8; SALT_LEN];
-            SystemRandom::new()
-                .fill(&mut salt)
-                .map_err(|_| BundleError::Worker)?;
+            let salt = random_salt()?;
             output.write_all(MAGIC_V3)?;
             output.write_all(&salt)?;
             Sealer::sealed(key, &salt)?
@@ -686,10 +699,7 @@ fn extract_sync(
         Sealer::plain()
     } else if &header == MAGIC_V3 {
         let key = key.ok_or(BundleError::KeyRequired)?;
-        let mut salt = [0u8; SALT_LEN];
-        input
-            .read_exact(&mut salt)
-            .map_err(|_| BundleError::InvalidBundle)?;
+        let salt = read_salt(&mut input)?;
         Sealer::sealed(key, &salt)?
     } else if &header == MAGIC_LEGACY_ENCRYPTED {
         return Err(BundleError::LegacyEncrypted);

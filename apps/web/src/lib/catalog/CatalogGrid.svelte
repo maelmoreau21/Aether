@@ -8,6 +8,10 @@
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
+  import {
+    features, loadFeatures, discoverRequests, posterUrl, requestPayload,
+    statusLabels, statusTone, applicationRequest, type SearchResult, type MediaRequest
+  } from '../applications/api';
 
   let {
     section,
@@ -108,6 +112,7 @@
   onMount(() => {
     if (activeFilterCount > 0) showFilters = true;
     focusSearch();
+    void loadFeatures();
   });
 
   $effect(() => {
@@ -175,6 +180,76 @@
     }
     return list;
   });
+
+  // On-demand discovery state
+  let discoverResults = $state<SearchResult[]>([]);
+  const discoverMissing = $derived.by(() => {
+    return discoverResults.filter(r => !r.inLibrary && (selectedKindFilter === 'all' || selectedKindFilter === r.kind));
+  });
+
+  // Request modal dialog state
+  let requestDialog = $state<HTMLDialogElement>();
+  let requestingItem = $state<SearchResult | null>(null);
+  let requestingScope = $state<'all' | 'pick'>('all');
+  let chosenSeasons = $state<number[]>([]);
+  let requestingBusy = $state(false);
+  let requestSuccessMessage = $state('');
+
+  $effect(() => {
+    const trimmed = query.trim();
+    // Titles missing from Aether are offered only on the global search page, never while
+    // filtering the films or series catalogue.
+    if (section !== 'search' || !$features.requests || trimmed.length < 2) {
+      discoverResults = [];
+      return;
+    }
+    const controller = new AbortController();
+    void discoverRequests(trimmed, controller.signal)
+      .then(data => {
+        discoverResults = data.results ?? [];
+      })
+      .catch(() => {
+        discoverResults = [];
+      });
+    return () => controller.abort();
+  });
+
+  function openRequestDialog(item: SearchResult) {
+    requestingItem = item;
+    requestingScope = 'all';
+    chosenSeasons = [];
+    requestDialog?.showModal();
+  }
+
+  async function submitRequest(event: SubmitEvent) {
+    event.preventDefault();
+    if (!requestingItem || requestingBusy) return;
+    const target = requestingItem;
+    requestingBusy = true;
+    try {
+      const payload = requestPayload(target, {
+        seasons: requestingScope === 'all' ? [] : chosenSeasons,
+        monitorFuture: false
+      });
+      const created = await applicationRequest<MediaRequest>('/api/v1/requests', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      requestDialog?.close();
+      requestSuccessMessage = $t('rq_request_created', {
+        title: created.title ?? target.title,
+        status: statusLabels[created.status] ?? created.status
+      });
+      discoverResults = discoverResults.map(r => r === target ? {
+        ...r,
+        request: { status: created.status, mine: true, id: created.id }
+      } : r);
+    } catch {
+      // Ignored or handled
+    } finally {
+      requestingBusy = false;
+    }
+  }
 </script>
 
 <div class="catalog-grid-view">
@@ -433,7 +508,130 @@
       {/if}
     </nav>
   {/if}
+
+  {#if requestSuccessMessage}
+    <p role="status" class="feedback success">{requestSuccessMessage}</p>
+  {/if}
+
+  <!-- On-Demand Discovery Shelf -->
+  {#if section === 'search' && $features.requests && query.trim().length >= 2 && discoverMissing.length > 0}
+    <section class="shelf discover-shelf" aria-labelledby="discover-shelf-title">
+      <div class="section-heading">
+        <div class="discover-title-wrap">
+          <Icon name="download" size={20} />
+          <h2 id="discover-shelf-title">{$t('rq_discover_section_title')}</h2>
+        </div>
+        <span class="count-badge">{$t('rq_discover_count', { count: discoverMissing.length })}</span>
+      </div>
+      <p class="discover-hint">{$t('rq_discover_help')}</p>
+
+      <div class="discover-grid">
+        {#each discoverMissing as item (`${item.externalProvider}:${item.externalId}`)}
+          <div class="discover-card">
+            <div class="discover-poster-wrap">
+              {#if item.poster}
+                <img src={posterUrl(item.poster)} alt="" loading="lazy" class="discover-poster" />
+              {:else}
+                <div class="discover-poster placeholder">
+                  <span>{item.title.trim().charAt(0).toUpperCase() || '?'}</span>
+                </div>
+              {/if}
+              {#if item.request}
+                <span class="discover-badge tone-{statusTone(item.request.status)}">
+                  {item.request.mine ? $t('rq_requested_by_you') : $t('rq_already_requested')}
+                </span>
+              {:else if item.canRequest}
+                <span class="discover-badge tone-{item.autoApprove ? 'ok' : 'info'}">
+                  {item.autoApprove ? $t('rq_auto_approved_badge') : $t('rq_needs_review_badge')}
+                </span>
+              {/if}
+            </div>
+
+            <div class="discover-info">
+              <h3>
+                {item.title}
+                {#if item.year}<span class="year">({item.year})</span>{/if}
+              </h3>
+              <p class="discover-meta">
+                {item.kind === 'film' ? $t('kind_movie') : $t('kind_series')}
+                {#if item.runtime} · {$t('rq_runtime', { minutes: item.runtime })}{/if}
+                {#if item.genres?.length} · {item.genres.slice(0, 2).join(', ')}{/if}
+              </p>
+              {#if item.summary}
+                <p class="discover-summary">{item.summary}</p>
+              {/if}
+
+              <div class="discover-action">
+                {#if item.request}
+                  <button type="button" class="requested-btn" disabled>
+                    <Icon name="check" size={14} />
+                    <span>{statusLabels[item.request.status] ?? item.request.status}</span>
+                  </button>
+                {:else if item.canRequest}
+                  <button type="button" class="request-btn" onclick={() => openRequestDialog(item)}>
+                    <Icon name="download" size={14} />
+                    <span>{$t('rq_request_now')}</span>
+                  </button>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
+      </div>
+    </section>
+  {/if}
 </div>
+
+<dialog bind:this={requestDialog} class="discover-dialog" onclose={() => requestingItem = null}>
+  {#if requestingItem}
+    <form class="dialog-stack" onsubmit={submitRequest}>
+      <header class="dialog-header">
+        <h2>{$t('confirm_request_for', { title: requestingItem.title })}</h2>
+        <p class="muted small">
+          {requestingItem.kind === 'film' ? $t('kind_movie') : $t('kind_series')}
+          {#if requestingItem.year} · {requestingItem.year}{/if}
+        </p>
+      </header>
+
+      <p class="dialog-mode-hint" class:auto={requestingItem.autoApprove}>
+        {requestingItem.autoApprove ? $t('rq_confirm_dialog_auto') : $t('rq_confirm_dialog_manual')}
+      </p>
+
+      {#if requestingItem.kind === 'series' && requestingItem.seasons?.length}
+        <fieldset class="dialog-fieldset">
+          <legend>{$t('rq_seasons_legend')}</legend>
+          <label class="dialog-radio">
+            <input type="radio" name="scope" value="all" bind:group={requestingScope} />
+            <span>{$t('rq_all_seasons')}</span>
+          </label>
+          <label class="dialog-radio">
+            <input type="radio" name="scope" value="pick" bind:group={requestingScope} />
+            <span>{$t('rq_pick_seasons')}</span>
+          </label>
+          {#if requestingScope === 'pick'}
+            <div class="season-chips">
+              {#each requestingItem.seasons as season (season.number)}
+                <label class="season-chip">
+                  <input type="checkbox" value={season.number} bind:group={chosenSeasons} />
+                  <span>{season.number === 0 ? $t('rq_specials') : $t('rq_season_n', { number: season.number })}</span>
+                  {#if season.episodes}<small>({$t('rq_episode_count', { count: season.episodes })})</small>{/if}
+                </label>
+              {/each}
+            </div>
+          {/if}
+        </fieldset>
+      {/if}
+
+      <footer class="dialog-footer">
+        <button type="button" class="cancel-btn" onclick={() => requestDialog?.close()}>{$t('cancel')}</button>
+        <button type="submit" class="submit-btn" disabled={requestingBusy}>
+          <Icon name="download" size={15} />
+          <span>{$t('confirm_request')}</span>
+        </button>
+      </footer>
+    </form>
+  {/if}
+</dialog>
 
 <style>
   .catalog-grid-view { display: flex; flex-direction: column; gap: 20px; padding: 12px 0 48px; }
@@ -514,4 +712,44 @@
       gap: var(--card-row-gap, 18px) var(--card-gap, 10px);
     }
   }
+
+  .discover-shelf { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--line); }
+  .discover-title-wrap { display: flex; align-items: center; gap: 10px; color: var(--ac); }
+  .discover-hint { margin: 0; font-size: 14px; color: var(--mu); }
+  .discover-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 360px), 1fr)); gap: 16px; margin-top: 8px; }
+  .discover-card { display: flex; gap: 14px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-md, 12px); background: var(--bg-2); align-items: flex-start; }
+  .discover-poster-wrap { flex: none; width: 84px; aspect-ratio: 2/3; border-radius: var(--r-xs, 6px); overflow: hidden; position: relative; background: var(--pn-2); }
+  .discover-poster { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .discover-poster.placeholder { display: grid; place-items: center; color: var(--mu); font-size: 24px; font-weight: 700; }
+  .discover-badge { position: absolute; top: 4px; left: 4px; right: 4px; font-size: 10px; font-weight: 700; padding: 3px 4px; border-radius: 4px; text-align: center; text-transform: uppercase; letter-spacing: 0.02em; }
+  .discover-badge.tone-ok { color: var(--ok); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--ok); }
+  .discover-badge.tone-info { color: var(--info); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--info); }
+  .discover-badge.tone-warn { color: var(--warn); background: rgba(0, 0, 0, 0.75); border: 1px solid var(--warn); }
+  .discover-info { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+  .discover-info h3 { margin: 0; font-size: 16px; font-weight: 700; color: var(--tx); display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+  .discover-info .year { font-size: 14px; color: var(--mu); font-weight: 500; }
+  .discover-meta { margin: 0; font-size: 13px; color: var(--mu); }
+  .discover-summary { margin: 0; font-size: 12px; color: var(--mu); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.4; }
+  .discover-action { margin-top: auto; padding-top: 6px; }
+  .request-btn { height: 36px; padding: 0 14px; border: 0; border-radius: var(--r-pill); background: var(--ac); color: var(--on-ac); font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .request-btn:hover { opacity: 0.9; }
+  .requested-btn { height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--pn); color: var(--mu); font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; cursor: default; }
+  .feedback.success { padding: 12px 16px; border-radius: 10px; background: var(--bg-3); color: var(--ok); margin: 0; }
+
+  .discover-dialog { border: 1px solid var(--line); border-radius: var(--r-lg, 16px); background: var(--bg-2); color: var(--tx); padding: 24px; max-width: min(90vw, 480px); width: 100%; box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4); }
+  .discover-dialog::backdrop { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(4px); }
+  .dialog-stack { display: flex; flex-direction: column; gap: 16px; }
+  .dialog-header h2 { margin: 0; font-size: 20px; font-weight: 800; color: var(--tx); }
+  .dialog-mode-hint { margin: 0; font-size: 14px; color: var(--mu); padding: 10px 14px; border-radius: var(--r-sm); background: var(--pn); }
+  .dialog-mode-hint.auto { color: var(--ok); background: var(--ok-soft, rgba(34, 197, 94, 0.1)); }
+  .dialog-fieldset { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 14px; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .dialog-fieldset legend { font-size: 13px; font-weight: 700; color: var(--tx); padding: 0 6px; }
+  .dialog-radio { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--tx); cursor: pointer; }
+  .season-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .season-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--pn); font-size: 13px; cursor: pointer; }
+  .dialog-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+  .cancel-btn { height: 40px; padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r-sm); background: none; color: var(--tx); font-size: 14px; font-weight: 600; cursor: pointer; }
+  .cancel-btn:hover { background: var(--pn); }
+  .submit-btn { height: 40px; padding: 0 18px; border: 0; border-radius: var(--r-sm); background: var(--ac); color: var(--on-ac); font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .submit-btn:hover { opacity: 0.9; }
 </style>

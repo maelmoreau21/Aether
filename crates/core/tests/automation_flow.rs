@@ -1,6 +1,6 @@
 //! Durable automation contracts. Scale fixtures below simulate Nodes and do not
 //! execute media, HTTP, Wasm, or establish playback latency guarantees.
-use media_poc::{
+use aether_core::{
     automation::{self, EventInput},
     database::{query, query_as, query_scalar},
     identity::IdentityStore,
@@ -260,12 +260,12 @@ async fn installed_marker_extension_queues_chapter_work_for_episodes_and_films()
 
 #[tokio::test]
 async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_once() {
+    use aether_core::auth::{self, AuthState};
     use axum::{
         body::Body,
         http::{Request, StatusCode, header},
     };
     use http_body_util::BodyExt;
-    use media_poc::auth::{self, AuthState};
     use sha2::{Digest, Sha256};
     use tower::ServiceExt;
 
@@ -358,7 +358,7 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::timeline_markers::router(auth.clone()).merge(auth::router(auth));
+    let app = aether_core::timeline_markers::router(auth.clone()).merge(auth::router(auth));
     let login = app
         .clone()
         .oneshot(
@@ -462,11 +462,11 @@ async fn marker_reanalysis_reuses_completed_fingerprints_and_restarts_detection_
 
 #[tokio::test]
 async fn manual_marker_correction_is_authenticated_validated_and_durable() {
+    use aether_core::auth::{self, AuthState};
     use axum::{
         body::Body,
         http::{Request, StatusCode, header},
     };
-    use media_poc::auth::{self, AuthState};
     use tower::ServiceExt;
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("manual.sqlite"))
@@ -492,7 +492,7 @@ async fn manual_marker_correction_is_authenticated_validated_and_durable() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::timeline_markers::router(auth.clone()).merge(auth::router(auth));
+    let app = aether_core::timeline_markers::router(auth.clone()).merge(auth::router(auth));
     let login = app
         .clone()
         .oneshot(
@@ -566,15 +566,15 @@ async fn manual_marker_correction_is_authenticated_validated_and_durable() {
     let reopened = IdentityStore::open(&temp.path().join("manual.sqlite"))
         .await
         .unwrap();
-    let saved:(f64,f64)=media_poc::database::query_as("SELECT start_seconds,end_seconds FROM manual_timeline_markers WHERE asset_id='asset-1' AND marker_type='intro'")
+    let saved:(f64,f64)=aether_core::database::query_as("SELECT start_seconds,end_seconds FROM manual_timeline_markers WHERE asset_id='asset-1' AND marker_type='intro'")
         .fetch_one(reopened.pool()).await.unwrap();
     assert_eq!(saved, (10.0, 50.0));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn signed_marker_wasm_result_survives_restart() {
+    use aether_core::{auth::AuthState, scans::ScanJobs, scheduler};
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use media_poc::{auth::AuthState, scans::ScanJobs, scheduler};
     use ring::{
         rand::SystemRandom,
         signature::{Ed25519KeyPair, KeyPair},
@@ -631,13 +631,13 @@ async fn signed_marker_wasm_result_survives_restart() {
         signature: String::new(),
     };
     package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
-    media_poc::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
+    aether_core::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
     query("UPDATE extension_publishers SET public_key=? WHERE id='fixture-publisher'")
         .bind(STANDARD.encode(signing.public_key().as_ref()))
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extensions::storage::persist(&store, &package)
+    aether_core::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.markers','fixture-publisher',?,1,'marker-generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
@@ -668,20 +668,20 @@ async fn signed_marker_wasm_result_survives_restart() {
         }
     }).await;
     if completed.is_err() {
-        let tasks: Vec<(String, String, String)> = media_poc::database::query_as(
+        let tasks: Vec<(String, String, String)> = aether_core::database::query_as(
             "SELECT category,status,error FROM durable_tasks ORDER BY id",
         )
         .fetch_all(store.pool())
         .await
         .unwrap();
         let events: Vec<(String, Option<i64>)> =
-            media_poc::database::query_as("SELECT kind,dispatched_at FROM automation_events")
+            aether_core::database::query_as("SELECT kind,dispatched_at FROM automation_events")
                 .fetch_all(store.pool())
                 .await
                 .unwrap();
         panic!("marker automation timed out: tasks={tasks:?} events={events:?}");
     }
-    let descriptor = media_poc::inventory::descriptor_for_user(
+    let descriptor = aether_core::inventory::descriptor_for_user(
         &store,
         "asset-1",
         "synthetic-session",
@@ -1123,13 +1123,13 @@ async fn two_node_leases_survive_restart_fence_old_results_and_preserve_manual_m
 
 #[tokio::test]
 async fn automation_http_requires_admin_csrf_and_validated_idempotent_requests() {
+    use aether_core::auth::{self, AuthState};
     use axum::{
         Router,
         body::Body,
         http::{Request, StatusCode, header},
     };
     use http_body_util::BodyExt;
-    use media_poc::auth::{self, AuthState};
     use serde_json::Value;
     use tower::ServiceExt;
     async fn call(
@@ -1173,10 +1173,10 @@ async fn automation_http_requires_admin_csrf_and_validated_idempotent_requests()
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::automation_http::router(auth.clone())
+    let app = aether_core::automation_http::router(auth.clone())
         .merge(auth::router(auth.clone()))
         .merge(
-            media_poc::system_tasks::router(auth.clone(), temp.path().join("media"))
+            aether_core::system_tasks::router(auth.clone(), temp.path().join("media"))
                 .await
                 .unwrap(),
         );
@@ -1294,7 +1294,7 @@ async fn automation_http_requires_admin_csrf_and_validated_idempotent_requests()
         .bind(media_contracts::protocol::sha256_hex(raw.as_bytes())).bind(media_contracts::protocol::unix_now())
         .bind(media_contracts::protocol::unix_now()).bind(media_contracts::protocol::unix_now()+3600)
         .execute(store.pool()).await.unwrap();
-    let regular_cookie = format!("media_session={raw}");
+    let regular_cookie = format!("aether_session={raw}");
     assert_eq!(
         call(&app, "GET", path, &regular_cookie, "", Value::Null)
             .await
@@ -1348,10 +1348,10 @@ async fn automation_http_requires_admin_csrf_and_validated_idempotent_requests()
     let auth = AuthState::new(reopened.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let jobs = std::sync::Arc::new(media_poc::scans::ScanJobs::default());
+    let jobs = std::sync::Arc::new(aether_core::scans::ScanJobs::default());
     tokio::time::timeout(std::time::Duration::from_secs(10),async {
         loop {
-            media_poc::scheduler::dispatch_once(&auth,temp.path(),&jobs,media_contracts::protocol::unix_now()).await.unwrap();
+            aether_core::scheduler::dispatch_once(&auth,temp.path(),&jobs,media_contracts::protocol::unix_now()).await.unwrap();
             let status:String=query_scalar("SELECT status FROM durable_tasks WHERE category='system' AND target_id='clean-sessions'").fetch_one(reopened.pool()).await.unwrap();
             if status=="completed" {break;}
             assert_ne!(status,"error");
@@ -1366,8 +1366,8 @@ async fn automation_http_requires_admin_csrf_and_validated_idempotent_requests()
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn real_av1_opus_scan_runs_signed_wasm_automatically_and_persists_after_reopen() {
+    use aether_core::{auth::AuthState, scans::ScanJobs, scheduler};
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use media_poc::{auth::AuthState, scans::ScanJobs, scheduler};
     use ring::{
         rand::SystemRandom,
         signature::{Ed25519KeyPair, KeyPair},
@@ -1387,7 +1387,7 @@ async fn real_av1_opus_scan_runs_signed_wasm_automatically_and_persists_after_re
     let original = Sha256::digest(tokio::fs::read(&movie).await.unwrap());
     let path = temp.path().join("real.sqlite");
     let store = IdentityStore::open(&path).await.unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
     query("INSERT INTO users(id,role) VALUES('automation-admin','administrator')")
@@ -1430,13 +1430,13 @@ async fn real_av1_opus_scan_runs_signed_wasm_automatically_and_persists_after_re
         signature: String::new(),
     };
     package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
-    media_poc::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
+    aether_core::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
     query("INSERT INTO extension_publishers(id,public_key,active) VALUES('fixture-publisher',?,1)")
         .bind(STANDARD.encode(signing.public_key().as_ref()))
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extensions::storage::persist(&store, &package)
+    aether_core::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.metadata','fixture-publisher',?,1,'real-generation')")
@@ -1468,7 +1468,7 @@ async fn real_av1_opus_scan_runs_signed_wasm_automatically_and_persists_after_re
             let completed:i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks t JOIN automation_task_links a ON a.task_id=t.id WHERE t.status='completed'")
                 .fetch_one(store.pool()).await.unwrap();
             if completed == 1 { break; }
-            let errors:Vec<(String,String)> = media_poc::database::query_as("SELECT category,error FROM durable_tasks WHERE status='error'")
+            let errors:Vec<(String,String)> = aether_core::database::query_as("SELECT category,error FROM durable_tasks WHERE status='error'")
                 .fetch_all(store.pool()).await.unwrap();
             assert!(errors.is_empty(),"{errors:?}");
             tokio::time::sleep(Duration::from_millis(25)).await;
@@ -1534,7 +1534,10 @@ async fn hundred_thousand_persistent_tasks_admission() {
             .bind(&node_id).bind(&node_id).execute(&mut *tx).await.unwrap();
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES(?,?,'films',?,'/synthetic-read-only',1)")
             .bind(&library).bind(&library).bind(&node_id).execute(&mut *tx).await.unwrap();
-        query("WITH RECURSIVE sequence(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM sequence WHERE n<999) INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) SELECT ? || CAST(n AS TEXT),?,'benchmark',? || CAST(n AS TEXT),?,100,100,100 FROM sequence")
+        query("WITH RECURSIVE sequence(n) AS (SELECT 0 UNION ALL SELECT n+1 FROM sequence \
+                WHERE n<999) INSERT INTO \
+                durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) SELECT ? || CAST(n AS TEXT),?,'benchmark',? || CAST(n AS TEXT),?,100,100,100 \
+                FROM sequence")
             .bind(format!("{node_id}-job-")) .bind(&library)
             .bind(format!("{node_id}-key-")) .bind(&node_id)
             .execute(&mut *tx).await.unwrap();
@@ -1690,8 +1693,8 @@ async fn provider_cache_stores_deduplicates_and_expires() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
+    use aether_core::{auth::AuthState, scans::ScanJobs, scheduler};
     use base64::{Engine as _, engine::general_purpose::STANDARD};
-    use media_poc::{auth::AuthState, scans::ScanJobs, scheduler};
     use ring::{
         rand::SystemRandom,
         signature::{Ed25519KeyPair, KeyPair},
@@ -1707,7 +1710,15 @@ async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
         .await
         .unwrap();
     query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('music','Music','music','node-1','/synthetic-music',1)").execute(store.pool()).await.unwrap();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,duration,codec,mime,scan_id,available,lyrics) VALUES('song','music','/synthetic-music','song.opus',1,'1','Song','Artist','Album','Artist',180,'opus','audio/ogg','scan',1,'')").execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,duration,codec,mime,scan_id,available,lyrics) \
+            VALUES('song','music','/synthetic-music','song.opus',1,'1','Song','Artist','Album',\
+            'Artist',180,'opus','audio/ogg','scan',1,'')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     let output = json!({"apiVersion":1,"result":{"id":42,"trackName":"Song","artistName":"Artist","durationSecs":180,"instrumental":false,"plain":"Words","synced":"[00:01]Words"}}).to_string();
     let data = output
         .bytes()
@@ -1736,13 +1747,13 @@ async fn signed_synthetic_lyrics_wasm_is_applied_with_provenance() {
         signature: String::new(),
     };
     package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
-    media_poc::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
+    aether_core::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
     query("UPDATE extension_publishers SET public_key=? WHERE id='fixture-publisher'")
         .bind(STANDARD.encode(signing.public_key().as_ref()))
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::extensions::storage::persist(&store, &package)
+    aether_core::extensions::storage::persist(&store, &package)
         .await
         .unwrap();
     query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('fixture.lyrics','fixture-publisher',?,1,'generation')").bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
@@ -1800,12 +1811,30 @@ async fn music_automation_pipeline_and_lyrics_provenance() {
         .execute(store.pool()).await.unwrap();
 
     // Insert a track without lyrics and unknown artist
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics) VALUES('track-1','library-music','/synthetic-music','track1.opus',5000,'100','Bohemian Rhapsody','Unknown Artist','Unknown Album','',1,1,354.0,'opus','audio/ogg','scan-1',1,'')")
-        .execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,\
+            available,lyrics) \
+            VALUES('track-1','library-music','/synthetic-music','track1.opus',5000,'100',\
+            'Bohemian Rhapsody','Unknown Artist','Unknown Album','',1,1,354.0,'opus','audio/ogg',\
+            'scan-1',1,'')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     // Insert another track that already has manual lyrics
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics) VALUES('track-manual','library-music','/synthetic-music','track2.opus',6000,'100','Imagine','John Lennon','Imagine','',1,1,183.0,'opus','audio/ogg','scan-1',1,'[00:01.00] Manual local lyrics')")
-        .execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,\
+            available,lyrics) \
+            VALUES('track-manual','library-music','/synthetic-music','track2.opus',6000,'100',\
+            'Imagine','John Lennon','Imagine','',1,1,183.0,'opus','audio/ogg','scan-1',1,\
+            '[00:01.00] Manual local lyrics')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
 
     // Emit music snapshot
     let mut tx = store.pool().begin().await.unwrap();
@@ -2260,7 +2289,15 @@ async fn library_provider_allowlist_controls_admission_and_provenance_priority_m
         .execute(store.pool())
         .await
         .unwrap();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,codec,mime,scan_id,lyrics) VALUES('music','library-1','/read-only','legal.opus',100,'1','Song','Artist','Album','Artist','opus','audio/ogg','scan','Local lyrics')").execute(store.pool()).await.unwrap();
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,codec,mime,scan_id,lyrics) \
+            VALUES('music','library-1','/read-only','legal.opus',100,'1','Song','Artist','Album',\
+            'Artist','opus','audio/ogg','scan','Local lyrics')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
     query("INSERT INTO automation_policies(extension_id,library_id,operation) VALUES('fixture.metadata','library-1','lyrics.get')").execute(store.pool()).await.unwrap();
     let mut tx = store.pool().begin().await.unwrap();
     automation::emit_music_snapshot(&mut tx, "library-1", 100)

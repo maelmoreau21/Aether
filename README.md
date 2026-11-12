@@ -43,10 +43,10 @@ Le projet privilégie la **lecture directe** et n'impose aucun transcodage vidé
 | **Administration** | Comptes, groupes, droits par bibliothèque, clés API limitées au catalogue, tâches et scans planifiés |
 | **Authentification** | Comptes locaux et connexion OpenID Connect (OIDC), notamment avec Authentik |
 | **Stockage** | SQLite par défaut, PostgreSQL 18 externe en option pour un Core unique |
-| **Sauvegardes** | Sauvegardes administratives planifiables sans chiffrement, restauration hors ligne |
+| **Sauvegardes** | Sauvegardes administratives planifiables, chiffrées et authentifiées (clé obligatoire, voir le [guide de mise à niveau](docs/UPGRADE_1.0.md)), restauration hors ligne |
 | **Distribution** | Mode autonome ou Core central avec un ou plusieurs Media Nodes |
 
-**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Le transcodage de secours se relance à chaque changement de position ou de qualité : ce n'est pas un streaming HLS/DASH segmenté multi-débit.
+**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Le navigateur lit en direct ou via un transcodage de secours relancé à chaque changement de position ou de qualité (pas de multi-débit adaptatif segmenté) ; les lecteurs natifs (iOS, tvOS, Android, AirPlay, Chromecast) utilisent le HLS par copie sans réencodage ([HLS.md](docs/HLS.md)).
 
 ## Technologies
 
@@ -54,7 +54,7 @@ Le projet privilégie la **lecture directe** et n'impose aucun transcodage vidé
 - **Frontend :** Svelte 5, SvelteKit, TypeScript, Vite ; application compilée et servie par le Core.
 - **Base de données :** SQLite (mode WAL) ou PostgreSQL 18 externe.
 - **Médias :** `ffprobe` pour l'inspection des fichiers ; stratégie de lecture directe et de flux autorisés.
-- **Déploiement :** Docker / Docker Compose, avec images Linux `amd64`.
+- **Déploiement :** Docker / Docker Compose, avec images Linux multi-architecture `amd64` et `arm64` (Raspberry Pi, NAS ARM).
 
 ## 🚀 Installation rapide
 
@@ -63,7 +63,7 @@ Il couvre le premier administrateur, le démarrage et l’installation des exten
 
 ### Prérequis
 
-- Docker et Docker Compose v2 sur une machine Linux `x86_64` (ou un environnement compatible Docker).
+- Docker et Docker Compose v2 sur une machine Linux `x86_64` ou `arm64` (ou un environnement compatible Docker).
 - Un dossier de films ou de séries accessible en lecture par le conteneur.
 - Pour l'accès depuis un autre appareil : un **reverse proxy HTTPS** (Traefik, Caddy, Nginx ou Synology DSM).
 

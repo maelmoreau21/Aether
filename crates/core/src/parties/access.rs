@@ -43,7 +43,10 @@ pub async fn can_user_access_media(
          JOIN libraries l ON l.id = w.library_id \
          JOIN media_nodes n ON n.id = l.node_id \
          WHERE w.id = ? AND l.enabled = 1 AND n.status != 'revoked' \
-         AND ((? = 'administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS( \
+         AND ((? = 'administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT \
+         JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp \
+         ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+         AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS( \
              SELECT 1 FROM effective_library_permissions p \
              WHERE p.library_id=l.id AND p.user_id = ? \
          ))",

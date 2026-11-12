@@ -23,6 +23,10 @@
 //! 12. Verify secret rotation (`POST /api/v1/admin/nodes/{id}/rotate-secret` invalidates prior `PlaybackToken`s),
 //!     Node revocation (`POST /api/v1/admin/nodes/{id}/revoke`), expired token rejection, and unknown Node identity rejection.
 
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
+    secure_app_with_jobs,
+};
 use axum::http::{Method, Request, StatusCode, header};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -31,15 +35,11 @@ use media_contracts::{
     ids::{LibraryId, NodeId},
     protocol::{
         HDR_BODY_SHA256, HDR_KEY_ID, HDR_NODE_ID, HDR_NONCE, HDR_PROTOCOL, HDR_SIGNATURE,
-        HDR_TIMESTAMP, PROTOCOL_VERSION, PlaybackTokenClaims, issue_playback_token, sha256_hex,
-        sign_internal_request, unix_now,
+        HDR_TIMESTAMP, PROTOCOL_VERSION, PlaybackTokenClaims, issue_playback_token,
+        random_nonce_hex, random_secret_hex, sha256_hex, sign_internal_request, unix_now,
     },
 };
 use media_node::server::{NodeServerConfig, NodeServerState, app_with_state as node_router};
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
-    secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -260,21 +260,21 @@ async fn install_automatic_metadata_fixture(store: &IdentityStore, libraries: &[
         signature: String::new(),
     };
     package.signature = STANDARD.encode(signing.sign(&package.signing_bytes().unwrap()).as_ref());
-    media_poc::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
-    media_poc::database::query(
+    aether_core::extensions::validate_package(&package, signing.public_key().as_ref()).unwrap();
+    aether_core::database::query(
         "INSERT INTO extension_publishers(id,public_key,active) VALUES('distributed-fixture',?,1)",
     )
     .bind(STANDARD.encode(signing.public_key().as_ref()))
     .execute(store.pool())
     .await
     .unwrap();
-    media_poc::extensions::storage::persist(store, &package)
+    aether_core::extensions::storage::persist(store, &package)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('distributed.fixture','distributed-fixture',?,1,'distributed-generation')")
+    aether_core::database::query("INSERT INTO extensions(id,publisher_id,package_json,enabled,generation) VALUES('distributed.fixture','distributed-fixture',?,1,'distributed-generation')")
         .bind(serde_json::to_string(&package).unwrap()).execute(store.pool()).await.unwrap();
     for library in libraries {
-        media_poc::database::query(
+        aether_core::database::query(
             "INSERT INTO extension_grants(extension_id,library_id) VALUES('distributed.fixture',?)",
         )
         .bind(*library)
@@ -320,7 +320,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             .await
             .expect("temporary PostgreSQL");
         let schema = format!("distributed_{}", uuid::Uuid::new_v4().simple());
-        media_poc::database::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        aether_core::database::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
             .execute(&pool)
             .await
             .unwrap();
@@ -355,8 +355,11 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     let core_app = secure_app_with_jobs(inventory, core_port, auth.clone(), jobs.clone())
         .await
         .expect("distributed core app");
-    let _process_scheduler =
-        media_poc::scheduler::Scheduler::start(auth.clone(), scheduler_root.clone(), jobs.clone());
+    let _process_scheduler = aether_core::scheduler::Scheduler::start(
+        auth.clone(),
+        scheduler_root.clone(),
+        jobs.clone(),
+    );
 
     let (core_shutdown_tx, core_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     tokio::spawn(async move {
@@ -539,12 +542,12 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         (&alice_id, "alice", &alice_raw_token),
         (&bob_id, "bob", &bob_raw_token),
     ] {
-        media_poc::database::query("INSERT INTO users(id, role) VALUES (?, 'user')")
+        aether_core::database::query("INSERT INTO users(id, role) VALUES (?, 'user')")
             .bind(uid)
             .execute(store.pool())
             .await
             .unwrap();
-        media_poc::database::query(
+        aether_core::database::query(
             "INSERT INTO local_credentials(user_id, login, password_hash) VALUES (?, ?, 'unused-test-hash')",
         )
         .bind(uid)
@@ -553,7 +556,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await
         .unwrap();
         let tok_hash = sha256_hex(raw_tok.as_bytes());
-        media_poc::database::query(
+        aether_core::database::query(
             "INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at) VALUES (?, ?, unixepoch(), unixepoch(), unixepoch() + 3600)",
         )
         .bind(tok_hash)
@@ -562,8 +565,8 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await
         .unwrap();
     }
-    let alice_cookie = format!("media_session={alice_raw_token}");
-    let bob_cookie = format!("media_session={bob_raw_token}");
+    let alice_cookie = format!("aether_session={alice_raw_token}");
+    let bob_cookie = format!("aether_session={bob_raw_token}");
 
     // 4. Attach Films library to Node 1 and Series library to Node 2 (granting access to `alice`)
     let (lib1_st, _, lib1_body) = http_request(
@@ -683,18 +686,18 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     // extension invocation. Distinct Node provenance must survive persistence.
     let mut automatic_count=tokio::time::timeout(Duration::from_secs(30),async {
         loop {
-            let expected:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM inventory_assets WHERE available=1 AND library_id IN (?,?)")
+            let expected:i64=aether_core::database::query_scalar("SELECT COUNT(*) FROM inventory_assets WHERE available=1 AND library_id IN (?,?)")
                 .bind(&lib1_id).bind(&lib2_id).fetch_one(store.pool()).await.unwrap();
-            let completed:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture' AND t.status='completed'")
+            let completed:i64=aether_core::database::query_scalar("SELECT COUNT(*) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture' AND t.status='completed'")
                 .fetch_one(store.pool()).await.unwrap();
             if expected>=3 && completed==expected {break completed;}
-            let errors:Vec<String>=media_poc::database::query_scalar("SELECT t.error FROM durable_tasks t JOIN automation_task_links a ON a.task_id=t.id WHERE t.status='error'")
+            let errors:Vec<String>=aether_core::database::query_scalar("SELECT t.error FROM durable_tasks t JOIN automation_task_links a ON a.task_id=t.id WHERE t.status='error'")
                 .fetch_all(store.pool()).await.unwrap();
             assert!(errors.is_empty(),"automatic extension failures: {errors:?}");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }).await.expect("two real TCP Nodes did not complete automatic enrichment");
-    let automatic_nodes:i64=media_poc::database::query_scalar("SELECT COUNT(DISTINCT t.node_id) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture'")
+    let automatic_nodes:i64=aether_core::database::query_scalar("SELECT COUNT(DISTINCT t.node_id) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture'")
         .fetch_one(store.pool()).await.unwrap();
     assert_eq!(automatic_nodes, 2);
     println!(
@@ -1240,13 +1243,13 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         // the inventory being streamed. This is HTTP isolation, not decoding.
         if expected_node_url == &node1_url {
             // Real signed Node execution and callback with persisted results.
-            let track: i64 = media_poc::database::query_scalar("SELECT stream_index FROM inventory_tracks WHERE asset_id=? AND json_extract(metadata_json,'$.codec_type')='audio' ORDER BY stream_index LIMIT 1")
+            let track: i64 = aether_core::database::query_scalar("SELECT stream_index FROM inventory_tracks WHERE asset_id=? AND json_extract(metadata_json,'$.codec_type')='audio' ORDER BY stream_index LIMIT 1")
                 .bind(asset_id).fetch_one(store.pool()).await.unwrap();
             let mut operations = vec![
                 ("analyze", asset_id.clone(), String::new(), 640),
                 ("prepare", asset_id.clone(), format!("audio-{track}"), 640),
             ];
-            let image: Option<String> = media_poc::database::query_scalar(
+            let image: Option<String> = aether_core::database::query_scalar(
                 "SELECT id FROM inventory_images WHERE library_id=? AND available=1 LIMIT 1",
             )
             .bind(&lib1_id)
@@ -1257,7 +1260,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
                 operations.push(("image", image, String::new(), 320));
             }
             for (category, target, component, width) in operations {
-                let task = media_poc::task_engine::enqueue_task(
+                let task = aether_core::task_engine::enqueue_task(
                     &store,
                     &lib1_id,
                     "integration",
@@ -1273,7 +1276,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
                 .unwrap();
                 let finished = tokio::time::timeout(Duration::from_secs(30), async {
                     loop {
-                        let row = media_poc::task_engine::get(&store, &task.id)
+                        let row = aether_core::task_engine::get(&store, &task.id)
                             .await
                             .unwrap()
                             .unwrap();
@@ -1303,19 +1306,19 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             }
             let load_root = node1_root.join("queue-isolation-empty");
             tokio::fs::create_dir_all(&load_root).await.unwrap();
-            media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('queue-isolation','Queue isolation','films',?,?,1)")
+            aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('queue-isolation','Queue isolation','films',?,?,1)")
                 .bind(&node1_id).bind(load_root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
             let mut tx = store.pool().begin().await.unwrap();
             let timestamp = unix_now();
             for index in 0..10_000 {
                 let id = format!("queue-isolation-{index:05}");
-                media_poc::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) VALUES(?,'queue-isolation','integration',?,?,?,?,?)")
+                aether_core::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,created_at,updated_at,available_at) VALUES(?,'queue-isolation','integration',?,?,?,?,?)")
                     .bind(&id).bind(&id).bind(&node1_id).bind(timestamp).bind(timestamp).bind(timestamp)
                     .execute(&mut *tx).await.unwrap();
             }
             tx.commit().await.unwrap();
             let scheduler_root = base.join("core-local-empty");
-            media_poc::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
+            aether_core::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
                 .await
                 .unwrap();
             let mut ranges = tokio::task::JoinSet::new();
@@ -1363,7 +1366,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             // Require a real remote scan to finish through the production worker.
             let mut completed = 0;
             for _ in 0..100 {
-                completed = media_poc::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks WHERE library_id='queue-isolation' AND status='completed'")
+                completed = aether_core::database::query_scalar::<_, i64>("SELECT COUNT(*) FROM durable_tasks WHERE library_id='queue-isolation' AND status='completed'")
                     .fetch_one(store.pool()).await.unwrap();
                 if completed > 0 {
                     break;
@@ -1375,13 +1378,13 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
                 "production worker must complete a remote scan"
             );
             // Stop queue admission before later scenarios rescan/revoke this Node.
-            media_poc::database::query("UPDATE durable_tasks SET status='cancelled' WHERE library_id='queue-isolation' AND status='queued'")
+            aether_core::database::query("UPDATE durable_tasks SET status='cancelled' WHERE library_id='queue-isolation' AND status='queued'")
                 .execute(store.pool()).await.unwrap();
             for _ in 0..100 {
-                media_poc::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
+                aether_core::scheduler::dispatch_once(&auth, &scheduler_root, &jobs, unix_now())
                     .await
                     .unwrap();
-                let active: i64 = media_poc::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE library_id='queue-isolation' AND lease_until IS NOT NULL")
+                let active: i64 = aether_core::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE library_id='queue-isolation' AND lease_until IS NOT NULL")
                     .fetch_one(store.pool()).await.unwrap();
                 if active == 0 {
                     break;
@@ -1416,11 +1419,11 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .split('/')
         .next()
         .unwrap();
-    let node1_rec = media_poc::nodes::load_node(&store, &node1_id)
+    let node1_rec = aether_core::nodes::load_node(&store, &node1_id)
         .await
         .unwrap()
         .unwrap();
-    let (poster_direct_url, _) = media_poc::nodes::build_direct_playback_url(
+    let (poster_direct_url, _) = aether_core::nodes::build_direct_playback_url(
         &node1_rec,
         &lib1_id,
         "image",
@@ -1586,18 +1589,28 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     .await
     .unwrap();
     let failure_progress = std::time::Instant::now();
-    let (scan_status, _, scan_error) = http_request(
-        &core_origin,
-        Method::POST,
-        &format!("/api/v1/admin/libraries/{lib2_id}/scan"),
-        &[
-            ("origin", &core_origin),
-            ("cookie", &admin_cookie),
-            ("x-csrf-token", &admin_csrf),
-        ],
-        vec![],
-    )
-    .await;
+    // Real-time monitoring may already have a poll of this library in flight, which
+    // answers 409; retry until that poll ends so the manual scan sees the new file.
+    let mut scan_attempt = 0;
+    let (scan_status, _, scan_error) = loop {
+        let response = http_request(
+            &core_origin,
+            Method::POST,
+            &format!("/api/v1/admin/libraries/{lib2_id}/scan"),
+            &[
+                ("origin", &core_origin),
+                ("cookie", &admin_cookie),
+                ("x-csrf-token", &admin_csrf),
+            ],
+            vec![],
+        )
+        .await;
+        scan_attempt += 1;
+        if response.0 != StatusCode::CONFLICT || scan_attempt >= 100 {
+            break response;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
     assert_eq!(
         scan_status,
         StatusCode::ACCEPTED,
@@ -1606,7 +1619,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     );
     tokio::time::timeout(Duration::from_secs(30),async {
         loop {
-            let completed:i64=media_poc::database::query_scalar("SELECT COUNT(*) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture' AND t.status='completed'")
+            let completed:i64=aether_core::database::query_scalar("SELECT COUNT(*) FROM automation_results r JOIN durable_tasks t ON t.id=r.task_id WHERE r.extension_id='distributed.fixture' AND t.status='completed'")
                 .fetch_one(store.pool()).await.unwrap();
             if completed==automatic_count+1 {break;}
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1718,7 +1731,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     assert_eq!(new_tok_st, StatusCode::PARTIAL_CONTENT);
 
     // Direct requests also refresh activity through the same bounded P1 worker.
-    media_poc::database::query(
+    aether_core::database::query(
         "UPDATE sessions SET last_seen_at=unixepoch()-120 WHERE token_hash=?",
     )
     .bind(sha256_hex(alice_raw_token.as_bytes()))
@@ -1728,7 +1741,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     let (status, _, _) = http_request(&node1_url, Method::HEAD, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::OK);
     auth.flush_session_touches().await;
-    let age: i64 = media_poc::database::query_scalar(
+    let age: i64 = aether_core::database::query_scalar(
         "SELECT unixepoch()-last_seen_at FROM sessions WHERE token_hash=?",
     )
     .bind(sha256_hex(alice_raw_token.as_bytes()))
@@ -1737,7 +1750,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     .unwrap();
     assert!(age < 60);
 
-    let current_record = media_poc::nodes::load_node(&store, &node1_id)
+    let current_record = aether_core::nodes::load_node(&store, &node1_id)
         .await
         .unwrap()
         .unwrap();
@@ -1769,21 +1782,21 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    media_poc::database::query("UPDATE users SET disabled_at=unixepoch() WHERE id=?")
+    aether_core::database::query("UPDATE users SET disabled_at=unixepoch() WHERE id=?")
         .bind(&alice_id)
         .execute(store.pool())
         .await
         .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::GET, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    media_poc::database::query("UPDATE users SET disabled_at=NULL WHERE id=?")
+    aether_core::database::query("UPDATE users SET disabled_at=NULL WHERE id=?")
         .bind(&alice_id)
         .execute(store.pool())
         .await
         .unwrap();
 
     // Previously issued direct URLs obey live P1 permissions and session revocation.
-    media_poc::database::query("UPDATE libraries SET enabled=0 WHERE id=?")
+    aether_core::database::query("UPDATE libraries SET enabled=0 WHERE id=?")
         .bind(&lib1_id)
         .execute(store.pool())
         .await
@@ -1799,37 +1812,41 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         .await;
         assert_eq!(status, StatusCode::FORBIDDEN);
     }
-    media_poc::database::query("UPDATE libraries SET enabled=1 WHERE id=?")
+    aether_core::database::query("UPDATE libraries SET enabled=1 WHERE id=?")
         .bind(&lib1_id)
         .execute(store.pool())
         .await
         .unwrap();
-    media_poc::database::query("DELETE FROM library_permissions WHERE library_id=? AND user_id=?")
-        .bind(&lib1_id)
-        .bind(&alice_id)
-        .execute(store.pool())
-        .await
-        .unwrap();
+    aether_core::database::query(
+        "DELETE FROM library_permissions WHERE library_id=? AND user_id=?",
+    )
+    .bind(&lib1_id)
+    .bind(&alice_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::GET, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    media_poc::database::query("INSERT INTO library_permissions(library_id,user_id) VALUES (?,?)")
-        .bind(&lib1_id)
-        .bind(&alice_id)
-        .execute(store.pool())
-        .await
-        .unwrap();
-    media_poc::database::query("DELETE FROM sessions WHERE token_hash=?")
+    aether_core::database::query(
+        "INSERT INTO library_permissions(library_id,user_id) VALUES (?,?)",
+    )
+    .bind(&lib1_id)
+    .bind(&alice_id)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    aether_core::database::query("DELETE FROM sessions WHERE token_hash=?")
         .bind(sha256_hex(alice_raw_token.as_bytes()))
         .execute(store.pool())
         .await
         .unwrap();
     let (status, _, _) = http_request(&node1_url, Method::HEAD, &new_pq, &[], vec![]).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    media_poc::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES (?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
+    aether_core::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES (?,?,unixepoch(),unixepoch(),unixepoch()+3600)")
         .bind(sha256_hex(alice_raw_token.as_bytes())).bind(&alice_id).execute(store.pool()).await.unwrap();
 
     // Expired token rejection test on Node 1
-    let node1_rec = media_poc::nodes::load_node(&store, &node1_id)
+    let node1_rec = aether_core::nodes::load_node(&store, &node1_id)
         .await
         .unwrap()
         .unwrap();
@@ -1862,15 +1879,17 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
         b"{\"nodeId\":\"unknown-node\",\"name\":\"Fake\",\"publicUrl\":null,\"roots\":[]}";
     let fake_hash = sha256_hex(fake_body);
     let fake_ts = unix_now();
+    let fake_nonce = random_nonce_hex();
+    let fake_secret = random_secret_hex();
     let fake_sig = sign_internal_request(
-        "fake-secret",
+        &fake_secret,
         "node->core",
         "POST",
         "/internal/v1/core/heartbeat",
         "unknown-node",
         "fake-key",
         fake_ts,
-        "fake-nonce-1234567890",
+        &fake_nonce,
         &fake_hash,
     );
     let (unk_st, _, _) = http_request(
@@ -1882,7 +1901,7 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
             (HDR_NODE_ID, "unknown-node"),
             (HDR_KEY_ID, "fake-key"),
             (HDR_TIMESTAMP, &fake_ts.to_string()),
-            (HDR_NONCE, "fake-nonce-1234567890"),
+            (HDR_NONCE, &fake_nonce),
             (HDR_BODY_SHA256, &fake_hash),
             (HDR_SIGNATURE, &fake_sig),
             ("content-type", "application/json"),
@@ -2034,13 +2053,13 @@ async fn distributed_core_and_two_remote_nodes_end_to_end() {
 
     // The unchanged rescans and actual Node 1 restart above must not duplicate
     // extension effects or discard results already committed by either Node.
-    let retained: i64 = media_poc::database::query_scalar(
+    let retained: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM automation_results WHERE extension_id='distributed.fixture'",
     )
     .fetch_one(store.pool())
     .await
     .unwrap();
-    let admitted: i64 = media_poc::database::query_scalar(
+    let admitted: i64 = aether_core::database::query_scalar(
         "SELECT COUNT(*) FROM automation_task_links WHERE extension_id='distributed.fixture'",
     )
     .fetch_one(store.pool())

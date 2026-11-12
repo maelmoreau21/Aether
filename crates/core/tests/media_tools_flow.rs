@@ -1,16 +1,16 @@
 //! Per-file media tools over HTTP: generated-data status, preview and chapter rebuilds, and the
 //! guarantee that a manual segment is locked (never touched by an analysis, released only by an
 //! explicit reset). A remote Node stands in for the file's holder: nothing here runs FFmpeg.
+use aether_core::{
+    auth::{self, AuthState},
+    database::{query, query_scalar},
+    identity::IdentityStore,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::{self, AuthState},
-    database::{query, query_scalar},
-    identity::IdentityStore,
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -58,8 +58,8 @@ async fn status_actions_and_locked_segments_follow_the_administrator() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::timeline_markers::router(auth.clone())
-        .merge(media_poc::media_tools::router(auth.clone()))
+    let app = aether_core::timeline_markers::router(auth.clone())
+        .merge(aether_core::media_tools::router(auth.clone()))
         .merge(auth::router(auth));
 
     let login = app

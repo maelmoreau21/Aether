@@ -91,8 +91,26 @@ async fn lyrics(
 }
 async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result<(), StatusCode> {
     let actor = auth.authenticate(headers).await?;
-    let exists:i64=query_scalar("SELECT COUNT(*) FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))")
-        .bind(library).bind(&actor.user.id).bind(actor.user.role.as_str()).bind(&actor.user.id).fetch_one(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let exists: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE l.id=? AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' \
+            AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? \
+            AND policy.allow_unrated=0) AND ((?='administrator' AND NOT EXISTS(SELECT 1 \
+            FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id \
+            AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+            AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+            OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+            AND p.user_id=?))",
+    )
+    .bind(library)
+    .bind(&actor.user.id)
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .fetch_one(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if exists == 0 {
         Err(StatusCode::FORBIDDEN)
     } else {
@@ -133,16 +151,62 @@ async fn list(
             .replace('%', "\\%")
             .replace('_', "\\_")
     );
-    let total: i64 = query_scalar("SELECT COUNT(*) FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=l.id AND f.active=1),l.id)=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'")
-        .bind(&actor.user.id)
-        .bind(actor.user.role.as_str())
-        .bind(&actor.user.id)
-        .bind(&library).bind(&library)
-        .bind(&term)
-        .fetch_one(&auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let rows=query("SELECT t.* FROM music_tracks t JOIN libraries l ON l.id=t.library_id JOIN media_nodes n ON n.id=l.node_id WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=? AND policy.allow_unrated=0) AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=l.id AND f.active=1),l.id)=?) AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id LIMIT ? OFFSET ?").bind(&actor.user.id).bind(actor.user.role.as_str()).bind(&actor.user.id).bind(&library).bind(&library).bind(term).bind(limit).bind(offset).fetch_all(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let total: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM music_tracks t \
+            JOIN libraries l ON l.id=t.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 \
+            AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy \
+            WHERE policy.user_id=? AND policy.allow_unrated=0) AND ((?='administrator' \
+            AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf \
+            ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp \
+            ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+            AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+            OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+            AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f \
+            WHERE f.library_id=l.id AND f.active=1),l.id)=?) \
+            AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'",
+    )
+    .bind(&actor.user.id)
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .bind(&library)
+    .bind(&library)
+    .bind(&term)
+    .fetch_one(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let rows = query(
+        "SELECT t.* \
+            FROM music_tracks t \
+            JOIN libraries l ON l.id=t.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE t.available=1 AND t.root_snapshot=l.root AND l.kind='music' AND l.enabled=1 \
+            AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM parental_policies policy \
+            WHERE policy.user_id=? AND policy.allow_unrated=0) AND ((?='administrator' \
+            AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf \
+            ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp \
+            ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+            AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+            OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
+            AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f \
+            WHERE f.library_id=l.id AND f.active=1),l.id)=?) \
+            AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' \
+            ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id \
+            LIMIT ? OFFSET ?",
+    )
+    .bind(&actor.user.id)
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .bind(&library)
+    .bind(&library)
+    .bind(term)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(&auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let items: Vec<Value> = rows
         .into_iter()
         .map(|r| {
@@ -252,7 +316,10 @@ async fn content(
     let node_id = row.get::<String, _>("node_id");
     if request.uri().path().ends_with("/download") {
         let actor = auth.authenticate(request.headers()).await?;
-        if !crate::user_media_policy::can_download(&auth.store, &actor.user.id).await? {
+        // Native applications only (see `permissions::require_media`).
+        if !actor.bearer
+            || !crate::user_media_policy::can_download(&auth.store, &actor.user.id).await?
+        {
             return Err(StatusCode::FORBIDDEN);
         }
     }
@@ -373,34 +440,55 @@ pub async fn publish_track(
                 && serde_json::from_str::<String>(value).ok().as_deref() == Some(text.as_str())
         })
         .unwrap_or_default();
-    query("INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,available,lyrics,cover_path,cover_size,cover_modified_ns,cover_mime) SELECT ?,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,? FROM libraries WHERE id=? AND root=? AND enabled=1 AND kind='music' ON CONFLICT(library_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,track_number=excluded.track_number,disc_number=excluded.disc_number,duration=excluded.duration,codec=excluded.codec,mime=excluded.mime,scan_id=excluded.scan_id,available=1,lyrics=CASE WHEN excluded.lyrics='' AND music_tracks.size=excluded.size AND music_tracks.modified_ns=excluded.modified_ns AND music_tracks.title=excluded.title AND music_tracks.artist=excluded.artist AND music_tracks.album=excluded.album AND music_tracks.lyrics=? AND EXISTS(SELECT 1 FROM automatic_metadata_provenance p WHERE p.work_id=music_tracks.id AND p.field_name='lyrics' AND p.value_json=?) THEN music_tracks.lyrics ELSE excluded.lyrics END,cover_path=excluded.cover_path,cover_size=excluded.cover_size,cover_modified_ns=excluded.cover_modified_ns,cover_mime=excluded.cover_mime")
-        .bind(uuid::Uuid::new_v4().to_string())
-        .bind(root)
-        .bind(track.relative_path)
-        .bind(track.size as i64)
-        .bind(track.modified_ns)
-        .bind(track.title)
-        .bind(track.artist)
-        .bind(track.album)
-        .bind(track.album_artist)
-        .bind(track.track_number)
-        .bind(track.disc_number)
-        .bind(track.duration)
-        .bind(track.codec)
-        .bind(track.mime)
-        .bind(scan)
-        .bind(track.lyrics)
-        .bind(track.cover_path)
-        .bind(track.cover_size.map(|s| s as i64))
-        .bind(track.cover_modified_ns)
-        .bind(track.cover_mime)
-        .bind(library)
-        .bind(root)
-        .bind(cached_text)
-        .bind(cached_json)
-        .execute(&store.pool)
-        .await
-        .map_err(std::io::Error::other)?;
+    query(
+        "INSERT INTO music_tracks(id,library_id,root_snapshot,relative_path,size,modified_ns,\
+            title,artist,album,album_artist,track_number,disc_number,duration,codec,mime,scan_id,\
+            available,lyrics,cover_path,cover_size,cover_modified_ns,cover_mime) \
+            SELECT ?,id,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,? \
+            FROM libraries \
+            WHERE id=? AND root=? AND enabled=1 AND kind='music' \
+            ON CONFLICT(library_id,root_snapshot,relative_path) DO UPDATE \
+            SET size=excluded.size,modified_ns=excluded.modified_ns,title=excluded.title,\
+            artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,\
+            track_number=excluded.track_number,disc_number=excluded.disc_number,\
+            duration=excluded.duration,codec=excluded.codec,mime=excluded.mime,\
+            scan_id=excluded.scan_id,available=1,lyrics=CASE WHEN excluded.lyrics='' \
+            AND music_tracks.size=excluded.size AND music_tracks.modified_ns=excluded.modified_ns \
+            AND music_tracks.title=excluded.title AND music_tracks.artist=excluded.artist \
+            AND music_tracks.album=excluded.album AND music_tracks.lyrics=? AND EXISTS(SELECT 1 \
+            FROM automatic_metadata_provenance p WHERE p.work_id=music_tracks.id \
+            AND p.field_name='lyrics' AND p.value_json=?) THEN music_tracks.lyrics \
+            ELSE excluded.lyrics \
+            END,cover_path=excluded.cover_path,cover_size=excluded.cover_size,\
+            cover_modified_ns=excluded.cover_modified_ns,cover_mime=excluded.cover_mime",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(root)
+    .bind(track.relative_path)
+    .bind(track.size as i64)
+    .bind(track.modified_ns)
+    .bind(track.title)
+    .bind(track.artist)
+    .bind(track.album)
+    .bind(track.album_artist)
+    .bind(track.track_number)
+    .bind(track.disc_number)
+    .bind(track.duration)
+    .bind(track.codec)
+    .bind(track.mime)
+    .bind(scan)
+    .bind(track.lyrics)
+    .bind(track.cover_path)
+    .bind(track.cover_size.map(|s| s as i64))
+    .bind(track.cover_modified_ns)
+    .bind(track.cover_mime)
+    .bind(library)
+    .bind(root)
+    .bind(cached_text)
+    .bind(cached_json)
+    .execute(&store.pool)
+    .await
+    .map_err(std::io::Error::other)?;
 
     Ok(())
 }

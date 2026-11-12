@@ -2,7 +2,7 @@
 use super::{
     config::Config,
     error::{Error, db, deny, invalid},
-    types::{Callback, Link, Oidc, Status},
+    types::{AppStart, AppToken, Callback, Link, Oidc, Status},
 };
 use crate::{
     auth::{self, AuthState},
@@ -52,6 +52,20 @@ pub(super) fn routes(state: Oidc) -> Router {
         .route("/api/v1/admin/oidc", get(admin_status))
         .route("/api/v1/auth/oidc/start", post(start))
         .route("/api/v1/auth/oidc/link", post(link))
+        .route("/api/v1/auth/oidc/app/start", get(app_start))
+        .route("/api/v1/auth/oidc/app/token", post(app_token))
+        .route(
+            "/api/v1/auth/oidc/app/return.js",
+            get(|| async {
+                (
+                    [(
+                        header::CONTENT_TYPE,
+                        "application/javascript; charset=utf-8",
+                    )],
+                    "window.location.replace(document.getElementById('open').href);",
+                )
+            }),
+        )
         .route("/api/v1/auth/oidc/callback", get(callback))
         .route("/api/v1/auth/oidc/logout", get(logout))
         .layer(axum::extract::DefaultBodyLimit::max(4096))
@@ -136,7 +150,27 @@ async fn logout(State(s): State<Oidc>) -> Result<Json<serde_json::Value>, Error>
     Ok(Json(serde_json::json!({ "endSessionUrl": url })))
 }
 async fn start(State(s): State<Oidc>, headers: HeaderMap) -> Result<Response, Error> {
-    s.begin(&headers, None).await
+    s.begin(&headers, None, None).await
+}
+/// Opened by a native application in the system browser: straight to the
+/// identity provider, and back to the application with a one-time code.
+async fn app_start(
+    State(s): State<Oidc>,
+    headers: HeaderMap,
+    Query(app): Query<AppStart>,
+) -> Result<Response, Error> {
+    let mut response = s.begin(&headers, None, Some(app)).await?;
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(response)
+}
+async fn app_token(
+    State(s): State<Oidc>,
+    headers: HeaderMap,
+    Json(input): Json<AppToken>,
+) -> Result<Response, Error> {
+    s.redeem(&headers, input).await
 }
 async fn link(
     State(s): State<Oidc>,
@@ -161,7 +195,13 @@ async fn link(
     // Reuse local login's persistent client rate limit before expensive Argon2 work.
     let client_key = auth::extract_client_key(&headers);
     let allowed = crate::database::query_scalar::<_, i64>(
-        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END, window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END RETURNING login_throttle.attempts",
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) \
+                VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE \
+                SET attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+                ELSE login_throttle.attempts+1 END, window_started=CASE \
+                WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() \
+                ELSE login_throttle.window_started END \
+                RETURNING login_throttle.attempts",
     )
     .bind(&client_key)
     .fetch_one(&s.auth.store.pool)
@@ -198,7 +238,7 @@ async fn link(
     if !ok {
         return Err(invalid());
     }
-    s.begin(&headers, Some(identity.token_hash)).await
+    s.begin(&headers, Some(identity.token_hash), None).await
 }
 async fn callback(
     State(s): State<Oidc>,

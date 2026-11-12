@@ -46,8 +46,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "Windows: recovered files inherit the destination folder's ACL. Verify access to the folder and any copies; Aether does not validate or restrict these ACLs."
     );
     // Only MDBK0003 needs a key; legacy MDBK0002 archives stay readable without one.
-    let key = media_poc::backup_bundle::key_from_settings(&|name: &str| std::env::var(name).ok())?;
-    let summary = media_poc::backup_bundle::extract(&source, &target, key.as_ref()).await?;
+    let key =
+        aether_core::backup_bundle::key_from_settings(&|name: &str| std::env::var(name).ok())?;
+    let summary = aether_core::backup_bundle::extract(&source, &target, key.as_ref()).await?;
     println!(
         "Recovery files extracted. Keep the output directory private: config.json contains sensitive settings and the extracted files are NOT encrypted."
     );

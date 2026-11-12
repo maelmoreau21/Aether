@@ -1,16 +1,16 @@
 //! Integration tests for plugin storage, persistence, diagnostics, and auto-healing.
+use aether_core::{
+    auth::AuthState,
+    database::query,
+    extensions::storage::{check_health, persist, sync_installed, wasm},
+    identity::IdentityStore,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use media_extension_sdk::{Manifest, Package};
-use media_poc::{
-    auth::AuthState,
-    database::query,
-    extensions::storage::{check_health, persist, sync_installed, wasm},
-    identity::IdentityStore,
-};
 use ring::{rand::SystemRandom, signature::Ed25519KeyPair};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -316,10 +316,10 @@ async fn test_storage_health_endpoint_http() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::extensions::router(auth.clone());
+    let app = aether_core::extensions::router(auth.clone());
 
     // Log in admin to get session cookie
-    let auth_app = media_poc::auth::router(auth.clone());
+    let auth_app = aether_core::auth::router(auth.clone());
     let login_body = serde_json::to_vec(&serde_json::json!({
         "login": "admin",
         "password": "AdministratorPassword123#"

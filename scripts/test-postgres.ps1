@@ -8,7 +8,7 @@ if ($TestBinary) {
     $testBinaryPath = (Resolve-Path -LiteralPath $TestBinary).Path
     $expectedDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../target/debug/deps'))
     if ([System.IO.Path]::GetDirectoryName($testBinaryPath) -ne $expectedDirectory -or
-        [System.IO.Path]::GetFileName($testBinaryPath) -notmatch '^media_poc-[a-f0-9]+\.exe$' -or
+        [System.IO.Path]::GetFileName($testBinaryPath) -notmatch '^aether_core-[a-f0-9]+\.exe$' -or
         -not ($OnlySubtitles -or $OnlyNotifications -or $OnlyExtensionRuns)) {
         throw 'TestBinary requires a freshly built Core unit-test executable and one matching targeted group.'
     }
@@ -87,30 +87,30 @@ try {
     Write-Host 'PostgreSQL 18 is ready on a temporary loopback port. Running serial contract tests.'
 
     if ($OnlySubtitles) {
-        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'postgres_subtitle_schema_reservations_and_derivatives_survive_reopen', '--', '--ignored', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--lib', 'postgres_subtitle_schema_reservations_and_derivatives_survive_reopen', '--', '--ignored', '--test-threads=1')
         Write-Host 'Targeted PostgreSQL subtitle tests passed.'
         return
     }
     if ($OnlyExtensionRuns) {
-        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'postgres_history_owner_is_fenced_between_independent_pools', '--', '--ignored', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--lib', 'postgres_history_owner_is_fenced_between_independent_pools', '--', '--ignored', '--test-threads=1')
         Write-Host 'Targeted PostgreSQL extension-run ownership tests passed.'
         return
     }
     if ($OnlyMultiCoreExtension) {
-        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'multi_core_extension_runs', '--', '--ignored', '--nocapture', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--test', 'multi_core_extension_runs', '--', '--ignored', '--nocapture', '--test-threads=1')
         Write-Host 'Targeted two-process Core extension crash test passed.'
         return
     }
     if ($OnlyNotifications) {
-        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'postgres_notification_claim_is_fenced_and_queue_survives_reopen', '--', '--ignored', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--lib', 'postgres_notification_claim_is_fenced_and_queue_survives_reopen', '--', '--ignored', '--test-threads=1')
         Write-Host 'Targeted PostgreSQL notification tests passed.'
         return
     }
     if (-not $OnlyDistributed) {
-        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'postgres', '--', '--ignored', '--test-threads=1')
-        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--lib', 'oidc::tests', '--', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--test', 'postgres', '--', '--ignored', '--test-threads=1')
+        Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--lib', 'oidc::tests', '--', '--test-threads=1')
     }
-    Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'media-poc', '-j', '1', '--test', 'distributed_multi_node', '--', '--test-threads=1')
+    Invoke-CheckedCargo -CargoArguments @('test', '--locked', '-p', 'aether-core', '-j', '1', '--test', 'distributed_multi_node', '--', '--test-threads=1')
     Write-Host 'Requested PostgreSQL tests passed.'
 }
 finally {

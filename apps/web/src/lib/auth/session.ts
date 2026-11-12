@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { deviceRequest } from './quick-connect';
+import { getAssertion, type AssertionJSON, type RequestOptionsJSON } from './webauthn';
 
 import { tr } from '../i18n';
 export interface AuthUser { id: string; login: string; role: 'administrator' | 'user'; displayName?: string | null; sso?: boolean | null; disabledAt?: number | null; }
@@ -162,22 +163,71 @@ export async function bootstrapAdmin(login: string, password: string, bootstrapT
   });
 }
 
-export async function login(login: string, password: string): Promise<void> {
+/** Password accepted; the account asks for a second factor before Core opens a session. */
+export interface MfaChallenge { mfaToken: string; methods: ('totp' | 'recovery' | 'passkey')[]; passkey?: RequestOptionsJSON }
+export type SecondFactor = { code: string } | { recoveryCode: string } | { passkey: AssertionJSON };
+
+async function postSignIn(path: string, body: unknown, failures: Record<number, string>): Promise<Session | MfaChallenge> {
+  const response = await fetch(path, {
+    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+    headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (response.status === 429) throw new Error(tr('too_many_attempts_wait_before_trying'));
+  const failure = failures[response.status];
+  if (failure) throw new Error(failure);
+  if (!response.ok) throw new Error(tr('sign_in_is_unavailable_try_again'));
+  return response.json();
+}
+
+function finishSignIn(result: Session | MfaChallenge, overrideSeq: number): MfaChallenge | null {
+  if (overrideSeq !== manualOverrideSeq) {
+    throw new Error(tr('the_session_changed_during_sign_in'));
+  }
+  if ('mfaRequired' in result || 'mfaToken' in result) return result as MfaChallenge;
+  applySession(result, true);
+  return null;
+}
+
+/** Resolves to `null` once signed in, or to the second-factor challenge to answer. */
+export async function login(login: string, password: string): Promise<MfaChallenge | null> {
   return enqueueAuthMutation(async () => {
     const overrideSeq = manualOverrideSeq;
-    const response = await fetch('/api/v1/auth/login', {
+    const invalid = tr('incorrect_credentials');
+    const result = await postSignIn('/api/v1/auth/login', { login, password }, { 400: invalid, 401: invalid });
+    return finishSignIn(result, overrideSeq);
+  });
+}
+
+export async function completeSecondFactor(challenge: MfaChallenge, factor: SecondFactor): Promise<void> {
+  return enqueueAuthMutation(async () => {
+    const overrideSeq = manualOverrideSeq;
+    const response = await fetch('/api/v1/auth/login/mfa', {
       method: 'POST', credentials: 'same-origin', cache: 'no-store',
-      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login, password }),
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mfaToken: challenge.mfaToken, ...factor }),
       signal: AbortSignal.timeout(15000)
     });
     if (response.status === 429) throw new Error(tr('too_many_attempts_wait_before_trying'));
-    if (response.status === 401 || response.status === 400) throw new Error(tr('incorrect_credentials'));
-    if (!response.ok) throw new Error(tr('sign_in_is_unavailable_try_again'));
-    const authenticated = (await response.json()) as Session;
-    if (overrideSeq !== manualOverrideSeq) {
-      throw new Error(tr('the_session_changed_during_sign_in'));
+    if (response.status === 401) {
+      const code = (await response.json().catch(() => null))?.error;
+      throw new Error(code === 'mfa_expired' ? tr('mfa_step_expired_sign_in_again') : tr('mfa_code_incorrect'));
     }
-    applySession(authenticated, true);
+    if (!response.ok) throw new Error(tr('sign_in_is_unavailable_try_again'));
+    finishSignIn(await response.json(), overrideSeq);
+  });
+}
+
+export async function loginWithPasskey(): Promise<void> {
+  return enqueueAuthMutation(async () => {
+    const overrideSeq = manualOverrideSeq;
+    const optionsResponse = await fetch('/api/v1/auth/passkey/options', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000)
+    });
+    if (optionsResponse.status === 429) throw new Error(tr('too_many_attempts_wait_before_trying'));
+    if (!optionsResponse.ok) throw new Error(tr('sign_in_is_unavailable_try_again'));
+    const assertion = await getAssertion(await optionsResponse.json());
+    const result = await postSignIn('/api/v1/auth/passkey/login', assertion, { 400: tr('passkey_not_recognised'), 401: tr('passkey_not_recognised') });
+    finishSignIn(result, overrideSeq);
   });
 }
 

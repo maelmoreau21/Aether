@@ -44,7 +44,7 @@
     }
   }
 
-  function navigate(event: MouseEvent, destination: 'settings/' | 'admin/libraries/#overview' | 'profiles/') {
+  function navigate(event: MouseEvent, destination: 'settings/' | 'admin/libraries/#overview' | 'accounts/') {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
     panel.hidePopover();
@@ -93,9 +93,9 @@
         <Icon name="chevron" size={13} />
       </a>
 
-      <a class="profile-entry" href={resolve('profiles/')} onclick={(event) => navigate(event, 'profiles/')}>
+      <a class="profile-entry" href={resolve('accounts/')} onclick={(event) => navigate(event, 'accounts/')}>
         <Icon name="profile" size={17} />
-        <span>{$t('profiles_switch')}</span>
+        <span>{$t('accounts_switch')}</span>
         <Icon name="chevron" size={13} />
       </a>
 

@@ -1,14 +1,14 @@
-use media_contracts::{
-    inventory::{InventoryBatch, ScannedFile},
-    media::{FilmMetadata, NfoOutcome},
-};
-use media_poc::{
+use aether_core::{
     auth::AuthState,
     backup::{
         BackupError, BackupOptions, backup_database, backup_database_with_options, restore_database,
     },
     identity::{IdentityStore, Role},
     inventory,
+};
+use media_contracts::{
+    inventory::{InventoryBatch, ScannedFile},
+    media::{FilmMetadata, NfoOutcome},
 };
 use zeroize::Zeroizing;
 
@@ -98,7 +98,7 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
             size: 1048576 * (i + 1),
             modified_ns: "1700000000".into(),
             mime: "video/x-matroska".into(),
-            probe: media_poc::media::Probe::default(),
+            probe: aether_core::media::Probe::default(),
             editorial: NfoOutcome::Valid {
                 metadata: FilmMetadata {
                     title: Some(format!("Film Test {i}")),
@@ -247,7 +247,7 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
 
     use axum::body::Body;
     use tower::ServiceExt;
-    let auth_router = media_poc::auth::router(auth.clone());
+    let auth_router = aether_core::auth::router(auth.clone());
 
     let login_response = auth_router
         .clone()
@@ -277,7 +277,7 @@ async fn test_sqlite_wal_backup_and_restore_preserves_users_grants_uuids_and_met
         .unwrap();
 
     // Verify authenticated session can access catalog
-    let catalog_res = media_poc::inventory::catalogue(
+    let catalog_res = aether_core::inventory::catalogue(
         &restored_store,
         &[library_id.into()],
         Some("film"),

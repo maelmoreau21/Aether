@@ -3,6 +3,7 @@
 package app.aether
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -13,12 +14,18 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,6 +44,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -60,6 +70,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -100,6 +116,21 @@ import uniffi.aether_ffi.Pairing
 import uniffi.aether_ffi.Episode
 import uniffi.aether_ffi.Work
 
+/** The web's Halo dark palette (apps/web/src/lib/styles/halo.css). */
+private val HaloColors = darkColorScheme(
+    primary = Color(0xFFEEF1F8),
+    onPrimary = Color(0xFF0B0E18),
+    secondary = Color(0xFFFF7B47),
+    background = Color(0xFF0B0E18),
+    onBackground = Color(0xFFEEF1F8),
+    surface = Color(0xFF11151F),
+    onSurface = Color(0xFFEEF1F8),
+    surfaceVariant = Color(0xFF171C28),
+    onSurfaceVariant = Color(0xFFA2A9BA),
+    error = Color(0xFFFF6B6B),
+    outline = Color(0x17FFFFFF),
+)
+
 /** A FragmentActivity: the Cast route picker is shown as a dialog fragment. */
 class MainActivity : FragmentActivity() {
     private val model: AetherViewModel by viewModels()
@@ -107,8 +138,21 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) { App(model) }
+            MaterialTheme(colorScheme = HaloColors) { App(model) }
         }
+        if (savedInstanceState == null) returnFromSso(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        returnFromSso(intent)
+    }
+
+    /** `aether://sso?code=…`: the browser is done with single sign-on. */
+    private fun returnFromSso(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "aether" || uri.host != "sso") return
+        model.finishSso(uri.getQueryParameter("code"), uri.getQueryParameter("error"))
     }
 }
 
@@ -127,10 +171,11 @@ private fun App(model: AetherViewModel) {
         Column(Modifier.fillMaxSize().padding(padding)) {
             when (val current = screen) {
                 Screen.Server -> ServerScreen(model)
-                Screen.SignIn -> SignInScreen(model)
+                Screen.SignIn -> if (model.mfa.collectAsState().value != null) SecondFactorScreen(model) else SignInScreen(model)
                 Screen.Catalog -> CatalogScreen(model)
                 Screen.Downloads -> DownloadsScreen(model)
                 Screen.Devices -> DevicesScreen(model)
+                Screen.Accounts -> AccountsScreen(model)
                 is Screen.Series -> SeriesScreen(model, current.work)
                 is Screen.Player -> PlayerScreen(model, current.work, current.startAt)
             }
@@ -172,60 +217,316 @@ private fun DownloadQualityDialog(choice: DownloadChoice, onChoose: (DownloadQua
     )
 }
 
+// ---- Sign-in: the same two pages and the same look as the web (Halo, dark) ------
+
+private val Panel = Color(0x0EFFFFFF)
+private val Panel2 = Color(0x17FFFFFF)
+private val Line = Color(0x17FFFFFF)
+private val Muted = Color(0xFFA2A9BA)
+private val Accent = Color(0xFFFF7B47)
+
+/** Brand, a card and a footer, centred and scrollable like the web's `login-viewport`. */
 @Composable
-private fun ServerScreen(model: AetherViewModel) {
-    var address by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text(stringResource(R.string.server_title), style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(16.dp))
+private fun AuthFrame(name: String, content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Image(painterResource(R.drawable.ic_aether_logo), contentDescription = null, modifier = Modifier.size(44.dp))
+            Text(name, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(stringResource(R.string.brand_tagline), color = Muted, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(24.dp))
+        val shape = RoundedCornerShape(28.dp)
+        Column(
+            Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(shape)
+                .background(MaterialTheme.colorScheme.surface).border(1.dp, Line, shape).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            content = content,
+        )
+        Spacer(Modifier.height(24.dp))
+        Text(stringResource(R.string.brand_footer, name), color = Muted, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun CardIntro(title: String, description: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold)
+        Text(description, color = Muted, fontSize = 15.sp, lineHeight = 24.sp)
+    }
+}
+
+@Composable
+private fun LabeledField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    secret: Boolean = false,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Bold)
         OutlinedTextField(
-            value = address,
-            onValueChange = { address = it },
-            label = { Text(stringResource(R.string.server_hint)) },
+            value = value,
+            onValueChange = onChange,
             singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            shape = RoundedCornerShape(12.dp),
+            visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+            keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+            colors = OutlinedTextFieldDefaults.colors(
+                unfocusedContainerColor = Panel,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                unfocusedBorderColor = Color.Transparent,
+                focusedBorderColor = Accent,
+            ),
             modifier = Modifier.fillMaxWidth(),
         )
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = { model.connect(address) }, enabled = address.isNotBlank()) {
-            Text(stringResource(R.string.continue_action))
+    }
+}
+
+/** The large full-width button of the web's `btn-submit` (light when primary). */
+@Composable
+private fun WideButton(text: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(16.dp),
+        colors = if (primary) {
+            ButtonDefaults.buttonColors()
+        } else {
+            ButtonDefaults.buttonColors(containerColor = Panel2, contentColor = MaterialTheme.colorScheme.onSurface)
+        },
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+    ) {
+        Text(text, fontWeight = FontWeight.Bold)
+        if (primary) {
+            Spacer(Modifier.size(8.dp))
+            Text("→", fontWeight = FontWeight.Bold)
         }
     }
 }
 
 @Composable
+private fun Notice(text: String) {
+    Text(
+        text,
+        color = Accent,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(Color(0x29FF7B47)).padding(horizontal = 16.dp, vertical = 12.dp),
+    )
+}
+
+/** Page 1: the address of the server, checked before anything else is offered. */
+@Composable
+private fun ServerScreen(model: AetherViewModel) {
+    var address by remember { mutableStateOf("") }
+    val checking by model.checking.collectAsState()
+    AuthFrame("Aether") {
+        CardIntro(stringResource(R.string.server_title), stringResource(R.string.server_intro))
+        LabeledField(stringResource(R.string.server_hint), address, { address = it }, KeyboardType.Uri)
+        WideButton(
+            stringResource(if (checking) R.string.server_checking else R.string.continue_action),
+            primary = true,
+            enabled = address.isNotBlank() && !checking,
+        ) { model.connect(address) }
+    }
+}
+
+/** Page 3: authenticator or backup code, when the account has a second factor. */
+@Composable
+private fun SecondFactorScreen(model: AetherViewModel) {
+    var code by remember { mutableStateOf("") }
+    var recovery by remember { mutableStateOf(false) }
+    val challenge by model.mfa.collectAsState()
+    val signingIn by model.signingIn.collectAsState()
+    val totp = challenge?.totp == true
+    AuthFrame("Aether") {
+        CardIntro(
+            stringResource(R.string.mfa_title),
+            stringResource(
+                when {
+                    !totp -> R.string.mfa_passkey_only
+                    recovery -> R.string.mfa_recovery_desc
+                    else -> R.string.mfa_totp_desc
+                },
+            ),
+        )
+        if (totp) {
+            LabeledField(
+                stringResource(if (recovery) R.string.mfa_recovery_label else R.string.mfa_code_label),
+                code,
+                { code = it },
+                if (recovery) KeyboardType.Text else KeyboardType.NumberPassword,
+            )
+            WideButton(
+                stringResource(if (signingIn) R.string.mfa_checking else R.string.mfa_submit),
+                primary = true,
+                enabled = code.isNotBlank() && !signingIn,
+            ) { model.submitSecondFactor(code, recovery) }
+            TextButton(onClick = { recovery = !recovery; code = "" }) {
+                Text(stringResource(if (recovery) R.string.mfa_use_app else R.string.mfa_use_recovery))
+            }
+        }
+        TextButton(onClick = model::cancelSecondFactor) { Text(stringResource(R.string.back)) }
+    }
+}
+
+/** Page 2, in the order of the web login page: SSO button, local account, Quick Connect. */
+@Composable
 private fun SignInScreen(model: AetherViewModel) {
     var login by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    val info by model.serverInfo.collectAsState()
     val pairing by model.pairing.collectAsState()
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(stringResource(R.string.sign_in_title), style = MaterialTheme.typography.headlineSmall)
-        OutlinedTextField(login, { login = it }, label = { Text(stringResource(R.string.login)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(
-            password,
-            { password = it },
-            label = { Text(stringResource(R.string.password)) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Button(onClick = { model.login(login.trim(), password) }, enabled = login.isNotBlank() && password.isNotEmpty()) {
-            Text(stringResource(R.string.sign_in))
+    val kind by model.pairingKind.collectAsState()
+    val signingIn by model.signingIn.collectAsState()
+    val ssoEnabled = info?.ssoEnabled == true
+    val localEnabled = info?.localLoginEnabled != false
+    AuthFrame(info?.name ?: "Aether") {
+        CardIntro(stringResource(R.string.welcome_title), stringResource(R.string.welcome_desc))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Text(model.serverAddress.orEmpty(), color = Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            TextButton(onClick = model::changeServer) { Text(stringResource(R.string.change_server)) }
         }
-        pairing?.let { PairingCode(it) }
-        TextButton(onClick = model::changeServer) { Text(stringResource(R.string.change_server)) }
+        if (info?.needsBootstrap == true) {
+            Notice(stringResource(R.string.bootstrap_needed))
+            return@AuthFrame
+        }
+
+        // Accounts already signed in on this device and set aside: one touch to come back.
+        val known = model.accounts.collectAsState().value.filter { !it.current }
+        if (known.isNotEmpty()) {
+            Text(stringResource(R.string.accounts_known), color = Muted, fontSize = 13.sp)
+            known.forEach { account -> WideButton(account.name, primary = false) { model.switchAccount(account.id) } }
+            HorizontalDivider(color = Line)
+        }
+
+        if (ssoEnabled) {
+            if (kind == PairingKind.Sso) {
+                SsoWait(model)
+            } else {
+                val context = LocalContext.current
+                SsoButton(info?.ssoLabel.orEmpty(), info?.ssoProvider.orEmpty()) { model.startSso(context) }
+            }
+            if (localEnabled) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HorizontalDivider(Modifier.weight(1f), color = Line)
+                    Text(stringResource(R.string.or_local), color = Muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    HorizontalDivider(Modifier.weight(1f), color = Line)
+                }
+            }
+        }
+
+        if (localEnabled) {
+            LabeledField(stringResource(R.string.login), login, { login = it })
+            LabeledField(stringResource(R.string.password), password, { password = it }, KeyboardType.Password, secret = true)
+            WideButton(
+                stringResource(if (signingIn) R.string.signing_in else R.string.sign_in),
+                primary = true,
+                enabled = login.isNotBlank() && password.isNotEmpty() && !signingIn,
+            ) { model.login(login.trim(), password) }
+        }
+
+        QuickConnect(pairing, kind, model)
+
+        HorizontalDivider(color = Line)
+        Text(
+            stringResource(
+                when {
+                    !localEnabled -> R.string.help_local_disabled
+                    ssoEnabled -> R.string.help_sso
+                    else -> R.string.help_local
+                },
+            ),
+            color = Muted,
+            fontSize = 13.sp,
+            lineHeight = 21.sp,
+        )
     }
 }
+
+/** The SSO button, labelled by the administrator of the server (`sso_label`). */
+@Composable
+private fun SsoButton(label: String, provider: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(16.dp)).background(Panel2)
+            .clickable(onClick = onClick).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(label, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (provider.isNotEmpty()) {
+                Text(
+                    provider,
+                    color = Muted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Panel2).padding(horizontal = 9.dp, vertical = 4.dp),
+                )
+            }
+            Text("→", fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+/** Shown in place of the SSO button once the browser has been opened. */
+@Composable
+private fun SsoWait(model: AetherViewModel) {
+    val context = LocalContext.current
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(R.string.sso_wait), color = Muted, fontSize = 14.sp, lineHeight = 22.sp)
+        WideButton(stringResource(R.string.sso_reopen), primary = false) { model.reopenBrowser(context) }
+        TextButton(onClick = model::cancelPairing) { Text(stringResource(R.string.cancel)) }
+    }
+}
+
+/** Quick Connect, as the web's section: title, text, QR code and code. */
+@Composable
+private fun QuickConnect(pairing: Pairing?, kind: PairingKind?, model: AetherViewModel) {
+    val showing = kind == PairingKind.QuickConnect
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        HorizontalDivider(color = Line)
+        Text(stringResource(R.string.qc_title), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.qc_desc), color = Muted, fontSize = 13.sp, lineHeight = 21.sp, textAlign = TextAlign.Center)
+        if (showing && pairing != null) {
+            PairingCode(pairing)
+            Text(stringResource(R.string.qc_hint), color = Muted, fontSize = 13.sp, lineHeight = 21.sp, textAlign = TextAlign.Center)
+            Text(stringResource(R.string.waiting_confirmation), color = Muted, fontSize = 13.sp)
+        }
+        WideButton(
+            stringResource(
+                when {
+                    showing && pairing == null -> R.string.qc_creating
+                    showing -> R.string.qc_new
+                    else -> R.string.qc_show
+                },
+            ),
+            primary = false,
+            enabled = !(showing && pairing == null),
+        ) { model.startQuickConnect() }
+    }
+}
+
+/** `ABCD–EFGH`, as the web shows a pairing code. */
+private fun codeText(code: String) = if (code.length > 4) "${code.take(4)}–${code.drop(4)}" else code
 
 /** The QR modules come from the Core; drawn here without an image library. */
 @Composable
 private fun PairingCode(pairing: Pairing) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-        Text(stringResource(R.string.pair_title))
-        Spacer(Modifier.height(8.dp))
         val width = pairing.qrWidth.toInt()
-        Canvas(Modifier.size(220.dp).background(Color.White).padding(12.dp)) {
+        Canvas(Modifier.size(220.dp).clip(RoundedCornerShape(12.dp)).background(Color.White).padding(12.dp)) {
             val cell = size.minDimension / width
             pairing.qrModules.forEachIndexed { index, dark ->
                 if (dark) {
@@ -234,7 +535,7 @@ private fun PairingCode(pairing: Pairing) {
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text(stringResource(R.string.pair_code, pairing.code), style = MaterialTheme.typography.titleLarge)
+        Text(codeText(pairing.code), fontSize = 26.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -281,14 +582,25 @@ private fun CatalogScreen(model: AetherViewModel) {
     }
     val posters = rememberPosterLoader(model)
     val download = rememberDownload(model)
+    val update by model.updateAvailable.collectAsState()
     Column(Modifier.fillMaxSize().padding(12.dp)) {
+        update?.let { latest ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Panel2).padding(start = 16.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(stringResource(R.string.update_available, latest), fontSize = 14.sp, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
+                TextButton(onClick = model::openReleases) { Text(stringResource(R.string.update_download)) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(kind == "film", { kind = "film" }, { Text(stringResource(R.string.films)) })
             FilterChip(kind == "series", { kind = "series" }, { Text(stringResource(R.string.series)) })
             Spacer(Modifier.weight(1f))
             TextButton(onClick = model::showDevices) { Text(stringResource(R.string.devices)) }
             TextButton(onClick = model::showDownloads) { Text(stringResource(R.string.downloads)) }
-            TextButton(onClick = model::signOut) { Text(stringResource(R.string.sign_out)) }
+            TextButton(onClick = model::showAccounts) { Text(stringResource(R.string.accounts)) }
         }
         OutlinedTextField(search, { search = it }, label = { Text(stringResource(R.string.search)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Spacer(Modifier.height(8.dp))
@@ -378,6 +690,36 @@ private fun clock(seconds: Double): String {
     val total = seconds.toLong()
     return if (total >= 3600) "%d:%02d:%02d".format(total / 3600, total / 60 % 60, total % 60)
     else "%d:%02d".format(total / 60, total % 60)
+}
+
+/** The accounts signed in on this device: use another one, add one, or sign one out. */
+@Composable
+private fun AccountsScreen(model: AetherViewModel) {
+    val accounts by model.accounts.collectAsState()
+    BackHandler { model.closeSeries() }
+    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TextButton(onClick = model::closeSeries) { Text(stringResource(R.string.back)) }
+            Text(stringResource(R.string.accounts), style = MaterialTheme.typography.titleLarge)
+        }
+        Text(stringResource(R.string.accounts_hint), color = Muted, fontSize = 14.sp, lineHeight = 22.sp, modifier = Modifier.padding(horizontal = 4.dp))
+        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            listItems(accounts, key = { it.id }) { account ->
+                Card(Modifier.fillMaxWidth().clickable(enabled = !account.current) { model.switchAccount(account.id) }) {
+                    Row(Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(account.name, style = MaterialTheme.typography.titleMedium)
+                            if (account.current) Text(stringResource(R.string.accounts_active), style = MaterialTheme.typography.bodySmall)
+                        }
+                        TextButton(onClick = { if (account.current) model.signOut() else model.forgetAccount(account.id) }) {
+                            Text(stringResource(R.string.sign_out))
+                        }
+                    }
+                }
+            }
+        }
+        WideButton(stringResource(R.string.accounts_add), primary = true) { model.addAccount() }
+    }
 }
 
 /** The account's other devices: drive what they play, or take it over here. */

@@ -173,20 +173,20 @@ les services en cours d'exécution ne sont pas mis à jour automatiquement.
 
 ## Vérifications exécutées
 
-- `cargo test --locked -p media-poc --lib artwork::tests -j 1 -- --nocapture` :
+- `cargo test --locked -p aether-core --lib artwork::tests -j 1 -- --nocapture` :
   2 réussis, pixels redimensionnés/JPEG, alpha, proportions, couleurs uniformes,
   représentations et formats invalides.
-- `cargo test --locked -p media-poc --lib image_collection -j 1 -- --nocapture` :
+- `cargo test --locked -p aether-core --lib image_collection -j 1 -- --nocapture` :
   2 réussis, ordre exact/base/secours/neutre et protection de la configuration privée.
-- `cargo test --locked -p media-poc --test artwork_variants -j 1 -- --nocapture` :
+- `cargo test --locked -p aether-core --test artwork_variants -j 1 -- --nocapture` :
   1 réussi avec migrations SQLite, vraie authentification et contrats d'erreur.
-- `cargo test --locked -p media-poc --test extensions image_collection_uses_only_enabled_providers_and_skips_known_sources -j 1 -- --nocapture` :
+- `cargo test --locked -p aether-core --test extensions image_collection_uses_only_enabled_providers_and_skips_known_sources -j 1 -- --nocapture` :
   1 réussi avec paquet signé synthétique, vrai worker Wasm, désactivation et zéro
   tentative de transfert pour une URL connue.
 - Binaires de tests fraîchement construits exécutés avec les filtres
   `extensions::adapters::tests` et `rich_operations_and_account_avatars_use_signed_permissions` :
   respectivement2 et1 réussis ; aucun changement du contrat métadonnées/avatars.
-- `cargo clippy --locked -p media-poc --lib --tests -j 1 -- -D warnings` et
+- `cargo clippy --locked -p aether-core --lib --tests -j 1 -- -D warnings` et
   `cargo fmt --all -- --check` : réussis.
 - Web : tests ciblés de sélection/URL, ESLint ciblé, `npm run check` et
   `npm run build` réussis. Svelte : zéro erreur, six avertissements préexistants.

@@ -1,4 +1,12 @@
 //! Host authorization, real disposable-worker ABI and persisted report lifecycle.
+use aether_core::{
+    applications,
+    auth::AuthState,
+    database::{query, query_scalar},
+    extensions,
+    identity::IdentityStore,
+    reports,
+};
 use axum::{
     Router,
     body::Body,
@@ -8,14 +16,6 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use http_body_util::BodyExt;
 use media_extension_sdk::{Manifest, Package};
-use media_poc::{
-    applications,
-    auth::AuthState,
-    database::{query, query_scalar},
-    extensions,
-    identity::IdentityStore,
-    reports,
-};
 use ring::{
     rand::SystemRandom,
     signature::{Ed25519KeyPair, KeyPair},
@@ -54,7 +54,7 @@ async fn fixture() -> Fixture {
         query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,?,?,?)")
             .bind(format!("{:x}",Sha256::digest(&raw))).bind(id).bind(now).bind(now).bind(now+3600).execute(store.pool()).await.unwrap();
         sessions.push((
-            format!("media_session={raw}"),
+            format!("aether_session={raw}"),
             format!("{:x}", Sha256::digest(format!("csrf:{raw}"))),
         ));
     }
@@ -608,34 +608,4 @@ async fn reports_extension_installed_by_an_administrator_accepts_reports() {
     let response = send(&f, Some(2), "POST", "/api/v1/reports", true, report).await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
     assert_eq!(body(response).await["error"], "library_permission_denied");
-}
-
-#[tokio::test]
-async fn startup_repairs_application_extensions_left_without_library_scope() {
-    let _worker = WORKER_TEST.lock().await;
-    let f = fixture().await;
-    install(&f.store, "reports").await;
-    install(&f.store, "requests").await;
-    // Former default: no library at all for application extensions.
-    query("UPDATE extensions SET all_libraries=0")
-        .execute(f.store.pool())
-        .await
-        .unwrap();
-    // An explicit grant list is an administrator decision and must survive.
-    query("INSERT INTO extension_grants(extension_id,library_id) VALUES('media-requests','films')")
-        .execute(f.store.pool())
-        .await
-        .unwrap();
-    let report = json!({"category":"audio","description":"Son désynchronisé","workId":"work-1"});
-    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, report.clone()).await;
-    assert_eq!(body(response).await["error"], "library_permission_denied");
-    let reopened = IdentityStore::open(&f._dir.path().join("applications.sqlite"))
-        .await
-        .unwrap();
-    assert_eq!(all_libraries(&reopened, "media-reports").await, 1);
-    assert_eq!(all_libraries(&reopened, "media-requests").await, 0);
-    let response = send(&f, Some(1), "POST", "/api/v1/reports", true, report).await;
-    let status = response.status();
-    let created = body(response).await;
-    assert_eq!(status, StatusCode::CREATED, "{created}");
 }

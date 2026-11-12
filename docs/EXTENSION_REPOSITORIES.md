@@ -231,7 +231,7 @@ consentements par bibliothèque restent ceux du runtime existant.
 
 ## Vérification
 
-`cargo test --locked -p media-poc --lib extensions::repositories -j 1 -- --test-threads=1`
+`cargo test --locked -p aether-core --lib extensions::repositories -j 1 -- --test-threads=1`
 couvre les politiques URL/IP et le parcours HTTP de gestion, confiance,
 empreinte altérée, installation désactivée, actualisation et retrait sans perte
 de module. Le transport HTTPS de ce test est injecté uniquement sous `cfg(test)` ;
@@ -242,7 +242,7 @@ principal ; les tests seuls ne prouvent pas un dépôt ou fournisseur public ré
 Après compilation du Web, un parcours Chrome dédié est disponible :
 
 ```powershell
-cargo test --locked -p media-poc --lib browser_repository_catalogue_version_trust_and_install -j 1 -- --ignored --nocapture --test-threads=1
+cargo test --locked -p aether-core --lib browser_repository_catalogue_version_trust_and_install -j 1 -- --ignored --nocapture --test-threads=1
 ```
 
 Ce test démarre un vrai Core avec SQLite temporaire et deux versions signées,

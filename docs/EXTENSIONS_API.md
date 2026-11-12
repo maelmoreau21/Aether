@@ -256,7 +256,7 @@ compile le Wasm, convertit le manifeste fournisseur et crée le paquet signé.
 Pour l'auteur d'un paquet, l'outil de signature est générique :
 
 ```powershell
-cargo build -p media-poc --bin media-extension-pack --bin media-extension-worker -j 1
+cargo build -p aether-core --bin media-extension-pack --bin media-extension-worker -j 1
 media-extension-pack keygen CHEMIN_PRIVE.pk8
 media-extension-pack pack MANIFEST.json MODULE.wasm CHEMIN_PRIVE.pk8 IDENTIFIANT_EDITEUR PAQUET.json
 ```

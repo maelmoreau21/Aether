@@ -66,11 +66,33 @@ fn configuration_rejects_ssrf_injection_and_redacts_secrets() {
             "email",
             &Config {
                 smtp_port: 25,
-                ..email
+                ..email.clone()
             }
         )
         .is_err()
     );
+    for forbidden_smtp in [
+        "localhost",
+        "127.0.0.1",
+        "10.0.0.1",
+        "192.168.1.1",
+        "169.254.169.254",
+        "relay.localhost",
+        "mail.local",
+        "smtp.internal",
+        "gateway.arpa",
+    ] {
+        assert!(
+            transport::validate(
+                "email",
+                &Config {
+                    smtp_host: forbidden_smtp.into(),
+                    ..email.clone()
+                }
+            )
+            .is_err()
+        );
+    }
     assert!(serde_json::from_value::<Config>(json!({"localTest":true})).is_err());
 }
 
@@ -555,13 +577,6 @@ async fn content_additions_are_opt_in_deduplicated_and_permission_filtered() {
     let path = temp.path().join("content.sqlite");
     let store = IdentityStore::open(&path).await.unwrap();
     fixture(&store, "content-admin").await;
-    // Simulate an existing installation from before the additive content subscription table.
-    query("DROP TABLE notification_content_preferences")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    store.close().await;
-    let store = IdentityStore::open(&path).await.unwrap();
     content_contract(&store).await;
     store.close().await;
     let store = IdentityStore::open(&path).await.unwrap();

@@ -1,13 +1,13 @@
+use aether_core::{
+    auth::{self, AuthState},
+    identity::IdentityStore,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::{self, AuthState},
-    identity::IdentityStore,
-};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
@@ -56,16 +56,16 @@ async fn variant_imports_preserve_other_images_and_deduplicate_across_labels() {
         )
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    media_poc::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
-    media_poc::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Film','{}')").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','synthetic',1)").execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json) VALUES('work','films','work','Film','{}')").execute(store.pool()).await.unwrap();
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    let app = media_poc::artwork::router(auth.clone())
-        .merge(media_poc::extensions::router(auth.clone()))
+    let app = aether_core::artwork::router(auth.clone())
+        .merge(aether_core::extensions::router(auth.clone()))
         .merge(auth::router(auth));
     let (status, login, cookie) = call(
         &app,
@@ -186,7 +186,7 @@ async fn variant_imports_preserve_other_images_and_deduplicate_across_labels() {
         StatusCode::BAD_REQUEST
     );
     // Mark the harvested variants as provider-owned and verify a manual override retains their pool.
-    media_poc::database::query(
+    aether_core::database::query(
         "UPDATE work_image_entries SET provider='test.provider' WHERE language IN ('fr','en')",
     )
     .execute(store.pool())

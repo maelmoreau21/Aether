@@ -732,7 +732,7 @@ mod tests {
             .await
             .unwrap();
         let mut headers = HeaderMap::new();
-        headers.insert("cookie", format!("media_session={raw}").parse().unwrap());
+        headers.insert("cookie", format!("aether_session={raw}").parse().unwrap());
         headers.insert("origin", "http://127.0.0.1:3000".parse().unwrap());
         headers.insert(
             "x-csrf-token",

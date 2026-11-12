@@ -37,7 +37,9 @@ const errors: Readonly<Record<string, string>> = translatedLabels({
   csrf_required: 'err_csrf_required', authentication_required: 'err_authentication_required',
   lidarr_track_unsupported: 'err_lidarr_track', unsupported_track: 'err_unsupported_track',
   remote_unavailable: 'err_remote_unavailable', connection_unavailable: 'err_connection_unavailable', not_found: 'err_not_found',
-  invalid_reject_reason: 'err_invalid_reject_reason', empty_selection: 'err_empty_selection', invalid_request_selection: 'err_empty_selection', invalid_priority: 'err_invalid_priority'
+  invalid_reject_reason: 'err_invalid_reject_reason', empty_selection: 'err_empty_selection', invalid_request_selection: 'err_empty_selection', invalid_priority: 'err_invalid_priority',
+  request_permission_denied: 'err_request_permission', request_period_quota_exceeded: 'err_request_period_quota',
+  invalid_request_policy: 'err_invalid_policy', policy_target_is_profile: 'err_policy_profile', group_not_found: 'err_not_found', user_not_found: 'err_not_found'
 });
 export function errorMessage(code: string | null | undefined, status?: number): string {
   if (code && code in errors) return errors[code];
@@ -80,6 +82,10 @@ export interface SearchResult {
   kind: RequestKind; title: string; externalId: string; externalProvider: string; serverId?: string; year?: number | null; summary?: string | null;
   genres?: string[]; runtime?: number | null; network?: string | null; artist?: string | null; album?: string | null; seasons?: SeasonInfo[];
   onServer?: boolean; inLibrary?: { workId: string }; request?: { status: string; mine: boolean; id?: string | null };
+  /** Artwork of a title that is not in the library yet: a fixed provider and a plain path, served by Aether. */
+  poster?: { src: 'tmdb' | 'tvdb'; path: string } | null;
+  /** What the caller's rights say: may request it, and whether it is approved without an administrator. */
+  canRequest?: boolean; autoApprove?: boolean;
 }
 export interface RequestSelection { seasons?: number[]; episodes?: { season: number; episode: number }[]; albumIds?: string[]; monitorFuture?: boolean; serverId?: string }
 export interface RequestEvent { status?: string; action?: string; createdAt: number; message?: string; code?: string | null; actorLabel?: string | null }
@@ -182,4 +188,74 @@ export function reportPayload(input: ReportInput): ReportInput {
   if (input.endSeconds !== undefined && (input.positionSeconds === undefined || input.endSeconds < input.positionSeconds)) throw new Error(tr('the_end_must_come_after_the'));
   const context = input.context ? Object.fromEntries(['engine', 'errorCode', 'audioTrackId', 'subtitleTrackId'].filter(key => typeof input.context?.[key as keyof ReportContext] === 'string').map(key => [key, input.context?.[key as keyof ReportContext]])) : undefined;
   return { category: input.category, description: input.description.trim(), workId: input.workId, trackId: input.trackId, assetId: input.assetId, positionSeconds: input.positionSeconds, endSeconds: input.endSeconds, context };
+}
+
+export interface QuotaRule { limit: number; days: number }
+export interface ClassRule { allow?: boolean; autoApprove?: boolean; quota?: QuotaRule }
+export interface PolicyRule { film?: ClassRule; series?: ClassRule; music?: ClassRule }
+export interface EffectiveQuota { limit: number; days: number; used: number; remaining: number; resetsAt?: number | null }
+export interface EffectiveClassPolicy { allow: boolean; autoApprove: boolean; destination?: boolean; quota: EffectiveQuota | null }
+export interface MyPolicy {
+  administrator: boolean;
+  pending: number;
+  maxPending: number;
+  restricted: boolean;
+  classes: { film: EffectiveClassPolicy; series: EffectiveClassPolicy; music: EffectiveClassPolicy };
+}
+export interface PolicyGroup { id: string; name: string; isDefault: boolean; systemRole?: 'user' | 'administrator' | null; rule: PolicyRule | null }
+export interface PolicyUser { id: string; label?: string; rule: PolicyRule }
+export interface PolicyOverview { default: PolicyRule; autoApprove: boolean; maxPending: number; groups: PolicyGroup[]; users: PolicyUser[] }
+
+/** Safe proxied URL for title artwork not yet present in the local library. */
+export function posterUrl(poster: { src: string; path: string } | null | undefined): string {
+  if (!poster?.src || !poster?.path) return '';
+  return `/api/v1/requests/poster?src=${encodeURIComponent(poster.src)}&path=${encodeURIComponent(poster.path)}`;
+}
+
+/** Combined discovery search across configured servers with rights and library annotations. */
+export async function discoverRequests(q: string, signal?: AbortSignal): Promise<{ results: SearchResult[]; errors: { error: string }[]; restricted?: boolean }> {
+  return applicationRequest<{ results: SearchResult[]; errors: { error: string }[]; restricted?: boolean }>(
+    `/api/v1/requests/discover?q=${encodeURIComponent(q.trim())}`,
+    { signal }
+  );
+}
+
+export async function loadMyPolicy(): Promise<MyPolicy> {
+  return applicationRequest<MyPolicy>('/api/v1/requests/policy');
+}
+export async function loadPolicyOverview(): Promise<PolicyOverview> {
+  return applicationRequest<PolicyOverview>('/api/v1/admin/acquisition/policies');
+}
+export async function saveDefaultPolicy(rule: PolicyRule): Promise<PolicyRule> {
+  return applicationRequest<PolicyRule>('/api/v1/admin/acquisition/policies/default', {
+    method: 'PUT',
+    body: JSON.stringify(rule)
+  });
+}
+export async function saveGroupPolicy(groupId: string, rule: PolicyRule): Promise<PolicyRule> {
+  return applicationRequest<PolicyRule>(`/api/v1/admin/acquisition/policies/groups/${encodeURIComponent(groupId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(rule)
+  });
+}
+export async function deleteGroupPolicy(groupId: string): Promise<void> {
+  return applicationRequest<void>(`/api/v1/admin/acquisition/policies/groups/${encodeURIComponent(groupId)}`, {
+    method: 'DELETE'
+  });
+}
+export async function saveUserPolicy(userId: string, rule: PolicyRule): Promise<PolicyRule> {
+  return applicationRequest<PolicyRule>(`/api/v1/admin/acquisition/policies/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(rule)
+  });
+}
+export async function deleteUserPolicy(userId: string): Promise<void> {
+  return applicationRequest<void>(`/api/v1/admin/acquisition/policies/users/${encodeURIComponent(userId)}`, {
+    method: 'DELETE'
+  });
+}
+export async function loadUserEffectivePolicy(userId: string): Promise<{ rule: PolicyRule | null; effective: MyPolicy }> {
+  return applicationRequest<{ rule: PolicyRule | null; effective: MyPolicy }>(
+    `/api/v1/admin/acquisition/policies/users/${encodeURIComponent(userId)}/effective`
+  );
 }

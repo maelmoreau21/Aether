@@ -11,7 +11,7 @@ Push-Location $workspacePath
 try {
     $env:MEDIA_STORAGE_BENCH_RECORDS = [string]$Records
     if ($WasmPath) { $env:MEDIA_STORAGE_BENCH_WASM = (Resolve-Path -LiteralPath $WasmPath).Path }
-    $buildLines = @(& cargo test --locked -p media-poc --features query-metrics --test extension_data_bench --no-run --message-format=json -j 1)
+    $buildLines = @(& cargo test --locked -p aether-core --features query-metrics --test extension_data_bench --no-run --message-format=json -j 1)
     if ($LASTEXITCODE -ne 0) { throw 'Benchmark compilation failed' }
     $executablePath = $null
     foreach ($line in $buildLines) {

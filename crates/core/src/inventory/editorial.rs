@@ -190,8 +190,20 @@ pub async fn editorial_warnings(
     store: &IdentityStore,
     library_id: &str,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let rows = query("SELECT w.editorial_json FROM inventory_works w WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.work_id=w.id AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked') ORDER BY w.id")
-        .bind(library_id).fetch_all(&store.pool).await?;
+    let rows = query(
+        "SELECT w.editorial_json \
+            FROM inventory_works w \
+            WHERE w.library_id=? AND EXISTS(SELECT 1 FROM inventory_editions e \
+            JOIN inventory_versions v ON v.edition_id=e.id JOIN inventory_sources s \
+            ON s.version_id=v.id JOIN inventory_assets a ON a.source_id=s.id JOIN libraries l \
+            ON l.id=s.library_id JOIN media_nodes n ON n.id=l.node_id WHERE e.work_id=w.id \
+            AND a.available=1 AND s.root_snapshot=l.root AND l.enabled=1 \
+            AND l.kind IN ('films', 'series') AND n.status != 'revoked') \
+            ORDER BY w.id",
+    )
+    .bind(library_id)
+    .fetch_all(&store.pool)
+    .await?;
     let mut warnings = Vec::new();
     for row in rows {
         if let Ok(metadata) = serde_json::from_str::<Value>(row.get("editorial_json"))

@@ -1,12 +1,12 @@
 //! Integration tests for static asset serving under /app.
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
-};
 use tower::ServiceExt;
 use zeroize::Zeroizing;
 

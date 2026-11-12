@@ -11,16 +11,16 @@
 //! 8. Bounded zero-copy streaming relay (`206 Partial Content`) via Node outbound uplink.
 //! 9. Secret rotation and Node revocation over the outbound channel.
 
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
+    secure_app_with_jobs,
+};
 use axum::http::{Method, Request, StatusCode, header};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper_util::rt::TokioIo;
 use media_contracts::protocol::{PROTOCOL_VERSION, unix_now};
 use media_node::server::{NodeServerConfig, NodeServerState};
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
-    secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},

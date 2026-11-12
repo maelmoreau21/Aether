@@ -13,6 +13,18 @@ leur parcours existant ; « Lire les titres musicaux » lance les morceaux dans 
 lecteur global. L'enchaînement automatique d'une liste mêlant vidéo et musique
 n'est pas fourni.
 
+**Playlists automatiques.** Par défaut, les films et les séries marqués d'un cœur
+sont rassemblés dans deux playlists en lecture seule, « Films favoris » et « Séries
+favorites » (`auto-favorites-film`, `auto-favorites-series`). Elles sont calculées à
+chaque consultation, propres au compte, et n'accordent aucun accès : les droits de
+bibliothèque et le contrôle parental s'appliquent comme dans le catalogue. Chaque
+compte peut les désactiver dans **Paramètres → Affichage → Playlists automatiques**
+(préférence `autoPlaylists`, activée tant qu'elle n'est pas mise à `false`).
+
+**Sans accès à la musique.** Un compte qui n'a aucune bibliothèque musicale ne voit
+ni la recherche de morceaux, ni « Lire les titres musicaux », ni le libellé musique
+dans la page Playlists.
+
 Les playlists sont privées par défaut. Dans **Administration → Général**,
 l'administrateur peut autoriser le partage nominatif et la visibilité publique.
 « Publique » signifie uniquement visible par les comptes connectés : aucun accès
@@ -85,8 +97,8 @@ Les DLL et paquets Jellyfin ne sont pas compatibles.
 - Vitest : 96 tests passés ; Svelte : zéro erreur et avertissement ; lint et build statique passés.
 - `cargo clippy --locked --workspace --all-features --all-targets -j 1 -- -D warnings` : passé ; format appliqué.
 - Tests produit existants : cinq passés ; test ciblé des playlists mixtes passé avec le parcours navigateur activé.
-- `cargo test --locked -p media-poc --test extensions signed_file_import -- --test-threads=1` : import signé vérifié, un test passé.
-- `cargo test --locked -p media-poc --lib product_tests::mixed_playlists -- --test-threads=1` avec `MEDIA_TEST_PLAYLIST_BROWSER=1` et le build Web présent : passé.
+- `cargo test --locked -p aether-core --test extensions signed_file_import -- --test-threads=1` : import signé vérifié, un test passé.
+- `cargo test --locked -p aether-core --lib product_tests::mixed_playlists -- --test-threads=1` avec `MEDIA_TEST_PLAYLIST_BROWSER=1` et le build Web présent : passé.
 - Scan musical avec paroles et contrat Range : test ciblé passé. Workflow validé par actionlint.
 
 Chrome réel 155.0.8059.85, Core/SQLite et comptes jetables : lecture Opus

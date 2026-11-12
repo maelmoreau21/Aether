@@ -27,7 +27,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("PostgreSQL usage: media-restore BACKUP_PATH; target is MEDIA_DB_URL, must be empty; stop Core first".into());
             }
             let url = std::env::var("MEDIA_DB_URL").map_err(|_| "MEDIA_DB_URL is required")?;
-            media_poc::postgres_backup::restore(&url, &backup_path, Some(&media_root)).await?;
+            aether_core::postgres_backup::restore(&url, &backup_path, Some(&media_root)).await?;
             println!("PostgreSQL database restored successfully. Core can now be started.");
             return Ok(());
         }
@@ -38,11 +38,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let target_path = if let Some(target_arg) = args.next() {
         PathBuf::from(target_arg)
     } else {
-        media_poc::identity::configured_path(&media_root)?
+        aether_core::identity::configured_path(&media_root)?
     };
 
     let summary =
-        media_poc::backup::restore_database(&backup_path, &target_path, Some(&media_root)).await?;
+        aether_core::backup::restore_database(&backup_path, &target_path, Some(&media_root))
+            .await?;
 
     println!("Aether SQLite database restored successfully.");
     println!("  Backup:    {}", summary.backup_path);

@@ -1,5 +1,5 @@
 //! Disposable browser scan/playback evidence, including a real Core process restart.
-use media_poc::identity::IdentityStore;
+use aether_core::identity::IdentityStore;
 use std::{path::Path, process::Stdio, time::Duration};
 use zeroize::Zeroizing;
 

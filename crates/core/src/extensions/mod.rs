@@ -76,6 +76,8 @@ use matching::*;
 use package::*;
 use run::*;
 use settings::*;
+// The requests feature falls back on the same public key for its searches.
+pub(crate) use settings::DEFAULT_COMMUNITY_TMDB_API_KEY;
 
 pub(crate) use automated::{MARKER_CHAPTERS_MAX, UNIDENTIFIED_ERROR, run_automated};
 pub use install::install_internal_with_key;

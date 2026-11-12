@@ -7,8 +7,10 @@
 //! native player, a Chromecast or AirPlay opens without any credential.
 
 mod model;
+mod update;
 
 pub use model::*;
+pub use update::{APP_VERSION, RELEASES_URL, is_outdated};
 
 use reqwest::{Method, StatusCode, header};
 use serde::{Serialize, de::DeserializeOwned};
@@ -27,6 +29,10 @@ pub enum Error {
     SignedOut,
     #[error("the pairing request expired")]
     PairingExpired,
+    /// The address answers, but not like an Aether server (another service, or
+    /// a web page): nothing to sign in to.
+    #[error("not an Aether server")]
+    NotAether,
     /// The Core answered with an error status and, usually, an error code.
     #[error("server refused the request: {status} {code}")]
     Server { status: u16, code: String },
@@ -47,6 +53,14 @@ fn now() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() as i64)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    bytes.iter().fold(String::new(), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
 }
 
 /// The Core names a device after its `User-Agent`; keep it printable and short.
@@ -163,11 +177,133 @@ impl Client {
 
     // ---- Sign-in -------------------------------------------------------------
 
-    /// Local account sign-in; stores the device token.
-    pub async fn login(&self, login: &str, password: &str) -> Result<User> {
+    /// Checks that the address is an Aether server and reads what the sign-in
+    /// screen needs: its name, version and sign-in methods (with the SSO button
+    /// label its administrator chose). Public endpoints only, no account needed.
+    /// A service that is not Aether is [`Error::NotAether`]; an unreachable one
+    /// is a network error.
+    pub async fn discover(&self) -> Result<ServerInfo> {
+        let identify = |error: Error| match error {
+            Error::Server { .. } => Error::NotAether,
+            other => other,
+        };
+        let (_, config) = self
+            .call(Method::GET, "/api/v1/config", None, false)
+            .await
+            .map_err(identify)?;
+        let text = |key: &str| config[key].as_str().map(str::to_owned);
+        let (Some(name), Some(version), Some(_mode)) =
+            (text("name"), text("version"), text("mode"))
+        else {
+            return Err(Error::NotAether);
+        };
+        let (_, status) = self
+            .call(Method::GET, "/api/v1/auth/oidc/status", None, false)
+            .await
+            .map_err(identify)?;
+        if !status["enabled"].is_boolean() || !status["localLoginEnabled"].is_boolean() {
+            return Err(Error::NotAether);
+        }
+        let sign_in: SignInOptions =
+            serde_json::from_value(status).map_err(|_| Error::NotAether)?;
+        // First start: no administrator yet. Best effort, never blocks.
+        let needs_bootstrap = match self
+            .call(Method::GET, "/api/v1/auth/bootstrap/status", None, false)
+            .await
+        {
+            Ok((_, value)) => value["needsBootstrap"].as_bool().unwrap_or(false),
+            Err(_) => false,
+        };
+        Ok(ServerInfo {
+            name,
+            version,
+            sign_in,
+            needs_bootstrap,
+        })
+    }
+    /// The newer release published by the server, when this application is older
+    /// (see [`RELEASES_URL`]). Public endpoint; `None` for a development build or
+    /// when the version cannot be compared. Call it after every sign-in or
+    /// session restore, and ignore its errors: it must never block anything.
+    pub async fn check_update(&self) -> Result<Option<String>> {
+        let Some(app) = APP_VERSION.filter(|v| !v.is_empty()) else {
+            return Ok(None);
+        };
+        let (_, config) = self
+            .call(Method::GET, "/api/v1/config", None, false)
+            .await?;
+        Ok(config["version"]
+            .as_str()
+            .filter(|server| is_outdated(app, server))
+            .map(str::to_owned))
+    }
+    /// Local account sign-in. Stores the device token, or, for an account with
+    /// two-step sign-in, returns the challenge to finish with
+    /// [`Client::login_second_factor`].
+    pub async fn login(&self, login: &str, password: &str) -> Result<LoginStep> {
         let body = json!({"login": login, "password": password, "tokenType": "bearer"});
         let (_, value) = self
             .call(Method::POST, "/api/v1/auth/login", Some(body), false)
+            .await?;
+        if value["mfaRequired"].as_bool() == Some(true) {
+            let token = value["mfaToken"].as_str().ok_or_else(missing)?.to_owned();
+            let totp = value["methods"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|v| v == "totp"));
+            return Ok(LoginStep::SecondFactor(SecondFactor { token, totp }));
+        }
+        self.grant(&value).map(LoginStep::SignedIn)
+    }
+    /// Second step: an authenticator code (6 digits) or, with `recovery`, a backup code.
+    pub async fn login_second_factor(
+        &self,
+        challenge: &SecondFactor,
+        code: &str,
+        recovery: bool,
+    ) -> Result<User> {
+        let key = if recovery { "recoveryCode" } else { "code" };
+        let body = json!({"mfaToken": challenge.token, key: code.trim()});
+        let (_, value) = self
+            .call(Method::POST, "/api/v1/auth/login/mfa", Some(body), false)
+            .await?;
+        self.grant(&value)
+    }
+    /// Single sign-on in the system browser, where the person's provider
+    /// session and password manager live. Open [`SsoRequest::url`]; the browser
+    /// comes back on `redirect` (`aether://sso` for a phone, or
+    /// `http://127.0.0.1:<port>/sso` for a desktop application listening on
+    /// that port) with a `code` to give to [`Client::finish_sso`], or an
+    /// `error`. No network: the request only exists once the browser opens it.
+    pub fn start_sso(&self, redirect: &str) -> Result<SsoRequest> {
+        let mut secret = [0u8; 32];
+        ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut secret)
+            .map_err(|_| Error::InvalidUrl)?;
+        let verifier = hex(&secret);
+        let challenge =
+            hex(ring::digest::digest(&ring::digest::SHA256, verifier.as_bytes()).as_ref());
+        let mut url = self
+            .base
+            .join("api/v1/auth/oidc/app/start")
+            .map_err(|_| Error::InvalidUrl)?;
+        url.query_pairs_mut()
+            .append_pair("challenge", &challenge)
+            .append_pair("redirect", redirect);
+        Ok(SsoRequest {
+            url: url.into(),
+            verifier,
+        })
+    }
+    /// Redeems the code the browser brought back, with the verifier of the
+    /// request that was started here. Stores the device token.
+    pub async fn finish_sso(&self, code: &str, verifier: &str) -> Result<User> {
+        let body = json!({"code": code, "verifier": verifier, "tokenType": "bearer"});
+        let (_, value) = self
+            .call(
+                Method::POST,
+                "/api/v1/auth/oidc/app/token",
+                Some(body),
+                false,
+            )
             .await?;
         self.grant(&value)
     }

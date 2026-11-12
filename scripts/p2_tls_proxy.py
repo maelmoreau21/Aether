@@ -23,7 +23,9 @@ def serve(port, host, upstream):
                 self.send_response(response.status)
                 for key, value in response.getheaders():
                     if key.lower() not in ("connection", "transfer-encoding"):
-                        self.send_header(key, value)
+                        safe_key = key.replace("\r", "").replace("\n", "")
+                        safe_value = value.replace("\r", "").replace("\n", "")
+                        self.send_header(safe_key, safe_value)
                 self.send_header("Connection", "close")
                 self.end_headers()
                 if self.command != "HEAD":

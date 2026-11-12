@@ -21,6 +21,64 @@ pub struct User {
     pub display_name: Option<String>,
 }
 
+/// How this Core lets people sign in, read before any account is known
+/// (`GET /api/v1/auth/oidc/status`, public).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SignInOptions {
+    /// An OpenID Connect provider (SSO) is configured.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Local identifier and password sign-in is allowed.
+    #[serde(default = "yes")]
+    pub local_login_enabled: bool,
+    /// Label of the SSO button, chosen by the administrator of the Core.
+    #[serde(default)]
+    pub button_label: Option<String>,
+    /// Identity provider ("Authentik", "Keycloak"… or "SSO" when unknown).
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for SignInOptions {
+    /// What to assume when a Core cannot say (an older one): no SSO, passwords allowed.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            local_login_enabled: true,
+            button_label: None,
+            provider: None,
+        }
+    }
+}
+
+impl SignInOptions {
+    /// The SSO button text, with a default when the Core sets none.
+    pub fn sso_label(&self) -> String {
+        self.button_label
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or("Se connecter avec SSO")
+            .to_owned()
+    }
+}
+
+/// What the sign-in screen shows about a server (see `Client::discover`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerInfo {
+    /// Brand name of the server, shown above the sign-in form.
+    pub name: String,
+    pub version: String,
+    pub sign_in: SignInOptions,
+    /// No administrator exists yet: the server must be set up from its web page.
+    pub needs_bootstrap: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pairing {
@@ -34,6 +92,15 @@ pub struct Pairing {
     pub qr_width: usize,
     /// Row-major, `qr_width × qr_width`, `true` for a dark module.
     pub qr_modules: Vec<bool>,
+}
+
+/// A single sign-on to finish in the system browser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsoRequest {
+    /// Opened in the system browser: the provider's sign-in page follows.
+    pub url: String,
+    /// Kept by this device only; it redeems the code the browser brings back.
+    pub verifier: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -214,4 +281,48 @@ pub(crate) struct ProgressWrite {
     pub duration: f64,
     pub watched: bool,
     pub expected_revision: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SignInOptions;
+    use serde_json::json;
+
+    #[test]
+    fn sign_in_options_follow_the_core_and_default_safely() {
+        let sso: SignInOptions = serde_json::from_value(json!({
+            "enabled": true, "provider": "Authentik",
+            "localLoginEnabled": false, "buttonLabel": "Entrer avec Authentik"
+        }))
+        .unwrap();
+        assert!(sso.enabled && !sso.local_login_enabled);
+        assert_eq!(sso.sso_label(), "Entrer avec Authentik");
+
+        // A Core that says nothing: passwords allowed, no SSO, default label.
+        let bare: SignInOptions = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(bare, SignInOptions::default());
+        assert!(bare.local_login_enabled && !bare.enabled);
+        let blank = SignInOptions {
+            button_label: Some("  ".into()),
+            ..SignInOptions::default()
+        };
+        assert_eq!(blank.sso_label(), "Se connecter avec SSO");
+    }
+}
+
+/// Pending second step of a sign-in (TOTP or passkey account).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SecondFactor {
+    /// Single-use token (5 minutes, five wrong codes) sent back with the code.
+    pub token: String,
+    /// An authenticator or backup code can be entered. When `false`, the account
+    /// only has passkeys: use Quick Connect or the web.
+    pub totp: bool,
+}
+
+/// Result of the first step of a local sign-in.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LoginStep {
+    SignedIn(User),
+    SecondFactor(SecondFactor),
 }

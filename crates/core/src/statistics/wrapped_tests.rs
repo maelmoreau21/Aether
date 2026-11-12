@@ -24,11 +24,33 @@ async fn session(
     } else {
         ("stats-films", "", "")
     };
-    query("INSERT INTO statistics_sessions(id,user_id,owner_hash,generation,media_id,canonical_id,asset_id,library_id,node_id,kind,title,artist,album,device,started_at,updated_at,ended_at,state_json,seconds,covered_seconds,duration,completed,end_reason) VALUES(?,?,'fixture',0,?,?,?,?,'local',?,?,?,?,'Mozilla/5.0 (Windows NT 10.0) Firefox/131.0',?,?,?,'{\"method\":\"direct\"}',?,?,3600.0,?,'ended')")
-        .bind(id).bind(user).bind(media).bind(media).bind(media).bind(library).bind(kind).bind(format!("Fixture {media}"))
-        .bind(artist).bind(album).bind(started).bind(started + seconds as i64).bind(started + seconds as i64)
-        .bind(seconds).bind(seconds).bind(i64::from(completed))
-        .execute(&store.pool).await.unwrap();
+    query(
+        "INSERT INTO statistics_sessions(id,user_id,owner_hash,generation,media_id,canonical_id,\
+            asset_id,library_id,node_id,kind,title,artist,album,device,started_at,updated_at,\
+            ended_at,state_json,seconds,covered_seconds,duration,completed,end_reason) \
+            VALUES(?,?,'fixture',0,?,?,?,?,'local',?,?,?,?,\
+            'Mozilla/5.0 (Windows NT 10.0) Firefox/131.0',?,?,?,'{\"method\":\"direct\"}',?,?,\
+            3600.0,?,'ended')",
+    )
+    .bind(id)
+    .bind(user)
+    .bind(media)
+    .bind(media)
+    .bind(media)
+    .bind(library)
+    .bind(kind)
+    .bind(format!("Fixture {media}"))
+    .bind(artist)
+    .bind(album)
+    .bind(started)
+    .bind(started + seconds as i64)
+    .bind(started + seconds as i64)
+    .bind(seconds)
+    .bind(seconds)
+    .bind(i64::from(completed))
+    .execute(&store.pool)
+    .await
+    .unwrap();
 }
 
 async fn contract(store: IdentityStore) {

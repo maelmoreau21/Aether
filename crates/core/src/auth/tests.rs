@@ -112,6 +112,192 @@ async fn sign_in(state: &AuthState) -> (String, String) {
         body["csrfToken"].as_str().unwrap().into(),
     )
 }
+/// `name=value` of a cookie the response sets.
+fn cookie_set(response: &Response, name: &str) -> String {
+    response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with(&format!("{name}=")))
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
+}
+#[tokio::test]
+async fn several_accounts_share_a_browser_and_switch_without_signing_in_again() {
+    let (_temp, state) = setup().await;
+    let (first, first_csrf) = sign_in(&state).await;
+    crate::database::query(
+        "INSERT INTO users(id,role,display_name) VALUES('second','user','Second')",
+    )
+    .execute(&state.store.pool)
+    .await
+    .unwrap();
+    let second_raw = super::util::random_token();
+    crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'second',unixepoch(),unixepoch(),unixepoch()+3600)")
+        .bind(hash(&second_raw))
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+    let call =
+        |path: &'static str, cookies: String, csrf: Option<String>, body: serde_json::Value| {
+            let state = state.clone();
+            async move {
+                request(
+                    &state,
+                    path,
+                    if path.ends_with("/accounts") {
+                        "GET"
+                    } else {
+                        "POST"
+                    },
+                    Some(&cookies),
+                    Some(ORIGIN),
+                    csrf.as_deref(),
+                    body,
+                )
+                .await
+            }
+        };
+    let null = serde_json::Value::Null;
+
+    // Setting the first account aside signs the browser out and keeps its session.
+    let denied = call(
+        "/api/v1/auth/accounts/park",
+        first.clone(),
+        None,
+        null.clone(),
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let parked = call(
+        "/api/v1/auth/accounts/park",
+        first.clone(),
+        Some(first_csrf),
+        null.clone(),
+    )
+    .await;
+    assert_eq!(parked.status(), StatusCode::NO_CONTENT);
+    assert_eq!(cookie_set(&parked, "aether_session"), "aether_session=");
+    let aside = cookie_set(&parked, "aether_accounts");
+    assert_eq!(
+        aside,
+        format!("aether_accounts={}", first.split('=').nth(1).unwrap())
+    );
+
+    // Signed in as the second account: both are listed, the active one first.
+    let second = format!("aether_session={second_raw}");
+    let both = format!("{second}; {aside}");
+    let listed = call("/api/v1/auth/accounts", both.clone(), None, null.clone()).await;
+    let listed: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(listed.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let accounts = listed["accounts"].as_array().unwrap();
+    assert_eq!(accounts.len(), 2);
+    assert_eq!(accounts[0]["user"]["id"], "second");
+    assert_eq!(accounts[0]["current"], true);
+    assert_eq!(accounts[1]["current"], false);
+    let first_id = accounts[1]["user"]["id"].as_str().unwrap().to_owned();
+
+    // Switching swaps the two cookies and answers with the new identity.
+    let second_csrf = super::util::csrf(&second_raw);
+    let target = serde_json::json!({"userId": first_id});
+    let denied = call(
+        "/api/v1/auth/accounts/switch",
+        both.clone(),
+        None,
+        target.clone(),
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+    let switched = call(
+        "/api/v1/auth/accounts/switch",
+        both.clone(),
+        Some(second_csrf.clone()),
+        target.clone(),
+    )
+    .await;
+    assert_eq!(switched.status(), StatusCode::OK);
+    assert_eq!(cookie_set(&switched, "aether_session"), first);
+    assert_eq!(
+        cookie_set(&switched, "aether_accounts"),
+        format!("aether_accounts={second_raw}")
+    );
+    let unknown = call(
+        "/api/v1/auth/accounts/switch",
+        both.clone(),
+        Some(second_csrf.clone()),
+        serde_json::json!({"userId":"nobody"}),
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+
+    // Signed out, the sign-in page still offers the parked account, and can enter it.
+    let offered = call(
+        "/api/v1/auth/accounts/switch",
+        aside.clone(),
+        None,
+        target.clone(),
+    )
+    .await;
+    assert_eq!(offered.status(), StatusCode::OK);
+    assert_eq!(cookie_set(&offered, "aether_session"), first);
+
+    // Forgetting a parked account closes its session.
+    let forgotten = call(
+        "/api/v1/auth/accounts/forget",
+        both,
+        Some(second_csrf),
+        target,
+    )
+    .await;
+    assert_eq!(forgotten.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        cookie_set(&forgotten, "aether_accounts"),
+        "aether_accounts="
+    );
+    let left: Vec<String> = crate::database::query_scalar("SELECT user_id FROM sessions")
+        .fetch_all(&state.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(left, ["second"]);
+}
+#[tokio::test]
+async fn a_cookie_session_is_extended_only_with_its_csrf_token() {
+    let (_temp, state) = setup().await;
+    let (cookie, csrf) = sign_in(&state).await;
+    crate::database::query("UPDATE sessions SET expires_at=unixepoch()+60")
+        .execute(&state.store.pool)
+        .await
+        .unwrap();
+    let extend = |csrf| {
+        request(
+            &state,
+            "/api/v1/auth/session/extend",
+            "POST",
+            Some(&cookie),
+            Some(ORIGIN),
+            csrf,
+            serde_json::json!(null),
+        )
+    };
+    assert_eq!(extend(None).await.status(), StatusCode::FORBIDDEN);
+    let extended = extend(Some(&csrf)).await;
+    assert_eq!(extended.status(), StatusCode::NO_CONTENT);
+    let renewed = extended.headers()[header::SET_COOKIE].to_str().unwrap();
+    assert!(renewed.starts_with(&cookie) && renewed.contains("Max-Age=2592000"));
+    let left: i64 = crate::database::query_scalar("SELECT expires_at-unixepoch() FROM sessions")
+        .fetch_one(&state.store.pool)
+        .await
+        .unwrap();
+    assert!(left > 2_591_000);
+}
 #[tokio::test]
 async fn login_persistence_expiry_csrf_and_revocation() {
     let (temp, state) = setup().await;
@@ -809,7 +995,7 @@ async fn bootstrap_status_and_bootstrap_web_flow() {
         .unwrap()
         .to_str()
         .unwrap();
-    assert!(cookie_header.contains("media_session="));
+    assert!(cookie_header.contains("aether_session="));
     let valid_bytes = valid_res.into_body().collect().await.unwrap().to_bytes();
     let body: serde_json::Value = serde_json::from_slice(&valid_bytes).unwrap();
     assert_eq!(body["user"]["role"], "administrator");

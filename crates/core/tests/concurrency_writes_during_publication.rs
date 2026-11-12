@@ -1,3 +1,4 @@
+use aether_core::{auth::AuthState, identity::IdentityStore, inventory, scans::ScanJobs};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
@@ -7,7 +8,6 @@ use media_contracts::{
     inventory::{InventoryBatch, ScannedFile},
     media::NfoOutcome,
 };
-use media_poc::{auth::AuthState, identity::IdentityStore, inventory, scans::ScanJobs};
 use sqlx::Connection;
 use std::{
     sync::Arc,
@@ -58,7 +58,7 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
         "password": "pass-concurrency-write-12345"
     });
 
-    let auth_router = media_poc::auth::router(auth.clone());
+    let auth_router = aether_core::auth::router(auth.clone());
     let login_res = auth_router
         .clone()
         .oneshot(
@@ -87,8 +87,8 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
     let csrf_token = login_json["csrfToken"].as_str().unwrap().to_owned();
 
     let jobs = Arc::new(ScanJobs::default());
-    let app = media_poc::secure_app_with_jobs(
-        media_poc::node::Inventory::local(root.clone())
+    let app = aether_core::secure_app_with_jobs(
+        aether_core::node::Inventory::local(root.clone())
             .await
             .unwrap(),
         3000,
@@ -115,7 +115,7 @@ async fn test_concurrent_writes_during_sqlite_publication_and_timeout_behavior()
                     size: 1048576,
                     modified_ns: "1700000000".into(),
                     mime: "video/x-matroska".into(),
-                    probe: media_poc::media::Probe::default(),
+                    probe: aether_core::media::Probe::default(),
                     editorial: NfoOutcome::Missing,
                     poster: None,
                     reused: false,

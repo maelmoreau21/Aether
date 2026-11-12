@@ -333,7 +333,15 @@ fn push_catalogue_filters(
                 builder
                     .push(" AND (w.max_height >= ")
                     .push_bind(height)
-                    .push(" OR (w.max_height = 0 AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft ON ft.asset_id=fa.id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=")
+                    .push(" OR (w.max_height = 0 AND EXISTS(SELECT 1 FROM inventory_editions fe \
+                            JOIN inventory_versions fv ON fv.edition_id=fe.id \
+                            JOIN inventory_sources fs ON fs.version_id=fv.id \
+                            JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft \
+                            ON ft.asset_id=fa.id WHERE (fe.work_id=w.id \
+                            OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep \
+                            JOIN inventory_seasons fseason ON fseason.id=fep.season_id \
+                            WHERE fseason.series_id=w.id)) AND fa.available=1 \
+                            AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=")
                     .push_bind(height)
                     .push("))) ");
             }
@@ -342,7 +350,15 @@ fn push_catalogue_filters(
                 builder
                     .push(" AND (instr(w.codecs_csv, ")
                     .push_bind(format!(",{c},"))
-                    .push(")>0 OR (w.codecs_csv = ',' AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft ON ft.asset_id=fa.id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND lower(json_extract(ft.metadata_json,'$.codec_name'))=")
+                    .push(")>0 OR (w.codecs_csv = ',' AND EXISTS(SELECT 1 \
+                            FROM inventory_editions fe JOIN inventory_versions fv \
+                            ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id \
+                            JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft \
+                            ON ft.asset_id=fa.id WHERE (fe.work_id=w.id \
+                            OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep \
+                            JOIN inventory_seasons fseason ON fseason.id=fep.season_id \
+                            WHERE fseason.series_id=w.id)) AND fa.available=1 \
+                            AND lower(json_extract(ft.metadata_json,'$.codec_name'))=")
                     .push_bind(c)
                     .push("))) ");
             }
@@ -351,12 +367,30 @@ fn push_catalogue_filters(
                 builder
                     .push(" AND (instr(w.languages_csv, ")
                     .push_bind(format!(",{l},"))
-                    .push(")>0 OR (w.languages_csv = ',' AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft ON ft.asset_id=fa.id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND lower(json_extract(json_extract(ft.metadata_json,'$.tags'),'$.language'))=")
+                    .push(")>0 OR (w.languages_csv = ',' AND EXISTS(SELECT 1 \
+                            FROM inventory_editions fe JOIN inventory_versions fv \
+                            ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id \
+                            JOIN inventory_assets fa ON fa.source_id=fs.id JOIN inventory_tracks ft \
+                            ON ft.asset_id=fa.id WHERE (fe.work_id=w.id \
+                            OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep \
+                            JOIN inventory_seasons fseason ON fseason.id=fep.season_id \
+                            WHERE fseason.series_id=w.id)) AND fa.available=1 \
+                            AND lower(json_extract(json_extract(ft.metadata_json,'$.tags'),\
+                            '$.language'))=")
                     .push_bind(l)
                     .push("))) ");
             }
         } else {
-            builder.push(" AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id JOIN inventory_assets fa ON fa.source_id=fs.id JOIN libraries fl ON fl.id=fs.library_id JOIN media_nodes fn ON fn.id=fl.node_id WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id FROM inventory_episodes fep JOIN inventory_seasons fseason ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 AND fl.enabled=1 AND fn.status!='revoked' AND fs.root_snapshot=fl.root ");
+            builder.push(
+                " AND EXISTS(SELECT 1 FROM inventory_editions fe JOIN inventory_versions fv \
+                    ON fv.edition_id=fe.id JOIN inventory_sources fs ON fs.version_id=fv.id \
+                    JOIN inventory_assets fa ON fa.source_id=fs.id JOIN libraries fl \
+                    ON fl.id=fs.library_id JOIN media_nodes fn ON fn.id=fl.node_id \
+                    WHERE (fe.work_id=w.id OR fe.work_id IN (SELECT fep.work_id \
+                    FROM inventory_episodes fep JOIN inventory_seasons fseason \
+                    ON fseason.id=fep.season_id WHERE fseason.series_id=w.id)) AND fa.available=1 \
+                    AND fl.enabled=1 AND fn.status!='revoked' AND fs.root_snapshot=fl.root ",
+            );
             if let Some(height) = filter.quality {
                 builder.push(" AND EXISTS(SELECT 1 FROM inventory_tracks ft WHERE ft.asset_id=fa.id AND CAST(json_extract(ft.metadata_json,'$.height') AS BIGINT)>=").push_bind(height).push(") ");
             }
@@ -397,14 +431,38 @@ fn push_group_filter(
     if !has_groups {
         return;
     }
-    builder.push(" AND (NOT EXISTS(SELECT 1 FROM media_group_members own_group WHERE own_group.work_id=w.id) OR w.id IN (SELECT COALESCE(MIN(CASE WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM media_group_members gm JOIN inventory_works w ON w.id=gm.work_id JOIN libraries gl ON gl.id=w.library_id JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' ");
+    builder.push(
+        " AND (NOT EXISTS(SELECT 1 FROM media_group_members own_group \
+            WHERE own_group.work_id=w.id) OR w.id IN (SELECT COALESCE(MIN(CASE \
+            WHEN gn.status='connected' THEN w.id END),MIN(w.id)) FROM media_group_members gm \
+            JOIN inventory_works w ON w.id=gm.work_id JOIN libraries gl ON gl.id=w.library_id \
+            JOIN media_nodes gn ON gn.id=gl.node_id WHERE gl.enabled=1 AND gn.status!='revoked' ",
+    );
     if let Some(user) = &filter.user_id {
-        builder.push(" AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=").push_bind(user).push(" AND gu.role='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions gp WHERE gp.library_id=gl.id AND gp.user_id=").push_bind(user).push(")) ");
+        builder
+            .push(" AND (EXISTS(SELECT 1 FROM users gu WHERE gu.id=")
+            .push_bind(user)
+            .push(
+                " AND gu.role='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT \
+                JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT \
+                JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=gl.id \
+                AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+                OR EXISTS(SELECT 1 \
+                FROM effective_library_permissions gp \
+                WHERE gp.library_id=gl.id AND gp.user_id=",
+            )
+            .push_bind(user)
+            .push(")) ");
     }
     if fast_avail {
         builder.push(" AND (w.kind!='film' OR w.has_available_asset=1) ");
     } else {
-        builder.push(" AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ");
+        builder.push(
+            " AND (w.kind!='film' OR EXISTS(SELECT 1 FROM inventory_editions ge \
+                JOIN inventory_versions gv ON gv.edition_id=ge.id JOIN inventory_sources gs \
+                ON gs.version_id=gv.id JOIN inventory_assets ga ON ga.source_id=gs.id \
+                WHERE ge.work_id=w.id AND ga.available=1 AND gs.root_snapshot=gl.root)) ",
+        );
     }
     builder.push(" AND w.library_id IN (");
     let mut ids = builder.separated(",");
@@ -1242,7 +1300,10 @@ pub async fn detail_window(
           FROM inventory_images i JOIN libraries il ON il.id=i.library_id JOIN media_nodes in_node ON in_node.id=il.node_id \
           WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 AND i.root_snapshot=il.root AND il.enabled=1 AND il.kind IN ('films', 'series') AND in_node.status='connected' \
           ORDER BY i.priority, i.relative_path, i.id LIMIT 1) AS poster_url, \
-           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='backdrop' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS backdrop_url, \
+           (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size \
+           FROM inventory_images i WHERE i.work_id=w.id AND i.role='backdrop' AND i.available=1 \
+           AND i.root_snapshot=wl.root AND wn.status='connected' \
+           ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS backdrop_url, \
            (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='logo' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS logo_url \
          FROM inventory_works w \
          JOIN libraries wl ON wl.id=w.library_id \
@@ -1257,7 +1318,18 @@ pub async fn detail_window(
     };
 
     let mut value = work(&row);
-    let images = query("SELECT i.id,i.role,i.modified_ns,i.size FROM inventory_images i JOIN libraries l ON l.id=i.library_id JOIN media_nodes n ON n.id=l.node_id WHERE i.work_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' AND i.role!='poster' ORDER BY i.priority,i.relative_path,i.id").bind(work_id).fetch_all(&store.pool).await?;
+    let images = query(
+        "SELECT i.id,i.role,i.modified_ns,i.size \
+            FROM inventory_images i \
+            JOIN libraries l ON l.id=i.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE i.work_id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 \
+            AND n.status='connected' AND i.role!='poster' \
+            ORDER BY i.priority,i.relative_path,i.id",
+    )
+    .bind(work_id)
+    .fetch_all(&store.pool)
+    .await?;
     let mut artwork = serde_json::Map::new();
     for image in images {
         let role: String = image.get("role");
@@ -1370,7 +1442,11 @@ async fn populate_episode_page(
     // The same permissions and parental policy apply before pagination as on direct work access.
     let eligible = format!(
         "wl.enabled=1 AND wn.status!='revoked' AND \
-         ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=wl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=wl.id AND p.user_id=?)) \
+         ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT JOIN library_folders hxf \
+         ON hxf.library_id=hx.id AND hxf.active=1 LEFT JOIN libraries hxp ON hxp.id=hxf.parent_id \
+         WHERE hx.id=wl.id AND COALESCE(hxp.options_json,hx.options_json) LIKE \
+         '%adminAccess__false%')) OR EXISTS(SELECT 1 FROM effective_library_permissions p \
+         WHERE p.library_id=wl.id AND p.user_id=?)) \
          AND {} AND EXISTS(SELECT 1 FROM inventory_editions pe \
          JOIN inventory_versions pv ON pv.edition_id=pe.id JOIN inventory_sources ps ON ps.version_id=pv.id \
          JOIN inventory_assets pa ON pa.source_id=ps.id JOIN libraries pl ON pl.id=ps.library_id \

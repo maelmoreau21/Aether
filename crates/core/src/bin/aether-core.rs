@@ -1,16 +1,16 @@
 //! Single Core entry point, shared by the Docker images (`aether-core`, with the
-//! `aether` and `media-poc` aliases) and local development (`cargo run -p media-poc`).
+//! `aether` and `aether-core` aliases) and local development (`cargo run -p aether-core`).
 //!
 //! Library selection:
 //! - `MEDIA_LIBRARY_ROOT` set: local library scanned from that folder;
 //! - otherwise `MEDIA_FIXTURE_DIR` set: synthetic fixture inventory (tests, benchmarks);
 //! - otherwise: empty local library in a temporary folder (production default).
-use media_poc::{auth::AuthState, node::Inventory, scans::ScanJobs, secure_app_with_jobs};
+use aether_core::{auth::AuthState, node::Inventory, scans::ScanJobs, secure_app_with_jobs};
 
 /// Startup diagnostics also reach the administration log viewer.
 macro_rules! eprintln {
     ($($arg:tt)*) => {
-        media_poc::server_log::record(format!($($arg)*))
+        aether_core::server_log::record(format!($($arg)*))
     };
 }
 use std::{
@@ -81,14 +81,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        media_poc::server_log::remember(
-            media_poc::server_log::Level::Error,
+        aether_core::server_log::remember(
+            aether_core::server_log::Level::Error,
             &format!("panic: {info}"),
         );
         default_hook(info);
     }));
-    let log_directory = media_poc::server_log::default_directory();
-    if let Err(error) = media_poc::server_log::init_files(log_directory.clone()) {
+    let log_directory = aether_core::server_log::default_directory();
+    if let Err(error) = aether_core::server_log::init_files(log_directory.clone()) {
         eprintln!(
             "Warning: log files disabled, cannot write to '{}': {error}",
             log_directory.display()
@@ -103,14 +103,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or_else(|_| "3000".into())
         .parse()?;
     let bind_addr = parse_bind_addr()?;
-    let database = media_poc::identity::IdentityStore::open_configured(&root).await?;
+    let database = aether_core::identity::IdentityStore::open_configured(&root).await?;
     if let Some(directory) = std::env::var_os("MEDIA_EXTENSION_IMPORT_DIR") {
         let imported =
-            media_poc::extensions::files::import(&database, std::path::Path::new(&directory))
+            aether_core::extensions::files::import(&database, std::path::Path::new(&directory))
                 .await?;
         eprintln!("{{\"event\":\"local_extensions_imported\",\"count\":{imported}}}");
     }
-    match media_poc::extensions::storage::sync_installed(&database).await {
+    match aether_core::extensions::storage::sync_installed(&database).await {
         Ok(count) => {
             eprintln!(
                 "Plugin storage initialized at '{}' ({} plugin(s) verified/synced)",
@@ -139,18 +139,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let public_origin =
         std::env::var("MEDIA_PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
     let auth = AuthState::new(database.clone(), public_origin.clone()).await?;
-    if let Ok(settings) = media_poc::server_settings::load(&database).await {
-        media_poc::server_log::configure(settings.log_level, settings.log_retention_days);
+    if let Ok(settings) = aether_core::server_settings::load(&database).await {
+        aether_core::server_log::configure(settings.log_level, settings.log_retention_days);
     }
     println!("aether-core listening on {public_origin}/app/");
-    media_poc::server_log::remember(
-        media_poc::server_log::Level::Info,
+    aether_core::server_log::remember(
+        aether_core::server_log::Level::Info,
         &format!(
             "aether-core {} listening on {public_origin}/app/",
             media_contracts::version::current_version()
         ),
     );
-    let web_dist = media_poc::configured_web_dist();
+    let web_dist = aether_core::configured_web_dist();
     if !web_dist.exists() {
         eprintln!(
             "Warning: Static web assets not found at '{}'. /app routes will return 404.",
@@ -163,14 +163,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let scheduler_root = inventory.root().to_owned();
     let app = secure_app_with_jobs(inventory, port, auth.clone(), jobs.clone()).await?;
     // DLNA/UPnP for old TVs and consoles: opt-in through a catalog:read API key.
-    let app = match media_poc::dlna::DlnaConfig::from_env(port) {
+    let app = match aether_core::dlna::DlnaConfig::from_env(port) {
         Some(config) => {
-            media_poc::dlna::ssdp::spawn(config.clone());
-            app.merge(media_poc::dlna::router(database.clone(), config))
+            aether_core::dlna::ssdp::spawn(config.clone());
+            app.merge(aether_core::dlna::router(database.clone(), config))
         }
         None => app,
     };
-    let scheduler = media_poc::scheduler::Scheduler::start(auth, scheduler_root, jobs);
+    let scheduler = aether_core::scheduler::Scheduler::start(auth, scheduler_root, jobs);
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),

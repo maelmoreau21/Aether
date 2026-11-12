@@ -19,6 +19,23 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 10 novembre 2026 — Amélioration Demandes inspirée de Seerr (découverte catalogue, droits & quotas)
+
+- **Moteur de politiques de demandes** (`crates/core/src/acquisition/policy.rs`, `schema/postgres.sql`, `docs/REQUESTS_AND_REPORTS.md`) :
+  - Résolution hiérarchique : surcharge utilisateur > politiques de groupes (additives) > défaut serveur > paramètres globaux.
+  - Règles distinctes par classe (`film`, `series`, `music`) avec autorisation (`allow`), validation automatique (`auto_approve`) et quotas glissants (`limit` / `days`).
+  - Administration complète sous `/requests/admin` : édition des règles par défaut, par groupe et par utilisateur, inspecteur de droits effectifs.
+- **Découverte intégrée au catalogue** (`CatalogGrid.svelte`, `acquisition/http.rs`, `GET /api/v1/requests/discover`) :
+  - Lors d'une recherche, les œuvres manquantes dans la bibliothèque locale sont découvertes via Radarr/Sonarr et présentées dans une étagère « Disponibles à la demande » avec affiche, badge d'approbation automatique et modale de demande en 1 clic.
+- **Proxy d'affiches sécurisé** (`acquisition/transport.rs`, `GET /api/v1/requests/poster`) :
+  - Mise en cache locale des affiches externes (TMDb, TheTVDB) avec protection anti-SSRF stricte, résolution DNS épinglée et blocage des IP privées.
+- **Vérifications** :
+  - `cargo test -p media-poc --lib acquisition` : 29 tests passés avec succès.
+  - `cargo clippy -p media-poc --lib -- -D warnings` : 0 avertissement.
+  - `svelte-check` : 0 erreur, 0 avertissement.
+  - `vitest run` : `api.test.ts`, `completeness.test.ts` (0 clé orpheline, parité 100% FR/EN) et `hardcoded.test.ts` (0 chaîne en dur).
+
+
 ## 9 novembre 2026 — Transcodage de secours, HDR, PGS, mode nuit, minuterie
 
 - Décision : transcodage **optionnel** via `prepared/transcode-*` (Node `transcode.rs`, contrôles Core
@@ -188,7 +205,7 @@ Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur
 ## 5 novembre 2026 — Tâches post-scan, permissions par type, images et lecteur
 
 - Tâches non-scan (trickplay, chapitres, analyses) suivies par `active_task_runs`
-  (`migrations/task_runs.sql`) : elles ne réécrivent plus `scan_jobs`, ne bloquent
+  (`schema/*.sql`) : elles ne réécrivent plus `scan_jobs`, ne bloquent
   plus un rescan (409) ni le statut du scan. Résultats trickplay distants acceptés.
   Images de chapitres préparées après scan si `chapterImagesDuringScan`.
   `introDetectionEnabled` respecté ; le premier épisode d'une saison est réanalysé.
@@ -319,8 +336,9 @@ Branche `chore/core-restructure`, partie de `feat/requests-and-reports` (WIP com
 - Git : `crates/node/data`, `crates/core/data`, ainsi que les PNG/JSONL de
   `docs/evidence/2026-10-15`, sont ignorés et retirés de l'index (copies locales gardées,
   historique non réécrit). Les fichiers de suivi IA passent dans `.ai/`.
-- SQL : `schema.sql` et les `*_schema.sql` sont dans `crates/core/migrations/` (pas des
-  migrations sqlx : schéma courant et scripts idempotents de `initialize_fresh_schema`).
+- SQL : le schéma courant est dans `crates/core/schema/` (`sqlite.sql`, `postgres.sql`, `seed.sql`),
+  appliqué par `initialize_fresh_schema` sur une base vide ; plus de chaîne de migrations ni de journal
+  (voir `docs/MIGRATIONS.md`).
 - Extensions : plus aucun `extension_*.rs` à la racine de `src/`. Les modules publics sont
   devenus `extensions::{runtime,storage,data,objects,files,data_lifecycle}`.
 - Tests unitaires : convention `module/tests.rs`, plus de `#[path]` (ils dépendent d'éléments

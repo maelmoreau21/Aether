@@ -33,7 +33,7 @@ si un acteur épuise le budget ; elle ne constitue pas une défense réseau dist
 
 À chaque connexion, nouveau jeton aléatoire composé de deux UUID v4 OS
 (244 bits aléatoires). SQLite ne conserve que SHA-256 du jeton, user_id et dates.
-Cookie `media_session`, `Path=/`, `HttpOnly`, `SameSite=Strict`, durée maximale
+Cookie `aether_session`, `Path=/`, `HttpOnly`, `SameSite=Strict`, durée maximale
 30 jours ; `Secure` pour une origine HTTPS. HTTP est limité au loopback.
 L'origine locale par défaut est `http://127.0.0.1:MEDIA_PORT` (3000 par défaut).
 `MEDIA_PUBLIC_URL` permet de déclarer une origine exacte sans chemin, par exemple

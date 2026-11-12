@@ -1,7 +1,7 @@
 //! The client against a real Core served on a loopback port, with a film
 //! library scanned from a generated fixture: what an application does, end to end.
-use aether_client::{CatalogQuery, Client, Error, ProgressUpdate};
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory};
+use aether_client::{CatalogQuery, Client, Error, LoginStep, ProgressUpdate};
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory};
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
 use zeroize::Zeroizing;
@@ -41,7 +41,7 @@ async fn serve() -> (tempfile::TempDir, String, PathBuf) {
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
     let auth = AuthState::new(store, origin.clone()).await.unwrap();
-    let app = media_poc::secure_app(
+    let app = aether_core::secure_app(
         Inventory::local(media.clone()).await.unwrap(),
         address.port(),
         auth,
@@ -92,7 +92,9 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
             .unwrap_err()
             .is_unauthorized()
     );
-    let user = phone.login("admin", &PASSWORD).await.unwrap();
+    let LoginStep::SignedIn(user) = phone.login("admin", &PASSWORD).await.unwrap() else {
+        panic!("no second factor expected");
+    };
     assert_eq!(
         (user.login.as_str(), user.role.as_str()),
         ("admin", "administrator")
@@ -208,6 +210,54 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
     assert_eq!(original.status(), 206);
     assert_eq!(original.bytes().await.unwrap().len(), 16);
 
+    // Downloading the original is for native applications: the device token is
+    // served, a browser session (cookie) is refused, and the personal policy says so.
+    let download = format!("{origin}/api/v1/assets/{}/download", asset.id);
+    let native = reqwest::Client::new()
+        .get(&download)
+        .bearer_auth(phone.token().unwrap().access)
+        .header("range", "bytes=0-15")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(native.status(), 206);
+    let web = reqwest::Client::new()
+        .post(format!("{origin}/api/v1/auth/login"))
+        .header("origin", &origin)
+        .json(&json!({"login": "admin", "password": *PASSWORD}))
+        .send()
+        .await
+        .unwrap();
+    assert!(web.status().is_success(), "{}", web.status());
+    let cookie = web.headers()[reqwest::header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    let refused = reqwest::Client::new()
+        .get(&download)
+        .header("cookie", &cookie)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), 403);
+    assert_eq!(
+        refused.json::<Value>().await.unwrap()["error"],
+        "media_download_native_only"
+    );
+    let policy = |cookie: Option<String>| {
+        let request = reqwest::Client::new().get(format!("{origin}/api/v1/me/media-policy"));
+        let request = match cookie {
+            Some(cookie) => request.header("cookie", cookie),
+            None => request.bearer_auth(phone.token().unwrap().access),
+        };
+        async move { request.send().await.unwrap().json::<Value>().await.unwrap() }
+    };
+    assert_eq!(policy(None).await["allowMediaDownload"], true);
+    assert_eq!(policy(Some(cookie)).await["allowMediaDownload"], false);
+
     // A TV pairs by QR code, approved from the phone.
     let tv = Client::new(&origin, "Salon TV").unwrap();
     let pairing = tv.start_pairing().await.unwrap();
@@ -263,4 +313,55 @@ async fn an_application_signs_in_pairs_a_tv_browses_plays_and_resumes() {
         user,
         "the phone keeps its own session"
     );
+}
+
+/// An address that answers like any other web server is refused, and a closed
+/// port is a network error: the sign-in screen tells them apart.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_address_that_is_not_an_aether_server_is_refused() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let page = axum::Router::new()
+        .fallback(|| async { axum::response::Html("<!doctype html><title>Not Aether</title>") });
+    tokio::spawn(async move { axum::serve(listener, page).await.unwrap() });
+    let client = Client::new(&format!("http://{address}"), "Salon").unwrap();
+    assert!(matches!(client.discover().await, Err(Error::NotAether)));
+
+    let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let client = Client::new(&format!("http://127.0.0.1:{port}"), "Salon").unwrap();
+    assert!(matches!(client.discover().await, Err(Error::Network(_))));
+}
+
+/// The sign-in screen first checks that the address is an Aether server and
+/// reads how it lets people sign in (needs no media).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn discovery_reads_a_real_core_before_any_sign_in() {
+    let temp = tempfile::tempdir().unwrap();
+    let media = temp.path().join("media");
+    std::fs::create_dir_all(&media).unwrap();
+    let store = IdentityStore::open(&temp.path().join("core.sqlite3"))
+        .await
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let origin = format!("http://{address}");
+    let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
+    let app = aether_core::secure_app(Inventory::local(media).await.unwrap(), address.port(), auth)
+        .await
+        .unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let client = Client::new(&origin, "Salon").unwrap();
+
+    let fresh = client.discover().await.unwrap();
+    assert_eq!(fresh.name, "Aether");
+    assert!(fresh.sign_in.local_login_enabled && !fresh.sign_in.enabled);
+    assert!(fresh.needs_bootstrap, "no administrator yet");
+
+    store
+        .bootstrap("admin", Zeroizing::new(PASSWORD.clone()))
+        .await
+        .unwrap();
+    assert!(!client.discover().await.unwrap().needs_bootstrap);
 }

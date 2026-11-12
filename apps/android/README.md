@@ -4,7 +4,12 @@ Application native (Kotlin, Compose, Media3) pour téléphones, tablettes, Andro
 TV, Google TV et Fire TV (même APK), au-dessus du cœur Rust partagé
 `crates/client`, exposé à Kotlin par UniFFI (`crates/client-ffi`).
 
-- Connexion par mot de passe ou par code QR approuvé depuis un autre appareil.
+- Connexion en deux pages, comme le web (palette Halo) : l'adresse du serveur, vérifiée
+  (sinon « ne répond pas comme un serveur Aether »), puis le bouton SSO (libellé choisi
+  par l'administrateur ; il ouvre la page de connexion du fournisseur dans le
+  navigateur du téléphone, qui revient seul dans l'application par `aether://sso`,
+  sans appareil à approuver), le compte local si le serveur
+  l'autorise, et le code QR approuvé depuis un autre appareil. Logo Aether en icône.
 - Jeton d'appareil chiffré par une clé du Keystore Android, renouvelé au démarrage
   et chaque jour en tâche de fond (WorkManager), même si l'app n'est pas ouverte.
 - Sur TV : lanceur et bannière de l'écran d'accueil, navigation à la télécommande

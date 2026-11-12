@@ -3,6 +3,7 @@
   import ExtensionSettings from './ExtensionSettings.svelte';
   import { settingsFields, settingsDefaults } from './extension-settings';
   import AvatarCollections from './AvatarCollections.svelte';
+  import AcquisitionAdmin from '../applications/AcquisitionAdmin.svelte';
   import { onMount } from 'svelte';
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
@@ -47,6 +48,8 @@
   type Repository = { id: string; name: string; url: string; refreshedAt: number };
   // One entry per published version. Versioned catalogues (apiVersion 2) also give
   // the release date, changelog, owner and whether an image can be fetched.
+  import { isSafeHttpUrl } from '../safe-url';
+  import { toBannerSrc } from './banner';
   type CatalogueEntry = { repositoryId: string; repositoryName: string; compatible: boolean; manifest: Manifest; publisherId: string; publicKey: string; version?: string; timestamp?: string | null; changelog?: string | null; owner?: string | null; overview?: string | null; hasImage?: boolean };
   let tab = $state<'installed' | 'catalogue' | 'repositories'>('installed');
   let category = $state('all');
@@ -147,17 +150,6 @@
   const displayName = (name: string) => name.replace(/\s+\([^)]*\)$/, '');
   const shortDescription = (description: string) => description.split(' (')[0];
   const accessLabels = (permissions: string[]) => permissions.map(permission => permissionNames[permission] ?? permission).join(' · ');
-  function toBannerSrc(banner?: string): string | null {
-    if (!banner) return null;
-    const trimmed = banner.trim();
-    if (trimmed.startsWith('<svg') || trimmed.includes('<svg')) {
-      return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(trimmed)}`;
-    }
-    if (trimmed.startsWith('data:image/') || trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return trimmed;
-    }
-    return null;
-  }
   async function reload(updateRepositories = false) {
     busy = true; error = '';
     try {
@@ -498,7 +490,11 @@
         <div class="settings-screen">
           <h2 id="extensions-heading">{$t('extension_settings_for', { name: displayName(extension.manifest.name) })}</h2>
           {#if extension.manifest.permissions.includes('metadata.read')}<p>{$t('metadata_language_note')}</p>{/if}
-          {#if settingsFields(extension.manifest).length}
+          {#if extension.manifest.id === 'media-requests'}
+            <!-- Connections (Radarr, Sonarr, Lidarr), destinations and rules are Core-owned: the
+                 plugin settings screen opens them; the requests themselves keep their own page. -->
+            {#if extension.enabled}<AcquisitionAdmin embedded />{:else}<p>{$t('requests_settings_enable_first')}</p>{/if}
+          {:else if settingsFields(extension.manifest).length}
             <ExtensionSettings fields={settingsFields(extension.manifest)} bind:values={editingSettings[extension.manifest.id]} {busy} onsave={()=>void saveSettings(extension.manifest.id)} />
           {:else}<p>{$t('no_settings')}</p>{/if}
           {#if extension.manifest.permissions.includes('avatars')}<AvatarCollections extensionId={extension.manifest.id} />{/if}
@@ -604,7 +600,7 @@
             <div><dt>{$t('developer')}</dt><dd>{detail.group?.entries[0].owner || manifest.author}</dd></div>
             <div><dt>{$t('repository')}</dt><dd>
               <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- External link -->
-              {#if manifest.repository}<a href={manifest.repository} target="_blank" rel="noreferrer">{repositoryName ?? displayName(manifest.name)}</a>{:else}{repositoryName ?? '—'}{/if}
+              {#if manifest.repository && isSafeHttpUrl(manifest.repository)}<a href={manifest.repository} target="_blank" rel="noopener noreferrer">{repositoryName ?? displayName(manifest.name)}</a>{:else}{repositoryName ?? '—'}{/if}
             </dd></div>
             {#if !extension && latest}<div><dt>{$t('compatibility')}</dt><dd>{latest.compatible ? $t('compatible') : $t('incompatible')}</dd></div>{/if}
             <div><dt>{$t('permissions')}</dt><dd>{accessLabels(manifest.permissions) || $t('none')}</dd></div>

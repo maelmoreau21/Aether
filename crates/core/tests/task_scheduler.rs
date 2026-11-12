@@ -1,12 +1,6 @@
 //! The scheduler rework: one trigger engine, maintenance that is never starved, task views that
 //! ignore real-time monitoring polls, and the operations queue mounted in the application.
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode, header},
-};
-use http_body_util::BodyExt;
-use media_poc::{
+use aether_core::{
     auth::{self, AuthState},
     database::{query, query_as, query_scalar},
     identity::IdentityStore,
@@ -14,6 +8,12 @@ use media_poc::{
     scans::ScanJobs,
     scheduler, task_engine, task_scheduler,
 };
+use axum::{
+    Router,
+    body::Body,
+    http::{Request, StatusCode, header},
+};
+use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
@@ -81,7 +81,7 @@ async fn open(temp: &std::path::Path) -> (IdentityStore, AuthState) {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    media_poc::libraries::initialize_local(&store)
+    aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
     (store, auth)
@@ -97,9 +97,9 @@ async fn add_library(store: &IdentityStore, root: &std::path::Path) {
 
 /// Unified task API plus the system-task routes it relies on.
 async fn task_app(auth: &AuthState, root: &std::path::Path) -> Router {
-    media_poc::task_triggers::router(auth.clone())
+    aether_core::task_triggers::router(auth.clone())
         .merge(
-            media_poc::system_tasks::router(auth.clone(), root.to_owned())
+            aether_core::system_tasks::router(auth.clone(), root.to_owned())
                 .await
                 .unwrap(),
         )
@@ -112,7 +112,7 @@ async fn operations_queue_and_task_api_are_mounted_in_the_application() {
     let media = temp.path().join("media");
     std::fs::create_dir_all(&media).unwrap();
     let (_store, auth) = open(temp.path()).await;
-    let app = media_poc::secure_app(Inventory::local(media).await.unwrap(), 3000, auth)
+    let app = aether_core::secure_app(Inventory::local(media).await.unwrap(), 3000, auth)
         .await
         .unwrap();
     let (cookie, _) = login(&app).await;

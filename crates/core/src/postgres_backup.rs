@@ -220,7 +220,14 @@ pub async fn restore(
         .await
         .map_err(|_| PostgresBackupError::Database)?;
     let occupied: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%') OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema')) OR EXISTS (SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n ON n.oid=t.typnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') AND t.typtype IN ('e','d'))"
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n \
+                ON n.oid=c.relnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') \
+                AND n.nspname NOT LIKE 'pg_toast%' AND n.nspname NOT LIKE 'pg_temp%') \
+                OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n \
+                ON n.oid=p.pronamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema')) \
+                OR EXISTS (SELECT 1 FROM pg_catalog.pg_type t JOIN pg_catalog.pg_namespace n \
+                ON n.oid=t.typnamespace WHERE n.nspname NOT IN ('pg_catalog','information_schema') \
+                AND t.typtype IN ('e','d'))"
     ).fetch_one(&mut connection).await.map_err(|_| PostgresBackupError::Database)?;
     connection
         .close()

@@ -3,8 +3,11 @@
 package app.aether
 
 import android.app.Application
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.StreamKey
 import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
@@ -28,6 +31,8 @@ import kotlinx.coroutines.withContext
 import uniffi.aether_ffi.AetherClient
 import uniffi.aether_ffi.ClientException
 import uniffi.aether_ffi.Pairing
+import uniffi.aether_ffi.releasesUrl
+import uniffi.aether_ffi.ServerInfo
 import uniffi.aether_ffi.Work
 import uniffi.aether_ffi.WorkDetail
 
@@ -46,16 +51,23 @@ data class DownloadQuality(val original: Boolean, val height: Int, val bitrate: 
 /** A download waiting for its quality to be chosen. */
 data class DownloadChoice(val work: Work, val assetId: String, val url: String, val qualities: List<DownloadQuality>)
 
+/** What is waiting on the sign-in page: SSO in the browser, or a Quick Connect QR code. */
+enum class PairingKind { Sso, QuickConnect }
+
 sealed interface Screen {
     data object Server : Screen
     data object SignIn : Screen
     data object Catalog : Screen
     data object Downloads : Screen
     data object Devices : Screen
+    data object Accounts : Screen
     data class Series(val work: Work) : Screen
     /** `back` is where leaving the player returns; `startAt` overrides the saved position (seconds). */
     data class Player(val work: Work, val back: Screen, val startAt: Double? = null) : Screen
 }
+
+/** An account signed in on this device, as the accounts screen lists it. */
+data class AccountEntry(val id: String, val name: String, val current: Boolean)
 
 /** Navigation and session state; every network call goes through the Rust core. */
 class AetherViewModel(app: Application) : AndroidViewModel(app) {
@@ -71,16 +83,38 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     val error: StateFlow<String?> = _error
     private val _pairing = MutableStateFlow<Pairing?>(null)
     val pairing: StateFlow<Pairing?> = _pairing
+    /** Address of the Core in use, shown on the sign-in page. */
+    val serverAddress: String? get() = store.server
+    private val _serverInfo = MutableStateFlow<ServerInfo?>(null)
+    /** How the server lets people sign in (SSO label, local account), once checked. */
+    val serverInfo: StateFlow<ServerInfo?> = _serverInfo
+    private val _checking = MutableStateFlow(false)
+    val checking: StateFlow<Boolean> = _checking
+    private val _pairingKind = MutableStateFlow<PairingKind?>(null)
+    val pairingKind: StateFlow<PairingKind?> = _pairingKind
+    private val _signingIn = MutableStateFlow(false)
+    val signingIn: StateFlow<Boolean> = _signingIn
+    /** Pending second step of a sign-in (TOTP or passkey account); null otherwise. */
+    class MfaChallenge(val token: String, val totp: Boolean)
+    private val _mfa = MutableStateFlow<MfaChallenge?>(null)
+    val mfa: StateFlow<MfaChallenge?> = _mfa
+    /** Newer version published by the server when this app is older; null otherwise. */
+    private val _updateAvailable = MutableStateFlow<String?>(null)
+    val updateAvailable: StateFlow<String?> = _updateAvailable
     private val _works = MutableStateFlow<List<Work>>(emptyList())
     val works: StateFlow<List<Work>> = _works
     private val _detail = MutableStateFlow<WorkDetail?>(null)
     val detail: StateFlow<WorkDetail?> = _detail
 
-    private var pairingJob: Job? = null
+    /** The active account first, then the accounts set aside on this device. */
+    private val _accounts = MutableStateFlow<List<AccountEntry>>(emptyList())
+    val accounts: StateFlow<List<AccountEntry>> = _accounts
 
-    init {
-        store.server?.let { connect(it) }
-    }
+    private var pairingJob: Job? = null
+    /** Address of the single sign-on in progress, to open the browser again. */
+    private var ssoUrl: String? = null
+    /** The browser came back before the server was checked again (cold start). */
+    private var pendingSso: Pair<String?, String?>? = null
 
     fun clearError() {
         _error.value = null
@@ -95,12 +129,12 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
             _screen.value = Screen.Server
             return
         }
-        client = created
-        store.server = address
         if (saved == null) {
-            showSignIn()
+            checkServer(created, address)
             return
         }
+        client = created
+        store.server = address
         viewModelScope.launch {
             try {
                 created.refreshIfDue(REFRESH_MARGIN_SECONDS)
@@ -108,6 +142,7 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
                 TokenRefresh.schedule(getApplication())
                 showCatalog()
                 connectRemote()
+                rememberAccount(created)
             } catch (e: ClientException.Unauthorized) {
                 store.save(null)
                 showSignIn()
@@ -119,74 +154,333 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** First page: the address must be an Aether server before any sign-in is offered. */
+    private fun checkServer(created: AetherClient, address: String) {
+        _checking.value = true
+        viewModelScope.launch {
+            try {
+                _serverInfo.value = created.discover()
+                client = created
+                // Accounts set aside belong to the server they signed in to.
+                if (store.server != address) store.setParked(emptyList())
+                store.server = address
+                publishAccounts()
+                _screen.value = Screen.SignIn
+                pendingSso?.let { (code, error) ->
+                    pendingSso = null
+                    finishSso(code, error)
+                }
+            } catch (e: ClientException.NotAether) {
+                _error.value = getApplication<Application>().getString(R.string.error_not_aether)
+                _screen.value = Screen.Server
+            } catch (e: ClientException) {
+                _error.value = e.message
+                _screen.value = Screen.Server
+            } finally {
+                _checking.value = false
+            }
+        }
+    }
+
     fun changeServer() {
-        pairingJob?.cancel()
+        cancelPairing()
         client = null
+        _mfa.value = null
+        _serverInfo.value = null
         _screen.value = Screen.Server
     }
 
     fun login(login: String, password: String) {
         val client = client ?: return
+        _signingIn.value = true
         viewModelScope.launch {
             try {
-                client.login(login, password)
-                signedIn()
+                val step = client.loginStep(login, password)
+                val token = step.mfaToken
+                if (step.user == null && token != null) {
+                    _error.value = null
+                    _mfa.value = MfaChallenge(token, step.totp)
+                } else {
+                    signedIn()
+                }
             } catch (e: ClientException.Unauthorized) {
                 _error.value = getApplication<Application>().getString(R.string.error_credentials)
             } catch (e: ClientException) {
                 _error.value = e.message
+            } finally {
+                _signingIn.value = false
             }
         }
+    }
+
+    /** Second step: an authenticator code, or a backup code when [recovery]. */
+    fun submitSecondFactor(code: String, recovery: Boolean) {
+        val client = client ?: return
+        val challenge = _mfa.value ?: return
+        _signingIn.value = true
+        viewModelScope.launch {
+            try {
+                client.loginSecondFactor(challenge.token, code.trim(), recovery)
+                signedIn()
+            } catch (e: ClientException.Unauthorized) {
+                _error.value = getApplication<Application>().getString(R.string.error_code)
+            } catch (e: ClientException.Server) {
+                _error.value = if (e.status.toInt() == 401) {
+                    getApplication<Application>().getString(R.string.error_code)
+                } else {
+                    e.message
+                }
+            } catch (e: ClientException) {
+                _error.value = e.message
+            } finally {
+                _signingIn.value = false
+            }
+        }
+    }
+
+    /** Back from the code page to the identifiers. */
+    fun cancelSecondFactor() {
+        _mfa.value = null
+        _error.value = null
     }
 
     private fun showSignIn() {
         _screen.value = Screen.SignIn
-        startPairing()
-    }
-
-    /** Shows a QR code and polls until a signed-in device approves it. */
-    private fun startPairing() {
-        val client = client ?: return
-        pairingJob?.cancel()
-        pairingJob = viewModelScope.launch {
-            while (isActive && _screen.value == Screen.SignIn) {
-                val pairing = try {
-                    client.startPairing()
-                } catch (e: ClientException) {
-                    _error.value = e.message
-                    delay(10_000)
-                    continue
-                }
-                _pairing.value = pairing
-                val deadline = System.currentTimeMillis() + pairing.expiresIn * 1000
-                try {
-                    while (isActive && System.currentTimeMillis() < deadline) {
-                        delay(POLL_MILLIS)
-                        if (client.pollPairing(pairing) != null) {
-                            signedIn()
-                            return@launch
-                        }
-                    }
-                } catch (e: ClientException.PairingExpired) {
-                    // A fresh code is requested on the next turn.
-                } catch (e: ClientException) {
-                    _error.value = e.message
-                }
+        publishAccounts()
+        // A saved session that expired: the page still needs the server's sign-in methods.
+        if (_serverInfo.value == null) {
+            val current = client ?: return
+            viewModelScope.launch {
+                runCatching { current.discover() }.getOrNull()?.let { _serverInfo.value = it }
             }
         }
     }
 
-    private fun signedIn() {
+    /**
+     * SSO: the provider's sign-in page in the phone's browser, which comes back
+     * to the application by itself ([finishSso]). Nothing to approve.
+     */
+    fun startSso(context: Context) {
+        val client = client ?: return
+        cancelPairing()
+        val request = try {
+            client.startSso(SSO_REDIRECT)
+        } catch (e: ClientException) {
+            _error.value = e.message
+            return
+        }
+        store.ssoVerifier = request.verifier
+        ssoUrl = request.url
+        _pairingKind.value = PairingKind.Sso
+        openSso(context)
+    }
+
+    private fun openSso(context: Context) {
+        val url = ssoUrl ?: return
+        // A tab of the default browser over the application: its sessions and
+        // password manager, and it closes when the application takes over again.
+        val opened = runCatching {
+            CustomTabsIntent.Builder().setShowTitle(true).build().launchUrl(context, Uri.parse(url))
+        }
+        if (opened.isFailure) {
+            cancelPairing()
+            _error.value = getApplication<Application>().getString(R.string.sso_no_browser)
+        }
+    }
+
+    /** The browser handed back `aether://sso?code=…` (or `error=…`). */
+    fun finishSso(code: String?, error: String?) {
+        val client = client
+        if (client == null) {
+            pendingSso = code to error
+            return
+        }
+        val verifier = store.ssoVerifier ?: return
+        cancelPairing()
+        if (code == null || error != null) {
+            _error.value = getApplication<Application>().getString(R.string.sso_refused)
+            return
+        }
+        _signingIn.value = true
+        viewModelScope.launch {
+            try {
+                client.finishSso(code, verifier)
+                signedIn()
+            } catch (e: ClientException.Unauthorized) {
+                _error.value = getApplication<Application>().getString(R.string.sso_refused)
+            } catch (e: ClientException) {
+                _error.value = e.message
+            } finally {
+                _signingIn.value = false
+            }
+        }
+    }
+
+    fun startQuickConnect() = startPairing(PairingKind.QuickConnect)
+
+    fun cancelPairing() {
         pairingJob?.cancel()
         _pairing.value = null
+        _pairingKind.value = null
+        ssoUrl = null
+        store.ssoVerifier = null
+    }
+
+    fun reopenBrowser(context: Context) = openSso(context)
+
+    /** Best effort: a failure never shows anything. */
+    private fun checkUpdate() {
+        val client = client ?: return
+        viewModelScope.launch {
+            _updateAvailable.value = runCatching { client.checkUpdate() }.getOrNull()
+        }
+    }
+
+    fun openReleases() = openBrowser(releasesUrl())
+
+    /** Only web addresses are ever handed to the system. */
+    private fun openBrowser(url: String) {
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { getApplication<Application>().startActivity(intent) }
+    }
+
+    /** Requests a code, then polls until a signed-in device approves it. */
+    private fun startPairing(kind: PairingKind) {
+        val client = client ?: return
+        pairingJob?.cancel()
+        _pairing.value = null
+        _pairingKind.value = kind
+        pairingJob = viewModelScope.launch {
+            val expired = getApplication<Application>().getString(R.string.code_expired)
+            val pairing = try {
+                client.startPairing()
+            } catch (e: ClientException) {
+                _error.value = e.message
+                _pairingKind.value = null
+                return@launch
+            }
+            _pairing.value = pairing
+            val deadline = System.currentTimeMillis() + pairing.expiresIn * 1000
+            try {
+                while (isActive && System.currentTimeMillis() < deadline) {
+                    delay(POLL_MILLIS)
+                    if (client.pollPairing(pairing) != null) {
+                        signedIn()
+                        return@launch
+                    }
+                }
+                _error.value = expired
+            } catch (e: ClientException.PairingExpired) {
+                _error.value = expired
+            } catch (e: ClientException) {
+                _error.value = e.message
+            }
+            _pairing.value = null
+            _pairingKind.value = null
+        }
+    }
+
+    private fun signedIn() {
+        _mfa.value = null
+        cancelPairing()
         store.save(client?.token())
+        TokenRefresh.schedule(getApplication())
+        showCatalog()
+        connectRemote()
+        client?.let(::rememberAccount)
+    }
+
+    // ---- Several accounts on this device -----------------------------------
+
+    private fun publishAccounts() {
+        val current = store.accountId?.takeIf { client?.token() != null }
+            ?.let { AccountEntry(it, store.accountName.orEmpty(), true) }
+        _accounts.value = listOfNotNull(current) + store.parked().map { AccountEntry(it.id, it.name, false) }
+    }
+
+    /** Names the active account, and drops a copy of it set aside by an earlier sign-in. */
+    private fun rememberAccount(signedIn: AetherClient) {
+        viewModelScope.launch {
+            val user = runCatching { signedIn.me() }.getOrNull() ?: return@launch
+            if (client !== signedIn) return@launch
+            store.accountId = user.id
+            store.accountName = user.displayName ?: user.login
+            store.setParked(store.parked().filter { it.id != user.id })
+            publishAccounts()
+        }
+    }
+
+    /** Sets the active account aside: it stays signed in, ready to come back. */
+    private fun parkCurrent() {
+        val token = client?.token() ?: return
+        val id = store.accountId ?: return
+        val aside = SavedAccount(id, store.accountName.orEmpty(), token)
+        store.setParked((listOf(aside) + store.parked().filter { it.id != id }).take(MAX_PARKED))
+    }
+
+    private fun forgetCurrent() {
+        store.save(null)
+        store.accountId = null
+        store.accountName = null
+    }
+
+    fun showAccounts() {
+        publishAccounts()
+        _screen.value = Screen.Accounts
+    }
+
+    /** Signs in to one more account; the active one is set aside, not signed out. */
+    fun addAccount() {
+        val server = store.server ?: return
+        val fresh = runCatching { AetherClient(server, device, null) }.getOrElse {
+            _error.value = it.message
+            return
+        }
+        remote.disconnect()
+        parkCurrent()
+        forgetCurrent()
+        client = fresh
+        showSignIn()
+    }
+
+    /** Makes an account set aside the active one, without signing in again. */
+    fun switchAccount(id: String) {
+        val server = store.server ?: return
+        val target = store.parked().firstOrNull { it.id == id } ?: return
+        val next = runCatching { AetherClient(server, device, target.token) }.getOrElse {
+            _error.value = it.message
+            return
+        }
+        remote.disconnect()
+        cancelPairing()
+        _mfa.value = null
+        parkCurrent()
+        store.setParked(store.parked().filter { it.id != id })
+        client = next
+        store.save(target.token)
+        store.accountId = target.id
+        store.accountName = target.name
+        publishAccounts()
         TokenRefresh.schedule(getApplication())
         showCatalog()
         connectRemote()
     }
 
+    /** Signs an account set aside out of this device. */
+    fun forgetAccount(id: String) {
+        val server = store.server ?: return
+        val target = store.parked().firstOrNull { it.id == id } ?: return
+        store.setParked(store.parked().filter { it.id != id })
+        publishAccounts()
+        viewModelScope.launch {
+            runCatching { AetherClient(server, device, target.token).logout() }
+        }
+    }
+
     private fun showCatalog() {
         _screen.value = Screen.Catalog
+        checkUpdate()
         loadCatalog(kind = "film", search = null)
         renewIncompleteDownloads()
     }
@@ -244,9 +538,15 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             remote.disconnect()
             runCatching { client.logout() }
-            store.save(null)
-            TokenRefresh.cancel(getApplication())
-            showSignIn()
+            forgetCurrent()
+            // Another account of this device takes over; the sign-in page otherwise.
+            val next = store.parked().firstOrNull()
+            if (next != null) {
+                switchAccount(next.id)
+            } else {
+                TokenRefresh.cancel(getApplication())
+                showSignIn()
+            }
         }
     }
 
@@ -474,9 +774,21 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     fun completedDownload(id: String): Download? =
         downloads.downloadIndex.getDownload(id)?.takeIf { it.state == Download.STATE_COMPLETED }
 
+    // Last on purpose: Kotlin initialises properties in source order, and a saved
+    // session reaches the remote control and the downloads without suspending
+    // (a token that is not due for refresh answers at once).
+    init {
+        publishAccounts()
+        store.server?.let { connect(it) }
+    }
+
     private companion object {
+        /** Where the browser returns after single sign-on (see the manifest). */
+        const val SSO_REDIRECT = "aether://sso"
         const val REFRESH_MARGIN_SECONDS = 7L * 24 * 3600
         const val POLL_MILLIS = 3_000L
+        /** Accounts kept beside the active one. */
+        const val MAX_PARKED = 5
         const val PAGE = 200u
     }
 }

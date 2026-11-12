@@ -56,12 +56,24 @@ async fn own_kinds(store: &IdentityStore, user: &str) -> Result<Vec<String>, Sta
 
 /// Media types a user may reach once user and group denials are combined.
 pub async fn effective_kinds(store: &IdentityStore, user: &str) -> Result<Vec<String>, StatusCode> {
-    let denied: Vec<String> = query_scalar("SELECT kind FROM user_media_kind_denials WHERE user_id=? UNION SELECT x.kind FROM group_media_kind_denials x JOIN effective_user_group_members m ON m.group_id=x.group_id WHERE m.user_id=? UNION SELECT x.kind FROM group_media_kind_denials x JOIN user_groups g ON g.id=x.group_id WHERE g.is_default=1")
-        .bind(user)
-        .bind(user)
-        .fetch_all(&store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let denied: Vec<String> = query_scalar(
+        "SELECT kind \
+            FROM user_media_kind_denials \
+            WHERE user_id=? \
+            UNION SELECT x.kind \
+            FROM group_media_kind_denials x \
+            JOIN effective_user_group_members m ON m.group_id=x.group_id \
+            WHERE m.user_id=? \
+            UNION SELECT x.kind \
+            FROM group_media_kind_denials x \
+            JOIN user_groups g ON g.id=x.group_id \
+            WHERE g.is_default=1",
+    )
+    .bind(user)
+    .bind(user)
+    .fetch_all(&store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(MEDIA_KINDS
         .iter()
         .filter(|kind| !denied.iter().any(|d| d == *kind))
@@ -104,7 +116,8 @@ async fn own(
         effective_kinds(&auth.store, &actor.user.id).await?
     };
     Ok(Json(Policy {
-        allow_media_download: can_download(&auth.store, &actor.user.id).await?,
+        // Downloads belong to the native applications (bearer token), never the web.
+        allow_media_download: actor.bearer && can_download(&auth.store, &actor.user.id).await?,
         allowed_kinds: None,
         effective_kinds: Some(effective),
     }))

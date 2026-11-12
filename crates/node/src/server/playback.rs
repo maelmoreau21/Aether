@@ -818,6 +818,10 @@ fn apply_cors_headers(headers: &mut HeaderMap) {
         header::HeaderName::from_static("cross-origin-resource-policy"),
         HeaderValue::from_static("cross-origin"),
     );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
 }
 
 fn sign_stream_response(

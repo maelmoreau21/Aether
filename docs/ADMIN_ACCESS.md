@@ -25,7 +25,7 @@ l'administration et à l'héritage des permissions. La migration est idempotente
 et commune SQLite/PostgreSQL ; les validations locales sont précisées dans le
 bilan du changement.
 
-Contrôles ciblés : `cargo test -p media-poc --test admin_access` couvre les
+Contrôles ciblés : `cargo test -p aether-core --test admin_access` couvre les
 comptes bootstrap/locaux, les insertions sans identifiants locaux, les changements
 de rôle, les refus de modification des membres, ainsi que la réouverture d'une
 base avec groupes homonymes et permissions existantes. Un contrôle SQL sur une

@@ -5,9 +5,10 @@ use axum::{
 };
 
 pub fn router(auth: AuthState) -> Router {
-    Router::new()
+    let main = Router::new()
         .route("/api/v1/requests", get(list).post(create))
         .route("/api/v1/requests/search", get(search))
+        .route("/api/v1/requests/discover", get(discover))
         .route("/api/v1/requests/destinations", get(destinations))
         .route("/api/v1/requests/{id}", get(detail))
         .route("/api/v1/requests/{id}/action", post(action))
@@ -32,12 +33,19 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/admin/acquisition/servers/{id}/options",
             get(options),
         )
+        .merge(policy::routes())
         .layer(DefaultBodyLimit::max(65536))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("private, no-store"),
         ))
-        .with_state(auth)
+        .with_state(auth.clone());
+    // Posters are images, cacheable by the browser: they live outside the no-store layer.
+    main.merge(
+        Router::new()
+            .route("/api/v1/requests/poster", get(poster))
+            .with_state(auth),
+    )
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -96,8 +104,22 @@ async fn locations(
     headers: HeaderMap,
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
-    let rows:Vec<(String,String,String,String,String,String)>=query_as("SELECT l.id,COALESCE(parent.name,l.name),l.kind,n.id,n.name,l.root FROM libraries l JOIN media_nodes n ON n.id=l.node_id LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 LEFT JOIN libraries parent ON parent.id=f.parent_id WHERE l.enabled=1 AND n.status!='revoked' AND (parent.id IS NULL OR parent.enabled=1) AND NOT EXISTS(SELECT 1 FROM library_folders child WHERE child.parent_id=l.id AND child.active=1) ORDER BY COALESCE(parent.name,l.name),l.root,l.id")
-        .fetch_all(auth.store.pool()).await.map_err(db)?;
+    let rows: Vec<(String, String, String, String, String, String)> = query_as(
+        "SELECT l.id,COALESCE(parent.name,l.name),l.kind,n.id,n.name,l.root \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            LEFT \
+            JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
+            LEFT \
+            JOIN libraries parent ON parent.id=f.parent_id \
+            WHERE l.enabled=1 AND n.status!='revoked' AND (parent.id IS NULL OR parent.enabled=1) \
+            AND NOT EXISTS(SELECT 1 FROM library_folders child WHERE child.parent_id=l.id \
+            AND child.active=1) \
+            ORDER BY COALESCE(parent.name,l.name),l.root,l.id",
+    )
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(Json(
         json!({"locations":rows.into_iter().map(|(id,name,kind,node_id,node_name,root)|json!({"id":id,"name":name,"kind":kind,"nodeId":node_id,"nodeName":node_name,"root":root})).collect::<Vec<_>>()}),
     ))
@@ -238,7 +260,13 @@ async fn save_server(
             .await
             .map_err(db)?;
     }
-    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,metadata_profile_id,is_default,enabled,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,kind=excluded.kind,base_url=excluded.base_url,api_key=excluded.api_key,allowed_ips_json=excluded.allowed_ips_json,library_id=excluded.library_id,root_folder=excluded.root_folder,quality_profile_id=excluded.quality_profile_id,metadata_profile_id=excluded.metadata_profile_id,is_default=excluded.is_default,enabled=excluded.enabled,generation=excluded.generation")
+    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,metadata_profile_id,is_default,enabled,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE \
+            SET name=excluded.name,kind=excluded.kind,base_url=excluded.base_url,\
+            api_key=excluded.api_key,allowed_ips_json=excluded.allowed_ips_json,\
+            library_id=excluded.library_id,root_folder=excluded.root_folder,\
+            quality_profile_id=excluded.quality_profile_id,\
+            metadata_profile_id=excluded.metadata_profile_id,is_default=excluded.is_default,\
+            enabled=excluded.enabled,generation=excluded.generation")
         .bind(&id).bind(input.name.trim()).bind(input.kind).bind(connection.base_url).bind(key).bind(json!(connection.allowed_ips).to_string()).bind(input.library_id).bind(input.root_folder).bind(input.quality_profile_id).bind(input.metadata_profile_id).bind(i64::from(input.is_default)).bind(i64::from(input.enabled)).bind(generation).execute(&mut *tx).await.map_err(db)?;
     crate::database::commit(tx).await.map_err(db)?;
     Ok(Json(
@@ -355,10 +383,208 @@ async fn search(
             "invalid_search_query",
         ));
     }
+    let effective = policy::effective(
+        &auth.store,
+        &actor.user.id,
+        actor.user.role == Role::Administrator,
+    )
+    .await?;
+    let grant = effective.grant(&input.kind);
+    if !grant.allow {
+        return Err(err(StatusCode::FORBIDDEN, "request_permission_denied"));
+    }
     let server = choose(&auth, &actor, &input.kind, input.server_id.as_deref()).await?;
     let mut results = remote::search(&server, &input.kind, input.q.trim()).await?;
     annotate(&auth, &actor, &input.kind, &mut results).await?;
+    for result in &mut results {
+        result["canRequest"] = json!(true);
+        result["autoApprove"] = json!(grant.auto_approve);
+    }
     Ok(Json(json!({"results":results})))
+}
+/// Codes that only mean "this person cannot request this media class here": the combined
+/// search stays quiet about them instead of showing an error beside the library results.
+const QUIET: [&str; 4] = [
+    "acquisition_server_not_configured",
+    "library_permission_denied",
+    "external_metadata_parental_unverified",
+    "request_permission_denied",
+];
+async fn tmdb_enabled(pool: &sqlx::AnyPool) -> bool {
+    let count: i64 = query_scalar("SELECT COUNT(*) FROM extensions WHERE id='tmdb' AND enabled=1")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    count > 0
+}
+
+async fn resolve_tmdb_api_key(pool: &sqlx::AnyPool) -> String {
+    let stored: Option<String> =
+        query_scalar("SELECT settings_json FROM extension_settings WHERE extension_id='tmdb'")
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    if let Some(json) = stored
+        && let Ok(val) = serde_json::from_str::<Value>(&json)
+        && let Some(key) = val
+            .get("api_key")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+    {
+        return key.trim().to_string();
+    }
+    std::env::var("MEDIA_TMDB_API_KEY")
+        .or_else(|_| std::env::var("TMDB_API_KEY"))
+        .ok()
+        .filter(|k| !k.trim().is_empty())
+        .unwrap_or_else(|| crate::extensions::DEFAULT_COMMUNITY_TMDB_API_KEY.to_string())
+}
+
+async fn discover_kind(
+    auth: &AuthState,
+    actor: &Authenticated,
+    effective: &policy::Effective,
+    kind: &str,
+    q: &str,
+) -> Result<Vec<Value>, String> {
+    let grant = effective.grant(kind);
+    if !grant.allow {
+        return Ok(vec![]);
+    }
+    let found = async {
+        // Without a destination the person can read, the reason is kept: it is
+        // reported (or kept quiet) exactly as before the public search existed.
+        let (server, unavailable) = match choose(auth, actor, kind, None).await {
+            Ok(server) => (Some(server), None),
+            Err(error) => (None, Some(error)),
+        };
+        let use_tmdb = matches!(kind, "film" | "series") && tmdb_enabled(auth.store.pool()).await;
+
+        let mut results = if use_tmdb {
+            let api_key = resolve_tmdb_api_key(auth.store.pool()).await;
+            match transport::public_tmdb_search(kind, q, &api_key).await {
+                Ok(res) => res,
+                Err(error) => match &server {
+                    Some(srv) => remote::search(srv, kind, q).await?,
+                    None => return Err(error),
+                },
+            }
+        } else {
+            match &server {
+                Some(srv) => remote::search(srv, kind, q).await?,
+                None => {
+                    return Err(unavailable
+                        .unwrap_or_else(|| err(StatusCode::NOT_FOUND, "no_acquisition_server")));
+                }
+            }
+        };
+
+        results.truncate(12);
+        if let Some(srv) = &server {
+            for item in &mut results {
+                if item.get("serverId").is_none() {
+                    item["serverId"] = json!(srv.id);
+                }
+            }
+        }
+        annotate(auth, actor, kind, &mut results).await?;
+        Ok::<_, Error>(results)
+    }
+    .await;
+    match found {
+        Ok(mut results) => {
+            for result in &mut results {
+                result["canRequest"] = json!(true);
+                result["autoApprove"] = json!(grant.auto_approve);
+            }
+            Ok(results)
+        }
+        Err((_, Json(body))) => {
+            let code = body["error"].as_str().unwrap_or("search_failed");
+            if QUIET.contains(&code) {
+                Ok(vec![])
+            } else {
+                Err(code.to_owned())
+            }
+        }
+    }
+}
+#[derive(Deserialize)]
+struct Discover {
+    q: String,
+}
+/// One search for the whole interface: films and series known to the configured destinations,
+/// each marked with what the caller may do (request now, wait for approval) and with what
+/// already exists. Titles already in the library are returned too: the library search shows
+/// them, this lists what is still missing next to it.
+async fn discover(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Query(input): Query<Discover>,
+) -> Result<Json<Value>, Error> {
+    let actor = crate::applications::require(&auth, &headers, "requests", false).await?;
+    let q = input.q.trim();
+    if q.chars().count() < 2 || input.q.len() > 200 {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_search_query",
+        ));
+    }
+    if unrestricted(&auth.store, &actor.user.id).await.is_err() {
+        return Ok(Json(json!({"results":[],"errors":[],"restricted":true})));
+    }
+    let administrator = actor.user.role == Role::Administrator;
+    let effective = policy::effective(&auth.store, &actor.user.id, administrator).await?;
+    let (films, series) = tokio::join!(
+        discover_kind(&auth, &actor, &effective, "film", q),
+        discover_kind(&auth, &actor, &effective, "series", q)
+    );
+    let mut results = vec![];
+    let mut errors = vec![];
+    for found in [films, series] {
+        match found {
+            Ok(mut values) => results.append(&mut values),
+            Err(code) => errors.push(json!({"error":code})),
+        }
+    }
+    Ok(Json(
+        json!({"results":results,"errors":errors,"restricted":false}),
+    ))
+}
+#[derive(Deserialize)]
+struct PosterQuery {
+    src: String,
+    path: String,
+}
+/// Artwork for titles that are not in the library yet. Only fixed providers and plain image
+/// paths are served; the browser never contacts them directly.
+async fn poster(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Query(input): Query<PosterQuery>,
+) -> Result<axum::response::Response, Error> {
+    use axum::{http::header, response::IntoResponse};
+    crate::applications::require(&auth, &headers, "requests", false).await?;
+    let (host, prefix) = match input.src.as_str() {
+        "tmdb" => ("image.tmdb.org", "/t/p/w342"),
+        "tvdb" => ("artworks.thetvdb.com", "/banners"),
+        _ => return Err(err(StatusCode::NOT_FOUND, "not_found")),
+    };
+    if !remote::valid_poster_path(&input.path) {
+        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_poster"));
+    }
+    let (bytes, content_type) =
+        transport::public_image(host, &format!("{prefix}{}", input.path)).await?;
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "private, max-age=86400"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 /// Marks results already present in a readable Aether library or already requested,
 /// so nobody requests twice what exists. Another account's request only shows its state.
@@ -389,13 +615,27 @@ async fn annotate(
     }
     let requests = statement.fetch_all(auth.store.pool()).await.map_err(db)?;
     let works: Vec<(String, String, String)> = match kind {
-        "film" | "series" => {
-            let path = if kind == "film" { "$.tmdb" } else { "$.tvdb" };
+        "film" => {
             let sql = format!(
-                "SELECT CAST(json_extract(external_ids_json,'{path}') AS TEXT),id,library_id FROM inventory_works WHERE kind=? AND CAST(json_extract(external_ids_json,'{path}') AS TEXT) IN ({marks}) ORDER BY id LIMIT 200"
+                "SELECT CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT),id,library_id FROM inventory_works WHERE kind='film' AND CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT) IN ({marks}) ORDER BY id LIMIT 200"
             );
-            let mut statement =
-                query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql)).bind(kind);
+            let mut statement = query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql));
+            for id in &ids {
+                statement = statement.bind(id);
+            }
+            statement.fetch_all(auth.store.pool()).await.map_err(db)?
+        }
+        "series" => {
+            let sql = format!(
+                "SELECT CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT),id,library_id FROM inventory_works WHERE kind='series' AND CAST(json_extract(external_ids_json,'$.tmdb') AS TEXT) IN ({marks}) \
+                 UNION ALL \
+                 SELECT CAST(json_extract(external_ids_json,'$.tvdb') AS TEXT),id,library_id FROM inventory_works WHERE kind='series' AND CAST(json_extract(external_ids_json,'$.tvdb') AS TEXT) IN ({marks}) \
+                 LIMIT 200"
+            );
+            let mut statement = query_as::<_, (String, String, String)>(sqlx::AssertSqlSafe(sql));
+            for id in &ids {
+                statement = statement.bind(id);
+            }
             for id in &ids {
                 statement = statement.bind(id);
             }
@@ -443,6 +683,11 @@ async fn create(
             "invalid_request_selection",
         ));
     }
+    let administrator = actor.user.role == Role::Administrator;
+    let effective = policy::effective(&auth.store, &actor.user.id, administrator).await?;
+    if !effective.grant(&input.kind).allow {
+        return Err(err(StatusCode::FORBIDDEN, "request_permission_denied"));
+    }
     let server = choose(&auth, &actor, &input.kind, input.server_id.as_deref()).await?;
     let validation =
         crate::applications::invoke(&auth.store, "requests", "requests.validate", json!(input))
@@ -460,6 +705,19 @@ async fn create(
         .take(512)
         .collect();
     input.server_id = Some(server.id.clone());
+    let id = insert_request(&auth, &actor.user.id, &effective, &server, &input).await?;
+    Ok(Json(json!(record(&auth.store, &id).await?)))
+}
+/// Admission of one validated request: duplicate, open-request limit and window quota are
+/// checked inside the write transaction, then the author's rights decide whether it starts
+/// approved (an administrator, or a rule that approves automatically) or waits for review.
+pub(super) async fn insert_request(
+    auth: &AuthState,
+    user_id: &str,
+    effective: &policy::Effective,
+    server: &Server,
+    input: &RequestInput,
+) -> Result<String, Error> {
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
         .await
@@ -469,26 +727,24 @@ async fn create(
     if duplicate.is_some() {
         return Err(err(StatusCode::CONFLICT, "request_already_exists"));
     }
-    let (auto, max): (i64, i64) = query_as(
-        "SELECT auto_approve,max_pending_per_user FROM acquisition_settings WHERE singleton=1",
-    )
+    let pending: i64 = query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM media_requests WHERE user_id=? AND status IN ({})",
+        policy::OPEN_STATUSES
+    )))
+    .bind(user_id)
     .fetch_one(&mut *tx)
     .await
     .map_err(db)?;
-    let pending:i64=query_scalar("SELECT COUNT(*) FROM media_requests WHERE user_id=? AND status IN ('pending','approved','submitted','acquiring','imported','partial')").bind(&actor.user.id).fetch_one(&mut *tx).await.map_err(db)?;
-    if pending >= max {
+    if pending >= effective.max_pending {
         return Err(err(StatusCode::TOO_MANY_REQUESTS, "request_quota_exceeded"));
     }
-    let status = if auto == 1 || actor.user.role == Role::Administrator {
-        "approved"
-    } else {
-        "pending"
-    };
+    policy::enforce_quota(&mut tx, effective, &input.kind).await?;
+    let (status, code) = policy::admission(effective, &input.kind);
     let id = uuid::Uuid::new_v4().to_string();
     let timestamp = now();
     query("INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)")
-        .bind(&id).bind(&actor.user.id).bind(&server.id).bind(&server.library_id).bind(&input.kind).bind(&input.title).bind(&input.external_id).bind(&input.external_provider).bind(json!(input).to_string()).bind(status).bind(timestamp).bind(timestamp).execute(&mut *tx).await.map_err(db)?;
-    event(&mut tx, &id, Some(&actor.user.id), status, None).await?;
+        .bind(&id).bind(user_id).bind(&server.id).bind(&server.library_id).bind(&input.kind).bind(&input.title).bind(&input.external_id).bind(&input.external_provider).bind(json!(input).to_string()).bind(status).bind(timestamp).bind(timestamp).execute(&mut *tx).await.map_err(db)?;
+    event(&mut tx, &id, Some(user_id), status, code).await?;
     if status == "approved" {
         query("INSERT INTO acquisition_jobs(request_id,available_at) VALUES(?,?)")
             .bind(&id)
@@ -498,7 +754,7 @@ async fn create(
             .map_err(db)?;
     }
     crate::database::commit(tx).await.map_err(db)?;
-    Ok(Json(json!(record(&auth.store, &id).await?)))
+    Ok(id)
 }
 #[derive(Deserialize, Default)]
 struct Page {
@@ -761,7 +1017,9 @@ async fn action(
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
         .await
         .map_err(db)?;
-    let changed=query("UPDATE media_requests SET status=?,error_code=?,server_id=?,library_id=?,input_json=?,updated_at=?,imported=CASE WHEN ?='approved' THEN 0 ELSE imported END WHERE id=? AND status=?").bind(status).bind(reason).bind(&server.id).bind(&server.library_id).bind(json!(selection).to_string()).bind(now()).bind(status).bind(&id).bind(&row.status).execute(&mut *tx).await.map_err(db)?.rows_affected();
+    let changed=query("UPDATE media_requests \
+            SET status=?,error_code=?,server_id=?,library_id=?,input_json=?,updated_at=?,imported=CASE WHEN ?='approved' THEN 0 ELSE imported END \
+            WHERE id=? AND status=?").bind(status).bind(reason).bind(&server.id).bind(&server.library_id).bind(json!(selection).to_string()).bind(now()).bind(status).bind(&id).bind(&row.status).execute(&mut *tx).await.map_err(db)?.rows_affected();
     if changed != 1 {
         return Err(err(StatusCode::CONFLICT, "request_changed"));
     }

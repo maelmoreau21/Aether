@@ -1,4 +1,4 @@
-use media_poc::{
+use aether_core::{
     database::query,
     identity::IdentityStore,
     inventory::{EpisodePage, detail_window},

@@ -1,11 +1,11 @@
 //! Explicit end-to-end storage-engine benchmark; never run in ordinary suites.
-use base64::Engine as _;
-use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
-use media_poc::{
+use aether_core::{
     database::query,
     extensions::data::{self as extension_data, Context},
     identity::IdentityStore,
 };
+use base64::Engine as _;
+use media_extension_sdk::storage::{StorageOperation, StorageRequest, StorageScope};
 use serde_json::json;
 use std::time::Instant;
 
@@ -155,7 +155,7 @@ async fn exercise(store: IdentityStore, engine: &str) {
     }
     let mut cells = Vec::new();
     for concurrency in [1, 4] {
-        let statements_before = media_poc::database::statement_calls();
+        let statements_before = aether_core::database::statement_calls();
         let mut tasks = Vec::new();
         let started = Instant::now();
         for worker in 0..concurrency {
@@ -187,7 +187,7 @@ async fn exercise(store: IdentityStore, engine: &str) {
         for task in tasks {
             samples.extend(task.await.unwrap());
         }
-        let statement_constructions = media_poc::database::statement_calls()
+        let statement_constructions = aether_core::database::statement_calls()
             .zip(statements_before)
             .map(|(after, before)| after - before);
         cells.push(json!({"workload":"read","concurrency":concurrency,"wallSeconds":started.elapsed().as_secs_f64(),"latency":stats(samples),"statementConstructionCalls":statement_constructions}));

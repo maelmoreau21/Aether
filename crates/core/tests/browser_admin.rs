@@ -1,5 +1,5 @@
 //! Real Core/SQLite UI evidence; no personal media and no API interception.
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs};
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
@@ -39,7 +39,7 @@ async fn run_browser(script: &str, seed: bool) {
         .await
         .unwrap();
     if seed {
-        use media_poc::database::query;
+        use aether_core::database::query;
         let root_string = media.to_string_lossy().to_string();
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('collage','Mosaïque de test','films','local',?,1)").bind(&root_string).execute(store.pool()).await.unwrap();
         for index in 0..4 {
@@ -91,7 +91,7 @@ async fn run_browser(script: &str, seed: bool) {
         .unwrap();
     std::env::set_current_dir(&root).unwrap();
     let jobs = Arc::new(ScanJobs::default());
-    let app = media_poc::secure_app_with_jobs(
+    let app = aether_core::secure_app_with_jobs(
         Inventory::local(media.clone()).await.unwrap(),
         port,
         auth,

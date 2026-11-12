@@ -1,10 +1,10 @@
+use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{path::Path, time::Duration};
@@ -536,7 +536,7 @@ async fn real_films_scan_persists_reuses_probes_and_enforces_live_library_permis
     let second = scan(&app, &library, &cookie, csrf).await;
     assert_eq!(second["reused"], 2);
     assert_eq!(second["probed"], 1); // invalid input is retried, successful unchanged media is not
-    let subtitle_asset: String = media_poc::database::query_scalar("SELECT a.id FROM inventory_assets a JOIN inventory_subtitles t ON t.asset_id=a.id WHERE a.relative_path LIKE '%version-mp4.mp4'")
+    let subtitle_asset: String = aether_core::database::query_scalar("SELECT a.id FROM inventory_assets a JOIN inventory_subtitles t ON t.asset_id=a.id WHERE a.relative_path LIKE '%version-mp4.mp4'")
         .fetch_one(store.pool()).await.unwrap();
     let subtitle_url = format!("/api/v1/assets/{subtitle_asset}/subtitles/0");
     assert!(

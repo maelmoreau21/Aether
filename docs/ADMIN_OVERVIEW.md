@@ -40,15 +40,15 @@ nécessitent validation dans leur environnement réel.
 
 ## Vérifications exécutées le 25 octobre 2026
 
-- `cargo test -p media-poc --lib historical_empty_endpoint_keeps_provider_default_and_credentials -- --nocapture` : réussi ; les URL vides historiques ne masquent plus les défauts des fournisseurs, les URL personnalisées sont conservées.
-- `cargo test -p media-poc --lib activity_is_authenticated_scoped_expires_and_stops -- --nocapture` : réussi.
-- `cargo test -p media-poc --lib imports_normalized_collections_without_approval_and_enforces_activation -- --nocapture` : réussi, y compris galerie désactivée, CSRF, renommage, suppression, attribution idempotente et automatique, import Gravatar JPEG simulé, verrouillage.
-- `cargo test -p media-poc --test extensions browser_extension_installs_and_executes_real_rust_module -- --ignored --nocapture` : réussi. Exécutable du même test relancé après les derniers changements Web : réussi.
+- `cargo test -p aether-core --lib historical_empty_endpoint_keeps_provider_default_and_credentials -- --nocapture` : réussi ; les URL vides historiques ne masquent plus les défauts des fournisseurs, les URL personnalisées sont conservées.
+- `cargo test -p aether-core --lib activity_is_authenticated_scoped_expires_and_stops -- --nocapture` : réussi.
+- `cargo test -p aether-core --lib imports_normalized_collections_without_approval_and_enforces_activation -- --nocapture` : réussi, y compris galerie désactivée, CSRF, renommage, suppression, attribution idempotente et automatique, import Gravatar JPEG simulé, verrouillage.
+- `cargo test -p aether-core --test extensions browser_extension_installs_and_executes_real_rust_module -- --ignored --nocapture` : réussi. Exécutable du même test relancé après les derniers changements Web : réussi.
 - Test collections avec `MEDIA_TEST_AVATAR_LIVE=1` : réussi contre GitHub, 7 dossiers détectés et 26 avatars Sonny normalisés en SQLite temporaire.
 - `npm --prefix apps/web test -- src/lib/admin/extension-settings.test.ts src/lib/player/presence.test.ts src/lib/player/progress.test.ts` : 12 tests réussis.
 - `npm --prefix apps/web run lint`, `run check`, `run build` : réussis ; check conserve un avertissement préexistant dans CatalogGrid.svelte.
-- `cargo check -p media-poc --lib` et `cargo fmt --all --check` : réussis.
-- Clippy strict Core lib rencontré : avertissement collapsible_if dans music.rs:209, hors de cette refonte. Contrôle complémentaire `cargo clippy -p media-poc --lib -- -D warnings -A clippy::collapsible_if` réussi.
+- `cargo check -p aether-core --lib` et `cargo fmt --all --check` : réussis.
+- Clippy strict Core lib rencontré : avertissement collapsible_if dans music.rs:209, hors de cette refonte. Contrôle complémentaire `cargo clippy -p aether-core --lib -- -D warnings -A clippy::collapsible_if` réussi.
 - Aether-Plugins : `cargo check --workspace --lib` et `cargo test -p aether-plugin-avatar -p aether-plugin-fanart -p aether-plugin-tmdb --lib --tests` réussis, 13 tests d’intégration.
 
 Captures inspectées : `target/extensions-lifecycle-browser/avatar-gallery-desktop.png`,

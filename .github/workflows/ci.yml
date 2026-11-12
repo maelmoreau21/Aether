@@ -166,12 +166,11 @@ jobs:
       - name: Installer FFmpeg (requis par les tests unitaires et intégration media-node)
         uses: ./.github/actions/setup-ffmpeg
 
-      - name: Installer les bibliothèques de l'application de bureau (GPUI, libmpv)
-        # `--workspace` compile apps/desktop ; libmpv sert à son test de lecture réelle.
+      - name: Installer les bibliothèques de l'application de bureau (WebKitGTK)
+        # `--workspace` compile apps/desktop, qui affiche l'interface web dans le moteur du système.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libxkbcommon-dev libxkbcommon-x11-dev \
-            libwayland-dev libx11-xcb-dev libxcb1-dev libfontconfig-dev libfreetype-dev libmpv2
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev
 
       - name: Générer les fixtures synthétiques P0 (MKV / MP4 AV1+Opus)
         if: steps.cache-fixtures.outputs.cache-hit != 'true'
@@ -225,14 +224,14 @@ jobs:
         # Les tests unitaires d'extensions lancent le vrai worker isolé, situé à
         # côté de target/debug/deps ; `--lib --bins` ne le produit pas seul.
         run: |
-          cargo build --locked -p media-poc --all-features --bin media-extension-worker
+          cargo build --locked -p aether-core --all-features --bin media-extension-worker
           cargo test --locked --workspace --all-features --lib --bins --timings
 
       - name: Vérifier l'ABI du SDK avec un module Rust de test
         if: matrix.shard == 'checks'
         run: |
           cargo build --locked -p media-extension-sdk-fixture --target wasm32-unknown-unknown --release
-          cargo test --locked --all-features -p media-poc --test extensions real_rust_sdk_module_executes -- --ignored
+          cargo test --locked --all-features -p aether-core --test extensions real_rust_sdk_module_executes -- --ignored
 
       - name: Exécuter les tests d'intégration (cargo test --test '*')
         if: matrix.shard != 'checks'
@@ -249,9 +248,20 @@ jobs:
         env:
           MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
         run: |
-          cargo test --locked --all-features -p media-poc --test postgres -- --ignored --test-threads=1
-          cargo test --locked --all-features -p media-poc --lib oidc::tests -- --test-threads=1
-          cargo test --locked --all-features -p media-poc --test distributed_multi_node -- --test-threads=1
+          cargo test --locked --all-features -p aether-core --test postgres -- --ignored --test-threads=1
+          cargo test --locked --all-features -p aether-core --lib oidc::tests -- --test-threads=1
+          cargo test --locked --all-features -p aether-core --test distributed_multi_node -- --test-threads=1
+
+      - name: Sauvegarde et restauration PostgreSQL 18 (pg_dump 18)
+        if: matrix.shard == 'checks'
+        env:
+          MEDIA_TEST_POSTGRES_URL: postgres://media_test:ci-only-disposable-password@127.0.0.1:5432/media_test?sslmode=disable
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+          pg_dump --version
+          cargo test --locked --all-features -p aether-core --test admin_postgres -- --ignored --test-threads=1
 
       - name: Conserver les temps de compilation Cargo
         if: always()
@@ -292,7 +302,7 @@ jobs:
         uses: actions/checkout@v4
 
       # cargo audit direct : échoue sur une vulnérabilité ; les crates non
-      # maintenues (dépendances de GPUI) restent des avertissements. L'action
+      # maintenues (liaisons GTK de l'application de bureau) restent des avertissements. L'action
       # rustsec/audit-check échouait en publiant ces avertissements (« Not Found »).
       - name: Installer cargo-audit
         run: cargo install cargo-audit --locked
@@ -424,14 +434,14 @@ jobs:
           # Keep generation aligned with report validation and artifact upload,
           # independently of the script's local default under target/.
           MEDIA_SCANNER_REPORT_DIR: docs/evidence/2026-10-16/scanner
-        run: cargo test --locked -p media-poc --test browser_scanner --test browser_series -- --ignored --nocapture
+        run: cargo test --locked -p aether-core --test browser_scanner --test browser_series -- --ignored --nocapture
 
       - name: Vérifier playlists, partage connecté, musique persistante et paroles
         env:
           MEDIA_TEST_PLAYLIST_BROWSER: '1'
           MEDIA_WEB_DIST: ${{ github.workspace }}/apps/web/build
           MEDIA_REPORT_DIR: docs/evidence/2026-10-22/playlists/ci
-        run: cargo test --locked -p media-poc --lib product::tests::mixed_playlists -- --test-threads=1
+        run: cargo test --locked -p aether-core --lib product::tests::mixed_playlists -- --test-threads=1
 
       - name: Vérifier le MP4 AV1 10 bits et deux Opus 5.1 en audio segmenté
         env:
@@ -634,9 +644,12 @@ jobs:
 
   clients:
     name: Applications clientes
+    needs: [calculate-beta]
     permissions:
       contents: read
     uses: ./.github/workflows/clients.yml
+    with:
+      version: ${{ needs.calculate-beta.outputs.version }}
     secrets: inherit
 
   beta-release:

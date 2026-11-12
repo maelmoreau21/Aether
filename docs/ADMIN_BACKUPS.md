@@ -55,7 +55,7 @@ suppression de cette seule sonde ont réussi sous l'utilisateur du service.
 Ni redémarrage, ni modification de médias/archives, ni déploiement de code.
 La création/restauration d'une archive complète et le parcours HTTP authentifié
 de production n'ont pas été exercés lors de cette intervention.
-Validation locale Windows : `cargo test -p media-poc --test admin_backups`
+Validation locale Windows : `cargo test -p aether-core --test admin_backups`
 réussit (2 tests, dont création/téléchargement/extraction/restauration SQLite
 et refus de chemin), ainsi que `cargo fmt --check` et `git diff --check`.
 Le scénario ajouté de permissions Unix puis rétablissement attend une exécution
@@ -104,4 +104,4 @@ inchangé.
 
 Arrêter le Core ; extraire vers un nouvel emplacement privé ; restaurer la base via `media-restore` (SQLite destination nouvelle, PostgreSQL base vide), puis rétablir la configuration extraite et vérifier le redémarrage. La restauration de la base active depuis HTTP reste exclue.
 
-Tests ciblés : `cargo test -p media-poc --test admin_backups` et `cargo test -p media-poc --lib admin_backups`. Couverture prévue : vrai snapshot SQLite, bundle chiffré téléchargé/extrait avec clé, absence des secrets dans les octets, refus sans clé ou avec clé faible, comptes présents, protection du dossier, rôles/CSRF, identifiants, paramètres planification, sémaphore commun, échéance persistée, échec terminal et absence de rafale. Validation PostgreSQL distant et récupération complète à documenter selon les commandes réellement exécutées par le coordinateur.
+Tests ciblés : `cargo test -p aether-core --test admin_backups` et `cargo test -p aether-core --lib admin_backups`. Couverture prévue : vrai snapshot SQLite, bundle chiffré téléchargé/extrait avec clé, absence des secrets dans les octets, refus sans clé ou avec clé faible, comptes présents, protection du dossier, rôles/CSRF, identifiants, paramètres planification, sémaphore commun, échéance persistée, échec terminal et absence de rafale. Validation PostgreSQL distant et récupération complète à documenter selon les commandes réellement exécutées par le coordinateur.

@@ -19,6 +19,8 @@ export type Preferences = {
   subtitles?: 'forced' | 'foreign' | 'always' | 'off'; audioTrack?: { mediaId: string; trackId: string; language?: string };
   rememberAudioSelections?: boolean; rememberSubtitleSelections?: boolean; playDefaultAudioTrack?: boolean;
   hidePlayedInLatest?: boolean;
+  /** Playlists built from the favourites (films, series). On unless set to `false`. */
+  autoPlaylists?: boolean;
   homeSections?: HomeSection[]; cardSize?: 'small' | 'medium' | 'large';
   cardDensity?: 'comfortable' | 'compact'; accentColor?: 'orange' | 'blue' | 'violet' | 'green';
   offsets?: { audio: number; subtitle: number }; subtitlePreference?: SubtitlePreference;

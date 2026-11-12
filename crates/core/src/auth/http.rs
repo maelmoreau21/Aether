@@ -4,7 +4,7 @@ use super::{
     state::{AuthState, AuthUser, Authenticated},
     util::{
         ABSOLUTE_SECONDS, COOKIE, IDLE_SECONDS, TokenType, constant_equal, device_label,
-        extract_client_key, hash, random_token,
+        extract_client_key, hash, random_token, session_token,
     },
 };
 use crate::identity::IdentityError;
@@ -66,12 +66,16 @@ struct IdentityResponse {
 pub fn router(state: AuthState) -> Router {
     Router::new()
         .merge(super::quick_connect::router())
+        .merge(super::accounts::router())
+        .merge(super::mfa::router())
+        .merge(super::passkey::router())
         .route("/api/v1/auth/bootstrap/status", get(bootstrap_status))
         .route("/api/v1/auth/bootstrap", post(bootstrap))
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/me", get(me))
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/token/refresh", post(refresh))
+        .route("/api/v1/auth/session/extend", post(extend))
         .layer(DefaultBodyLimit::max(4096))
         .with_state(state)
 }
@@ -240,7 +244,14 @@ async fn login(
     // Scoped throttle: budget per client IP, durable across restarts.
     let client_key = extract_client_key(&headers);
     let allowed = crate::database::query_scalar::<_, i64>(
-        "INSERT INTO login_throttle(throttle_key,window_started,attempts) VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 ELSE login_throttle.attempts+1 END WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 RETURNING login_throttle.attempts",
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts) \
+                VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE \
+                SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 \
+                THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE \
+                WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
+                ELSE login_throttle.attempts+1 END \
+                WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 \
+                RETURNING login_throttle.attempts",
     )
     .bind(&client_key)
     .fetch_optional(&state.store.pool)
@@ -286,7 +297,13 @@ async fn login(
     let Some((id, _)) = row.filter(|_| verified) else {
         return failure(StatusCode::UNAUTHORIZED, "invalid_credentials");
     };
-    issue_session(&state, &headers, &id, token_type == TokenType::Bearer).await
+    let bearer = token_type == TokenType::Bearer;
+    // An account with TOTP or a passkey gets a single-use mfaToken instead of a session.
+    match super::mfa::second_factor_challenge(&state, &id, bearer).await {
+        Ok(None) => issue_session(&state, &headers, &id, bearer).await,
+        Ok(Some(challenge)) => challenge,
+        Err(error) => error.into_response(),
+    }
 }
 /// Opens a fresh session for an already-verified user: a cookie for the browser,
 /// or a bearer grant for a native application. Shared by login and profile switching.
@@ -308,7 +325,21 @@ pub(crate) async fn issue_session(
     {
         return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
     }
-    if crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? FROM users WHERE id=? AND disabled_at IS NULL").bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(id).execute(&state.store.pool).await.is_err(){return failure(StatusCode::INTERNAL_SERVER_ERROR,"internal_error")}
+    if crate::database::query(
+        "INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) \
+            SELECT ?,id,unixepoch(),unixepoch(),unixepoch()+? \
+            FROM users \
+            WHERE id=? AND disabled_at IS NULL",
+    )
+    .bind(hash(&raw))
+    .bind(ABSOLUTE_SECONDS)
+    .bind(id)
+    .execute(&state.store.pool)
+    .await
+    .is_err()
+    {
+        return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error");
+    }
     let _ = crate::database::query("UPDATE sessions SET device_label=? WHERE token_hash=?")
         .bind(device_label(headers))
         .bind(hash(&raw))
@@ -374,6 +405,51 @@ async fn logout(State(state): State<AuthState>, headers: HeaderMap) -> Response 
     }
     response
 }
+/// Keeps a cookie session signed in while it is used: 30 more days from now,
+/// for an application that shows the web interface (the idle limit still ends
+/// a session nobody opens). Native applications rotate with `token/refresh`.
+async fn extend(State(state): State<AuthState>, headers: HeaderMap) -> Response {
+    let identity = match state.authenticate(&headers).await {
+        Ok(i) => i,
+        Err(s) => return failure(s, "authentication_required"),
+    };
+    if identity.bearer {
+        return failure(StatusCode::BAD_REQUEST, "cookie_required");
+    }
+    if let Err(s) = state.require_csrf(&headers, &identity) {
+        return failure(s, "forbidden");
+    }
+    let Some(raw) = session_token(&headers) else {
+        return failure(StatusCode::UNAUTHORIZED, "authentication_required");
+    };
+    let extended = crate::database::query(
+        "UPDATE sessions SET expires_at=unixepoch()+? WHERE token_hash=? AND expires_at>unixepoch()",
+    )
+    .bind(ABSOLUTE_SECONDS)
+    .bind(&identity.token_hash)
+    .execute(&state.store.pool)
+    .await;
+    match extended {
+        Ok(done) if done.rows_affected() == 1 => {}
+        Ok(_) => return failure(StatusCode::UNAUTHORIZED, "authentication_required"),
+        Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+    }
+    // The accounts parked on the same browser stay signed in with it.
+    for parked in super::accounts::parked(&headers) {
+        let _ = crate::database::query(
+            "UPDATE sessions SET expires_at=unixepoch()+? WHERE token_hash=? AND expires_at>unixepoch()",
+        )
+        .bind(ABSOLUTE_SECONDS)
+        .bind(hash(&parked))
+        .execute(&state.store.pool)
+        .await;
+    }
+    let mut response = StatusCode::NO_CONTENT.into_response();
+    if let Ok(cookie) = HeaderValue::from_str(&state.cookie(raw, ABSOLUTE_SECONDS)) {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
+}
 /// Rotates a native application's token before its absolute expiry. The old token
 /// keeps working for `REFRESH_GRACE_SECONDS` and can no longer be refreshed itself,
 /// so a copied token cannot fork the device session.
@@ -389,7 +465,11 @@ async fn refresh(State(state): State<AuthState>, headers: HeaderMap) -> Response
     let rotated: Result<bool, sqlx::Error> = async {
         let mut conn = state.store.pool.acquire().await?;
         let mut tx = crate::database::begin_write(&mut conn).await?;
-        let created = crate::database::query("INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) SELECT ?,s.user_id,s.device_label,unixepoch(),unixepoch(),unixepoch()+? FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>unixepoch()+? AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
+        let created = crate::database::query("INSERT INTO sessions(token_hash,user_id,device_label,created_at,last_seen_at,expires_at) SELECT ?,s.user_id,s.device_label,unixepoch(),unixepoch(),unixepoch()+? \
+                FROM sessions s \
+                JOIN users u ON u.id=s.user_id \
+                WHERE s.token_hash=? AND s.expires_at>unixepoch()+? \
+                AND s.last_seen_at>unixepoch()-? AND u.disabled_at IS NULL")
             .bind(hash(&raw)).bind(ABSOLUTE_SECONDS).bind(&identity.token_hash).bind(REFRESH_GRACE_SECONDS).bind(IDLE_SECONDS)
             .execute(&mut *tx).await?;
         if created.rows_affected() != 1 {

@@ -102,7 +102,7 @@ npm run lint --prefix apps/web
 npm run build --prefix apps/web
 cargo fmt --check
 cargo clippy --locked --all-targets -j 1 -- -D warnings
-cargo test --locked -p media-poc --lib extensions::repositories -j 1 -- --include-ignored --test-threads=1
+cargo test --locked -p aether-core --lib extensions::repositories -j 1 -- --include-ignored --test-threads=1
 node scripts/browser-dual-opus.cjs
 # Audio segmenté : MEDIA_TEST_SEGMENTED=1 ; HTTP cadencé : MEDIA_TEST_SLOW_START=1
 node scripts/browser-extension-catalogue-ui.cjs
@@ -122,7 +122,7 @@ Il utilise l’import HTTP signé pour préparer sa fixture, sans réintroduire
 un écran d’import de fichier dans le produit.
 
 ```powershell
-cargo test --locked -p media-poc --test extensions browser_extension_installs_and_executes_real_rust_module -j 1 -- --ignored --nocapture --test-threads=1
+cargo test --locked -p aether-core --test extensions browser_extension_installs_and_executes_real_rust_module -j 1 -- --ignored --nocapture --test-threads=1
 ```
 
 [Aperçu catalogue sombre](evidence/2026-10-23/startup-plugins/catalogue-ui/catalogue-dark-1440.png),

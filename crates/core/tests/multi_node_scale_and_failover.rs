@@ -12,6 +12,16 @@
 //!   automatic failover to a healthy Node copy without losing playback progress (`workId`),
 //!   reconnection, missing copy handling, immediate revocation, and 50x concurrency.
 
+use aether_core::{
+    auth::AuthState,
+    database::{query, query_scalar},
+    identity::IdentityStore,
+    inventory::{NfoOutcome, ScanReport, ScannedFile, descriptor_for_user, ingest},
+    node::Inventory,
+    nodes::{ensure_node_registry_warm, refresh_node_in_registry, score_node_entry},
+    scans::ScanJobs,
+    secure_app, secure_app_with_jobs,
+};
 use axum::{
     Router,
     body::Body,
@@ -25,16 +35,6 @@ use media_contracts::protocol::{
     HDR_TIMESTAMP, HeartbeatPayload, PROTOCOL_VERSION, sha256_hex, sign_internal_request, unix_now,
 };
 use media_node::server::{NodeServerConfig, NodeServerState, app_with_state as node_router};
-use media_poc::{
-    auth::AuthState,
-    database::{query, query_scalar},
-    identity::IdentityStore,
-    inventory::{NfoOutcome, ScanReport, ScannedFile, descriptor_for_user, ingest},
-    node::Inventory,
-    nodes::{ensure_node_registry_warm, refresh_node_in_registry, score_node_entry},
-    scans::ScanJobs,
-    secure_app, secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
@@ -1198,7 +1198,7 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
     );
 
     // 9. TEST HEARTBEAT ACTIVE_STREAMS REPORTING & MISSING COPY DETECTION
-    let node2_rec = media_poc::nodes::load_node(&store, &node2_id)
+    let node2_rec = aether_core::nodes::load_node(&store, &node2_id)
         .await
         .unwrap()
         .unwrap();

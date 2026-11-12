@@ -91,7 +91,11 @@ pub(super) async fn recover(store: &IdentityStore) -> Result<u64, sqlx::Error> {
         now() - 3600
     };
     let mut tx = crate::database::begin_write(&mut conn).await?;
-    let expired=query("UPDATE extension_runs SET status='interrupted' WHERE status='running' AND (EXISTS(SELECT 1 FROM extension_run_owners o WHERE o.run_id=extension_runs.id AND o.lease_until<=?) OR (started_at<? AND NOT EXISTS(SELECT 1 FROM extension_run_owners o WHERE o.run_id=extension_runs.id)))")
+    let expired=query("UPDATE extension_runs \
+            SET status='interrupted' \
+            WHERE status='running' AND (EXISTS(SELECT 1 FROM extension_run_owners o \
+            WHERE o.run_id=extension_runs.id AND o.lease_until<=?) OR (started_at<? \
+            AND NOT EXISTS(SELECT 1 FROM extension_run_owners o WHERE o.run_id=extension_runs.id)))")
         .bind(now()).bind(legacy_cutoff).execute(&mut *tx).await?;
     query("DELETE FROM extension_run_owners WHERE EXISTS(SELECT 1 FROM extension_runs r WHERE r.id=extension_run_owners.run_id AND r.status!='running')")
         .execute(&mut *tx).await?;

@@ -4,7 +4,17 @@ use sha2::{Digest, Sha256};
 
 pub(crate) const ABSOLUTE_SECONDS: i64 = 30 * 24 * 60 * 60;
 pub(crate) const IDLE_SECONDS: i64 = 7 * 24 * 60 * 60;
-pub(super) const COOKIE: &str = "media_session";
+pub(super) const COOKIE: &str = "aether_session";
+
+fn parse_ip_or_socket(raw: &str) -> Option<std::net::IpAddr> {
+    if let Ok(ip) = raw.parse::<std::net::IpAddr>() {
+        return Some(ip.to_canonical());
+    }
+    if let Ok(socket) = raw.parse::<std::net::SocketAddr>() {
+        return Some(socket.ip().to_canonical());
+    }
+    None
+}
 
 pub fn extract_client_key(headers: &HeaderMap) -> String {
     if let Some(ip) = headers
@@ -14,6 +24,9 @@ pub fn extract_client_key(headers: &HeaderMap) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
+        if let Some(parsed) = parse_ip_or_socket(ip) {
+            return format!("ip:{parsed}");
+        }
         let sanitized = ip
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_'))
@@ -29,6 +42,9 @@ pub fn extract_client_key(headers: &HeaderMap) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
+        if let Some(parsed) = parse_ip_or_socket(real_ip) {
+            return format!("ip:{parsed}");
+        }
         let sanitized = real_ip
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '-' | '_'))
@@ -110,4 +126,35 @@ pub(super) fn session_token(headers: &HeaderMap) -> Option<&str> {
         }
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_client_key_normalizes_ips_and_handles_proxies() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(extract_client_key(&headers), "ip:127.0.0.1");
+
+        headers.insert(
+            "x-forwarded-for",
+            "192.168.1.100, 10.0.0.1".parse().unwrap(),
+        );
+        assert_eq!(extract_client_key(&headers), "ip:192.168.1.100");
+
+        headers.insert("x-forwarded-for", "::ffff:192.168.1.100".parse().unwrap());
+        assert_eq!(extract_client_key(&headers), "ip:192.168.1.100");
+
+        headers.remove("x-forwarded-for");
+        headers.insert("x-real-ip", "2001:db8::1".parse().unwrap());
+        assert_eq!(extract_client_key(&headers), "ip:2001:db8::1");
+
+        headers.insert("x-forwarded-for", "192.168.1.100:54321".parse().unwrap());
+        assert_eq!(extract_client_key(&headers), "ip:192.168.1.100");
+
+        headers.remove("x-forwarded-for");
+        headers.insert("x-real-ip", "[2001:db8::1]:8080".parse().unwrap());
+        assert_eq!(extract_client_key(&headers), "ip:2001:db8::1");
+    }
 }

@@ -100,7 +100,7 @@ lecture effective en 50 ms. Les temps Playwright englobant ses clics et attentes
 ne sont pas présentés comme des temps de rendu seuls.
 
 Validation locale de cette pagination :
-`cargo test --locked -p media-poc --test series_responsiveness -j 1 -- --nocapture`
+`cargo test --locked -p aether-core --test series_responsiveness -j 1 -- --nocapture`
 réussit sur 10 000 épisodes synthétiques SQLite : première page de 24 épisodes
 et réponse <64 Kio, passage inter-saisons, épisode interdit ignoré avant pagination,
 fin de série et retrait de permission vérifiés. Première requête mesurée à 133,99 ms
@@ -108,7 +108,7 @@ sur cette exécution Windows ; ce résultat ne satisfait pas une cible universel
 50 ms et ne mesure ni le réseau NAS ni le décodage média.
 
 Le parcours Core/Chrome réel
-`cargo test --locked -p media-poc --test browser_series -j 1 -- --ignored --nocapture`
+`cargo test --locked -p aether-core --test browser_series -j 1 -- --ignored --nocapture`
 réussit en 31,19 s : huit images décodées, lecture des épisodes, pause/seek,
 enchaînement entre saisons, révocation/restauration et isolation des comptes.
 Le lancement d'épisode synthétique prend 1 001 ms lors de cette exécution.
@@ -119,7 +119,7 @@ suivant vérifiée pour une bibliothèque d'une seule page.
 Les sorties du parcours séries sont conservées dans `target/series-current/` ;
 les anciennes preuves datées dans `docs/evidence/` restent inchangées.
 
-Régression réelle supplémentaire : `cargo test --locked -p media-poc --test browser_series -j 1 -- --ignored --nocapture`
+Régression réelle supplémentaire : `cargo test --locked -p aether-core --test browser_series -j 1 -- --ignored --nocapture`
 réussit en 31,19 s avec Chrome 155 sous Windows, vrai Core/SQLite et fixtures légales :
 8 images décodées, seek/pause, enchaînement automatique inter-saisons, seconde saison,
 révocation 403/restauration et isolation des comptes. Le lancement mesuré dans ce

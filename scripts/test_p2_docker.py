@@ -27,9 +27,9 @@ WORK = ROOT / "target" / PREFIX
 WORK.mkdir(parents=True)
 REPORT = {"run": PREFIX, "baseline": BASELINE, "transport": "trusted HTTP bridge" if BASELINE else "HTTPS via test TLS terminator", "phases": {}, "checks": []}
 CONTAINERS, VOLUMES = [], []
-PASSWORD = secrets.token_hex(24)
+QA_ADMIN_AUTH = secrets.token_hex(24)
 TOKENS = [secrets.token_hex(32), secrets.token_hex(32)]
-LOG_SECRETS = [PASSWORD, *TOKENS]
+LOG_SECRETS = [QA_ADMIN_AUTH, *TOKENS]
 ENV = dict(os.environ)
 NETWORK = PREFIX + "-net"
 FIXTURE_HASHES = set()
@@ -97,17 +97,19 @@ def bootstrap(name):
                 if not chunk: raise AssertionError("bootstrap closed before prompt")
                 data += chunk
             return data
+        def send_prompt(text):
+            pipe.write(f"{text}\n".encode())
         until(b"Login (lowercase): ")
-        pipe.write(b"qa-admin\n")
+        send_prompt("qa-admin")
         until(b"Password: ")
-        pipe.write((PASSWORD + "\n").encode())
+        send_prompt(QA_ADMIN_AUTH)
         until(b"Confirm password: ")
-        pipe.write((PASSWORD + "\n").encode())
+        send_prompt(QA_ADMIN_AUTH)
         until(b"Administrator created.")
 
 
 def login(origin):
-    status, headers, body, _ = request(origin, "POST", "/api/v1/auth/login", {"login": "qa-admin", "password": PASSWORD})
+    status, headers, body, _ = request(origin, "POST", "/api/v1/auth/login", {"login": "qa-admin", "password": QA_ADMIN_AUTH})
     check(status == 200, "login " + origin)
     result = {"Cookie": headers["set-cookie"].split(";")[0], "x-csrf-token": json.loads(body)["csrfToken"]}
     LOG_SECRETS.extend([result["Cookie"], result["Cookie"].split("=", 1)[1], result["x-csrf-token"]])
@@ -340,7 +342,7 @@ def main():
         stream(origin, auth, [ids[0], ids[-1]], True, "relay")
         read_load(origin, auth, [ids[0], ids[-1]], "relay")
     if not BASELINE:
-        browser_env = {**os.environ, "MEDIA_TEST_ORIGIN": origin, "MEDIA_TEST_ADMIN_PASS": PASSWORD, "MEDIA_REPORT_DIR": str(WORK / "browser-distributed")}
+        browser_env = {**os.environ, "MEDIA_TEST_ORIGIN": origin, "MEDIA_TEST_ADMIN_PASS": QA_ADMIN_AUTH, "MEDIA_REPORT_DIR": str(WORK / "browser-distributed")}
         subprocess.run(["node", "scripts/browser-p2-validation.cjs"], env=browser_env, check=True, timeout=180)
     # Persistence, actual stop/reconnection, secret rotation, logout revocation.
     docker("restart", core, *nodes); wait(origin)
@@ -385,7 +387,7 @@ def main():
         stream(standalone_origin, standalone_auth, [single_ids[0], single_ids[-1]], False)
         read_load(standalone_origin, standalone_auth, [single_ids[0], single_ids[-1]], "relay")
     if not BASELINE:
-        browser_env = {**os.environ, "MEDIA_TEST_ORIGIN": standalone_origin, "MEDIA_TEST_ADMIN_PASS": PASSWORD, "MEDIA_REPORT_DIR": str(WORK / "browser-standalone")}
+        browser_env = {**os.environ, "MEDIA_TEST_ORIGIN": standalone_origin, "MEDIA_TEST_ADMIN_PASS": QA_ADMIN_AUTH, "MEDIA_REPORT_DIR": str(WORK / "browser-standalone")}
         subprocess.run(["node", "scripts/browser-p2-validation.cjs"], env=browser_env, check=True, timeout=180)
     docker("restart", single); wait(standalone_origin); standalone_auth = login(standalone_origin)
     check(set(assets(standalone_origin, standalone_auth)) == set(single_ids), "standalone restart persists IDs")

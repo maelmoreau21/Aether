@@ -176,12 +176,35 @@ async fn waiting_reason(
     library: &str,
     now: i64,
 ) -> Result<Option<(String, Option<String>)>, sqlx::Error> {
-    crate::database::query("UPDATE durable_tasks SET node_id=(SELECT l.node_id FROM libraries l WHERE l.id=durable_tasks.library_id),updated_at=? WHERE category='scan' AND status='queued' AND lease_until IS NULL AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND EXISTS(SELECT 1 FROM libraries l WHERE l.id=durable_tasks.library_id AND l.node_id!=durable_tasks.node_id)")
+    crate::database::query("UPDATE durable_tasks \
+            SET node_id=(SELECT l.node_id FROM libraries l \
+            WHERE l.id=durable_tasks.library_id),updated_at=? \
+            WHERE category='scan' AND status='queued' AND lease_until IS NULL AND (library_id=? \
+            OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? \
+            AND active=1)) AND EXISTS(SELECT 1 FROM libraries l WHERE l.id=durable_tasks.library_id \
+            AND l.node_id!=durable_tasks.node_id)")
         .bind(now).bind(library).bind(library).execute(&store.pool).await?;
-    let row: Option<(String, String, i64, String, i64, Option<String>)> = crate::database::query_as(
-        "SELECT j.node_id,COALESCE(n.status,'revoked'),j.available_at,j.error,CAST(CASE WHEN EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks p ON p.id=d.prerequisite_id WHERE d.task_id=j.id AND p.status!='completed') THEN 1 ELSE 0 END AS BIGINT),(SELECT b.category FROM durable_tasks b WHERE b.node_id=j.node_id AND b.lease_until IS NOT NULL AND b.id!=j.id ORDER BY b.started_at LIMIT 1) FROM durable_tasks j LEFT JOIN media_nodes n ON n.id=j.node_id WHERE (j.library_id=? OR j.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND j.category='scan' AND j.status='queued' AND j.lease_until IS NULL ORDER BY j.created_at,j.id LIMIT 1",
-    )
-    .bind(library).bind(library).fetch_optional(&store.pool).await?;
+    let row: Option<(String, String, i64, String, i64, Option<String>)> =
+        crate::database::query_as(
+            "SELECT j.node_id,COALESCE(n.status,'revoked'),j.available_at,j.error,CAST(CASE \
+                WHEN EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks p \
+                ON p.id=d.prerequisite_id WHERE d.task_id=j.id AND p.status!='completed') THEN 1 \
+                ELSE 0 END AS BIGINT),(SELECT b.category FROM durable_tasks b \
+                WHERE b.node_id=j.node_id AND b.lease_until IS NOT NULL AND b.id!=j.id \
+                ORDER BY b.started_at LIMIT 1) \
+                FROM durable_tasks j \
+                LEFT \
+                JOIN media_nodes n ON n.id=j.node_id \
+                WHERE (j.library_id=? OR j.library_id IN (SELECT library_id FROM library_folders \
+                WHERE parent_id=? AND active=1)) AND j.category='scan' AND j.status='queued' \
+                AND j.lease_until IS NULL \
+                ORDER BY j.created_at,j.id \
+                LIMIT 1",
+        )
+        .bind(library)
+        .bind(library)
+        .fetch_optional(&store.pool)
+        .await?;
     let Some((node, node_status, available_at, error, prerequisite, busy)) = row else {
         return Ok(None);
     };
@@ -431,7 +454,14 @@ async fn enqueue_one(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let library: Option<(String, String, String, String)> = crate::database::query_as(
-        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns FROM libraries l JOIN media_nodes n ON n.id = l.node_id WHERE l.id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films', 'series', 'music') AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
+        "SELECT l.root, l.kind, l.node_id, l.excluded_patterns \
+                FROM libraries l \
+                JOIN media_nodes n ON n.id = l.node_id \
+                WHERE l.id=? AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+                WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+                JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
+                AND f.active=1 AND parent.enabled=1)) AND l.kind IN ('films', 'series', 'music') \
+                AND n.status != 'revoked' AND l.id NOT IN ('fixture-films','fixture-series')",
     )
     .bind(&id)
     .fetch_optional(&state.auth.store.pool)
@@ -448,7 +478,10 @@ async fn enqueue_one(
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
     }
-    let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) VALUES(?,'queued',0,0,?) ON CONFLICT(library_id) DO UPDATE SET refresh_mode=excluded.refresh_mode,status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).bind(mode.as_str()).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) \
+            VALUES(?,'queued',0,0,?) ON CONFLICT(library_id) DO UPDATE \
+            SET refresh_mode=excluded.refresh_mode,status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 \
+            WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).bind(mode.as_str()).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if result.rows_affected() == 0 {
         return Err(StatusCode::CONFLICT);
     }
@@ -521,7 +554,10 @@ async fn enqueue_one(
             let root = crate::local_mounts::validate(std::path::Path::new(&root), &allowed_root).await?;
             if kind == "music" {
                 let count = crate::music::scan_fenced(&store, &job_id, &root, &cancel, Some(&scan_id)).await?;
-                crate::database::query("UPDATE scan_jobs SET status='completed',discovered=?,probed=?,reused=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(count as i64).bind(count as i64).bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
+                crate::database::query("UPDATE scan_jobs \
+                        SET status='completed',discovered=?,probed=?,reused=0 \
+                        WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r \
+                        WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(count as i64).bind(count as i64).bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
                 if let Some((task_id, attempt_str)) = scan_id.split_once(':')
                     && let Ok(attempt) = attempt_str.parse::<i64>()
                 {
@@ -697,7 +733,15 @@ mod tests {
         crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','nas','/media',1)").execute(pool).await.unwrap();
         // Queued while the library still lived on the local node: the engine can never lease it.
         crate::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,created_at,updated_at,available_at) VALUES('scan','films','admin','scan','local','scan',1,1,1)").execute(pool).await.unwrap();
-        crate::database::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,attempt,lease_until,started_at,created_at,updated_at,available_at) VALUES('prep','films','admin','prep','nas','prepare','running',1,9999999999,1,1,1,1)").execute(pool).await.unwrap();
+        crate::database::query(
+            "INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,\
+                status,attempt,lease_until,started_at,created_at,updated_at,available_at) \
+                VALUES('prep','films','admin','prep','nas','prepare','running',1,9999999999,1,1,1,\
+                1)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
         let reason = waiting_reason(&store, "films", 100).await.unwrap();
         assert_eq!(reason, Some(("node_busy".into(), Some("prepare".into()))));
         let node: String =

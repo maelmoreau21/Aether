@@ -39,7 +39,6 @@ COPY tests/fixtures/extension-sdk/ ./tests/fixtures/extension-sdk/
 COPY crates/client/Cargo.toml ./crates/client/
 COPY crates/client-ffi/Cargo.toml ./crates/client-ffi/
 COPY apps/desktop/Cargo.toml ./apps/desktop/
-COPY apps/desktop/vendor/ ./apps/desktop/vendor/
 
 # Scaffold dummy source hierarchy for dependency precompilation caching
 # Explicit test/bin targets declared in crates/node/Cargo.toml and crates/core/Cargo.toml must exist
@@ -82,7 +81,7 @@ COPY crates/shared/build.rs ./crates/shared/build.rs
 COPY crates/node/src/ ./crates/node/src/
 COPY crates/core/src/ ./crates/core/src/
 COPY crates/core/build.rs ./crates/core/build.rs
-COPY crates/core/migrations/ ./crates/core/migrations/
+COPY crates/core/schema/ ./crates/core/schema/
 COPY crates/core/embedded_plugins/ ./crates/core/embedded_plugins/
 COPY crates/core/embedded_avatars/ ./crates/core/embedded_avatars/
 COPY crates/core/experiments/ ./crates/core/experiments/
@@ -111,7 +110,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     rm -f target/release/deps/*media_contracts* \
           target/release/deps/*media_node* \
           target/release/deps/*aether_node* \
-          target/release/deps/*media_poc* \
+          target/release/deps/*aether_core* \
           target/release/deps/*aether_core* \
           target/release/deps/*media_bootstrap* \
           target/release/deps/*media_backup* \

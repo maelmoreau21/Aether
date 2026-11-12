@@ -30,7 +30,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let root = std::env::var_os("MEDIA_LIBRARY_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("media"));
-    let store = media_poc::identity::IdentityStore::open_configured(&root).await?;
+    let store = aether_core::identity::IdentityStore::open_configured(&root).await?;
     let report = store.assets().restore_extracted(&dir).await?;
     println!(
         "imported {}, already present {}, audited {} row(s): {} missing, {} corrupt",
@@ -45,8 +45,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             "restore is INCOMPLETE: do not reopen access (see missing/corrupt counts)".into(),
         );
     }
-    let count = media_poc::extensions::storage::sync_installed(&store).await?;
-    let health = media_poc::extensions::storage::check_health(&store).await;
+    let count = aether_core::extensions::storage::sync_installed(&store).await?;
+    let health = aether_core::extensions::storage::check_health(&store).await;
     if !health.healthy {
         return Err("restore is INCOMPLETE: extension storage is missing or corrupt".into());
     }

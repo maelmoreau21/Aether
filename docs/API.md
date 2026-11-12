@@ -1,3 +1,28 @@
+# Garantie de stabilité de `/api/v1` (1.0)
+
+À partir de la 1.0, `/api/v1` suit SemVer : pas de suppression, de renommage ni de
+changement de sens d'un champ ou d'une route **stable** dans la série 1.x ; les
+ajouts de champs et de routes restent possibles (les clients ignorent les champs
+inconnus). Un changement cassant attend `/api/v2`.
+
+**Stable** : authentification et sessions (`/auth`, `/me`, `/account`), catalogue et
+fiches (`/catalog`, `/works`, `/libraries`, `/assets` dont lecture, sous-titres et
+HLS, `/progress`, `/playlists`, `/lists`, `/music`, `/requests`, `/reports`,
+`/preferences`, `/parties`, `/health`, `/server`).
+
+**Non figé (expérimental, peut changer sans préavis de version majeure)** :
+- `/api/v1/experiment/*`, `/mse`, `/shaka`, `/audio-seek-policy.js` : bancs d'essai P0 ;
+- `/api/v1/demo/*` et `GET /api/v1/config` en mode `localhost-fixtures` : fixtures de démonstration ;
+- `/api/v1/admin/*` : contrat de la console d'administration, couplé à l'interface
+  embarquée du même Core (sans garantie pour des outils tiers) ;
+- `/api/v1/nodes`, `/api/v1/extensions`, `/api/v1/integrations`, `/api/v1/remote` :
+  protocole Core ↔ Node et extensions, versionnés avec le Core
+  ([EXTENSIONS_API.md](EXTENSIONS_API.md)) ;
+- tout champ ou route décrit ci-dessous comme « expérimental » ou « banc ».
+
+Le reste de ce document est un historique chronologique des jalons : en cas de
+contradiction, la section la plus récente et les documents liés font foi.
+
 > Moteur de tâches (25 octobre 2026) : API administrateur persistante `GET/POST /api/v1/admin/tasks/jobs`, détail `GET /api/v1/admin/tasks/jobs/{id}` et contrôles `POST /api/v1/admin/tasks/jobs/{id}/{pause|resume|cancel}`. Session administrateur et CSRF pour les mutations ; catégories scan/analyze/prepare/image et cibles inventoriées. Contrat, limites et validation : [tâches distribuées](DISTRIBUTED_TASKS.md).
 
 > Connexion d’appareils par QR code (5 novembre 2026) : voir [sessions](LOCAL_SESSIONS.md#connexion-par-qr-code--5-novembre-2026).
@@ -285,7 +310,7 @@ le séparateur du Node) ainsi que `node.version` et les chemins des pistes audio
 externes. Un compte `user` reçoit le Node, la bibliothèque et la description
 technique sans aucun nom de fichier ni chemin. Ces chemins sont informatifs :
 aucune route n'accepte de chemin en entrée. Test :
-`cargo test -p media-poc --test asset_details`.
+`cargo test -p aether-core --test asset_details`.
 
 ## P2 — contrôle interne de chaque requête directe (17 octobre 2026)
 

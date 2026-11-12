@@ -1,13 +1,13 @@
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
+    secure_app_with_jobs,
+};
 use axum::{
     Router,
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs,
-    secure_app_with_jobs,
-};
 use serde_json::{Value, json};
 use sqlx::{ConnectOptions, sqlite::SqliteConnectOptions};
 use std::{
@@ -160,7 +160,7 @@ async fn auth_and_catalog_reads_succeed_under_30s_sqlite_begin_immediate_lock() 
     .execute(store.pool())
     .await
     .unwrap();
-    let reader_cookie = format!("media_session={reader_raw}");
+    let reader_cookie = format!("aether_session={reader_raw}");
 
     let auth = AuthState::new(store.clone(), ORIGIN.into()).await.unwrap();
     let jobs = Arc::new(ScanJobs::default());

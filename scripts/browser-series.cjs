@@ -429,7 +429,7 @@ fs.mkdirSync(out, {recursive: true});
       'Same-session prefetch must use descriptorCache without extra network calls'
     );
 
-    const cookieAdmin = (await context.cookies()).find(c => c.name === 'media_session');
+    const cookieAdmin = (await context.cookies()).find(c => c.name === 'aether_session');
     assert(cookieAdmin && cookieAdmin.httpOnly && cookieAdmin.sameSite === 'Strict' && !cookieAdmin.secure);
 
     // Logout series-admin via ProfileMenu (pure SPA transition, real Core logout)
@@ -437,8 +437,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.getByRole('button', {name: /^(Se déconnecter|Sign out)$/, exact: true}).click();
     await page.waitForURL('**/app/login/**');
 
-    const cookieAfterLogout = (await context.cookies()).find(c => c.name === 'media_session');
-    assert(!cookieAfterLogout, 'Logout Set-Cookie must remove HttpOnly media_session cookie');
+    const cookieAfterLogout = (await context.cookies()).find(c => c.name === 'aether_session');
+    assert(!cookieAfterLogout, 'Logout Set-Cookie must remove HttpOnly aether_session cookie');
 
     // Login as second distinct SQLite account series-user-b via SPA login form (no mocked auth JSON)
     await page.locator('input[autocomplete="username"]').fill('series-user-b');
@@ -446,7 +446,7 @@ fs.mkdirSync(out, {recursive: true});
     await page.locator('button[type="submit"]').click();
     await page.waitForURL(origin + '/app/');
 
-    const cookieUserB = (await context.cookies()).find(c => c.name === 'media_session');
+    const cookieUserB = (await context.cookies()).find(c => c.name === 'aether_session');
     assert(cookieUserB && cookieUserB.httpOnly && cookieUserB.sameSite === 'Strict' && !cookieUserB.secure);
     assert.notEqual(cookieUserB.value, cookieAdmin.value, 'Second account must receive a distinct HttpOnly session cookie');
 
@@ -529,7 +529,7 @@ fs.mkdirSync(out, {recursive: true});
       for (const url of chunkUrls) {
         const mod = await import(url);
         for (const val of Object.values(mod)) {
-          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/login')) loginFn = val;
+          if (typeof val === 'function' && /\/api\/v1\/auth\/login["'`]/.test(val.toString())) loginFn = val;
           if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
           if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
         }
@@ -568,7 +568,7 @@ fs.mkdirSync(out, {recursive: true});
     assert.equal(delayedLogoutResult.meBody.user.login, 'series-admin');
     assert.equal(delayedLogoutResult.storeSession.user.login, 'series-admin');
     assert.equal(delayedLogoutResult.storeSession.csrfToken, delayedLogoutResult.meBody.csrfToken);
-    const cookieAfterDelayedLogout = (await context.cookies()).find(c => c.name === 'media_session');
+    const cookieAfterDelayedLogout = (await context.cookies()).find(c => c.name === 'aether_session');
     assert(cookieAfterDelayedLogout && cookieAfterDelayedLogout.httpOnly);
     assert.notEqual(cookieAfterDelayedLogout.value, cookieUserB.value);
     report.results.delayedLogoutDoesNotWipeNewLoginCookie = true;
@@ -617,7 +617,7 @@ fs.mkdirSync(out, {recursive: true});
       for (const url of chunkUrls) {
         const mod = await import(url);
         for (const val of Object.values(mod)) {
-          if (typeof val === 'function' && val.toString().includes('/api/v1/auth/login')) loginFn = val;
+          if (typeof val === 'function' && /\/api\/v1\/auth\/login["'`]/.test(val.toString())) loginFn = val;
           if (typeof val === 'function' && val.toString().includes('/api/v1/auth/logout')) logoutFn = val;
           if (val && typeof val === 'object' && typeof val.subscribe === 'function' && typeof val.set === 'function') sessionStore = val;
         }
@@ -680,7 +680,8 @@ fs.mkdirSync(out, {recursive: true});
     await page.goto(origin+'/app/settings/#devices');await page.getByRole('heading',{name:'Vos sessions'}).waitFor();
     for(const width of [390,1440]){await page.setViewportSize({width,height:900});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:`${out}/account-security-${width}.png`,fullPage:true});}
     await page.goto(origin+'/app/settings/#security');
-    await page.getByLabel('Mot de passe actuel',{exact:true}).fill('disposable series user-b password');
+    const passwordForm=page.locator('form').filter({has:page.getByRole('button',{name:'Changer le mot de passe',exact:true})});
+    await passwordForm.getByLabel('Mot de passe actuel',{exact:true}).fill('disposable series user-b password');
     await page.getByLabel('Nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
     await page.getByLabel('Confirmer le nouveau mot de passe',{exact:true}).fill('changed disposable user-b password');
     await page.getByRole('button',{name:'Changer le mot de passe',exact:true}).click();await page.waitForURL('**/app/login/**');

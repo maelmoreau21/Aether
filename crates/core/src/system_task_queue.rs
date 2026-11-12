@@ -182,7 +182,13 @@ async fn local_busy(store: &IdentityStore) -> Result<bool, sqlx::Error> {
 
 /// Claim the next runnable maintenance run, if any. At most one runs at a time.
 async fn claim(store: &IdentityStore, timestamp: i64) -> Result<Option<String>, sqlx::Error> {
-    let candidates: Vec<(String, String, i64)> = query_as("SELECT id,target_id,created_at FROM durable_tasks WHERE category='system' AND status='queued' AND lease_until IS NULL AND available_at<=? AND failure_count<max_attempts AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.category='system' AND active.lease_until IS NOT NULL) ORDER BY priority DESC,created_at,id LIMIT 16")
+    let candidates: Vec<(String, String, i64)> = query_as("SELECT id,target_id,created_at \
+            FROM durable_tasks \
+            WHERE category='system' AND status='queued' AND lease_until IS NULL AND available_at<=? \
+            AND failure_count<max_attempts AND NOT EXISTS(SELECT 1 FROM durable_tasks active \
+            WHERE active.category='system' AND active.lease_until IS NOT NULL) \
+            ORDER BY priority DESC,created_at,id \
+            LIMIT 16")
         .bind(timestamp)
         .fetch_all(store.pool())
         .await?;
@@ -208,7 +214,11 @@ async fn claim(store: &IdentityStore, timestamp: i64) -> Result<Option<String>, 
         return Ok(None);
     };
     let _writer = store.task_writes.lock().await;
-    let claimed = query("UPDATE durable_tasks SET status='running',attempt=attempt+1,lease_until=?,started_at=COALESCE(started_at,?),updated_at=?,finished_at=NULL,error='' WHERE id=? AND status='queued' AND lease_until IS NULL AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.category='system' AND active.lease_until IS NOT NULL)")
+    let claimed = query("UPDATE durable_tasks \
+            SET status='running',attempt=attempt+1,lease_until=?,started_at=COALESCE(started_at,?),updated_at=?,finished_at=NULL,error='' \
+            WHERE id=? AND status='queued' AND lease_until IS NULL AND NOT EXISTS(SELECT 1 \
+            FROM durable_tasks active WHERE active.category='system' \
+            AND active.lease_until IS NOT NULL)")
         .bind(timestamp.saturating_add(60)).bind(timestamp).bind(timestamp).bind(&id)
         .execute(store.pool()).await?
         .rows_affected();

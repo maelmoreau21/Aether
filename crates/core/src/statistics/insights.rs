@@ -32,7 +32,16 @@ async fn fetch(auth: &AuthState, selection: &Selection) -> Outcome<(Vec<Play>, b
     let epoch = now();
     let rows = selection
         .statement(
-            &format!("SELECT s.id,s.user_id,{NAME} AS user_name,s.media_id,s.canonical_id,s.kind,s.title,s.artist,s.album,s.device,s.started_at,s.updated_at,s.ended_at,s.seconds,s.covered_seconds,s.duration,s.completed,COALESCE(json_extract(s.state_json,'$.method'),'unknown') AS method,CAST(COALESCE(w.max_height,0) AS BIGINT) AS height,COALESCE(w.genres_csv,'|') AS genres,(SELECT se.series_id FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id WHERE ep.work_id=s.media_id) AS series_id"),
+            &format!(
+                "SELECT s.id,s.user_id,{NAME} AS \
+                    user_name,s.media_id,s.canonical_id,s.kind,s.title,s.artist,s.album,s.device,\
+                    s.started_at,s.updated_at,s.ended_at,s.seconds,s.covered_seconds,s.duration,\
+                    s.completed,COALESCE(json_extract(s.state_json,'$.method'),'unknown') AS \
+                    method,CAST(COALESCE(w.max_height,0) AS BIGINT) AS \
+                    height,COALESCE(w.genres_csv,'|') AS genres,(SELECT se.series_id \
+                    FROM inventory_episodes ep JOIN inventory_seasons se ON se.id=ep.season_id \
+                    WHERE ep.work_id=s.media_id) AS series_id"
+            ),
             &format!("ORDER BY s.started_at,s.id LIMIT {}", ROW_LIMIT + 1),
         )
         .fetch_all(&auth.store.pool)
@@ -172,7 +181,11 @@ async fn episode_numbers(
 
 async fn previous_totals(auth: &AuthState, selection: &Selection) -> Outcome<Totals> {
     let row = selection
-        .statement(&format!("SELECT COALESCE(SUM(s.seconds),0.0) AS seconds,CAST(COALESCE(SUM(CASE WHEN {} THEN 1 ELSE 0 END),0) AS BIGINT) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.user_id ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 THEN s.canonical_id ELSE NULL END) AS media,CAST(COALESCE(SUM(s.completed),0) AS BIGINT) AS completed", aggregate::QUALIFIED_SQL), "")
+        .statement(&format!("SELECT COALESCE(SUM(s.seconds),0.0) AS seconds,CAST(COALESCE(SUM(CASE WHEN {} THEN 1 \
+                ELSE 0 END),0) AS BIGINT) AS plays,COUNT(DISTINCT CASE WHEN s.seconds>0 \
+                THEN s.user_id ELSE NULL END) AS users,COUNT(DISTINCT CASE WHEN s.seconds>0 \
+                THEN s.canonical_id ELSE NULL END) AS media,CAST(COALESCE(SUM(s.completed),0) AS \
+                BIGINT) AS completed", aggregate::QUALIFIED_SQL), "")
         .fetch_one(&auth.store.pool)
         .await
         .map_err(db)?;

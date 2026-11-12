@@ -6,11 +6,11 @@
 //! each inserted asset. These tests publish a real staged scan next to synthetic offline
 //! libraries of several sizes; timings are for comparison on one machine, not NAS figures.
 
+use aether_core::{database::query, identity::IdentityStore, inventory};
 use media_contracts::{
     inventory::{InventoryBatch, ScannedFile},
     media::NfoOutcome,
 };
-use media_poc::{database::query, identity::IdentityStore, inventory};
 use std::time::Instant;
 
 const PUBLISHED: usize = 1_000;
@@ -60,7 +60,7 @@ async fn publish_online_library(store: &IdentityStore, root: &std::path::Path) -
                     size: 1_048_576,
                     modified_ns: "1700000000".into(),
                     mime: "video/x-matroska".into(),
-                    probe: media_poc::media::Probe::default(),
+                    probe: aether_core::media::Probe::default(),
                     editorial: NfoOutcome::Missing,
                     ..Default::default()
                 }
@@ -126,7 +126,7 @@ async fn trigger_sql(store: &IdentityStore) -> String {
 }
 
 #[tokio::test]
-async fn existing_databases_receive_the_primary_key_trigger_once() {
+async fn the_primary_key_trigger_is_part_of_the_schema_and_survives_a_restart() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("core.sqlite3");
     let store = IdentityStore::open(&path).await.unwrap();
@@ -135,45 +135,9 @@ async fn existing_databases_receive_the_primary_key_trigger_once() {
             .await
             .contains("+has_available_asset = 0")
     );
-
-    // Put the database back in the state of a release that predates the step.
-    sqlx::raw_sql(
-        "DROP TRIGGER inventory_assets_avail_insert;
-         CREATE TRIGGER inventory_assets_avail_insert AFTER INSERT ON inventory_assets
-         WHEN NEW.available = 1 BEGIN
-             UPDATE inventory_works SET has_available_asset = 1
-             WHERE id IN (
-                 SELECT e.work_id FROM inventory_sources s
-                 JOIN inventory_versions v ON v.id = s.version_id
-                 JOIN inventory_editions e ON e.id = v.edition_id
-                 WHERE s.id = NEW.source_id
-             ) AND has_available_asset = 0;
-         END;
-         DELETE FROM schema_migrations WHERE name='0001_asset_availability_insert';",
-    )
-    .execute(store.pool())
-    .await
-    .unwrap();
     store.pool().close().await;
     drop(store);
 
-    let store = IdentityStore::open(&path).await.unwrap();
-    assert!(
-        trigger_sql(&store)
-            .await
-            .contains("+has_available_asset = 0")
-    );
-    let applied: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM schema_migrations WHERE name='0001_asset_availability_insert' AND kind='versioned'",
-    )
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert_eq!(applied, 1);
-    store.pool().close().await;
-    drop(store);
-
-    // A later start finds the step journalled and leaves the trigger alone.
     let store = IdentityStore::open(&path).await.unwrap();
     assert!(
         trigger_sql(&store)

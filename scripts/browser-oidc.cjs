@@ -15,7 +15,7 @@ const [origin,password,out] = process.argv.slice(2);
   await page.getByRole('button',{name:'Menu profil',exact:true}).waitFor();
   let me=await context.request.get(origin+'/api/v1/auth/me');let data=await me.json();
   assert.equal(data.user.role,'user');const id=data.user.id;
-  let cookies=await context.cookies();let cookie=cookies.find(c=>c.name==='media_session');assert(cookie.httpOnly && cookie.sameSite==='Strict');assert(!cookies.some(c=>c.name==='media_oidc_flow' && c.value));
+  let cookies=await context.cookies();let cookie=cookies.find(c=>c.name==='aether_session');assert(cookie.httpOnly && cookie.sameSite==='Strict');assert(!cookies.some(c=>c.name==='aether_oidc_flow' && c.value));
   assert.equal(await page.evaluate(()=>Object.keys(localStorage).some(k=>/auth|token|oidc|session/i.test(k))),false);
   const logout=await page.evaluate(async csrf=>{const r=await fetch('/api/v1/auth/logout',{method:'POST',headers:{'x-csrf-token':csrf}});return r.status},data.csrfToken);assert.equal(logout,204);
   assert.equal((await context.request.get(origin+'/api/v1/auth/me')).status(),401);

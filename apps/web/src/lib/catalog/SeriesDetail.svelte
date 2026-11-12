@@ -7,7 +7,7 @@
   import { request, type Work, localizedTitle, localizedPlot } from './api';
   import { locale, t } from '../i18n';
   import MediaStatistics from '../statistics/MediaStatistics.svelte';
-  import { statisticsVisible } from '../statistics/visibility';
+  import { titleStatisticsVisible } from '../statistics/visibility';
   import { st } from '../statistics/i18n';
   import PersonalFeedback from './PersonalFeedback.svelte';
   import EditorialCredits from './EditorialCredits.svelte';
@@ -118,7 +118,7 @@
     { id: 'episodes', label: $t('episodes') },
     { id: 'details', label: $t('detail_tab_details') },
     ...(hasCast ? [{ id: 'cast', label: $t('cast') }] : []),
-    ...($statisticsVisible && !work.synthetic ? [{ id: 'stats', label: $st('media_tab') }] : [])
+    ...($titleStatisticsVisible && !work.synthetic ? [{ id: 'stats', label: $st('media_tab') }] : [])
   ]);
   let tab = $state('episodes');
   // `?section=stats` (links from the statistics page) opens the audience tab.
@@ -186,7 +186,7 @@
     <div class="panel" role="tabpanel" id="series-detail-panel-details" aria-labelledby="series-detail-tab-details"><WorkDetails {work} /></div>
   {:else if tab === 'cast' && hasCast}
     <div class="panel" role="tabpanel" id="series-detail-panel-cast" aria-labelledby="series-detail-tab-cast"><EditorialCredits {work} /></div>
-  {:else if tab === 'stats' && $statisticsVisible && !work.synthetic}
+  {:else if tab === 'stats' && $titleStatisticsVisible && !work.synthetic}
     <div class="panel" role="tabpanel" id="series-detail-panel-stats" aria-labelledby="series-detail-tab-stats"><MediaStatistics mediaId={work.id} kind="series" /></div>
   {:else}
   <div class="panel series-shelf" role="tabpanel" id="series-detail-panel-episodes" aria-labelledby="series-detail-tab-episodes">

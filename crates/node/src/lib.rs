@@ -2,7 +2,7 @@
 //! bounded `ffprobe` analysis, NFO XML parsing, image decoding/validation, and
 //! 64 KiB chunked HTTP `GET`/`HEAD`/`Range` streaming from confined file handles.
 //!
-//! This crate has zero dependency on `media-poc` (Core), `sqlx`, or Core users/sessions/permissions.
+//! This crate has zero dependency on `aether-core` (Core), `sqlx`, or Core users/sessions/permissions.
 
 mod cache_dirs;
 mod disk_cache;

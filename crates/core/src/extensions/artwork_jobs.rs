@@ -34,8 +34,25 @@ async fn present_kinds(
     auth: &AuthState,
     work: &str,
 ) -> Result<std::collections::HashSet<String>, Error> {
-    let kinds: Vec<String> = query_scalar("SELECT kind FROM work_image_entries WHERE work_id=? UNION SELECT i.role FROM inventory_images i LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id WHERE i.work_id=? AND i.available=1 AND h.image_id IS NULL UNION SELECT 'poster' FROM work_posters WHERE work_id=?")
-        .bind(work).bind(work).bind(work).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let kinds: Vec<String> = query_scalar(
+        "SELECT kind \
+            FROM work_image_entries \
+            WHERE work_id=? \
+            UNION SELECT i.role \
+            FROM inventory_images i \
+            LEFT \
+            JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+            WHERE i.work_id=? AND i.available=1 AND h.image_id IS NULL \
+            UNION SELECT 'poster' \
+            FROM work_posters \
+            WHERE work_id=?",
+    )
+    .bind(work)
+    .bind(work)
+    .bind(work)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     Ok(kinds.into_iter().collect())
 }
 const IMAGE_KINDS: [&str; 6] = ["poster", "backdrop", "logo", "thumb", "banner", "disc"];
@@ -57,9 +74,25 @@ async fn next_auto_work(
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
     let mut cursor = job.cursor_work.clone();
     for _ in 0..50 {
-        let next: Option<String> = query_scalar("SELECT w.id FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) ORDER BY w.id LIMIT 1")
-            .bind(&job.library_id).bind(&job.library_id).bind(&cursor).bind(mode).bind(handled_after)
-            .fetch_optional(auth.store.pool()).await.map_err(db)?;
+        let next: Option<String> = query_scalar(
+            "SELECT w.id \
+                FROM inventory_works w \
+                WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders \
+                WHERE parent_id=? AND active=1)) AND w.id>? AND w.kind IN ('film','series') \
+                AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 \
+                FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? \
+                AND a.attempted_at>?) \
+                ORDER BY w.id \
+                LIMIT 1",
+        )
+        .bind(&job.library_id)
+        .bind(&job.library_id)
+        .bind(&cursor)
+        .bind(mode)
+        .bind(handled_after)
+        .fetch_optional(auth.store.pool())
+        .await
+        .map_err(db)?;
         let Some(work) = next else {
             return Ok((None, cursor));
         };
@@ -102,8 +135,18 @@ pub(crate) async fn ensure_automatic(auth: &AuthState, force: bool) -> Result<()
     let Some(owner) = owner else {
         return Ok(());
     };
-    let libraries: Vec<(String, String)> = query_as("SELECT l.id,l.options_json FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND l.kind IN ('films','series') AND n.status!='revoked' AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id AND f.active=1) AND NOT EXISTS(SELECT 1 FROM artwork_collection_jobs j WHERE j.library_id=l.id AND j.status IN ('queued','running','paused'))")
-        .fetch_all(auth.store.pool()).await.map_err(db)?;
+    let libraries: Vec<(String, String)> = query_as(
+        "SELECT l.id,l.options_json \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE l.enabled=1 AND l.kind IN ('films','series') AND n.status!='revoked' \
+            AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id AND f.active=1) \
+            AND NOT EXISTS(SELECT 1 FROM artwork_collection_jobs j WHERE j.library_id=l.id \
+            AND j.status IN ('queued','running','paused'))",
+    )
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
     for (library, options) in libraries {
         let Ok(options) = serde_json::from_str::<crate::library_options::LibraryOptions>(&options)
         else {
@@ -113,9 +156,22 @@ pub(crate) async fn ensure_automatic(auth: &AuthState, force: bool) -> Result<()
             continue;
         }
         let mode = library_mode(&options);
-        let pending: i64 = query_scalar("SELECT COUNT(*) FROM (SELECT 1 FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) LIMIT 1) pending")
-            .bind(&library).bind(&library).bind(mode).bind(now() - AUTO_RETRY_AFTER)
-            .fetch_one(auth.store.pool()).await.map_err(db)?;
+        let pending: i64 = query_scalar(
+            "SELECT COUNT(*) \
+                FROM (SELECT 1 FROM inventory_works w WHERE (w.library_id=? \
+                OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? \
+                AND active=1)) AND w.kind IN ('film','series') \
+                AND w.external_ids_json NOT IN ('','{}') AND NOT EXISTS(SELECT 1 \
+                FROM artwork_auto_attempts a WHERE a.work_id=w.id AND a.mode=? \
+                AND a.attempted_at>?) LIMIT 1) pending",
+        )
+        .bind(&library)
+        .bind(&library)
+        .bind(mode)
+        .bind(now() - AUTO_RETRY_AFTER)
+        .fetch_one(auth.store.pool())
+        .await
+        .map_err(db)?;
         if pending == 0 {
             continue;
         }
@@ -316,8 +372,27 @@ pub(super) async fn control(
 }
 
 pub(super) async fn authorize_work(auth: &AuthState, job: &Job, work: &str) -> Result<(), Error> {
-    let valid: i64 = query_scalar("SELECT COUNT(*) FROM artwork_collection_jobs j JOIN users u ON u.id=j.owner JOIN inventory_works w ON w.id=? JOIN libraries l ON l.id=w.library_id JOIN media_nodes n ON n.id=l.node_id WHERE j.id=? AND j.lease_token=? AND j.status='running' AND j.lease_until>? AND u.role='administrator' AND u.disabled_at IS NULL AND l.enabled=1 AND n.status!='revoked' AND (l.id=j.library_id OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.parent_id=j.library_id AND f.active=1 AND parent.enabled=1))")
-        .bind(work).bind(&job.id).bind(&job.lease_token).bind(now()).fetch_one(auth.store.pool()).await.map_err(db)?;
+    let valid: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM artwork_collection_jobs j \
+            JOIN users u ON u.id=j.owner \
+            JOIN inventory_works w ON w.id=? \
+            JOIN libraries l ON l.id=w.library_id \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE j.id=? AND j.lease_token=? AND j.status='running' AND j.lease_until>? \
+            AND u.role='administrator' AND u.disabled_at IS NULL AND l.enabled=1 \
+            AND n.status!='revoked' AND (l.id=j.library_id OR EXISTS(SELECT 1 \
+            FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id \
+            WHERE f.library_id=l.id AND f.parent_id=j.library_id AND f.active=1 \
+            AND parent.enabled=1))",
+    )
+    .bind(work)
+    .bind(&job.id)
+    .bind(&job.lease_token)
+    .bind(now())
+    .fetch_one(auth.store.pool())
+    .await
+    .map_err(db)?;
     if valid != 1
         || !crate::product::target_allowed(&auth.store, &job.owner, "work", work)
             .await
@@ -334,7 +409,24 @@ pub(super) async fn provider_permitted(
     library: &str,
     generation: &str,
 ) -> Result<bool, Error> {
-    let valid: i64 = query_scalar("SELECT COUNT(*) FROM artwork_collection_jobs j JOIN users u ON u.id=j.owner JOIN extensions e ON e.id=? JOIN extension_publishers p ON p.id=e.publisher_id JOIN libraries l ON l.id=? JOIN media_nodes n ON n.id=l.node_id WHERE j.id=? AND j.lease_token=? AND j.status='running' AND j.lease_until>? AND u.role='administrator' AND u.disabled_at IS NULL AND e.generation=? AND e.enabled=1 AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND (l.id=j.library_id OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.parent_id=j.library_id AND f.active=1 AND parent.enabled=1)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM automation_policies policy WHERE policy.extension_id=e.id AND policy.library_id=l.id AND policy.mode='disabled')")
+    let valid: i64 = query_scalar("SELECT COUNT(*) \
+            FROM artwork_collection_jobs j \
+            JOIN users u ON u.id=j.owner \
+            JOIN extensions e ON e.id=? \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            JOIN libraries l ON l.id=? \
+            JOIN media_nodes n ON n.id=l.node_id \
+            WHERE j.id=? AND j.lease_token=? AND j.status='running' AND j.lease_until>? \
+            AND u.role='administrator' AND u.disabled_at IS NULL AND e.generation=? AND e.enabled=1 \
+            AND p.active=1 AND l.enabled=1 AND n.status!='revoked' AND (l.id=j.library_id \
+            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.parent_id=j.library_id \
+            AND f.active=1 AND parent.enabled=1)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 \
+            FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=l.id) \
+            OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f \
+            ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id \
+            AND f.active=1)) AND NOT EXISTS(SELECT 1 FROM automation_policies policy \
+            WHERE policy.extension_id=e.id AND policy.library_id=l.id AND policy.mode='disabled')")
         .bind(id).bind(library).bind(&job.id).bind(&job.lease_token).bind(now()).bind(generation).fetch_one(auth.store.pool()).await.map_err(db)?;
     Ok(valid == 1)
 }

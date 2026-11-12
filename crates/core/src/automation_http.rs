@@ -92,8 +92,25 @@ async fn run(
     let mut tx = begin_write(&mut conn)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let allowed:i64=query_scalar("SELECT COUNT(*) FROM libraries l JOIN media_nodes n ON n.id=l.node_id JOIN extensions e ON e.id=? JOIN extension_publishers p ON p.id=e.publisher_id WHERE l.id=? AND e.enabled=1 AND p.active=1 AND n.status!='revoked' AND (l.enabled=1 OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND (g.library_id=l.id OR EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id AND f.parent_id=g.library_id AND f.active=1))))")
-        .bind(&input.extension_id).bind(&input.library_id).fetch_one(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let allowed: i64 = query_scalar(
+        "SELECT COUNT(*) \
+            FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            JOIN extensions e ON e.id=? \
+            JOIN extension_publishers p ON p.id=e.publisher_id \
+            WHERE l.id=? AND e.enabled=1 AND p.active=1 AND n.status!='revoked' AND (l.enabled=1 \
+            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
+            AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+            WHERE g.extension_id=e.id AND (g.library_id=l.id OR EXISTS(SELECT 1 \
+            FROM library_folders f WHERE f.library_id=l.id AND f.parent_id=g.library_id \
+            AND f.active=1))))",
+    )
+    .bind(&input.extension_id)
+    .bind(&input.library_id)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if allowed != 1 {
         return Err(StatusCode::NOT_FOUND);
     }
@@ -162,11 +179,40 @@ async fn history(
     admin(&auth, &headers, false).await?;
     // Folder libraries (extra roots of a library) have their own id: report the
     // library the administrator knows, and the file or track that was processed.
-    let tasks: Vec<TaskHistoryRow> = query_as("SELECT t.id AS id,l.extension_id AS extension_id,t.library_id AS library_id,COALESCE(parent.id,lib.id,t.library_id) AS root_library_id,COALESCE(parent.name,lib.name,'') AS library_name,t.status AS status,l.operation AS operation,l.provider AS provider,t.priority AS priority,t.attempt AS attempt,t.max_attempts AS max_attempts,t.created_at AS created_at,t.started_at AS started_at,t.finished_at AS finished_at,t.error AS error,COALESCE(a.relative_path,'') AS asset_path,COALESCE(m.title,'') AS track_title FROM durable_tasks t JOIN automation_task_links l ON l.task_id=t.id LEFT JOIN libraries lib ON lib.id=t.library_id LEFT JOIN library_folders f ON f.library_id=t.library_id LEFT JOIN libraries parent ON parent.id=f.parent_id LEFT JOIN inventory_assets a ON a.id=t.target_id LEFT JOIN music_tracks m ON m.id=t.target_id ORDER BY t.created_at DESC,t.id LIMIT 200")
-        .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+    let tasks: Vec<TaskHistoryRow> = query_as(
+        "SELECT t.id AS id,l.extension_id AS extension_id,t.library_id AS \
+            library_id,COALESCE(parent.id,lib.id,t.library_id) AS \
+            root_library_id,COALESCE(parent.name,lib.name,'') AS library_name,t.status AS \
+            status,l.operation AS operation,l.provider AS provider,t.priority AS \
+            priority,t.attempt AS attempt,t.max_attempts AS max_attempts,t.created_at AS \
+            created_at,t.started_at AS started_at,t.finished_at AS finished_at,t.error AS \
+            error,COALESCE(a.relative_path,'') AS asset_path,COALESCE(m.title,'') AS track_title \
+            FROM durable_tasks t \
+            JOIN automation_task_links l ON l.task_id=t.id \
+            LEFT \
+            JOIN libraries lib ON lib.id=t.library_id \
+            LEFT \
+            JOIN library_folders f ON f.library_id=t.library_id \
+            LEFT \
+            JOIN libraries parent ON parent.id=f.parent_id \
+            LEFT \
+            JOIN inventory_assets a ON a.id=t.target_id \
+            LEFT \
+            JOIN music_tracks m ON m.id=t.target_id \
+            ORDER BY t.created_at DESC,t.id \
+            LIMIT 200",
+    )
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let quotas:Vec<(String,i64,i64,i64)>=query_as("SELECT provider,next_allowed_at,min_interval_seconds,max_concurrent FROM automation_provider_limits ORDER BY provider LIMIT 100")
         .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
-    let sources:Vec<(String,String,String,String,String,i64,i64)>=query_as("SELECT p.work_id,COALESCE(w.title,''),p.field_name,p.extension_id,p.provider_id,p.priority,p.updated_at FROM automatic_metadata_provenance p LEFT JOIN inventory_works w ON w.id=p.work_id ORDER BY p.updated_at DESC,p.work_id,p.field_name LIMIT 100")
+    let sources:Vec<(String,String,String,String,String,i64,i64)>=query_as("SELECT p.work_id,COALESCE(w.title,''),p.field_name,p.extension_id,p.provider_id,p.priority,p.updated_at \
+            FROM automatic_metadata_provenance p \
+            LEFT \
+            JOIN inventory_works w ON w.id=p.work_id \
+            ORDER BY p.updated_at DESC,p.work_id,p.field_name \
+            LIMIT 100")
         .fetch_all(auth.store.pool()).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(json!({
         "now": media_contracts::protocol::unix_now(),

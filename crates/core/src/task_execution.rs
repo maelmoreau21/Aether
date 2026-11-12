@@ -26,11 +26,36 @@ pub(crate) async fn dispatch(
 ) -> Result<(), sqlx::Error> {
     let run = format!("{}:{}", job.id, job.attempt);
     let row: Option<(String, String, String, i64, String, String)> = if job.category == "image" {
-        query_as("SELECT i.root_snapshot,i.relative_path,i.mime,i.size,i.modified_ns,l.node_id FROM inventory_images i JOIN libraries l ON l.id=i.library_id WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))")
-            .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await?
+        query_as(
+            "SELECT i.root_snapshot,i.relative_path,i.mime,i.size,i.modified_ns,l.node_id \
+                FROM inventory_images i \
+                JOIN libraries l ON l.id=i.library_id \
+                WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root \
+                AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+                WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+                JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
+                AND f.active=1 AND parent.enabled=1))",
+        )
+        .bind(&job.target_id)
+        .bind(&job.library_id)
+        .fetch_optional(auth.store.pool())
+        .await?
     } else {
-        query_as("SELECT s.root_snapshot,a.relative_path,a.mime,a.size,a.modified_ns,l.node_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN libraries l ON l.id=a.library_id WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1))")
-            .bind(&job.target_id).bind(&job.library_id).fetch_optional(auth.store.pool()).await?
+        query_as(
+            "SELECT s.root_snapshot,a.relative_path,a.mime,a.size,a.modified_ns,l.node_id \
+                FROM inventory_assets a \
+                JOIN inventory_sources s ON s.id=a.source_id \
+                JOIN libraries l ON l.id=a.library_id \
+                WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root \
+                AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+                WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+                JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
+                AND f.active=1 AND parent.enabled=1))",
+        )
+        .bind(&job.target_id)
+        .bind(&job.library_id)
+        .fetch_optional(auth.store.pool())
+        .await?
     };
     let Some((snapshot, relative, mime, size, modified, node)) = row else {
         task_engine::finish(

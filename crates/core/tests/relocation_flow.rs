@@ -1,12 +1,12 @@
 //! Renamed / moved films keep their work; ambiguous or cross-library cases never merge anything.
 //! Synthetic staged scans only (no media fixtures): the Core decides from what Nodes report.
 
-use media_contracts::media::FilmMetadata;
-use media_poc::{
+use aether_core::{
     database::{query, query_scalar},
     identity::IdentityStore,
     inventory::{InventoryBatch, NfoOutcome, ScannedFile, publish_staged_scan, stage_batch},
 };
+use media_contracts::media::FilmMetadata;
 use std::{collections::BTreeMap, path::Path};
 
 const FP_A: &str = "b3s1:1000:00112233445566778899aabbccddeeff";
@@ -552,11 +552,20 @@ async fn asset_at(store: &IdentityStore, library: &str, path: &str) -> Option<St
         .unwrap()
 }
 async fn series_of(store: &IdentityStore, asset: &str) -> String {
-    query_scalar("SELECT ss.series_id FROM inventory_assets a JOIN inventory_sources s ON s.id=a.source_id JOIN inventory_versions v ON v.id=s.version_id JOIN inventory_editions e ON e.id=v.edition_id JOIN inventory_episodes ie ON ie.work_id=e.work_id JOIN inventory_seasons ss ON ss.id=ie.season_id WHERE a.id=?")
-        .bind(asset)
-        .fetch_one(store.pool())
-        .await
-        .unwrap()
+    query_scalar(
+        "SELECT ss.series_id \
+            FROM inventory_assets a \
+            JOIN inventory_sources s ON s.id=a.source_id \
+            JOIN inventory_versions v ON v.id=s.version_id \
+            JOIN inventory_editions e ON e.id=v.edition_id \
+            JOIN inventory_episodes ie ON ie.work_id=e.work_id \
+            JOIN inventory_seasons ss ON ss.id=ie.season_id \
+            WHERE a.id=?",
+    )
+    .bind(asset)
+    .fetch_one(store.pool())
+    .await
+    .unwrap()
 }
 
 #[tokio::test]

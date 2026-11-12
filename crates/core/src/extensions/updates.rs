@@ -39,7 +39,11 @@ pub(super) async fn snapshot(
         ));
     }
     clear_snapshot(conn, id).await.map_err(db)?;
-    query("INSERT INTO extension_update_revisions(extension_id,package_json,settings_json,enabled,all_libraries,target_sha256) SELECT e.id,?,COALESCE(s.settings_json,'{}'),e.enabled,e.all_libraries,? FROM extensions e LEFT JOIN extension_settings s ON s.extension_id=e.id WHERE e.id=? AND e.package_json=?")
+    query("INSERT INTO extension_update_revisions(extension_id,package_json,settings_json,enabled,all_libraries,target_sha256) SELECT e.id,?,COALESCE(s.settings_json,'{}'),e.enabled,e.all_libraries,? \
+            FROM extensions e \
+            LEFT \
+            JOIN extension_settings s ON s.extension_id=e.id \
+            WHERE e.id=? AND e.package_json=?")
         .bind(previous).bind(target).bind(id).bind(previous).execute(&mut *conn).await.map_err(db)?;
     for (snapshot, source) in [
         ("data", "extension_data"),
@@ -112,8 +116,17 @@ pub(super) async fn rollback(
     let _lock = MUTATIONS.lock().await;
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write(&mut conn).await.map_err(db)?;
-    let saved: Option<(String,String,String,String,String)> = query_as("SELECT r.package_json,r.settings_json,r.target_sha256,e.package_json,p.public_key FROM extension_update_revisions r JOIN extensions e ON e.id=r.extension_id JOIN extension_publishers p ON p.id=e.publisher_id AND p.active=1 WHERE r.extension_id=?")
-        .bind(&id).fetch_optional(&mut *tx).await.map_err(db)?;
+    let saved: Option<(String, String, String, String, String)> = query_as(
+        "SELECT r.package_json,r.settings_json,r.target_sha256,e.package_json,p.public_key \
+            FROM extension_update_revisions r \
+            JOIN extensions e ON e.id=r.extension_id \
+            JOIN extension_publishers p ON p.id=e.publisher_id AND p.active=1 \
+            WHERE r.extension_id=?",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(db)?;
     let (previous, settings, target, current, key) =
         saved.ok_or_else(|| err(StatusCode::CONFLICT, "extension_rollback_unavailable"))?;
     let package: Package = serde_json::from_str(&previous)

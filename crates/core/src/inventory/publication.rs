@@ -19,7 +19,7 @@ pub async fn publish_staged_scan(
     let mut tx = crate::database::begin_write(&mut conn).await?;
 
     let configured: Option<(String, String)> = query_as(
-        "SELECT l.root, l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
+        "SELECT l.root, l.kind FROM libraries l          JOIN media_nodes n ON n.id=l.node_id          WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series')          AND n.status != 'revoked'",
     )
     .bind(library_id)
     .fetch_optional(&mut *tx)
@@ -35,12 +35,11 @@ pub async fn publish_staged_scan(
             || Path::new(c_clean) == Path::new(root_clean)
     });
 
-    if !configured_matches {
+    let (Some((root_snapshot, lib_kind)), true) = (configured, configured_matches) else {
         return Err(sqlx::Error::Protocol(
             "library configuration changed during scan".into(),
         ));
-    }
-    let (root_snapshot, lib_kind) = configured.unwrap();
+    };
 
     // The mode is fixed by the Core when the unique library job is queued; the Node cannot choose it.
     let refresh_mode: String =
@@ -544,8 +543,9 @@ pub async fn publish_staged_scan(
                         && r.get::<String, _>("root_snapshot") == root_snapshot
                 });
 
-                let (asset_id, ep_work_id) = if is_existing_matching {
-                    let r = existing.unwrap();
+                let (asset_id, ep_work_id) = if let Some(r) =
+                    existing.as_ref().filter(|_| is_existing_matching)
+                {
                     let asset_id: String = r.get("id");
                     let ep_work_id: String = r.get("work_id");
                     query(
@@ -755,7 +755,9 @@ pub async fn publish_staged_scan(
                 }
             }
 
-            last_new_path = chunk.last().unwrap().get("relative_path");
+            if let Some(last) = chunk.last() {
+                last_new_path = last.get("relative_path");
+            }
         }
     } else {
         // Keyset pagination in bounded chunks (250 items at a time) for new / modified files.
@@ -811,8 +813,9 @@ pub async fn publish_staged_scan(
                         && r.get::<String, _>("root_snapshot") == root_snapshot
                 });
 
-                let (asset_id, work_id) = if is_existing_matching {
-                    let r = existing.unwrap();
+                let (asset_id, work_id) = if let Some(r) =
+                    existing.as_ref().filter(|_| is_existing_matching)
+                {
                     let asset_id: String = r.get("id");
                     let work_id: String = r.get("work_id");
                     query(
@@ -1004,7 +1007,9 @@ pub async fn publish_staged_scan(
                 }
             }
 
-            last_new_path = chunk.last().unwrap().get("relative_path");
+            if let Some(last) = chunk.last() {
+                last_new_path = last.get("relative_path");
+            }
         }
     }
 
@@ -1053,7 +1058,8 @@ pub async fn publish_staged_scan(
                 } else {
                     (work_id.clone(), role)
                 };
-                query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available,role) VALUES(?,?,?,?,?,?,?,?,100,1,?) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,available=1,role=excluded.role")
+                query("INSERT INTO inventory_images(id,work_id,library_id,root_snapshot,relative_path,size,modified_ns,mime,priority,available,role) VALUES(?,?,?,?,?,?,?,?,100,1,?) ON CONFLICT(work_id,root_snapshot,relative_path) DO UPDATE \
+                        SET size=excluded.size,modified_ns=excluded.modified_ns,mime=excluded.mime,available=1,role=excluded.role")
                     .bind(id()).bind(owner).bind(library_id).bind(&root_snapshot).bind(&image.path).bind(image.size_bytes as i64).bind(&image.modified_ns).bind(&image.mime).bind(role).execute(&mut *tx).await?;
             }
             let poster_path: Option<String> = row.get("poster_path");
@@ -1164,7 +1170,9 @@ pub async fn publish_staged_scan(
             }
         }
 
-        last_staged_path = chunk.last().unwrap().get("relative_path");
+        if let Some(last) = chunk.last() {
+            last_staged_path = last.get("relative_path");
+        }
     }
 
     refresh_editorial_for_works(&mut tx, &affected_work_ids).await?;
@@ -1185,14 +1193,37 @@ pub async fn publish_staged_scan(
     }
 
     // Publish text snapshots atomically with assets, including unchanged video files.
-    query("INSERT INTO inventory_subtitles(asset_id,subtitles_json) SELECT a.id,f.subtitles_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET subtitles_json=excluded.subtitles_json")
-        .bind(scan_id).execute(&mut *tx).await?;
-    query("INSERT INTO inventory_audio(asset_id,audios_json) SELECT a.id,f.audios_json FROM scan_staging_files f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET audios_json=excluded.audios_json")
-        .bind(scan_id).execute(&mut *tx).await?;
+    query(
+        "INSERT INTO inventory_subtitles(asset_id,subtitles_json) SELECT a.id,f.subtitles_json \
+            FROM scan_staging_files f \
+            JOIN inventory_assets a ON a.library_id=f.library_id \
+            AND a.relative_path=f.relative_path \
+            WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE \
+            SET subtitles_json=excluded.subtitles_json",
+    )
+    .bind(scan_id)
+    .execute(&mut *tx)
+    .await?;
+    query(
+        "INSERT INTO inventory_audio(asset_id,audios_json) SELECT a.id,f.audios_json \
+            FROM scan_staging_files f \
+            JOIN inventory_assets a ON a.library_id=f.library_id \
+            AND a.relative_path=f.relative_path \
+            WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE \
+            SET audios_json=excluded.audios_json",
+    )
+    .bind(scan_id)
+    .execute(&mut *tx)
+    .await?;
 
     // Remember the partial fingerprints of the files now published, for the next scan's rename
     // detection and so a restarted Node never rereads unchanged files. Hints only.
-    query("INSERT INTO inventory_asset_fingerprints(asset_id,library_id,size,modified_ns,fingerprint) SELECT a.id,a.library_id,a.size,a.modified_ns,f.fingerprint FROM scan_staging_fingerprints f JOIN inventory_assets a ON a.library_id=f.library_id AND a.relative_path=f.relative_path WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE SET library_id=excluded.library_id,size=excluded.size,modified_ns=excluded.modified_ns,fingerprint=excluded.fingerprint")
+    query("INSERT INTO inventory_asset_fingerprints(asset_id,library_id,size,modified_ns,fingerprint) SELECT a.id,a.library_id,a.size,a.modified_ns,f.fingerprint \
+            FROM scan_staging_fingerprints f \
+            JOIN inventory_assets a ON a.library_id=f.library_id \
+            AND a.relative_path=f.relative_path \
+            WHERE f.scan_id=? AND a.available=1 ON CONFLICT(asset_id) DO UPDATE \
+            SET library_id=excluded.library_id,size=excluded.size,modified_ns=excluded.modified_ns,fingerprint=excluded.fingerprint")
         .bind(scan_id).execute(&mut *tx).await?;
 
     crate::automation::emit_snapshot(

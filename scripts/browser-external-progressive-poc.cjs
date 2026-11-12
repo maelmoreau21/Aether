@@ -28,7 +28,8 @@ const server=http.createServer((req,res)=>{
 (async()=>{let browser;try{
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));browser=await chromium.launch({channel:'chrome',headless:true,args:['--autoplay-policy=no-user-gesture-required']});report.browser=browser.version();
   const page=await browser.newPage();page.on('console',message=>{if(report.console.length<100)report.console.push({type:message.type(),text:message.text()});});await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  for(const name of modules){const code=ts.transpileModule(sources[name],{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;await page.addScriptTag({content:`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`});}
+  const bundleDir=fs.mkdtempSync(path.join(out,'bundle-'));
+  try{for(const name of modules){const code=ts.transpileModule(sources[name],{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;const scriptPath=path.join(bundleDir,`${name}.js`);fs.writeFileSync(scriptPath,`window[${JSON.stringify(name)}]={};(function(exports,require){${code}})(window[${JSON.stringify(name)}],name=>window[name.slice(2)]);`);await page.addScriptTag({path:scriptPath});}}finally{fs.rmSync(bundleDir,{recursive:true,force:true});}
   let deadline;
   try {report.result=await Promise.race([page.evaluate(async(direct)=>{
     const video=document.querySelector('video'),errors=[],player=new window.native.NativePlayer(video,message=>errors.push(message));

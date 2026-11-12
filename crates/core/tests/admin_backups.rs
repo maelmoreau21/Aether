@@ -1,9 +1,9 @@
+use aether_core::{admin_backups, auth::AuthState, database, identity::IdentityStore};
 use axum::{
     Router,
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use media_poc::{admin_backups, auth::AuthState, database, identity::IdentityStore};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
 
@@ -65,7 +65,7 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
         .await
         .unwrap();
         database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,?,unixepoch(),unixepoch(),unixepoch()+3600)").bind(format!("{:x}", Sha256::digest(token.as_bytes()))).bind(id).execute(store.pool()).await.unwrap();
-        cookies.push(format!("media_session={token}"));
+        cookies.push(format!("aether_session={token}"));
     }
     // Populate persisted administrator settings rather than checking an almost-empty DB.
     database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films privés','films','local',?,1)")
@@ -208,14 +208,14 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
     assert!(!bytes.windows(15).any(|window| window == b"SQLite format 3"));
     let package = temp.path().join("download.media-backup");
     std::fs::write(&package, &bytes).unwrap();
-    let parsed_key = media_poc::backup_bundle::BackupKey::parse(&key).unwrap();
+    let parsed_key = aether_core::backup_bundle::BackupKey::parse(&key).unwrap();
     assert!(
-        media_poc::backup_bundle::extract(&package, &temp.path().join("without-key"), None)
+        aether_core::backup_bundle::extract(&package, &temp.path().join("without-key"), None)
             .await
             .is_err()
     );
     let extracted = temp.path().join("extracted");
-    let summary = media_poc::backup_bundle::extract(&package, &extracted, Some(&parsed_key))
+    let summary = aether_core::backup_bundle::extract(&package, &extracted, Some(&parsed_key))
         .await
         .unwrap();
     assert_eq!(summary.engine, "sqlite");
@@ -231,7 +231,7 @@ async fn backups_authorization_csrf_consistency_download_and_unknown_ids() {
     assert!(configuration.get("MEDIA_BACKUP_KEY").is_none());
     assert!(configuration.get("MEDIA_BACKUP_KEY_FILE").is_none());
     let restored = temp.path().join("restored.sqlite3");
-    let restored_summary = media_poc::backup::restore_database(&copy, &restored, None)
+    let restored_summary = aether_core::backup::restore_database(&copy, &restored, None)
         .await
         .unwrap();
     assert_eq!(restored_summary.user_count, 2);
@@ -474,7 +474,7 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
         .execute(store.pool())
         .await
         .unwrap();
-    let cookie = format!("media_session={token}");
+    let cookie = format!("aether_session={token}");
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();

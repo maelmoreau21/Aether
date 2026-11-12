@@ -216,6 +216,10 @@ pub(crate) fn fallback_response(bytes: Vec<u8>) -> Response {
         header::X_CONTENT_TYPE_OPTIONS,
         header::HeaderValue::from_static("nosniff"),
     );
+    response.headers_mut().insert(
+        header::CONTENT_SECURITY_POLICY,
+        header::HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; sandbox"),
+    );
     response
 }
 #[derive(Clone, serde::Serialize, serde::Deserialize)]

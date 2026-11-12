@@ -179,13 +179,13 @@ distincts. Une erreur de stockage est explicite et ne bloque pas tout le Core.
 - `node scripts/browser-extension-catalogue-ui.cjs` : huit manifestes réels,
   APIs simulées, aucune approbation/API éditeur, configuration/activation/import,
   clair/sombre 1440/390, champs mobile lisibles et aucune erreur navigateur.
-- `cargo test --locked -p media-poc --test extensions -j 1 -- --test-threads=1` :
+- `cargo test --locked -p aether-core --test extensions -j 1 -- --test-threads=1` :
   dix tests Core réussis, puis relancés après le complément de stockage : dix réussis
   à nouveau. Test extension_storage : création/reprise/altération/suppression réussi ;
   `cargo clippy --locked --all-targets -j 1 -- -D warnings` et format réussis.
 - Navigateurs Core réels : cycle installation/exécution Rust-Wasm/sauvegarde/
   désactivation/désinstallation et dépôts/version/retrait réussis.
-- `MEDIA_TEST_AVATAR_LIVE=1 cargo test --locked -p media-poc --lib extensions::collections::tests::imports_normalized -j 1 -- --nocapture --test-threads=1` : vrai HTTPS,
+- `MEDIA_TEST_AVATAR_LIVE=1 cargo test --locked -p aether-core --lib extensions::collections::tests::imports_normalized -j 1 -- --nocapture --test-threads=1` : vrai HTTPS,
   sept collections découvertes et 26 images sonny importées en SQLite temporaire.
 - Aether-Plugins : `cargo test --workspace -j 1 -- --test-threads=1` : 41 tests ;
   `node scripts/test-repository.cjs` : huit paquets/signatures/UTF-8 vérifiés.

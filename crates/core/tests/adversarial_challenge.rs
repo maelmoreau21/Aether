@@ -1,12 +1,12 @@
 //! Empirical stress tests for binding and static web serving.
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
-use media_poc::{
-    auth::AuthState, identity::IdentityStore, node::Inventory, secure_app_with_web_dist,
-};
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     process::Command,
@@ -214,6 +214,15 @@ async fn adversarial_web_dist_serving_and_security_under_app() {
         res.headers().get(header::X_CONTENT_TYPE_OPTIONS).unwrap(),
         "nosniff"
     );
+    assert_eq!(res.headers().get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+    assert_eq!(
+        res.headers().get(header::REFERRER_POLICY).unwrap(),
+        "strict-origin-when-cross-origin"
+    );
+    assert_eq!(
+        res.headers().get("permissions-policy").unwrap(),
+        "camera=(), microphone=(), geolocation=()"
+    );
     assert_eq!(
         res.headers().get(header::CACHE_CONTROL).unwrap(),
         "no-store"
@@ -281,7 +290,7 @@ async fn adversarial_nonexistent_web_dist_serves_404_without_crashing() {
         .header(header::HOST, "127.0.0.1:3000")
         .body(Body::empty())
         .unwrap();
-    let res = router.oneshot(req).await.unwrap();
+    let res = router.clone().oneshot(req).await.unwrap();
     let status = res.status();
     let headers = res.headers().clone();
     let body = res.into_body().collect().await.unwrap().to_bytes();
@@ -289,6 +298,137 @@ async fn adversarial_nonexistent_web_dist_serves_404_without_crashing() {
     eprintln!("HEADERS: {headers:?}");
     eprintln!("BODY: {}", String::from_utf8_lossy(&body));
     assert_eq!(status, StatusCode::NOT_FOUND);
+
+    store.close().await;
+}
+
+#[tokio::test]
+async fn adversarial_security_headers_and_csp_injection_prevention() {
+    let _lock = ENV_LOCK.lock().await;
+    let temp = tempfile::tempdir().unwrap();
+    let db_path = temp.path().join("csp_test.sqlite3");
+    let store = IdentityStore::open(&db_path).await.unwrap();
+    store
+        .bootstrap(
+            "admin",
+            Zeroizing::new("valid-test-password-16chars".into()),
+        )
+        .await
+        .unwrap();
+
+    let origin = "http://127.0.0.1:3000".to_string();
+    let auth = AuthState::new(store.clone(), origin.clone()).await.unwrap();
+    let media_dir = temp.path().join("media");
+    std::fs::create_dir_all(&media_dir).unwrap();
+    let inventory = Inventory::local(media_dir).await.unwrap();
+    let web_dist = temp.path().join("web_dist");
+    std::fs::create_dir_all(&web_dist).unwrap();
+    std::fs::write(
+        web_dist.join("index.html"),
+        "<!doctype html><html><body>Root Index</body></html>",
+    )
+    .unwrap();
+
+    let router = secure_app_with_web_dist(inventory, 3000, auth, web_dist)
+        .await
+        .unwrap();
+
+    let req = Request::builder()
+        .uri("/app/")
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
+        .unwrap();
+    let res = router.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    assert_eq!(res.headers().get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+    assert_eq!(
+        res.headers().get(header::REFERRER_POLICY).unwrap(),
+        "strict-origin-when-cross-origin"
+    );
+    assert_eq!(
+        res.headers().get("permissions-policy").unwrap(),
+        "camera=(), microphone=(), geolocation=()"
+    );
+
+    let csp = res
+        .headers()
+        .get(header::CONTENT_SECURITY_POLICY)
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(csp.contains("default-src 'none'"));
+    assert!(csp.contains("frame-ancestors 'none'"));
+    assert!(csp.contains("object-src 'none'"));
+    assert!(csp.contains("base-uri 'self'"));
+    assert!(csp.contains("form-action 'self'"));
+
+    // Also test health routes have permissions policy
+    let health_req = Request::builder()
+        .uri("/api/v1/health")
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
+        .unwrap();
+    let health_res = router.clone().oneshot(health_req).await.unwrap();
+    assert_eq!(health_res.status(), StatusCode::OK);
+    assert_eq!(
+        health_res.headers().get("permissions-policy").unwrap(),
+        "camera=(), microphone=(), geolocation=()"
+    );
+
+    // Test CORS wildcard defense: "*" must not reflect arbitrary origin with credentials
+    if let Ok(mut guard) = store.cors_origins.write() {
+        *guard = vec!["*".to_string(), "http://explicit-partner.com".to_string()];
+    }
+
+    // 1. Arbitrary origin with wildcard configured: gets wildcard origin without credentials
+    let opt_wildcard = Request::builder()
+        .method("OPTIONS")
+        .uri("/app/")
+        .header(header::HOST, "127.0.0.1:3000")
+        .header(header::ORIGIN, "http://evil-attacker.com")
+        .body(Body::empty())
+        .unwrap();
+    let res_wildcard = router.clone().oneshot(opt_wildcard).await.unwrap();
+    assert_eq!(res_wildcard.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        res_wildcard
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .unwrap(),
+        "*"
+    );
+    assert!(
+        res_wildcard
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .is_none()
+    );
+
+    // 2. Explicitly allowed partner origin: gets reflected origin with credentials
+    let opt_explicit = Request::builder()
+        .method("OPTIONS")
+        .uri("/app/")
+        .header(header::HOST, "127.0.0.1:3000")
+        .header(header::ORIGIN, "http://explicit-partner.com")
+        .body(Body::empty())
+        .unwrap();
+    let res_explicit = router.clone().oneshot(opt_explicit).await.unwrap();
+    assert_eq!(res_explicit.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        res_explicit
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .unwrap(),
+        "http://explicit-partner.com"
+    );
+    assert_eq!(
+        res_explicit
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_CREDENTIALS)
+            .unwrap(),
+        "true"
+    );
 
     store.close().await;
 }

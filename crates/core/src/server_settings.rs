@@ -75,9 +75,10 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub watch_together_enabled: bool,
     /// Server video transcoding (re-encoded picture, reduced quality, tone mapping, burnt
-    /// subtitles). Direct play stays the default; when off, the Core refuses every encode
-    /// of the picture. Settings saved before the audio/video split used `transcodingEnabled`.
-    #[serde(default = "default_true", alias = "transcodingEnabled")]
+    /// subtitles). Off by default: the picture is played as stored and the Core refuses every
+    /// encode of it until an administrator turns this on. Settings saved before the
+    /// audio/video split used `transcodingEnabled`.
+    #[serde(default, alias = "transcodingEnabled")]
     pub video_transcoding_enabled: bool,
     /// Server audio transcoding (AAC conversion, downmix, normalisation, night mode).
     /// When off, the Core refuses every audio encode; copied audio stays allowed.
@@ -227,7 +228,7 @@ impl Default for Settings {
             log_level: crate::server_log::Level::Info,
             log_retention_days: default_log_retention(),
             watch_together_enabled: true,
-            video_transcoding_enabled: true,
+            video_transcoding_enabled: false,
             audio_transcoding_enabled: true,
             tone_mapping_enabled: true,
             subtitle_burn_in_enabled: true,
@@ -637,7 +638,7 @@ mod tests {
         assert!(parsed.chapter_images_enabled && parsed.intro_detection_enabled);
         assert_eq!(parsed.marker_min_confidence, 80);
         assert!(parsed.watch_together_enabled);
-        assert!(parsed.video_transcoding_enabled && parsed.audio_transcoding_enabled);
+        assert!(!parsed.video_transcoding_enabled && parsed.audio_transcoding_enabled);
         assert_eq!(
             parsed.media_defaults(),
             crate::library_options::GlobalMediaDefaults::default()

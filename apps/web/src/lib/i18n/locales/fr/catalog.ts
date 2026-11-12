@@ -771,6 +771,8 @@ export const catalog = {
   select_version: 'Sélectionner la version {value}',
   resume_the_film: 'Reprendre le film',
   play_the_film: 'Lancer le film',
+  native_download: 'Télécharger',
+  native_downloads: 'Téléchargements',
   replace_an_image: 'Remplacer une image',
   add_an_image: 'Ajouter une image',
   unpin_this_image: 'Désépingler cette image',

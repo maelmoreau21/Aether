@@ -7,6 +7,9 @@
 
 <script lang="ts">
   import { preloadCatalog } from '../catalog/page-cache';
+  import { nativeApp } from '../native/app-bridge';
+  // The Android application keeps offline downloads in a native list.
+  const app = nativeApp();
   import { onMount, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { session } from '../auth/session';
@@ -168,6 +171,11 @@
           <span class="invite-badge">{pendingInvitesCount}</span>
         {/if}
       </button>
+      {/if}
+      {#if app?.downloads}
+        <button type="button" class="icon-btn" title={$t('native_downloads')} aria-label={$t('native_downloads')} onclick={() => app.downloads?.()}>
+          <Icon name="download" size={19} />
+        </button>
       {/if}
       <ProfileMenu />
     </div>

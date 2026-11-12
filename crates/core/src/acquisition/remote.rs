@@ -79,20 +79,23 @@ pub fn valid_poster_path(path: &str) -> bool {
         && path
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
-        && matches!(
-            path.rsplit('.').next(),
-            Some("jpg" | "jpeg" | "png" | "webp")
-        )
+        && path.rsplit('.').next().is_some_and(|ext| {
+            ext.eq_ignore_ascii_case("jpg")
+                || ext.eq_ignore_ascii_case("jpeg")
+                || ext.eq_ignore_ascii_case("png")
+                || ext.eq_ignore_ascii_case("webp")
+        })
 }
 /// The artwork source and path of a lookup result's poster, when it is hosted by one of the
 /// fixed providers (TMDB for films, TheTVDB for series).
 pub(super) fn poster_source(v: &Value) -> Option<(&'static str, String)> {
     let address = v["remotePoster"].as_str().or_else(|| {
-        v["images"]
-            .as_array()?
-            .iter()
-            .find(|image| image["coverType"].as_str() == Some("poster"))?["remoteUrl"]
-            .as_str()
+        let poster = v["images"].as_array()?.iter().find(|image| {
+            image["coverType"]
+                .as_str()
+                .is_some_and(|c| c.eq_ignore_ascii_case("poster"))
+        })?;
+        poster["remoteUrl"].as_str().or_else(|| poster["url"].as_str())
     })?;
     let url = url::Url::parse(address).ok()?;
     if !matches!(url.scheme(), "http" | "https") {
@@ -103,7 +106,10 @@ pub(super) fn poster_source(v: &Value) -> Option<(&'static str, String)> {
             let (_size, rest) = url.path().strip_prefix("/t/p/")?.split_once('/')?;
             ("tmdb", format!("/{rest}"))
         }
-        "artworks.thetvdb.com" => ("tvdb", url.path().strip_prefix("/banners")?.to_owned()),
+        "artworks.thetvdb.com" | "thetvdb.com" => {
+            let path = url.path().strip_prefix("/banners").unwrap_or(url.path());
+            ("tvdb", path.to_owned())
+        }
         _ => return None,
     };
     valid_poster_path(&found.1).then_some(found)

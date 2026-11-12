@@ -984,6 +984,11 @@ fn a_lookup_poster_is_reduced_to_a_fixed_provider_and_a_plain_path() {
         remote::poster_source(&tvdb),
         Some(("tvdb", "/posters/79488-1.jpg".into()))
     );
+    let tvdb_alt = json!({"images":[{"coverType":"Poster","url":"https://thetvdb.com/banners/posters/12345.JPG"}]});
+    assert_eq!(
+        remote::poster_source(&tvdb_alt),
+        Some(("tvdb", "/posters/12345.JPG".into()))
+    );
     for url in [
         "https://evil.example/t/p/original/a.jpg",
         "https://image.tmdb.org.evil.example/t/p/original/a.jpg",

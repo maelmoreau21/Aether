@@ -183,6 +183,7 @@
 
   // On-demand discovery state
   let discoverResults = $state<SearchResult[]>([]);
+  let failedPosters = $state<Set<string>>(new Set());
   const discoverMissing = $derived.by(() => {
     return discoverResults.filter(r => !r.inLibrary && (selectedKindFilter === 'all' || selectedKindFilter === r.kind));
   });
@@ -529,8 +530,17 @@
         {#each discoverMissing as item (`${item.externalProvider}:${item.externalId}`)}
           <div class="discover-card">
             <div class="discover-poster-wrap">
-              {#if item.poster}
-                <img src={posterUrl(item.poster)} alt="" loading="lazy" class="discover-poster" />
+              {#if item.poster && !failedPosters.has(`${item.externalProvider}:${item.externalId}`)}
+                <img
+                  src={posterUrl(item.poster)}
+                  alt=""
+                  loading="lazy"
+                  class="discover-poster"
+                  onerror={() => {
+                    failedPosters.add(`${item.externalProvider}:${item.externalId}`);
+                    failedPosters = new Set(failedPosters);
+                  }}
+                />
               {:else}
                 <div class="discover-poster placeholder">
                   <span>{item.title.trim().charAt(0).toUpperCase() || '?'}</span>
@@ -539,10 +549,6 @@
               {#if item.request}
                 <span class="discover-badge tone-{statusTone(item.request.status)}">
                   {item.request.mine ? $t('rq_requested_by_you') : $t('rq_already_requested')}
-                </span>
-              {:else if item.canRequest}
-                <span class="discover-badge tone-{item.autoApprove ? 'ok' : 'info'}">
-                  {item.autoApprove ? $t('rq_auto_approved_badge') : $t('rq_needs_review_badge')}
                 </span>
               {/if}
             </div>

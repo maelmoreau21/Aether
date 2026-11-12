@@ -17,7 +17,7 @@
 
   function apply(data: PlaybackSettings) {
     base = { serverName: data.serverName, welcomeMessage: data.welcomeMessage };
-    video = data.videoTranscodingEnabled ?? true;
+    video = data.videoTranscodingEnabled ?? false;
     audio = data.audioTranscodingEnabled ?? true;
     toneMapping = data.toneMappingEnabled ?? true;
     burnIn = data.subtitleBurnInEnabled ?? true;

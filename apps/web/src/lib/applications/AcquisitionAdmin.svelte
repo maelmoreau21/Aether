@@ -8,7 +8,6 @@
     saveUserPolicy, deleteUserPolicy, loadUserEffectivePolicy,
     type PolicyOverview, type PolicyRule, type MyPolicy
   } from './api';
-  import LegacyImport from './LegacyImport.svelte';
   import './applications.css';
   import { t } from '../i18n';
   let { embedded = false }: { embedded?: boolean } = $props();
@@ -448,7 +447,6 @@
         </div>
       </section>
       {/if}
-      <LegacyImport {servers} />
     </div>
   {/if}
 </div>

@@ -3,6 +3,8 @@
 package app.aether
 
 import android.app.Application
+import android.app.UiModeManager
+import android.content.res.Configuration
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -33,6 +35,7 @@ import uniffi.aether_ffi.ClientException
 import uniffi.aether_ffi.Pairing
 import uniffi.aether_ffi.releasesUrl
 import uniffi.aether_ffi.ServerInfo
+import uniffi.aether_ffi.Token
 import uniffi.aether_ffi.Work
 import uniffi.aether_ffi.WorkDetail
 
@@ -115,6 +118,43 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     private var ssoUrl: String? = null
     /** The browser came back before the server was checked again (cold start). */
     private var pendingSso: Pair<String?, String?>? = null
+
+    /**
+     * Phones and tablets show the server's web interface (the same pages as the browser);
+     * Android TV keeps the native screens made for the remote control.
+     */
+    val webInterface: Boolean =
+        (app.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager).currentModeType !=
+            Configuration.UI_MODE_TYPE_TELEVISION
+    private val _access = MutableStateFlow<String?>(null)
+    /** Session the web interface opens with: this device's token, as its cookie. */
+    val access: StateFlow<String?> = _access
+    /** Last page of the web interface, kept while a native screen (downloads) is shown. */
+    var webPage: String? = null
+
+    fun webAddress(): String? = store.server?.trimEnd('/')?.let { "$it/app/" }
+
+    fun currentAccess(): String? = store.load()?.access
+
+    /** The web interface signed in or switched account: downloads use that session too. */
+    fun adoptWebSession(token: String) {
+        if (token == store.load()?.access) return
+        val server = store.server ?: return
+        val adopted = Token(token, System.currentTimeMillis() / 1000 + WEB_SESSION_SECONDS)
+        val next = runCatching { AetherClient(server, device, adopted) }.getOrNull() ?: return
+        client = next
+        store.save(adopted)
+        _access.value = token
+        rememberAccount(next)
+    }
+
+    /** The web interface signed out: the device forgets the session as well. */
+    fun webSignedOut() {
+        if (store.load() == null) return
+        forgetCurrent()
+        _access.value = null
+        store.server?.let { server -> client = runCatching { AetherClient(server, device, null) }.getOrNull() }
+    }
 
     fun clearError() {
         _error.value = null
@@ -479,9 +519,10 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun showCatalog() {
+        _access.value = store.load()?.access
         _screen.value = Screen.Catalog
         checkUpdate()
-        loadCatalog(kind = "film", search = null)
+        if (!webInterface) loadCatalog(kind = "film", search = null)
         renewIncompleteDownloads()
     }
 
@@ -795,6 +836,8 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         /** Where the browser returns after single sign-on (see the manifest). */
         const val SSO_REDIRECT = "aether://sso"
+        /** A session adopted from the web interface: the Core's absolute limit (30 days). */
+        const val WEB_SESSION_SECONDS = 30L * 24 * 3600
         const val REFRESH_MARGIN_SECONDS = 7L * 24 * 3600
         const val POLL_MILLIS = 3_000L
         /** Accounts kept beside the active one. */

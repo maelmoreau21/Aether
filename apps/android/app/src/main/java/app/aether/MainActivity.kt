@@ -172,7 +172,7 @@ private fun App(model: AetherViewModel) {
             when (val current = screen) {
                 Screen.Server -> ServerScreen(model)
                 Screen.SignIn -> if (model.mfa.collectAsState().value != null) SecondFactorScreen(model) else SignInScreen(model)
-                Screen.Catalog -> CatalogScreen(model)
+                Screen.Catalog -> if (model.webInterface) WebScreen(model) else CatalogScreen(model)
                 Screen.Downloads -> DownloadsScreen(model)
                 Screen.Devices -> DevicesScreen(model)
                 Screen.Accounts -> AccountsScreen(model)
@@ -290,7 +290,7 @@ private fun LabeledField(
 
 /** The large full-width button of the web's `btn-submit` (light when primary). */
 @Composable
-private fun WideButton(text: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun WideButton(text: String, primary: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -541,7 +541,7 @@ private fun PairingCode(pairing: Pairing) {
 
 /** Starts a download, asking once for the notification that shows its progress. */
 @Composable
-private fun rememberDownload(model: AetherViewModel): (Work) -> Unit {
+internal fun rememberDownload(model: AetherViewModel): (Work) -> Unit {
     val context = LocalContext.current
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     return { work ->

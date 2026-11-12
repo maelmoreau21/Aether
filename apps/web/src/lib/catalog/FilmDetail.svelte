@@ -1,5 +1,6 @@
 <script lang="ts">
   import WorkTools from './WorkTools.svelte';
+  import NativeDownload from '../native/NativeDownload.svelte';
   import { bestVersion } from '../player/version-choice';
   import { preloadProgress, isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
@@ -93,6 +94,7 @@
         <span class="action-divider" aria-hidden="true"></span>
         <!-- Offline downloads are offered by the native clients only. -->
         <div class="tools-inline">
+          <NativeDownload id={work.id} kind="film" title={work.title} />
           <WorkTools {work} selectedMedia={currentSelectedMedia} />
         </div>
       {/if}

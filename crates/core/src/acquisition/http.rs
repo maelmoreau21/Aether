@@ -574,8 +574,12 @@ async fn poster(
     if !remote::valid_poster_path(&input.path) {
         return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_poster"));
     }
-    let (bytes, content_type) =
-        transport::public_image(host, &format!("{prefix}{}", input.path)).await?;
+    let full_path = if input.src == "tvdb" && input.path.starts_with("/banners/") {
+        input.path.clone()
+    } else {
+        format!("{prefix}{}", input.path)
+    };
+    let (bytes, content_type) = transport::public_image(host, &full_path).await?;
     Ok((
         [
             (header::CONTENT_TYPE, content_type),

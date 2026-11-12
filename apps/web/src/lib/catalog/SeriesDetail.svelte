@@ -1,5 +1,6 @@
 <script lang="ts">
   import { session } from '../auth/session';
+  import NativeDownload from '../native/NativeDownload.svelte';
   import { selectArtwork } from './artwork-selection';
   import WorkTools from './WorkTools.svelte';
   import ChapterImages from './ChapterImages.svelte';
@@ -248,6 +249,7 @@
             <div class="episode-actions-row">
               <EpisodePlayer {episode} {media} {immersive} isLaunching={launchingEpisodeId === episode.id} onlaunch={onLaunchEpisode} onselect={() => onSelectEpisode(episode)} />
               {#if !episode.synthetic}<WatchStatus workId={episode.id} {duration} compact />{/if}
+              {#if !episode.synthetic}<NativeDownload id={episode.id} kind="episode" title={epTitle} />{/if}
               {#if !episode.synthetic && $session?.user.role === 'administrator'}
                 <WorkTools work={episode} selectedMedia={descriptor} />
                 <button type="button" class="segment-shortcut" onclick={() => editSegments(episode, descriptor?.id ?? null)} title={$t('segment_edit_episode_hint')}><Icon name="edit" size={15} /><span>{$t('segment_edit_episode')}</span></button>

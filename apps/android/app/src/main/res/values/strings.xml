@@ -63,6 +63,8 @@
     <string name="back">Retour</string>
     <string name="season">Saison %1$d</string>
     <string name="downloads">Téléchargements</string>
+    <string name="web_offline">Le serveur ne répond pas. Vos téléchargements restent disponibles hors ligne.</string>
+    <string name="web_retry">Réessayer</string>
     <string name="downloads_channel">Téléchargements</string>
     <string name="download">Télécharger</string>
     <string name="no_downloads">Aucun téléchargement</string>

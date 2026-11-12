@@ -43,11 +43,18 @@ describe('user progress',()=>{
     vi.stubGlobal('window',{dispatchEvent:vi.fn()});
     preloadProgress('work');await writeProgress({workId:'work',position:1,duration:12,watched:false,revision:0});await readProgress('work');expect(fetch).toHaveBeenCalledTimes(3);
   });
-  it('does not overwrite a newer session revision after a conflict',async()=>{
-    login();const error=vi.fn();const fetch=vi.fn().mockResolvedValueOnce(Response.json({workId:'work',position:4,duration:12,watched:false,revision:7})).mockResolvedValue(new Response(null,{status:409}));vi.stubGlobal('fetch',fetch);
+  it('rereads the revision after a conflict and keeps saving without a notice',async()=>{
+    login();vi.stubGlobal('window',{dispatchEvent:vi.fn()});const error=vi.fn();
+    const fetch=vi.fn().mockResolvedValueOnce(Response.json({workId:'work',position:4,duration:12,watched:false,revision:7}))
+      .mockResolvedValueOnce(new Response(null,{status:409}))
+      .mockResolvedValueOnce(Response.json({workId:'work',position:5,duration:12,watched:false,revision:9}))
+      .mockImplementation(async()=>Response.json({workId:'work',position:4,duration:12,watched:false,revision:10}));
+    vi.stubGlobal('fetch',fetch);
     const tracker=new ProgressTracker('work',error);expect(await tracker.load()).toBe(4);tracker.save(state,true);
-    await vi.waitFor(()=>expect(error).toHaveBeenCalledOnce());tracker.save(state,true);expect(fetch).toHaveBeenCalledTimes(2);
+    await vi.waitFor(()=>expect(fetch).toHaveBeenCalledTimes(4));
     expect(JSON.parse(fetch.mock.calls[1][1].body).expectedRevision).toBe(7);
+    expect(JSON.parse(fetch.mock.calls[3][1].body).expectedRevision).toBe(9);
+    expect(error).not.toHaveBeenCalled();
   });
   it('in a watch party, rereads the revision after a conflict and keeps saving',async()=>{
     login();vi.stubGlobal('window',{dispatchEvent:vi.fn()});const error=vi.fn();

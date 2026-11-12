@@ -773,6 +773,8 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   select_version: 'Select version {value}',
   resume_the_film: 'Resume the film',
   play_the_film: 'Play the film',
+  native_download: 'Download',
+  native_downloads: 'Downloads',
   replace_an_image: 'Replace an image',
   add_an_image: 'Add an image',
   unpin_this_image: 'Unpin this image',

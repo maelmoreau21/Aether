@@ -121,8 +121,8 @@ export class ProgressTracker {
   private transientFailures = 0;
   static readonly TRANSIENT_FAILURES_BEFORE_NOTICE = 3;
   /**
-   * `shared`: playback is driven by a watch party. Several windows of the same account then write the
-   * same work's progress at the same time; the last position wins instead of stopping the tracker.
+   * `shared`: playback is driven by a watch party. As everywhere, when another window of the same
+   * account wrote the same work's progress meanwhile, the last position wins.
    */
   constructor(private work: string, private onError: (message: string) => void, creditsStart?: number, private shared = false) {
     this.creditsStart = creditsStart;
@@ -155,10 +155,13 @@ export class ProgressTracker {
         try {
           progress = await writeProgress({ workId: this.work, position, duration, watched, revision: this.revision }, force);
         } catch (error) {
-          if (!this.shared || !(error instanceof ProgressWriteError) || !error.conflict) throw error;
+          // Another window or device of this account saved meanwhile: the position being watched
+          // here is the newest, so take the stored revision and write again instead of stopping.
+          if (!(error instanceof ProgressWriteError) || !error.conflict) throw error;
           const latest = await fetchProgress(this.work).catch(() => { throw new ProgressWriteError(tr('progress_save_delayed'), true); });
           if (this.failed || this.generation !== getSessionGeneration()) return;
-          progress = await writeProgress({ workId: this.work, position, duration, watched: watched || latest.watched, revision: latest.revision }, force);
+          progress = await writeProgress({ workId: this.work, position, duration, watched: watched || latest.watched, revision: latest.revision }, force)
+            .catch(retry => { throw retry instanceof ProgressWriteError && retry.conflict ? new ProgressWriteError(tr('progress_save_delayed'), true) : retry; });
         }
         this.revision = progress.revision; this.watched = progress.watched;
         this.transientFailures = 0;

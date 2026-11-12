@@ -89,4 +89,6 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     // Single sign-on in the phone's own browser (a tab over the application).
     implementation("androidx.browser:browser:1.8.0")
+    // The web interface: bridge scripts and messages limited to the server's own pages.
+    implementation("androidx.webkit:webkit:1.12.1")
 }

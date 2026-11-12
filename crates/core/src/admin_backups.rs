@@ -149,6 +149,7 @@ async fn build_state(
         "MEDIA_BACKUP_KEY",
         "MEDIA_BACKUP_KEY_FILE",
         "MEDIA_BACKUP_ALLOW_UNENCRYPTED",
+        "MEDIA_BACKUP_STRICT_PERMISSIONS",
     ] {
         configuration.remove(name);
     }
@@ -286,12 +287,22 @@ fn safe_directory(directory: &DiskPath, media_root: &DiskPath) -> Result<(), Sta
     if let Ok(metadata) = std::fs::symlink_metadata(directory) {
         use std::os::unix::fs::PermissionsExt;
         if metadata.permissions().mode() & 0o077 != 0 {
-            eprintln!(
-                "admin_backups: backup directory {:?} must have mode 0700 (current {:o})",
-                directory,
-                metadata.permissions().mode() & 0o777
-            );
-            return Err(StatusCode::FORBIDDEN);
+            let strict = std::env::var("MEDIA_BACKUP_STRICT_PERMISSIONS")
+                .is_ok_and(|v| v == "true" || v == "1");
+            if strict {
+                eprintln!(
+                    "admin_backups: backup directory {:?} must have mode 0700 (current {:o})",
+                    directory,
+                    metadata.permissions().mode() & 0o777
+                );
+                return Err(StatusCode::FORBIDDEN);
+            } else {
+                eprintln!(
+                    "admin_backups: warning: backup directory {:?} has mode {:o} (mode 0700 recommended)",
+                    directory,
+                    metadata.permissions().mode() & 0o777
+                );
+            }
         }
     }
     for ancestor in directory.ancestors().filter(|p| !p.as_os_str().is_empty()) {
@@ -948,7 +959,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn directory_policy_reports_non_private_mount_without_changing_permissions() {
+    fn directory_policy_allows_permissive_mount_and_respects_strict_mode() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
         let backups = root.path().join("backups");
@@ -956,11 +967,20 @@ mod tests {
         std::fs::create_dir(&backups).unwrap();
         std::fs::create_dir(&media).unwrap();
         std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(safe_directory(&backups, &media), Err(StatusCode::FORBIDDEN));
+
+        // Permissive mounts (e.g. 0755/0777 on NAS) are accepted by default with a warning,
+        // without altering existing directory permissions.
+        assert!(safe_directory(&backups, &media).is_ok());
         assert_eq!(
             std::fs::metadata(&backups).unwrap().permissions().mode() & 0o777,
             0o755
         );
+
+        // Explicit strict mode enforces 0700.
+        unsafe { std::env::set_var("MEDIA_BACKUP_STRICT_PERMISSIONS", "true") };
+        assert_eq!(safe_directory(&backups, &media), Err(StatusCode::FORBIDDEN));
+        unsafe { std::env::remove_var("MEDIA_BACKUP_STRICT_PERMISSIONS") };
+
         std::fs::set_permissions(&backups, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(safe_directory(&backups, &media).is_ok());
     }

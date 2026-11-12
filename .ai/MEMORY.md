@@ -19,6 +19,18 @@ Les futures entrées restent courtes : périmètre, décision, vérifications r�
 exécutées et limites ; les détails propres à un domaine vont dans son document.
 Archiver périodiquement les entrées anciennes sans les modifier ni perdre leur contexte.
 
+## 12 novembre 2026 — Assouplissement du contrôle de permissions sur le dossier de sauvegarde
+
+- **Tolérance des montages permissifs pour les sauvegardes** (`crates/core/src/admin_backups.rs`, `docs/ADMIN_BACKUPS.md`) :
+  - Sur les déploiements NAS/Docker où le volume de sauvegarde présente des permissions ouvertes (ex. `0755` ou `0777`) mais où le processus dispose des droits réels de lecture, d'écriture et de suppression, Core n'échoue plus avec `403 Forbidden` (`safe_directory`).
+  - Un avertissement est consigné dans les logs (`admin_backups: warning: backup directory ... has mode ... (mode 0700 recommended)`), sans modification forcée des permissions hôtes.
+  - Le contrôle strict (rejet en `403 Forbidden` en cas de mode non-0700) reste activable explicitement via `MEDIA_BACKUP_STRICT_PERMISSIONS=true`.
+- **Vérifications** :
+  - `cargo fmt --check` : 0 différence.
+  - `cargo test -p aether-core --lib admin_backups` : 4/4 tests passés.
+  - `cargo test -p aether-core --test admin_backups` : 2/2 tests passés.
+  - `cargo clippy -p aether-core --lib -- -D warnings` : 0 avertissement.
+
 ## 10 novembre 2026 — Amélioration Demandes inspirée de Seerr (découverte catalogue, droits & quotas)
 
 - **Moteur de politiques de demandes** (`crates/core/src/acquisition/policy.rs`, `schema/postgres.sql`, `docs/REQUESTS_AND_REPORTS.md`) :

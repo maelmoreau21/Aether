@@ -489,7 +489,17 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         val client = client ?: return
         viewModelScope.launch {
             try {
-                _works.value = client.catalog(kind, search, 0u, PAGE).items
+                // The server answers at most PAGE works at a time: ask for the next pages
+                // until the list is complete (bounded), showing the first page at once.
+                var offset = 0u
+                val all = mutableListOf<Work>()
+                while (offset < MAX_WORKS) {
+                    val page = client.catalog(kind, search, offset, PAGE)
+                    all += page.items
+                    _works.value = all.toList()
+                    if (!page.hasMore || page.items.isEmpty()) break
+                    offset += PAGE
+                }
             } catch (e: ClientException.Unauthorized) {
                 store.save(null)
                 showSignIn()
@@ -789,6 +799,8 @@ class AetherViewModel(app: Application) : AndroidViewModel(app) {
         const val POLL_MILLIS = 3_000L
         /** Accounts kept beside the active one. */
         const val MAX_PARKED = 5
-        const val PAGE = 200u
+        /** The Core refuses more than 100 works per catalog request. */
+        const val PAGE = 100u
+        const val MAX_WORKS = 2000u
     }
 }

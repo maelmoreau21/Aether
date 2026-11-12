@@ -414,6 +414,10 @@ impl App {
     fn set_fullscreen(&self, on: bool) {
         self.window
             .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
+        // The window buttons of the frameless Windows window stay out of full screen.
+        let _ = self.webview.evaluate_script(&format!(
+            "document.documentElement.toggleAttribute('data-native-fullscreen', {on});"
+        ));
     }
 
     /// Asks, off the interface thread, whether `server` is an Aether server.

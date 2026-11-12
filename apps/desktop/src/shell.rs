@@ -73,15 +73,16 @@ pub const FRAME_SCRIPT: &str = r#"(() => {
   };
   const install = () => {
     if (document.getElementById('aether-frame')) return;
-    const style = document.createElement('style');
-    style.textContent = '#aether-frame{position:fixed;top:0;right:0;z-index:2147483647;display:flex;height:32px;-webkit-user-select:none;user-select:none}'
+    // A constructed style sheet: the Core's content security policy refuses <style> elements.
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync('#aether-frame{position:fixed;top:0;right:0;z-index:2147483647;display:flex;height:32px;-webkit-user-select:none;user-select:none}'
       + '#aether-frame button{all:unset;box-sizing:border-box;width:46px;height:32px;display:grid;place-items:center;color:#eef1f8;opacity:.8;cursor:default}'
       + '#aether-frame button:hover{background:rgba(255,255,255,.12);opacity:1}'
       + '#aether-frame button.close:hover{background:#c42b1c}'
       + '#aether-frame svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:1}'
-      + '#aether-frame[hidden]{display:none}'
-      + '.site-header .header-inner{padding-right:calc(var(--gutter,24px) + 140px)!important}';
-    document.head.appendChild(style);
+      + '#aether-frame[hidden],html[data-native-fullscreen] #aether-frame{display:none}'
+      + '.site-header .header-inner{padding-right:calc(var(--gutter,24px) + 140px)!important}');
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     const bar = document.createElement('div');
     bar.id = 'aether-frame';
     for (const [action, icon] of Object.entries(icons)) {
@@ -96,10 +97,7 @@ pub const FRAME_SCRIPT: &str = r#"(() => {
     }
     document.body.appendChild(bar);
     // Full screen (the player's or F11) has no window buttons.
-    const sync = () => { bar.hidden = Boolean(document.fullscreenElement) || (innerWidth >= screen.width && innerHeight >= screen.height); };
-    addEventListener('resize', sync);
-    document.addEventListener('fullscreenchange', sync);
-    sync();
+    document.addEventListener('fullscreenchange', () => { bar.hidden = Boolean(document.fullscreenElement); });
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
   else install();

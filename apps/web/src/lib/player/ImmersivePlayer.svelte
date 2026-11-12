@@ -910,10 +910,10 @@
       <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
       {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
-      {#if $watchTogetherEnabled && active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
+      {#if $watchTogetherEnabled && active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} aria-label={$t('watch_together')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /></button>{/if}
       {#if active?.workId && !active.synthetic && !syncClient && sendTargets.length}
         <div class="send-to">
-          <button type="button" class="watch-together" aria-expanded={sendMenu} aria-haspopup="menu" title={$t('send_to_device')} onclick={() => { menu = null; sendMenu = !sendMenu; }}><Icon name="tv" size={20} /><span>{$t('send_to')}</span></button>
+          <button type="button" class="watch-together" aria-expanded={sendMenu} aria-haspopup="menu" title={$t('send_to_device')} aria-label={$t('send_to')} onclick={() => { menu = null; sendMenu = !sendMenu; }}><Icon name="tv" size={20} /></button>
           {#if sendMenu}
             <div class="send-menu" role="menu" aria-label={$t('send_to_device')}>
               {#each sendTargets as device (device.deviceId)}<button type="button" role="menuitem" onclick={() => sendTo(device)}>{device.name}</button>{/each}
@@ -1190,16 +1190,12 @@
 
   .next-episode label { font-size: 13px; font-weight: 700; }
 
-  .watch-together { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 16px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  /* Icon-only actions (watch together, send to): the label is the tooltip and aria-label. */
+  .watch-together { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: rgb(255 255 255 / 0.14); color: #f4f6fb; cursor: pointer; }
 
   .watch-together:hover { background: rgb(255 255 255 / 0.22); }
 
   .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
-
-  @media (max-width: 640px) {
-  .watch-together span { display: none; }
-  .watch-together { padding: 0 10px; }
-}
 
   .send-to { position: relative; }
 

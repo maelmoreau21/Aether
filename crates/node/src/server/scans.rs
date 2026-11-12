@@ -272,6 +272,7 @@ pub(super) async fn run_node_task(
             size,
             &mtime,
             req.trickplay.as_ref(),
+            req.fingerprint.as_ref(),
             Some(&state.trickplay),
         )
         .await

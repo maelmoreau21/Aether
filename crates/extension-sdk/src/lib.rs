@@ -7,8 +7,15 @@ use std::collections::BTreeMap;
 pub mod storage;
 
 pub const API_VERSION: u32 = 1;
-pub const MAX_MODULE: usize = 262_144;
+/// Largest Wasm module (extension ABI 1.1). A package built for ABI 1.0 stays within
+/// [`MAX_MODULE_V1_0`], the limit of hosts that predate 1.1.
+pub const MAX_MODULE: usize = 1_048_576;
+pub const MAX_MODULE_V1_0: usize = 262_144;
 pub const MAX_JSON: usize = 65_536;
+/// Largest request a guest built with this SDK accepts (extension ABI 1.1). Responses, host
+/// calls and storage stay within [`MAX_JSON`]; hosts send more than [`MAX_JSON`] only to a
+/// package whose `targetAbi` is at least 1.1.
+pub const MAX_INPUT_JSON: usize = 262_144;
 
 /// Generic ABI envelope. Host adapters authorize operations before invocation.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -697,7 +704,7 @@ macro_rules! extension {
         #[cfg(target_arch = "wasm32")]
         #[unsafe(no_mangle)]
         pub extern "C" fn media_alloc(len: u32) -> u32 {
-            if len as usize > $crate::MAX_JSON {
+            if len as usize > $crate::MAX_INPUT_JSON {
                 return 0;
             }
             let buffer = vec![0u8; len as usize].into_boxed_slice();
@@ -706,7 +713,7 @@ macro_rules! extension {
         #[cfg(target_arch = "wasm32")]
         #[unsafe(no_mangle)]
         pub unsafe extern "C" fn media_run(ptr: u32, len: u32) -> u64 {
-            if len as usize > $crate::MAX_JSON {
+            if len as usize > $crate::MAX_INPUT_JSON {
                 return 0;
             }
             // The ABI host supplies the allocation returned by media_alloc.

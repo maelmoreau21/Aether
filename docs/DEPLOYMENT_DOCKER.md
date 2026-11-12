@@ -151,6 +151,7 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 |---|---|---|
 | `MEDIA_PORT` | `3000` | Port d'écoute interne du serveur HTTP |
 | `MEDIA_BIND_ADDR` | `0.0.0.0` | Adresse IP d'écoute à l'intérieur du conteneur |
+| `MEDIA_TRUSTED_PROXIES` | boucle locale + plages privées (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`, `fe80::/10`) | Proxys dont `X-Forwarded-For`/`X-Real-IP` sont crus pour les limites de connexion (adresses ou CIDR séparés par des virgules, `none` pour n'en croire aucun). Un pair hors liste est identifié par son adresse TCP ; la chaîne est lue depuis la droite. Si le port du Core est exposé directement via un proxy Docker qui masque l'adresse source, indiquez seulement l'adresse de votre reverse proxy |
 | `MEDIA_PUBLIC_URL` | `http://127.0.0.1:3000` | Origine publique canonique (`https://...` pour LAN/Internet, ou `http://` uniquement sur loopback `127.0.0.1`/`localhost`/`[::1]`) |
 | `MEDIA_DB_PATH` | `/data/core.sqlite3` | Chemin du fichier SQLite dans le volume persistant |
 | `MEDIA_SQLITE_BUSY_TIMEOUT_SECS` | `15` | Délai d'attente max sur verrou d'écriture SQLite avant erreur BUSY (45s+ recommandé sur 10k+ médias) |

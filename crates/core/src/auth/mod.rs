@@ -9,6 +9,7 @@
 //! - `http`: REST router and handlers.
 
 mod accounts;
+mod client_ip;
 mod config;
 mod grants;
 mod http;
@@ -24,6 +25,7 @@ mod mfa_tests;
 #[cfg(test)]
 mod tests;
 
+pub use client_ip::resolve_client_ip;
 pub use config::{is_http_bootstrap_disabled, is_local_login_enabled};
 pub(crate) use http::issue_session;
 pub use http::{authenticate, router};

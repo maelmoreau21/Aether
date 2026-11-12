@@ -204,6 +204,19 @@ pub struct TrickplayTaskOptions {
     pub columns: u32,
     #[serde(default = "default_trickplay_grid")]
     pub rows: u32,
+    /// Server-wide preview cache limit chosen by the administrator. Omitted when unknown
+    /// so a Node of the previous release, which denies unknown fields, keeps working.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cache_mb: Option<u32>,
+}
+
+/// Start window of an audio fingerprint, chosen by the administrator: `head_percent` of the
+/// file, at least 5 minutes, at most `head_max_seconds` (which wins when shorter).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FingerprintTaskOptions {
+    pub head_percent: u8,
+    pub head_max_seconds: u32,
 }
 
 fn default_trickplay_grid() -> u32 {
@@ -222,6 +235,8 @@ pub struct NodeTaskRequest {
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trickplay: Option<TrickplayTaskOptions>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<FingerprintTaskOptions>,
     pub core_base_url: String,
 }
 

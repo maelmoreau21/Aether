@@ -4,6 +4,7 @@
   import DeviceSessions from './DeviceSessions.svelte';
   import QuickConnectApprove from './QuickConnectApprove.svelte';
   import TwoFactorSettings from './TwoFactorSettings.svelte';
+  import AccountPinSettings from './AccountPinSettings.svelte';
   import { t } from '../i18n';
   let { mode = 'security' }: { mode?: 'security' | 'devices' } = $props();
   let canCreate=$state(false),login=$state('');
@@ -44,6 +45,7 @@
   {#if !$session?.user.sso}<p>{$t('all_your_sessions_will_be_signed')}</p>{/if}<button disabled={busy}>{$session?.user.sso ? $t('create_my_local_credentials') : $t('change_the_password')}</button>
 </form>{/if}
 {#if !$session?.user.sso}<TwoFactorSettings />{/if}
+<AccountPinSettings />
 {:else}<QuickConnectApprove /><DeviceSessions />
 {/if}
 {#if error}<p role="alert">{error}</p>{/if}</section>

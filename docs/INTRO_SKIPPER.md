@@ -4,6 +4,75 @@ IntroSkipper est le composant de détection automatique des introductions et gé
 
 ---
 
+## Validation sur une vraie bibliothèque — 12 novembre 2026 (plugin 0.3.1)
+
+Corpus : une série animée de 13 épisodes (MP4 1080p, ~23 min, aucun chapitre) et un film AV1 de
+1 h 39. Empreintes extraites avec les options exactes du Node (FFmpeg 9 de l'image), requêtes
+construites comme le Core (cible + 2 voisins, budget de 64 Kio), exécution du `.wasm` optimisé
+dans le runtime du Core. Référence : portage de la comparaison Chromaprint d'intro-skipper 12.0
+(index inversé, ≤ 6 bits d'écart, sauts ≤ 3,5 s, raccord des passages). Bornes contrôlées à
+l'image.
+
+| Mesure | Résultat |
+|---|---|
+| Intros (10 épisodes qui en ont une, ~30 s) | 10/10 trouvées, écart à la référence ≤ 3 s ; sur E04 Aether est juste et la référence inclut 3 s de noir |
+| E01–E03 | Pas d'intro trouvée, comme la référence : seulement un carton-titre de 14 s, sous le minimum de 15 s |
+| Génériques de fin (13 épisodes, ~65 s) | Avant correction : 5/13 commençaient ~30 s trop tard. Après : 13/13 à moins de 1 s de la référence |
+| Film (générique sur noir, 4 min 08) | 1:35:26,7 → fin, confiance 0,84, mesure en 94 s |
+| Coût Wasm | 111 à 136 M de fuel sur 200 M ; module optimisé 258 384 o sur 262 144 |
+
+Corrections :
+- **Plugin 0.3.1** : les passages similaires d'une même diagonale sont recollés comme dans
+  intro-skipper (deux passages d'au moins 8 s, trou au plus égal à la moitié du plus court). Un
+  générique coupé par un logo n'est plus réduit à sa moitié la plus longue.
+- **FFmpeg de l'image** : `blackframe`, `signalstats`, `metadata` et l'encodeur `wrapped_avframe`
+  manquaient ; la mesure du générique des films échouait toujours (`credits_scan_decoder_failed`).
+  Le script de construction échoue désormais s'ils manquent. Les tests du Node sautaient sans
+  rien vérifier quand ces filtres sont absents.
+
+### Fenêtres d'intro-skipper (extension ABI 1.1, plugin 0.4.0)
+
+Le Node lit désormais un quart du fichier au début, entre 5 et 10 min (`head_seconds`), et les
+7 min 30 de fin (3635 mots) ; le résultat porte `"window": 2`. Une extraction plus ancienne reste
+utilisée telle quelle ; la ré-analyse manuelle (`reextract_tailless`) la refait avec ces fenêtres.
+
+| | Avant | Après |
+|---|---|---|
+| Début analysé | 300 s | 25 % du fichier, de 300 à 600 s |
+| Fin analysée | 186 s | 450 s |
+| Requête vers le plugin | 64 Kio (2 épisodes dès ~1,9 Kio de réglages) | 256 Kio (`MAX_INPUT_JSON`), 3 épisodes ≈ 104 Kio |
+| Générique maximal (réglage) | 300 s | 450 s |
+| Intro après un cold open de 3 min 20 (simulé, 44 min) | 2/10 | 10/10, à ~3 s près |
+| Fuel par analyse | 111–136 M (anciennes fenêtres) | 113–133 M |
+
+- **ABI** : le SDK accepte en entrée jusqu'à `MAX_INPUT_JSON` (256 Kio) ; les sorties, appels
+  hôtes et stockages restent à `MAX_JSON` (64 Kio). Le Core (ABI hôte 1.1) n'envoie plus de
+  64 Kio qu'à un paquet dont `targetAbi` vaut au moins 1.1 ; à un paquet 1.0 il envoie les
+  anciennes fenêtres (2500 mots de tête, les 1500 derniers de fin, `tailStart` décalé). Le
+  catalogue cache un paquet 1.1 à un Core 1.0.
+- **Coût** : avec des fenêtres plus longues, l'index par octets du matcher faisait se rencontrer
+  chaque image avec une grande part de l'autre épisode (> 200 M de fuel). Il indexe maintenant des
+  moitiés de 16 bits ; la vérification (≤ 8 bits d'écart) est inchangée, les résultats aussi.
+- **Worker** : l'invocation (module en base64 + requête) était lue avec un plafond fixe de
+  400 000 octets, que dépassait déjà un module de 258 Ko avec une requête de 63 Ko. Le plafond
+  suit maintenant `MAX_MODULE` et `MAX_INPUT_JSON`.
+- **Publication** : le paquet 0.4.0 doit être construit avec un SDK qui contient
+  `MAX_INPUT_JSON` (révision git d'Aether à mettre à jour dans `Aether-Plugins/Cargo.toml`) ;
+  construit avec l'ancien SDK, il refuserait les requêtes de plus de 64 Kio.
+
+- **Réglages** (Administration → Paramètres, avec la confiance minimale) : « Début analysé »
+  (1 à 50 %, 25 par défaut) et « Durée maximale analysée au début » (1 à 10 min, 10 par défaut).
+  Fenêtre = la part demandée, au moins 5 min, au plus la durée maximale (qui l'emporte si elle est
+  plus courte). Le Core les joint à chaque tâche d'empreinte (`fingerprint` de `NodeTaskRequest`) ;
+  le cache du Node est refait quand ils changent. Les épisodes déjà analysés gardent leur
+  empreinte jusqu'à une nouvelle analyse de la saison.
+- **Taille des modules** : `MAX_MODULE` passe à 1 Mio en ABI 1.1 (`MAX_MODULE_V1_0` = 256 Kio pour
+  un paquet 1.0, vérifié par le Core et par `catalogue.cjs`). L'installation manuelle accepte un
+  corps à la mesure du module.
+
+Limite restante : non vérifié ici, le parcours complet Core + Node + lecteur (tâches,
+persistance, boutons).
+
 ## 0. Refonte du 8 novembre 2026 (plugin 0.2.0)
 
 Ce qui empêchait la détection d'aboutir, et ce qui a changé :
@@ -104,14 +173,14 @@ de détection sur une bibliothèque réelle :
         ▼
 [Détection chapitres] ──(intro OU crédits manquants)──► [Tâche Media Node: Audio Fingerprint]
         │                                                        │
-        │                                             (Head 300s = 2423 empreintes, plafond 2500)
-        │                                             (Tail 186s jusqu'à la fin du fichier, plafond 1500)
+        │                                             (Head 25 % du fichier, 300 à 600 s, plafond 4850)
+        │                                             (Tail 450 s jusqu'à la fin du fichier, plafond 3635)
         │                                             (Cache local disque invalidé sur mtime/size)
         │                                                        │
         ▼                                                        ▼
 [Outbox Automation Core] ◄─────────────────────────── [Empreintes compactes Base64]
         │
-        ├─ Lot de 3 épisodes au plus (64 Kio de requête, 200 M de carburant Wasm)
+        ├─ Lot de 3 épisodes au plus (256 Kio de requête en ABI 1.1, 200 M de carburant Wasm)
         ├─ Exécution isolée Wasm Wasmi (`intro.detect`)
         │
         ▼

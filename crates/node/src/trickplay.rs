@@ -14,7 +14,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, LazyLock, Mutex,
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicU32, AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime},
 };
@@ -111,7 +111,10 @@ enum JobState {
 
 pub struct TrickplayManager {
     cache_root: PathBuf,
-    max_cache_bytes: u64,
+    /// Shared by every clone so an administrator change reaches running jobs.
+    max_cache_bytes: Arc<AtomicU64>,
+    /// `MEDIA_TRICKPLAY_MAX_CACHE_MB` is a deployment override: it wins over the server setting.
+    cache_limit_from_env: bool,
     ffmpeg_binary: PathBuf,
     enabled: bool,
     active_streams: Arc<Mutex<Option<Arc<AtomicU32>>>>,
@@ -183,7 +186,8 @@ impl TrickplayManager {
     ) -> Self {
         Self {
             cache_root,
-            max_cache_bytes,
+            max_cache_bytes: Arc::new(AtomicU64::new(max_cache_bytes)),
+            cache_limit_from_env: false,
             ffmpeg_binary,
             enabled,
             active_streams: Arc::new(Mutex::new(active_streams)),
@@ -197,11 +201,11 @@ impl TrickplayManager {
         // Relative to the deployment's data directory, never the (possibly read-only) CWD.
         let cache_root = crate::data_subdir("MEDIA_TRICKPLAY_CACHE_DIR", "trickplay");
 
-        let max_cache_bytes = std::env::var("MEDIA_TRICKPLAY_MAX_CACHE_MB")
+        let env_limit = std::env::var("MEDIA_TRICKPLAY_MAX_CACHE_MB")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
-            .map(|mb| mb * 1024 * 1024)
-            .unwrap_or(DEFAULT_MAX_CACHE_BYTES);
+            .map(|mb| mb.saturating_mul(1024 * 1024));
+        let max_cache_bytes = env_limit.unwrap_or(DEFAULT_MAX_CACHE_BYTES);
 
         let ffmpeg_binary = std::env::var_os("MEDIA_TRICKPLAY_FFMPEG")
             .map(PathBuf::from)
@@ -212,7 +216,23 @@ impl TrickplayManager {
             Ok("0" | "false" | "off")
         );
 
-        Self::new(cache_root, max_cache_bytes, ffmpeg_binary, enabled, None)
+        let mut manager = Self::new(cache_root, max_cache_bytes, ffmpeg_binary, enabled, None);
+        manager.cache_limit_from_env = env_limit.is_some();
+        manager
+    }
+
+    /// Applies the administrator's cache limit (server setting `trickplayMaxCacheMb`),
+    /// unless the deployment pinned one through `MEDIA_TRICKPLAY_MAX_CACHE_MB`.
+    pub fn set_max_cache_mb(&self, mb: u32) {
+        if self.cache_limit_from_env || mb == 0 {
+            return;
+        }
+        self.max_cache_bytes
+            .store(u64::from(mb) * 1024 * 1024, Ordering::Relaxed);
+    }
+
+    pub fn max_cache_bytes(&self) -> u64 {
+        self.max_cache_bytes.load(Ordering::Relaxed)
     }
 
     pub fn with_active_streams(self, counter: Arc<AtomicU32>) -> Self {
@@ -553,7 +573,8 @@ impl TrickplayManager {
     fn clone_internal(&self) -> Self {
         Self {
             cache_root: self.cache_root.clone(),
-            max_cache_bytes: self.max_cache_bytes,
+            max_cache_bytes: self.max_cache_bytes.clone(),
+            cache_limit_from_env: self.cache_limit_from_env,
             ffmpeg_binary: self.ffmpeg_binary.clone(),
             enabled: self.enabled,
             active_streams: self.active_streams.clone(),
@@ -1024,13 +1045,14 @@ impl TrickplayManager {
             }
         }
 
-        if total_size <= self.max_cache_bytes {
+        let max_cache_bytes = self.max_cache_bytes();
+        if total_size <= max_cache_bytes {
             return;
         }
 
         // Sort by mtime ascending (oldest first)
         entries.sort_by_key(|(_, mtime, _)| *mtime);
-        let target_size = (self.max_cache_bytes * 8) / 10; // Evict to 80% watermark
+        let target_size = (max_cache_bytes * 8) / 10; // Evict to 80% watermark
 
         for (path, _, size) in entries {
             if total_size <= target_size {

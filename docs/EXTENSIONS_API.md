@@ -179,7 +179,7 @@ de l'utilisateur système, raison de son exclusion pour ce parcours sans I/O.
 Le choix ne prouve pas encore l'adéquation de Wasm/WASI pour FFmpeg ou les
 empreintes audio; ces opérations Node demandent leur propre contrat contrôlé.
 
-Limites fixes du premier runtime : module 256 Kio, entrée/sortie 64 Kio,
+Limites fixes du runtime : module 256 Kio (1 Mio pour un paquet `targetAbi` 1.1, `MAX_MODULE`), entrée 64 Kio (256 Kio en 1.1, `MAX_INPUT_JSON`), sortie 64 Kio,
 une mémoire linéaire de 16 Mio, une table de 4096 éléments, 200 millions d'unités
 de fuel et délai maximal de 65 secondes. L'admission commune limite le Core à
 quatre opérations simultanées et une par extension. Les tâches automatiques

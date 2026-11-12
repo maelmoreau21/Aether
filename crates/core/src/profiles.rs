@@ -340,6 +340,32 @@ async fn switch(
     Ok(response)
 }
 
+/// Whether switching to this account on a shared device asks for its PIN.
+pub(crate) async fn has_pin(auth: &AuthState, id: &str) -> bool {
+    matches!(pin_hash(auth, id).await, Ok(Some(_)))
+}
+
+/// Checks the short PIN guarding a switch to `id` among the accounts of one device.
+/// An account without a PIN switches as before; the budget is the per-account one
+/// shared by every device.
+pub(crate) async fn check_switch_pin(
+    auth: &AuthState,
+    id: &str,
+    pin: Option<String>,
+) -> Result<(), Error> {
+    let Some(encoded) = pin_hash(auth, id).await? else {
+        return Ok(());
+    };
+    let Some(given) = pin.filter(|pin| !pin.is_empty()) else {
+        return Err(failure(StatusCode::FORBIDDEN, "pin_required"));
+    };
+    throttle(auth, id).await?;
+    if !valid_pin(&given) || !verify_pin(auth, encoded, given).await? {
+        return Err(failure(StatusCode::FORBIDDEN, "invalid_pin"));
+    }
+    Ok(())
+}
+
 async fn pin_hash(auth: &AuthState, id: &str) -> Result<Option<String>, Error> {
     let encoded: Option<Option<String>> =
         query_scalar("SELECT pin_hash FROM account_profiles WHERE user_id=?")
@@ -372,7 +398,7 @@ async fn throttle(auth: &AuthState, id: &str) -> Result<(), Error> {
         .ok_or_else(|| failure(StatusCode::TOO_MANY_REQUESTS, "try_later"))
 }
 
-async fn hash_pin(auth: &AuthState, pin: String) -> Result<String, Error> {
+pub(crate) async fn hash_pin(auth: &AuthState, pin: String) -> Result<String, Error> {
     let pin = Zeroizing::new(pin);
     let permit = auth
         .workers

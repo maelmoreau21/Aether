@@ -59,7 +59,16 @@ const MAX_PLUGINS: usize = 200;
 const MAX_VERSIONS: usize = 1000;
 
 /// Extension ABI implemented by this Core. A catalogue `targetAbi` is a minimum.
-const HOST_ABI: [u64; 4] = [1, 0, 0, 0];
+/// 1.1: requests up to `MAX_INPUT_JSON` (wider audio windows for marker detection).
+const HOST_ABI: [u64; 4] = [1, 1, 0, 0];
+
+/// Whether a package declares at least extension ABI 1.1, and so accepts requests larger than
+/// `MAX_JSON`. A package without `targetAbi`, or with 1.0, gets requests of the 1.0 size.
+pub(crate) fn accepts_large_input(target_abi: Option<&str>) -> bool {
+    target_abi
+        .and_then(manifest::abi)
+        .is_some_and(|abi| abi >= [1, 1, 0, 0])
+}
 
 static DOWNLOADS: Semaphore = Semaphore::const_new(2);
 

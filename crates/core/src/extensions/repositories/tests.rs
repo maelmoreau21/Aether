@@ -756,7 +756,12 @@ fn redirects_and_abi_follow_the_published_policy() {
         assert_eq!(github_release_asset(other), None, "{other}");
     }
     assert!(abi_supported("1") && abi_supported("1.0") && abi_supported("1.0.0.0"));
-    assert!(!abi_supported("1.1") && !abi_supported("2.0") && !abi_supported("0.9"));
+    assert!(abi_supported("1.1") && abi_supported("1.1.0"));
+    assert!(!abi_supported("1.2") && !abi_supported("2.0") && !abi_supported("0.9"));
+    // Only a package built for 1.1 receives requests larger than the 1.0 size.
+    assert!(super::accepts_large_input(Some("1.1")) && super::accepts_large_input(Some("1.1.0")));
+    assert!(!super::accepts_large_input(Some("1.0")) && !super::accepts_large_input(None));
+    assert!(!super::accepts_large_input(Some("x")));
     assert!(!abi_supported("1.0.0.0.0") && !abi_supported("x"));
 }
 
@@ -801,7 +806,7 @@ fn versioned_catalogue_lists_every_version_and_keeps_limits() {
     );
     assert!(parse_manifest(&serde_json::to_vec(&json!([many])).unwrap()).is_err());
     let mut newer_abi = items[0].clone();
-    newer_abi.target_abi = Some("1.1".into());
+    newer_abi.target_abi = Some("1.2".into());
     assert!(!item_compatible(&newer_abi));
 }
 

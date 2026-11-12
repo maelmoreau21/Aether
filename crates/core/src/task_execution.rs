@@ -72,6 +72,17 @@ pub(crate) async fn dispatch(
     if node != job.node_id || size < 0 {
         return Err(sqlx::Error::Protocol("Task inventory mismatch".into()));
     }
+    // The start window chosen by the administrator travels with each fingerprint task.
+    let fingerprint_options = if job.category == "analyze" && job.component == "fingerprint" {
+        Some(
+            crate::server_settings::load(&auth.store)
+                .await
+                .unwrap_or_default()
+                .fingerprint_options(),
+        )
+    } else {
+        None
+    };
     let trickplay_options = if job.category == "trickplay" {
         let encoded: String =
             crate::database::query_scalar("SELECT options_json FROM libraries WHERE id=?")
@@ -112,6 +123,10 @@ pub(crate) async fn dispatch(
                 quality: options.trickplay_quality,
                 columns: u32::from(options.trickplay_columns),
                 rows: u32::from(options.trickplay_rows),
+                max_cache_mb: crate::server_settings::load(&auth.store)
+                    .await
+                    .ok()
+                    .map(|settings| settings.trickplay_max_cache_mb),
             },
         ))
     } else {
@@ -144,6 +159,7 @@ pub(crate) async fn dispatch(
                 .map_or(job.width as u32, |(width, _)| u32::from(*width)),
         ),
         trickplay: trickplay_options.map(|(_, options)| options),
+        fingerprint: fingerprint_options,
         core_base_url: std::env::var("MEDIA_CORE_INTERNAL_URL")
             .ok()
             .filter(|s| !s.is_empty())
@@ -177,7 +193,7 @@ pub(crate) async fn dispatch(
         } else {
             let outcome=async {
                 let _permit=jobs_task.slots.acquire().await.map_err(|_|"Task worker stopped".to_owned())?;
-                let future=media_node::tasks::run_task_with_trickplay_options(&job.category,&grant,request.component.as_deref(),request.width,&jobs_task.preparations,size as u64,&modified,request.trickplay.as_ref(),None);
+                let future=media_node::tasks::run_task_with_trickplay_options(&job.category,&grant,request.component.as_deref(),request.width,&jobs_task.preparations,size as u64,&modified,request.trickplay.as_ref(),request.fingerprint.as_ref(),None);
                 tokio::pin!(future);
                 let mut interval=tokio::time::interval(std::time::Duration::from_millis(100));
                 loop { tokio::select! {

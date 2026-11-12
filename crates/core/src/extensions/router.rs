@@ -108,7 +108,10 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/account/avatar/extensions/{id}",
             axum::routing::post(adapters::avatar_operation),
         )
-        .layer(DefaultBodyLimit::max(400_000))
+        // A signed package carries its module in base64, beside its manifest and key.
+        .layer(DefaultBodyLimit::max(
+            media_extension_sdk::MAX_MODULE * 4 / 3 + 262_144,
+        ))
         .layer(
             tower_http::set_header::SetResponseHeaderLayer::if_not_present(
                 header::CACHE_CONTROL,

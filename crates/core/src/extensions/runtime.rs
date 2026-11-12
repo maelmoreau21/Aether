@@ -613,12 +613,16 @@ fn execute_inner(
         .get_typed_func::<(u32, u32), u64>(&store, "media_run")
         .map_err(|_| "invalid_abi")?;
     let input = serde_json::to_vec(&invocation.input).map_err(|_| "invalid_input")?;
-    if input.len() > MAX_JSON {
+    if input.len() > media_extension_sdk::MAX_INPUT_JSON {
         return Err("input_too_large");
     }
     let ptr = alloc
         .call(&mut store, input.len() as u32)
         .map_err(|_| "execution_trapped")?;
+    // A guest built for ABI 1.0 refuses more than MAX_JSON by returning a null buffer.
+    if ptr == 0 {
+        return Err("input_too_large");
+    }
     memory
         .write(&mut store, ptr as usize, &input)
         .map_err(|_| "invalid_pointer")?;

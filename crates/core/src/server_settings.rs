@@ -46,6 +46,13 @@ pub struct Settings {
     /// Lowest confidence (percent) at which an automatic marker reaches the player.
     #[serde(default = "default_marker_min_confidence")]
     pub marker_min_confidence: u8,
+    /// Share (percent, 1 to 50) of each file's start whose audio is compared to find its
+    /// opening: intro-skipper's 25 % by default.
+    #[serde(default = "default_intro_analysis_percent")]
+    pub intro_analysis_percent: u8,
+    /// Longest start window (minutes, 1 to 10), whatever the share.
+    #[serde(default = "default_intro_analysis_max_minutes")]
+    pub intro_analysis_max_minutes: u8,
     #[serde(default = "default_min_resume_pct")]
     pub min_resume_pct: u8,
     #[serde(default = "default_max_resume_pct")]
@@ -100,6 +107,12 @@ fn default_activity_retention() -> u32 {
 }
 fn default_marker_min_confidence() -> u8 {
     80
+}
+fn default_intro_analysis_percent() -> u8 {
+    25
+}
+fn default_intro_analysis_max_minutes() -> u8 {
+    10
 }
 fn default_min_resume_pct() -> u8 {
     5
@@ -163,6 +176,8 @@ struct SettingsInput {
     chapter_images_enabled: Option<bool>,
     intro_detection_enabled: Option<bool>,
     marker_min_confidence: Option<u8>,
+    intro_analysis_percent: Option<u8>,
+    intro_analysis_max_minutes: Option<u8>,
     min_resume_pct: Option<u8>,
     max_resume_pct: Option<u8>,
     min_resume_duration_seconds: Option<u32>,
@@ -200,6 +215,8 @@ impl Default for Settings {
             chapter_images_enabled: true,
             intro_detection_enabled: true,
             marker_min_confidence: default_marker_min_confidence(),
+            intro_analysis_percent: default_intro_analysis_percent(),
+            intro_analysis_max_minutes: default_intro_analysis_max_minutes(),
             min_resume_pct: 5,
             max_resume_pct: 90,
             min_resume_duration_seconds: 0,
@@ -237,6 +254,16 @@ impl Settings {
         }
     }
 }
+impl Settings {
+    /// The start window sent with every audio fingerprint task.
+    pub fn fingerprint_options(&self) -> media_contracts::protocol::FingerprintTaskOptions {
+        media_contracts::protocol::FingerprintTaskOptions {
+            head_percent: self.intro_analysis_percent.clamp(1, 50),
+            head_max_seconds: u32::from(self.intro_analysis_max_minutes.clamp(1, 10)) * 60,
+        }
+    }
+}
+
 pub async fn load(store: &IdentityStore) -> Result<Settings, StatusCode> {
     let saved: Option<String> =
         query_scalar("SELECT settings_json FROM server_settings WHERE singleton=1")
@@ -362,6 +389,14 @@ async fn write(
             .marker_min_confidence
             .filter(|percent| (50..=99).contains(percent))
             .unwrap_or(previous.marker_min_confidence),
+        intro_analysis_percent: input
+            .intro_analysis_percent
+            .filter(|percent| (1..=50).contains(percent))
+            .unwrap_or(previous.intro_analysis_percent),
+        intro_analysis_max_minutes: input
+            .intro_analysis_max_minutes
+            .filter(|minutes| (1..=10).contains(minutes))
+            .unwrap_or(previous.intro_analysis_max_minutes),
         min_resume_pct: input.min_resume_pct.unwrap_or(previous.min_resume_pct),
         max_resume_pct: input.max_resume_pct.unwrap_or(previous.max_resume_pct),
         min_resume_duration_seconds: input
@@ -476,6 +511,7 @@ async fn write(
     if let Ok(mut guard) = auth.store.cors_origins.write() {
         *guard = input.cors_hosts.clone();
     }
+    media_node::trickplay::global_manager().set_max_cache_mb(input.trickplay_max_cache_mb);
     Ok(StatusCode::NO_CONTENT)
 }
 /// Persists the log level and file retention without touching the other settings.

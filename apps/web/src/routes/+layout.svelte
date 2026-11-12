@@ -19,6 +19,7 @@
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
   import { rememberPendingParty } from '../lib/syncplay/launch';
   import { installTvNavigation } from '../lib/tv/navigation';
+  import { parkAccount, shouldAskWhoIsWatching } from '../lib/auth/accounts';
 
   onMount(() => {
     initTheme();
@@ -40,14 +41,18 @@
   const isLogin = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/login'));
   const isDownloads = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/downloads'));
   const isConnect = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/connect'));
+  const isAccounts = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/accounts'));
   $effect(() => {
     const loginPage = isLogin;
     const connectPage = isConnect;
+    const accountsPage = isAccounts;
     let cancelled = false;
     verified = false; error = '';
     if (isDownloads) { verified=true; return; }
     readSession().then(async current => {
       if (cancelled) return;
+      // Signed out on a shared device: the accounts set aside are offered there.
+      if (!current && accountsPage) { verified = true; return; }
       if (!current && !loginPage) {
         if (connectPage) {
           const code = normalizeDeviceCode(window.location.hash.slice(1));
@@ -60,6 +65,13 @@
         void goto(resolve('connect/'), { replaceState: true }); return;
       }
       if (current && loginPage) { void goto(resolve('/'), { replaceState: true }); return; }
+      // Several accounts on this device and none chosen since the app opened: the active
+      // one is set aside, so coming back to it asks for its PIN like the others.
+      if (current && !accountsPage && !connectPage && shouldAskWhoIsWatching()) {
+        await parkAccount(current.csrfToken).catch(() => undefined);
+        if (!cancelled) window.location.replace(resolve('accounts/'));
+        return;
+      }
       if (current) {
         const generation = getSessionGeneration();
         const loadingPreferences = hydratePreferences();

@@ -216,6 +216,7 @@ async fn unavailable_task_node_is_not_retried_until_reconnected() {
         component: None,
         width: None,
         trickplay: None,
+        fingerprint: None,
         core_base_url: "http://127.0.0.1:3000".into(),
     };
     assert_eq!(

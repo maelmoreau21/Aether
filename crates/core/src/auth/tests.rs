@@ -249,6 +249,55 @@ async fn several_accounts_share_a_browser_and_switch_without_signing_in_again() 
     assert_eq!(offered.status(), StatusCode::OK);
     assert_eq!(cookie_set(&offered, "aether_session"), first);
 
+    // With a short PIN, the parked account opens only with it, and the list says so.
+    let encoded = crate::profiles::hash_pin(&state, "2468".into())
+        .await
+        .unwrap();
+    crate::database::query(
+        "INSERT INTO account_profiles(user_id,owner_id,pin_hash,created_at) VALUES(?,?,?,unixepoch())",
+    )
+    .bind(&first_id)
+    .bind(&first_id)
+    .bind(encoded)
+    .execute(&state.store.pool)
+    .await
+    .unwrap();
+    let listed = call("/api/v1/auth/accounts", aside.clone(), None, null.clone()).await;
+    let listed: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(listed.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(listed["accounts"][0]["hasPin"], true);
+    for (body, status, code) in [
+        (target.clone(), StatusCode::FORBIDDEN, Some("pin_required")),
+        (
+            serde_json::json!({"userId": first_id, "pin": "1357"}),
+            StatusCode::FORBIDDEN,
+            Some("invalid_pin"),
+        ),
+        (
+            serde_json::json!({"userId": first_id, "pin": "2468"}),
+            StatusCode::OK,
+            None,
+        ),
+    ] {
+        let answered = call("/api/v1/auth/accounts/switch", aside.clone(), None, body).await;
+        assert_eq!(answered.status(), status);
+        if let Some(code) = code {
+            let error: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(answered.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(error["error"], code);
+        } else {
+            assert_eq!(cookie_set(&answered, "aether_session"), first);
+        }
+    }
+
     // Forgetting a parked account closes its session.
     let forgotten = call(
         "/api/v1/auth/accounts/forget",
@@ -1206,5 +1255,44 @@ async fn native_bearer_login_refresh_and_logout() {
         .await
         .status(),
         StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn rotating_addresses_cannot_bypass_the_account_budget() {
+    let (_temp, state) = setup().await;
+    let attempt = |ip: String, login: &'static str, password: &'static str| {
+        let state = state.clone();
+        async move {
+            request_with_ip(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(ORIGIN),
+                None,
+                Some(&ip),
+                serde_json::json!({"login":login,"password":password}),
+            )
+            .await
+            .status()
+        }
+    };
+    for n in 0..super::http::LOGIN_ATTEMPTS_PER_ACCOUNT {
+        let ip = format!("203.0.113.{}", n + 1);
+        assert_eq!(
+            attempt(ip, "admin", "wrong").await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    // A fresh address no longer helps for this login, even with the right password...
+    assert_eq!(
+        attempt("198.51.100.1".into(), "admin", PASSWORD).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // ...while other logins keep their own budget.
+    assert_eq!(
+        attempt("198.51.100.2".into(), "someone", "wrong").await,
+        StatusCode::UNAUTHORIZED
     );
 }

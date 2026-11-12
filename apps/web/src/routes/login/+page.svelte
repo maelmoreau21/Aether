@@ -5,7 +5,7 @@
   import { DEFAULT_NAME, fetchBrandName } from '../../lib/config/brand';
   import { login, bootstrapAdmin, completeSecondFactor, loginWithPasskey, type MfaChallenge } from '../../lib/auth/session';
   import { getAssertion, passkeysSupported } from '../../lib/auth/webauthn';
-  import { type DeviceAccount, accountInitial, loadAccounts, switchAccount } from '../../lib/auth/accounts';
+  import { type DeviceAccount, accountInitial, loadAccounts, markAccountChosen, switchAccount } from '../../lib/auth/accounts';
   import Icon from '../../lib/ui/Icon.svelte';
   import QuickConnect from '../../lib/auth/QuickConnect.svelte';
   import { t } from '../../lib/i18n';
@@ -134,6 +134,8 @@
   // Accounts already signed in on this browser and set aside: one click to come back.
   async function resume(account: DeviceAccount) {
     if (busy) return;
+    // Its PIN is typed on the accounts screen, keypad included.
+    if (account.hasPin) { window.location.assign(resolve('accounts/')); return; }
     busy = true;
     error = '';
     try {
@@ -241,6 +243,8 @@
       error = mapError(errParam);
     }
 
+    // Whoever signs in from this page has chosen the account: no launch picker afterwards.
+    markAccountChosen();
     loadAccounts(controller.signal)
       .then((device) => { deviceAccounts = device.accounts.filter((account) => !account.current); })
       .catch(() => { deviceAccounts = []; });

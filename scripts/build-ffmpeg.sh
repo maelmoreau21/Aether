@@ -102,12 +102,15 @@ else
   # Optional fallback transcoding (never the default path) adds H.264 (x264, NVENC,
   # VAAPI for Intel QuickSync and AMD), AAC, hardware decoding, HDR -> SDR tone mapping
   # (zimg), image-subtitle burn-in and the loudness/night-mode audio filters.
+  # Film end credits are read from the picture (crates/node/src/end_credits.rs): blackframe,
+  # signalstats and metadata print the share of black pixels and the luma range per keyframe;
+  # the decoded frames go to `-f null`, whose encoder is wrapped_avframe.
   # x264 makes this binary GPL, compatible with the project's AGPLv3.
   set -- "$@" --enable-gpl --enable-libdav1d --enable-libwebp --enable-libx264 --enable-libzimg \
     --enable-vaapi --enable-ffnvcodec --enable-cuda --enable-nvenc --enable-nvdec \
     --enable-hwaccel=h264_vaapi,hevc_vaapi,av1_vaapi,vp9_vaapi,mpeg2_vaapi,h264_nvdec,hevc_nvdec,av1_nvdec,vp9_nvdec,mpeg2_nvdec \
-    --disable-encoders --enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le,aac,libx264,h264_nvenc,h264_vaapi \
-    --disable-filters --enable-filter=fps,scale,format,tile,aresample,aformat,anull,null,zscale,tonemap,overlay,hwupload,dynaudnorm,acompressor,alimiter \
+    --disable-encoders --enable-encoder=webvtt,mjpeg,libwebp,pcm_s16le,aac,libx264,h264_nvenc,h264_vaapi,wrapped_avframe \
+    --disable-filters --enable-filter=fps,scale,format,tile,aresample,aformat,anull,null,zscale,tonemap,overlay,hwupload,dynaudnorm,acompressor,alimiter,blackframe,signalstats,metadata \
     --enable-chromaprint --enable-muxer=chromaprint \
     --extra-cflags="-I$work/chromaprint-prefix/include" \
     --extra-ldflags="-L$work/chromaprint-prefix/lib" --extra-libs="-lstdc++ -lm"
@@ -128,6 +131,11 @@ if [ "$profile" = runtime ]; then
   for filter in zscale tonemap overlay dynaudnorm acompressor; do
     "$prefix/bin/ffmpeg" -hide_banner -filters | grep -qw "$filter"
   done
+  # Film end credits are measured on the picture: without these the Node scan always fails.
+  for filter in blackframe signalstats metadata; do
+    "$prefix/bin/ffmpeg" -hide_banner -filters | grep -qw "$filter"
+  done
+  "$prefix/bin/ffmpeg" -hide_banner -encoders | grep -qw wrapped_avframe
   "$prefix/bin/ffmpeg" -hide_banner -muxers | grep -qw sup
 fi
 mkdir -p "$prefix/share/media-probe"

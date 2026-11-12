@@ -78,6 +78,13 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
     if wasm.len() > MAX_MODULE || !wasm.starts_with(b"\0asm") {
         return Err("invalid_module");
     }
+    // A module over the 1.0 limit only runs on hosts of ABI 1.1, which its package must declare
+    // so that older Cores never offer it.
+    if wasm.len() > media_extension_sdk::MAX_MODULE_V1_0
+        && !super::repositories::accepts_large_input(m.target_abi.as_deref())
+    {
+        return Err("module_too_large");
+    }
     if package.sha256 != format!("{:x}", Sha256::digest(&wasm)) {
         return Err("invalid_digest");
     }

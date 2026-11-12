@@ -6,7 +6,7 @@ pub(crate) const ABSOLUTE_SECONDS: i64 = 30 * 24 * 60 * 60;
 pub(crate) const IDLE_SECONDS: i64 = 7 * 24 * 60 * 60;
 pub(super) const COOKIE: &str = "aether_session";
 
-fn parse_ip_or_socket(raw: &str) -> Option<std::net::IpAddr> {
+pub(super) fn parse_ip_or_socket(raw: &str) -> Option<std::net::IpAddr> {
     if let Ok(ip) = raw.parse::<std::net::IpAddr>() {
         return Some(ip.to_canonical());
     }

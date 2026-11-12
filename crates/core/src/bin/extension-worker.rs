@@ -4,7 +4,11 @@ fn main() {
     let invocation = {
         let input = std::io::stdin();
         let mut input = input.lock();
-        read_frame(&mut input, 400_000)
+        // The module (base64) and the largest request, plus hosts and headers.
+        read_frame(
+            &mut input,
+            media_extension_sdk::MAX_MODULE * 4 / 3 + media_extension_sdk::MAX_INPUT_JSON + 65_536,
+        )
     };
     let result = invocation.and_then(execute_brokered);
     match result {

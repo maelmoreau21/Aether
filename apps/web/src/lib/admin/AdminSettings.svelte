@@ -11,6 +11,7 @@
   let trickplayColumns = $state(10), trickplayRows = $state(10), trickplayMaxCacheMb = $state(5120);
   // Server-wide defaults a library in "inherit" mode follows (each library can force on or off).
   let chapterImagesEnabled = $state(true), introDetectionEnabled = $state(true), markerMinConfidence = $state(80);
+  let introAnalysisPercent = $state(25), introAnalysisMaxMinutes = $state(10);
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
   let loading = $state(true), saving = $state(false);
@@ -40,7 +41,7 @@
           trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
           trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
           trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
-          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
+          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number; introAnalysisPercent?: number; introAnalysisMaxMinutes?: number;
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
         }>('/api/v1/admin/settings');
@@ -59,6 +60,8 @@
         chapterImagesEnabled = data.chapterImagesEnabled ?? true;
         introDetectionEnabled = data.introDetectionEnabled ?? true;
         markerMinConfidence = data.markerMinConfidence ?? 80;
+        introAnalysisPercent = data.introAnalysisPercent ?? 25;
+        introAnalysisMaxMinutes = data.introAnalysisMaxMinutes ?? 10;
         minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
@@ -79,7 +82,7 @@
           trickplayEnabled, trickplayAutoGenerate,
           trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
           trickplayColumns, trickplayRows, trickplayMaxCacheMb,
-          chapterImagesEnabled, introDetectionEnabled, markerMinConfidence,
+          chapterImagesEnabled, introDetectionEnabled, markerMinConfidence, introAnalysisPercent, introAnalysisMaxMinutes,
           minResumePct, maxResumePct, minResumeDurationSeconds,
           activityLogRetentionDays,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
@@ -90,7 +93,7 @@
         trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
         trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
         trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
-          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
+          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number; introAnalysisPercent?: number; introAnalysisMaxMinutes?: number;
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
       }>('/api/v1/admin/settings');
@@ -109,6 +112,8 @@
       chapterImagesEnabled = saved.chapterImagesEnabled ?? true;
       introDetectionEnabled = saved.introDetectionEnabled ?? true;
       markerMinConfidence = saved.markerMinConfidence ?? 80;
+      introAnalysisPercent = saved.introAnalysisPercent ?? 25;
+      introAnalysisMaxMinutes = saved.introAnalysisMaxMinutes ?? 10;
       minResumePct = saved.minResumePct ?? 0; maxResumePct = saved.maxResumePct ?? 90;
       minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
@@ -157,6 +162,8 @@
         <label class="policy-toggle"><input type="checkbox" bind:checked={introDetectionEnabled} />{$t('detect_intros_with_enabled_extensions')}</label>
         {#if introDetectionEnabled}
           <label>{$t('marker_min_confidence', { value: markerMinConfidence })}<input type="range" min="50" max="99" step="1" bind:value={markerMinConfidence} /><small>{$t('marker_min_confidence_hint')}</small></label>
+          <label>{$t('intro_analysis_percent', { value: introAnalysisPercent })}<input type="range" min="1" max="50" step="1" bind:value={introAnalysisPercent} /><small>{$t('intro_analysis_percent_hint')}</small></label>
+          <label>{$t('intro_analysis_max_minutes')}<input type="number" min="1" max="10" step="1" required bind:value={introAnalysisMaxMinutes} /><small>{$t('intro_analysis_max_minutes_hint')}</small></label>
           <p class="hint">{$t('server_intro_thresholds_note')}</p>
         {/if}
       </fieldset>

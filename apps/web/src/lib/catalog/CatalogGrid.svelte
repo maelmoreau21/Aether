@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
   import { page } from '$app/state';
   import { onMount, tick } from 'svelte';
   import { slide } from 'svelte/transition';
@@ -183,7 +184,8 @@
 
   // On-demand discovery state
   let discoverResults = $state<SearchResult[]>([]);
-  let failedPosters = $state<Set<string>>(new Set());
+  // Posters that failed to load fall back to the placeholder (reactive set).
+  const failedPosters = new SvelteSet<string>();
   const discoverMissing = $derived.by(() => {
     return discoverResults.filter(r => !r.inLibrary && (selectedKindFilter === 'all' || selectedKindFilter === r.kind));
   });
@@ -538,7 +540,6 @@
                   class="discover-poster"
                   onerror={() => {
                     failedPosters.add(`${item.externalProvider}:${item.externalId}`);
-                    failedPosters = new Set(failedPosters);
                   }}
                 />
               {:else}

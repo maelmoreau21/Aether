@@ -95,7 +95,9 @@ pub(super) fn poster_source(v: &Value) -> Option<(&'static str, String)> {
                 .as_str()
                 .is_some_and(|c| c.eq_ignore_ascii_case("poster"))
         })?;
-        poster["remoteUrl"].as_str().or_else(|| poster["url"].as_str())
+        poster["remoteUrl"]
+            .as_str()
+            .or_else(|| poster["url"].as_str())
     })?;
     let url = url::Url::parse(address).ok()?;
     if !matches!(url.scheme(), "http" | "https") {

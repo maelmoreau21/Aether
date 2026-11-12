@@ -44,9 +44,9 @@ Le projet privilégie la **lecture directe** et n'impose aucun transcodage vidé
 | **Authentification** | Comptes locaux et connexion OpenID Connect (OIDC), notamment avec Authentik |
 | **Stockage** | SQLite par défaut, PostgreSQL 18 externe en option pour un Core unique |
 | **Sauvegardes** | Sauvegardes administratives planifiables, chiffrées et authentifiées (clé obligatoire, voir le [guide de mise à niveau](docs/UPGRADE_1.0.md)), restauration hors ligne |
-| **Distribution** | Mode autonome ou Core central avec un ou plusieurs Media Nodes |
+| **Distribution** | Mode autonome avec SQLite (recommandé en v1.0) ou mode distribué Core + Media Nodes en statut **expérimental / bêta (*ready for testing*)** |
 
-**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Le navigateur lit en direct ou via un transcodage de secours relancé à chaque changement de position ou de qualité (pas de multi-débit adaptatif segmenté) ; les lecteurs natifs (iOS, tvOS, Android, AirPlay, Chromecast) utilisent le HLS par copie sans réencodage ([HLS.md](docs/HLS.md)).
+**Limites actuelles :** la lecture AV1/Opus dépend de la prise en charge du navigateur et du conteneur ; toutes les combinaisons de pistes ne sont pas garanties. Le support complet des styles ASS/SSA, des flux élémentaires « raw », des extensions exécutables et du cluster multi-Core n'est **pas** livré comme fonctionnalité de production. Pour la **v1.0**, l'effort de stabilisation et de support cible le **mode autonome avec SQLite** ; le **mode distribué** (Core + Media Nodes distants, multi-machine, PostgreSQL) est proposé en statut **expérimental / *ready for testing*** avant un support complet en v1.1 ou v2. Le navigateur lit en direct ou via un transcodage de secours relancé à chaque changement de position ou de qualité (pas de multi-débit adaptatif segmenté) ; les lecteurs natifs (iOS, tvOS, Android, AirPlay, Chromecast) utilisent le HLS par copie sans réencodage ([HLS.md](docs/HLS.md)).
 
 ## Technologies
 
@@ -146,13 +146,16 @@ Aether sépare trois responsabilités, même dans le conteneur autonome :
 
 ### Mode autonome
 
-Un seul conteneur `aether` regroupe l'interface Web, le Core, le Media Node local et `ffprobe`. **Aucun processus Node.js permanent** et **aucune base externe obligatoire**.
+Un seul conteneur `aether` regroupe l'interface Web, le Core, le Media Node local et `ffprobe`. C'est le mode **recommandé et supporté pour la v1.0** (avec SQLite). **Aucun processus Node.js permanent en production** (le frontend est compilé statiquement et servi par le Core) et **aucune base externe obligatoire**.
 
 ```bash
 docker compose -f docker-compose.yml up -d
 ```
 
-### Mode distribué
+### Mode distribué (expérimental / bêta en v1.0)
+
+> [!NOTE]
+> **Statut v1.0 : expérimental / *ready for testing*.** Pour une installation domestique stable en v1.0, privilégiez le mode autonome avec SQLite. Le support complet du mode distribué (multi-hôte, PostgreSQL, reprise après sinistre) est prévu pour la v1.1 ou la v2.
 
 Un `aether-core` centralise les comptes et le catalogue ; les conteneurs `aether-node` accèdent uniquement à leurs propres bibliothèques. Le déploiement distribué nécessite un **secret d'appairage unique**, une configuration réseau adaptée et, entre machines, un transport HTTPS de confiance.
 
@@ -197,7 +200,7 @@ Consultez la [politique de sécurité](SECURITY.md) et les [notes techniques de 
 
 ## Développement
 
-Prérequis de développement : Rust `1.99+` (édition 2024), Node.js compatible avec le frontend, npm, `ffprobe` et les outils nécessaires aux fixtures multimédias des tests.
+Prérequis de développement : Rust `1.99+` (édition 2024), `ffprobe` et les outils nécessaires aux fixtures multimédias des tests. **Node.js et npm sont requis en développement et en CI** pour compiler le frontend SvelteKit (`apps/web`), exécuter les vérifications TypeScript/lint et lancer les tests unitaires et E2E navigateur (Playwright) — bien qu'aucun processus Node.js ne tourne en production (voir [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 
 ```bash
 # Qualité du code Rust

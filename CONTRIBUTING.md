@@ -73,14 +73,22 @@ cargo test --locked
 cargo audit
 ```
 
-### Frontend (SvelteKit) — lorsqu'actif
-Lorsque le frontend dans `apps/web` sera initialisé :
+### Frontend (SvelteKit) et tests navigateur (Node.js en dev/CI uniquement)
+
+En **production** (binaire et images Docker), le frontend SvelteKit est précompilé statiquement (`adapter-static`) et servi directement par le Core Rust : **aucun processus Node.js permanent** n'est exécuté.
+
+En **développement et en CI**, **Node.js et npm sont en revanche requis** pour :
+- construire les fichiers statiques du frontend (`npm run build`) ;
+- exécuter les vérifications TypeScript/Svelte, le linter et les tests unitaires Vitest ;
+- lancer les tests E2E navigateur (Playwright).
+
 ```bash
 cd apps/web
 npm ci
 npm run check
 npm run lint
 npm test
+npm run build
 npm audit
 ```
 

@@ -2,6 +2,7 @@
   import WorkTools from './WorkTools.svelte';
   import NativeDownload from '../native/NativeDownload.svelte';
   import { bestVersion } from '../player/version-choice';
+  import { mediaCompatibilityWarning } from '../player/compatibility';
   import { preloadProgress, isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
   import { history } from './watch-state';
@@ -34,6 +35,12 @@
   const currentAudioTracks = $derived(inspectedAudioTracks(currentSelectedMedia));
   const resolutionBadge = $derived(videoResolutionBadge(currentVideoTrack?.width, currentVideoTrack?.height));
   const colorBadge = $derived(colorProfileLabel(currentVideoTrack?.pix_fmt));
+  const compatibilityWarning = $derived.by(() => {
+    const source = currentSelectedMedia?.sources[0];
+    if (!source || typeof document === 'undefined') return undefined;
+    const probe = document.createElement('video');
+    return mediaCompatibilityWarning(source, mime => probe.canPlayType(mime));
+  });
 
   const hasCast = $derived(creditPeople(work).length > 0);
   const tabs = $derived([
@@ -115,6 +122,7 @@
     {/if}
 
     {#if !playableMedia.length && !allowedIds.length}<p class="unavailable">{$t('detail_no_playable_version')}</p>{/if}
+    {#if compatibilityWarning}<p class="compatibility-warning" role="status">{compatibilityWarning}</p>{/if}
     {#if mediaError}<p class="error-banner" role="alert">{mediaError}</p>{/if}
   </DetailHero>
 
@@ -284,6 +292,7 @@
   .hero-cta:active { transform: scale(0.98); }
 
   .unavailable { margin: 0; font-size: 13px; opacity: 0.8; }
+  .compatibility-warning { margin: 0; font-size: 13px; line-height: 1.5; color: var(--color-warning, #f5c451); }
   .error-banner { color: var(--color-danger); margin: 0; line-height: 1.6; }
 
   @media (max-width: 1100px) {

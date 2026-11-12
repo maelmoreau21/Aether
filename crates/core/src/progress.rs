@@ -172,13 +172,12 @@ async fn admin_command(
         return Err(StatusCode::FORBIDDEN);
     }
     state.auth.require_csrf(&headers, &actor)?;
-    let exists: Option<String> = query_scalar(
-        "SELECT id FROM active_playbacks WHERE id=? AND updated_at>unixepoch()-45",
-    )
-    .bind(&id)
-    .fetch_optional(&state.auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let exists: Option<String> =
+        query_scalar("SELECT id FROM active_playbacks WHERE id=? AND updated_at>unixepoch()-45")
+            .bind(&id)
+            .fetch_optional(&state.auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if exists.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }

@@ -95,6 +95,8 @@ jobs:
         run: python scripts/test-smoke-docker-images.py
       - name: Verify multiarchitecture manifest publication gates offline
         run: python scripts/test-docker-multiarch.py
+      - name: Verify compromised MDBK0001 backup key absence
+        run: python scripts/test-backup-key-absence.py
 
   # =========================================================================
   # 1. Vérifications et tests Rust (Core & Node)

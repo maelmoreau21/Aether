@@ -79,6 +79,8 @@ docker compose exec -it aether media-bootstrap --login admin
 
 ## 3. Mode 2 : Déploiement Distribué Multi-Node (`aether-core` + `aether-node`)
 
+> **Statut v1.0 : expérimental / bêta (*ready for testing*).** Pour une mise en production v1.0 sur un seul NAS, privilégiez le mode **Standalone avec SQLite** (section 2). Le support complet du mode distribué (multi-machine, PostgreSQL, reprise après sinistre) est prévu pour la v1.1 ou la v2.
+
 Ce mode sépare physiquement et logiquement :
 - **`aether-core`** : API publique `/api/v1/...`, comptes utilisateurs, RBAC, catalogue global SQLite et interface Web statique SvelteKit. **Ne monte aucun dossier média.**
 - **`aether-node`** (Node polyvalent par défaut, ou plusieurs conteneurs si besoin) : monte à la fois `/media/films:ro` et `/media/series:ro`, scanne ses bibliothèques en `:ro`, analyse les pistes via `ffprobe`, lit les `.nfo`/posters et sert les flux vidéos/images autorisés par jeton court (`PlaybackToken`) ou via relais Core borné.

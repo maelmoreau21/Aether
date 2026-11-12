@@ -28,8 +28,26 @@ une archive : sauvegardes manuelles et planifiées échouent avec `backup_key_re
 Dérogation temporaire (déconseillée) : `MEDIA_BACKUP_ALLOW_UNENCRYPTED=true` produit
 encore du `MDBK0002` en clair, avec avertissement.
 
+### Révocation de l'ancienne clé `MDBK0001` et rotation
+
+L'ancienne clé publiée dans l'historique Git (`crates/core/secrets/backup.key`) est
+**formellement révoquée et considérée comme compromise** :
+
+- Toute archive **`MDBK0001`** créée avec cette clé doit être considérée comme **lisible par un tiers**. Isolez ces archives, recréez de nouvelles sauvegardes `MDBK0003` avec une clé neuve (`MEDIA_BACKUP_KEY_FILE`), puis **renouvelez les secrets** qui y figuraient (secret client OIDC, mots de passe de base, jetons d'appairage des Nodes, clés privées TLS, sessions actives).
+- **Rotation de la clé `MEDIA_BACKUP_KEY_FILE` (`MDBK0003`)** :
+  1. Générez une nouvelle clé de 64 caractères hexadécimaux hors dépôt et hors `/backups` (`umask 077 && openssl rand -hex 32 > ./backup-new.key`).
+  2. Conservez l'ancienne clé `MDBK0003` dans votre gestionnaire de secrets si vous devez relire d'anciennes archives `MDBK0003` (`media-recover` exige la clé qui a chiffré l'archive visée).
+  3. Mettez à jour `MEDIA_BACKUP_KEY_FILE` (ou le secret Docker) et redémarrez Core.
+  4. Lancez une sauvegarde de test et vérifiez-la avec `media-recover`.
+- **Archives `MDBK0002` (non chiffrées)** : leur conservation ou utilisation sans ré-chiffrement préalable est **fortement déconseillée**, car elles contiennent la base et la configuration (`config.json`) en clair. Extrayez les données nécessaires dans un environnement sûr avec `media-recover`, créez une archive chiffrée `MDBK0003` via `MEDIA_BACKUP_KEY_FILE`, vérifiez-la, puis supprimez l'archive `MDBK0002` en clair.
+
 Détails : [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md), [BACKUP_RESTORE.md](BACKUP_RESTORE.md),
 [ADMIN_BACKUPS.md](ADMIN_BACKUPS.md), [ADMIN_DEPLOYMENT.md](ADMIN_DEPLOYMENT.md).
+
+## Périmètre de support v1.0 : mode autonome vs distribué
+
+- **Mode autonome avec SQLite (recommandé et supporté pour la v1.0)** : un seul conteneur `aether` regroupant l'interface Web, le Core et le Media Node local. C'est le parcours principal stabilisé, testé et documenté pour la 1.0.
+- **Mode distribué (`aether-core` + `aether-node`, multi-machine, PostgreSQL) : statut expérimental / bêta (*ready for testing*)** pour la v1.0. Il reste utilisable pour les tests et retours terrain, mais le support complet de production (notamment multi-machine et reprise après sinistre) est reporté à la v1.1 / v2. Le cluster multi-Core n'est pas livré pour la production.
 
 ## Autres changements
 

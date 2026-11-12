@@ -19,6 +19,7 @@
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { isForeignAudio, languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
+  import { mediaCompatibilityWarning, subtitleCompatibilityWarning } from './compatibility';
   import { AudioSelectionRetainedError } from './errors';
   import { failoverHelps, failureKindOf, type PlaybackFailureKind } from './diagnostics';
   import { revalidateMediaDescriptor } from '../catalog/api';
@@ -459,6 +460,12 @@
       if (enhancement !== 'off' && engine.setAudioEnhancement && !engine.setAudioEnhancement(enhancement)) notice = $t('audio_enhancement_unavailable');
       foreignAudio = isForeignAudio(source.language, subtitleLanguage);
       const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage, preferSdh);
+      const activeSubtitleTrack = media.subtitles.find(track => track.id === usableSubtitle);
+      if (!notice) {
+        notice = mediaCompatibilityWarning(source, mime => video.canPlayType(mime))
+          ?? subtitleCompatibilityWarning(activeSubtitleTrack)
+          ?? '';
+      }
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -757,10 +764,11 @@
     const accountGeneration = getSessionGeneration();
     void action(async player => { await player.selectAudio(id);
       if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
-      audio = id; notice = '';
+      const nextSource = active?.sources.find(source => source.audioTrackId === id);
+      audio = id; notice = mediaCompatibilityWarning(nextSource, mime => video.canPlayType(mime)) ?? '';
       const info = player.playbackInfo?.();
       if (info?.audio) collector?.track('audio', info.audio, 'manual');
-      const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
+      const language = audioLanguage(nextSource?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
       foreignAudio = isForeignAudio(language, subtitleLanguage);
       manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
@@ -783,6 +791,7 @@
     subtitle = id;
     trackSubtitle(id, 'manual');
     const track = active?.subtitles.find(track => track.id === id);
+    notice = subtitleCompatibilityWarning(track) ?? '';
     const chosen: SubtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
     // A choice made in VO applies to every VO; one made in the person's language, to the others.
     if (foreignAudio) {

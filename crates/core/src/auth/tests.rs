@@ -1278,13 +1278,31 @@ async fn rotating_addresses_cannot_bypass_the_account_budget() {
             .status()
         }
     };
-    for n in 0..super::http::LOGIN_ATTEMPTS_PER_ACCOUNT {
+    // Attempts from different addresses all count against the one login.
+    for n in 0..3 {
         let ip = format!("203.0.113.{}", n + 1);
         assert_eq!(
             attempt(ip, "admin", "wrong").await,
             StatusCode::UNAUTHORIZED
         );
     }
+    let counted: i64 =
+        crate::database::query_scalar("SELECT attempts FROM login_throttle WHERE throttle_key=?")
+            .bind("login:admin")
+            .fetch_one(&state.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(counted, 3);
+    // The rest of the budget is spent directly: thirty Argon2 checks can outlast the one-minute
+    // window on a slow runner, which would reopen it before the last attempt.
+    crate::database::query(
+        "UPDATE login_throttle SET attempts=?, window_started=unixepoch() WHERE throttle_key=?",
+    )
+    .bind(super::http::LOGIN_ATTEMPTS_PER_ACCOUNT)
+    .bind("login:admin")
+    .execute(&state.store.pool)
+    .await
+    .unwrap();
     // A fresh address no longer helps for this login, even with the right password...
     assert_eq!(
         attempt("198.51.100.1".into(), "admin", PASSWORD).await,

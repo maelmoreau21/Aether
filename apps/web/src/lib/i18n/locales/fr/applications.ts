@@ -298,8 +298,6 @@ export const applications = {
   rq_discover_help: 'Ces titres ne sont pas dans votre médiathèque. Vous pouvez demander leur téléchargement.',
   rq_discover_count: '{count} {count#suggestion à télécharger|suggestions à télécharger}',
   rq_request_now: 'Demander',
-  rq_auto_approved_badge: 'Validation immédiate',
-  rq_needs_review_badge: 'Validation requise',
   rq_confirm_dialog_auto: 'Votre demande sera validée immédiatement.',
   rq_confirm_dialog_manual: 'Votre demande sera transmise à un administrateur pour validation.',
   rq_quota_remaining_label: '{remaining} {remaining#demande restante|demandes restantes} sur {limit} ({days} jours)',

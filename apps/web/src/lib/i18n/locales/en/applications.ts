@@ -300,8 +300,6 @@ export const applications: Readonly<Record<keyof typeof source, string>> = {
   rq_discover_help: 'These titles are not in your library. You can request their download.',
   rq_discover_count: '{count} {count#download suggestion|download suggestions}',
   rq_request_now: 'Request',
-  rq_auto_approved_badge: 'Auto-approved',
-  rq_needs_review_badge: 'Needs review',
   rq_confirm_dialog_auto: 'Your request will be approved immediately.',
   rq_confirm_dialog_manual: 'Your request will be sent to an administrator for review.',
   rq_quota_remaining_label: '{remaining} of {limit} {remaining#request|requests} remaining ({days} days)',

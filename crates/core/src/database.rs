@@ -177,6 +177,7 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
     const SQLITE_SCHEMA: &str = include_str!("../schema/sqlite.sql");
     const POSTGRES_SCHEMA: &str = include_str!("../schema/postgres.sql");
     const SEED: &str = include_str!("../schema/seed.sql");
+    const DERIVED: &str = include_str!("../schema/derived.sql");
     /// Value of the single `schema_version` row written by the schema files.
     const SCHEMA_VERSION: i64 = 1;
     const SCHEMA_LOCK_ID: i64 = 0x4d45444941534348;
@@ -200,6 +201,7 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
         })
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(DERIVED).execute(&mut *tx).await?;
         crate::groups::initialize_role_groups(&mut tx).await?;
         sqlx::raw_sql(SEED).execute(&mut *tx).await?;
     } else if has_users == 0 {
@@ -231,6 +233,9 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
                 "Unsupported database schema version; choose a fresh database".into(),
             ));
         }
+        // Views and indexes carry no data: refreshing them lets a database already in
+        // service pick up their current, faster definition.
+        sqlx::raw_sql(DERIVED).execute(&mut *tx).await?;
     }
     tx.commit().await
 }

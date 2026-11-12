@@ -8,6 +8,7 @@ par moteur, et appliqué à une base vide par `initialize_fresh_schema`
 |---|---|
 | `crates/core/schema/sqlite.sql` | tables, index, vues et trigger SQLite |
 | `crates/core/schema/postgres.sql` | les mêmes objets pour PostgreSQL (colonnes `BIGINT`, pas de trigger : la disponibilité des fichiers est maintenue en Rust) |
+| `crates/core/schema/derived.sql` | vues (et index de performance) partagés par les deux moteurs, sans aucune donnée : réappliqués à chaque démarrage, voir ci-dessous |
 | `crates/core/schema/seed.sql` | lignes présentes dans toute base neuve (réglages singleton, tâches système, déclencheurs par défaut), identique pour les deux moteurs |
 
 ## Démarrage
@@ -17,10 +18,29 @@ sur PostgreSQL) ; une erreur annule l'ensemble.
 
 1. **Base vide** : le fichier du moteur, le seed Rust des groupes de rôles
    (`groups::initialize_role_groups`), puis `seed.sql`.
-2. **Base qui contient déjà ce schéma** (`users` présent, `schema_version = 1`) : rien
-   n'est exécuté, les données ne sont jamais réécrites.
+2. **Base qui contient déjà ce schéma** (`users` présent, `schema_version = 1`) : seul
+   `derived.sql` est réexécuté ; les tables et les données ne sont jamais réécrites.
 3. **Toute autre base** (tables sans `users`, `schema_version` absent ou différent) :
    refus explicite, « choisir une base neuve ». Aucune mise à niveau en place.
+
+## Objets dérivés (`derived.sql`)
+
+Les vues et les index ne portent aucune donnée : `derived.sql` les supprime et les recrée
+à chaque démarrage (après le schéma sur une base neuve, après la vérification de version
+sur une base existante). Une correction de performance y atteint donc aussi les bases déjà
+en service, sans les recréer. Chaque instruction doit être idempotente
+(`DROP VIEW IF EXISTS`, `CREATE INDEX IF NOT EXISTS`) et valide sur SQLite comme sur
+PostgreSQL. Jamais de table, de colonne ni de donnée dans ce fichier.
+
+Exemple : `effective_library_permissions` déclare ses CTE `NOT MATERIALIZED` ; sans cela,
+chaque requête calculait les droits de tous les comptes avant de filtrer sur le sien
+(18 ms par requête avec 10 000 comptes sous PostgreSQL, contre 0,3 ms).
+
+Sous PostgreSQL, chaque connexion du pool fixe `plan_cache_mode = force_generic_plan`
+(`IdentityStore::open_postgres`) : les requêtes préparées sont planifiées une fois par
+connexion au lieu d'être replanifiées à chaque appel. Le banc
+`crates/core/tests/postgres_catalogue_bench.rs` (ignoré par défaut) mesure accueil, fiches
+et lecteur sur 30 000 films, 1 000 séries et 10 000 comptes.
 
 ## Modifier le schéma
 

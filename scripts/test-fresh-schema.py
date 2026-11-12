@@ -6,6 +6,7 @@ import unittest
 
 
 SCHEMA = Path(__file__).resolve().parents[1] / "crates/core/schema/sqlite.sql"
+DERIVED = SCHEMA.with_name("derived.sql")
 
 
 class FreshSchema(unittest.TestCase):
@@ -14,6 +15,13 @@ class FreshSchema(unittest.TestCase):
         with sqlite3.connect(":memory:") as connection:
             connection.execute("PRAGMA foreign_keys=ON")
             connection.executescript(schema)
+            # Views are refreshed on every start: applying them twice must succeed.
+            for _ in range(2):
+                connection.executescript(DERIVED.read_text(encoding="utf-8"))
+            views = {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='view'"
+            )}
+            self.assertTrue({"effective_library_permissions", "effective_user_group_members"}.issubset(views))
             tables = {row[0] for row in connection.execute(
                 "SELECT name FROM sqlite_master WHERE type='table'"
             )}

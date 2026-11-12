@@ -7,42 +7,165 @@ pub(super) fn image_cache() -> &'static ImageCache {
     &CACHE
 }
 
-pub(super) fn is_safe_svg_text(lower: &str) -> bool {
-    let forbidden = [
-        "<script",
-        "<foreignobject",
-        "<iframe",
-        "<embed",
-        "<object",
-        "<use",
-        "<animate",
-        "<set",
-        "<!doctype",
-        "<!entity",
-        "javascript:",
-        "vbscript:",
-        "data:text/html",
-    ];
-    if forbidden.iter().any(|bad| lower.contains(bad)) {
+fn is_allowed_svg_attr(name: &str, value: &str) -> bool {
+    let lower_val = value.to_ascii_lowercase();
+    if lower_val.contains("javascript:")
+        || lower_val.contains("vbscript:")
+        || lower_val.contains("data:")
+        || lower_val.contains("url(")
+        || lower_val.contains("expression(")
+    {
         return false;
     }
-    for (i, _) in lower.match_indices("on") {
-        if i > 0 {
-            let prev = lower.as_bytes()[i - 1];
-            if !prev.is_ascii_whitespace() && prev != b'/' && prev != b'<' {
-                continue;
-            }
+    match name {
+        "xmlns" => value == "http://www.w3.org/2000/svg",
+        "id" => {
+            !value.is_empty()
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         }
-        let rest = &lower[i + 2..];
-        let name_len = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
-        if name_len >= 2 {
-            let after_name = rest[name_len..].trim_start();
-            if after_name.starts_with('=') {
-                return false;
-            }
+        "viewbox" | "width" | "height" | "x" | "y" | "rx" | "ry" | "cx" | "cy" | "r" | "x1"
+        | "x2" | "y1" | "y2" | "stroke-width" | "opacity" | "fill-opacity" | "stroke-opacity" => {
+            !value.is_empty()
+                && value.chars().all(|c| {
+                    c.is_ascii_digit()
+                        || matches!(c, '.' | '-' | '+' | '%' | ' ' | ',' | 'p' | 'x' | 'e' | 'm')
+                })
+        }
+        "fill" | "stroke" => {
+            !value.is_empty()
+                && value.chars().all(|c| {
+                    c.is_ascii_alphanumeric()
+                        || matches!(c, '#' | '(' | ')' | ',' | '.' | ' ' | '%' | '-')
+                })
+        }
+        "stroke-linecap" | "stroke-linejoin" | "fill-rule" | "clip-rule" => {
+            !value.is_empty() && value.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+        }
+        "d" => value.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(c, ' ' | ',' | '.' | '-' | '+' | '\t' | '\n' | '\r')
+        }),
+        "points" => value.chars().all(|c| {
+            c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | ',' | ' ' | '\t' | '\n' | '\r')
+        }),
+        "transform" => value.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '(' | ')' | '.' | '-' | '+' | ',' | ' ')
+        }),
+        _ => false,
+    }
+}
+
+fn validate_svg_tag(tag: &quick_xml::events::BytesStart<'_>, is_root: bool) -> Option<String> {
+    let qname = tag.name();
+    let raw_name: &str = qname.as_ref();
+    if raw_name.contains(':') {
+        return None;
+    }
+    let name = raw_name.to_ascii_lowercase();
+    if is_root && name != "svg" {
+        return None;
+    }
+    let allowed_tag = matches!(
+        name.as_str(),
+        "svg"
+            | "g"
+            | "rect"
+            | "circle"
+            | "ellipse"
+            | "path"
+            | "line"
+            | "polygon"
+            | "polyline"
+            | "defs"
+            | "title"
+    );
+    if !allowed_tag {
+        return None;
+    }
+    for attr in tag.attributes() {
+        let attr = attr.ok()?;
+        let attr_name: &str = attr.key.as_ref();
+        if attr_name.contains(':') {
+            return None;
+        }
+        let attr_name_lower = attr_name.to_ascii_lowercase();
+        let attr_val: &str = attr.value.as_ref();
+        if !is_allowed_svg_attr(&attr_name_lower, attr_val) {
+            return None;
         }
     }
-    true
+    Some(name)
+}
+
+pub(super) fn is_safe_svg_text(text: &str) -> bool {
+    if text.contains('&') {
+        return false;
+    }
+    let mut reader = quick_xml::Reader::from_str(text);
+    reader.config_mut().trim_text(true);
+    let mut stack: Vec<String> = Vec::new();
+    let mut saw_svg_root = false;
+    let mut element_count = 0usize;
+
+    loop {
+        match reader.read_event() {
+            Ok(quick_xml::events::Event::Start(e)) => {
+                element_count += 1;
+                if element_count > 4096 || stack.len() >= 64 || (saw_svg_root && stack.is_empty()) {
+                    return false;
+                }
+                let is_root = !saw_svg_root && stack.is_empty();
+                let Some(name) = validate_svg_tag(&e, is_root) else {
+                    return false;
+                };
+                if is_root {
+                    saw_svg_root = true;
+                }
+                stack.push(name);
+            }
+            Ok(quick_xml::events::Event::Empty(e)) => {
+                element_count += 1;
+                if element_count > 4096 || stack.len() >= 64 || (saw_svg_root && stack.is_empty()) {
+                    return false;
+                }
+                let is_root = !saw_svg_root && stack.is_empty();
+                if validate_svg_tag(&e, is_root).is_none() {
+                    return false;
+                }
+                if is_root {
+                    saw_svg_root = true;
+                }
+            }
+            Ok(quick_xml::events::Event::End(e)) => {
+                let qname = e.name();
+                let raw_name: &str = qname.as_ref();
+                let name = raw_name.to_ascii_lowercase();
+                if stack.pop().as_deref() != Some(name.as_str()) {
+                    return false;
+                }
+            }
+            Ok(quick_xml::events::Event::Text(t)) => {
+                let text_content: &str = t.as_ref();
+                let trimmed = text_content.trim();
+                if !trimmed.is_empty() && stack.last().map(String::as_str) != Some("title") {
+                    return false;
+                }
+            }
+            Ok(quick_xml::events::Event::Decl(_)) | Ok(quick_xml::events::Event::Comment(_)) => {}
+            Ok(quick_xml::events::Event::Eof) => break,
+            Ok(
+                quick_xml::events::Event::DocType(_)
+                | quick_xml::events::Event::PI(_)
+                | quick_xml::events::Event::CData(_)
+                | quick_xml::events::Event::GeneralRef(_),
+            )
+            | Err(_) => return false,
+        }
+    }
+
+    saw_svg_root && stack.is_empty()
 }
 
 /// Image types accepted from a catalogue `imageUrl`, recognised by content.
@@ -58,11 +181,8 @@ pub(super) fn image_type(bytes: &[u8]) -> Option<&'static str> {
     } else {
         let text = std::str::from_utf8(bytes).ok()?;
         let text = text.trim_start_matches('\u{feff}').trim_start();
-        if text.starts_with('<') && text.contains("<svg") {
-            let lower = text.to_ascii_lowercase();
-            if is_safe_svg_text(&lower) {
-                return Some("image/svg+xml");
-            }
+        if text.starts_with('<') && is_safe_svg_text(text) {
+            return Some("image/svg+xml");
         }
         None
     }

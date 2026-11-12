@@ -1026,3 +1026,31 @@ async fn versioned_catalogue_installs_zip_assets_and_older_versions() {
         documents.remove(url);
     }
 }
+
+#[test]
+fn svg_image_validation_rejects_bypass_vectors() {
+    assert_eq!(
+        super::images::image_type(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="#fff"/></svg>"##
+        ),
+        Some("image/svg+xml")
+    );
+    let malicious = [
+        br#"<svg><svg:script>alert(1)</svg:script></svg>"#.as_slice(),
+        br#"<svg xmlns:svg="http://www.w3.org/2000/svg"><svg:foreignObject/></svg>"#,
+        br#"<svg><a href="&#x6a;avascript:alert(1)"><rect width="10" height="10"/></a></svg>"#,
+        br#"<svg><style>@import url(https://evil.example/x.css);</style></svg>"#,
+        br#"<svg><image href="https://evil.example/track.png"/></svg>"#,
+        br#"<svg onload="alert(1)"/>"#,
+        br#"<svg/><svg/>"#,
+        br#"<rect width="10" height="10"/>"#,
+    ];
+    for payload in malicious {
+        assert_eq!(
+            super::images::image_type(payload),
+            None,
+            "expected rejection for {}",
+            String::from_utf8_lossy(payload)
+        );
+    }
+}

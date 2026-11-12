@@ -121,6 +121,17 @@ async fn bootstrap(
     let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
         return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
     };
+    let client_key = extract_client_key(&headers);
+    for (key, limit) in [
+        (format!("bootstrap:{client_key}"), LOGIN_ATTEMPTS_PER_IP),
+        ("bootstrap:global".to_string(), LOGIN_ATTEMPTS_PER_ACCOUNT),
+    ] {
+        match take_login_attempt(&state, &key, limit).await {
+            Ok(true) => {}
+            Ok(false) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
+            Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+        }
+    }
 
     let expected = state.get_bootstrap_token();
     let Some(expected_token) = expected else {

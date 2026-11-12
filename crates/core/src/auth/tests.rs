@@ -1314,3 +1314,48 @@ async fn rotating_addresses_cannot_bypass_the_account_budget() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn bootstrap_is_rate_limited() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("bootstrap-limit.db");
+    let store = IdentityStore::open(&db).await.unwrap();
+    let state = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let token = state.get_bootstrap_token().expect("bootstrap token");
+
+    for _ in 0..10 {
+        let res = request(
+            &state,
+            "/api/v1/auth/bootstrap",
+            "POST",
+            None,
+            Some("http://127.0.0.1:3000"),
+            None,
+            serde_json::json!({
+                "login": "admin",
+                "password": "my-secure-admin-password-1234",
+                "bootstrap_token": "wrong-token"
+            }),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    let throttled = request(
+        &state,
+        "/api/v1/auth/bootstrap",
+        "POST",
+        None,
+        Some("http://127.0.0.1:3000"),
+        None,
+        serde_json::json!({
+            "login": "admin",
+            "password": "my-secure-admin-password-1234",
+            "bootstrap_token": token
+        }),
+    )
+    .await;
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
+}

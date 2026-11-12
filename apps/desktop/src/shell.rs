@@ -54,6 +54,57 @@ pub const PAGE_SCRIPT: &str = r#"(() => {
   window.addEventListener('load', extend, { once: true });
 })();"#;
 
+/// Windows only: the window has no title bar of its own, the interface draws
+/// the minimize / maximize / close buttons in its top right corner and the top
+/// of the page (the site header) moves the window.
+pub const FRAME_SCRIPT: &str = r#"(() => {
+  if (window.top !== window || window.__aetherFrame) return;
+  window.__aetherFrame = true;
+  const post = message => window.ipc && window.ipc.postMessage(JSON.stringify(message));
+  const interactive = target => target instanceof Element && Boolean(target.closest('a, button, input, select, textarea, label, summary, [role=button], [role=menuitem], [role=slider], [contenteditable=""], [contenteditable="true"], video, #aether-frame'));
+  const draggable = event => event.button === 0 && !interactive(event.target)
+    && (event.clientY < 32 || (event.target instanceof Element && Boolean(event.target.closest('.site-header, [data-drag-region]'))));
+  window.addEventListener('mousedown', event => { if (draggable(event) && event.detail === 1) post({ type: 'window', action: 'drag' }); }, true);
+  window.addEventListener('dblclick', event => { if (draggable(event)) post({ type: 'window', action: 'toggle-maximize' }); }, true);
+  const icons = {
+    minimize: '<path d="M1 5.5h8" />',
+    'toggle-maximize': '<rect x="1.5" y="1.5" width="7" height="7" />',
+    close: '<path d="M1 1l8 8M9 1L1 9" />',
+  };
+  const install = () => {
+    if (document.getElementById('aether-frame')) return;
+    const style = document.createElement('style');
+    style.textContent = '#aether-frame{position:fixed;top:0;right:0;z-index:2147483647;display:flex;height:32px;-webkit-user-select:none;user-select:none}'
+      + '#aether-frame button{all:unset;box-sizing:border-box;width:46px;height:32px;display:grid;place-items:center;color:#eef1f8;opacity:.8;cursor:default}'
+      + '#aether-frame button:hover{background:rgba(255,255,255,.12);opacity:1}'
+      + '#aether-frame button.close:hover{background:#c42b1c}'
+      + '#aether-frame svg{width:10px;height:10px;fill:none;stroke:currentColor;stroke-width:1}'
+      + '#aether-frame[hidden]{display:none}'
+      + '.site-header .header-inner{padding-right:calc(var(--gutter,24px) + 140px)!important}';
+    document.head.appendChild(style);
+    const bar = document.createElement('div');
+    bar.id = 'aether-frame';
+    for (const [action, icon] of Object.entries(icons)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.tabIndex = -1;
+      button.setAttribute('aria-label', action === 'close' ? 'Fermer' : action === 'minimize' ? 'Réduire' : 'Agrandir ou restaurer');
+      if (action === 'close') button.className = 'close';
+      button.innerHTML = '<svg viewBox="0 0 10 10" aria-hidden="true">' + icon + '</svg>';
+      button.addEventListener('click', () => post({ type: 'window', action }));
+      bar.appendChild(button);
+    }
+    document.body.appendChild(bar);
+    // Full screen (the player's or F11) has no window buttons.
+    const sync = () => { bar.hidden = Boolean(document.fullscreenElement) || (innerWidth >= screen.width && innerHeight >= screen.height); };
+    addEventListener('resize', sync);
+    document.addEventListener('fullscreenchange', sync);
+    sync();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
+  else install();
+})();"#;
+
 /// Address of the local page. WebView2 maps a custom protocol to
 /// `http://<scheme>.localhost`; the other engines keep `<scheme>://localhost`.
 pub fn url(change: bool) -> String {
@@ -91,6 +142,17 @@ pub enum Request {
     Sso,
     /// The server cannot be reached: open what was downloaded from it.
     Offline,
+    /// A button or the top of the page, in the frameless Windows window.
+    Window(WindowAction),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum WindowAction {
+    Drag,
+    Minimize,
+    ToggleMaximize,
+    Close,
 }
 
 #[derive(Deserialize)]
@@ -110,6 +172,9 @@ enum Message {
     ToggleFullscreen,
     Sso,
     Offline,
+    Window {
+        action: WindowAction,
+    },
 }
 
 /// Reads a message posted by the page at `page_url`; `None` for anything
@@ -127,6 +192,7 @@ pub fn request(body: &str, page_url: &str) -> Option<Request> {
         Message::ToggleFullscreen => Some(Request::ToggleFullscreen),
         Message::Sso if !from_shell => Some(Request::Sso),
         Message::Sso => None,
+        Message::Window { action } => Some(Request::Window(action)),
         Message::Offline if from_shell => Some(Request::Offline),
         Message::Offline => None,
     }
@@ -261,6 +327,14 @@ mod tests {
         assert_eq!(
             request(r#"{"type":"offline"}"#, &url(false)),
             Some(Request::Offline)
+        );
+        assert_eq!(
+            request(r#"{"type":"window","action":"minimize"}"#, remote),
+            Some(Request::Window(WindowAction::Minimize))
+        );
+        assert_eq!(
+            request(r#"{"type":"window","action":"format"}"#, remote),
+            None
         );
         assert_eq!(request(r#"{"type":"run","command":"calc"}"#, remote), None);
         assert_eq!(request("not json", remote), None);

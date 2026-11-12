@@ -770,6 +770,14 @@ pub fn local_security_with_store(
                     && req.headers().get("sec-fetch-mode").is_none_or(|v| v == "navigate")
                     && req.headers().get("sec-fetch-dest").is_none_or(|v| v == "document");
 
+                // 1b. A native application opens the sign-in in the phone's browser (a Custom
+                // Tab launched by the app is a cross-site top-level navigation). It only
+                // redirects to the provider; the handler validates challenge and redirect.
+                let oidc_app_start = method == axum::http::Method::GET
+                    && req_path == "/api/v1/auth/oidc/app/start"
+                    && req.headers().get("sec-fetch-mode").is_none_or(|v| v == "navigate")
+                    && req.headers().get("sec-fetch-dest").is_none_or(|v| v == "document");
+
                 // 2. Safe top-level web navigation to frontend routes (/, /app, /app/*, /favicon*)
                 // When an end-user navigates from an external portal (like Authentik) or third-party link,
                 // browsers send sec-fetch-mode: navigate (and/or sec-fetch-dest: document).
@@ -814,6 +822,7 @@ pub fn local_security_with_store(
                     && (
                         is_top_level_navigation
                         || oidc_callback
+                        || oidc_app_start
                         || (!is_cross_site && origin_matches && (origin_header.is_none() || is_primary_origin))
                         || is_trusted_external
                     );

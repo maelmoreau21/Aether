@@ -45,6 +45,8 @@ enum UserEvent {
     Checked {
         server: String,
         result: Result<(), String>,
+        /// The server was opened right away at launch, this only confirms it.
+        startup: bool,
     },
     /// The browser came back from a single sign-on.
     SignedIn(sso::Outcome),
@@ -73,7 +75,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     // next to the executable.
     let mut context = WebContext::new(config_dir.as_ref().map(|dir| dir.join("webview")));
     let ipc = proxy.clone();
-    let builder = WebViewBuilder::new_with_web_context(&mut context)
+    let mut builder = WebViewBuilder::new_with_web_context(&mut context)
         .with_background_color(BACKGROUND)
         .with_custom_protocol(shell::SCHEME.to_owned(), |_, _| {
             Response::builder()
@@ -104,6 +106,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with_hotkeys_zoom(false)
         .with_devtools(cfg!(debug_assertions))
         .with_url(shell::url(false));
+    if cfg!(windows) {
+        builder = builder.with_initialization_script(shell::FRAME_SCRIPT);
+    }
     let webview = build_webview(platform_options(builder), &window)?;
 
     let mut app = App {
@@ -115,6 +120,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         settings,
         resting: false,
         sign_in: Arc::new(AtomicU64::new(0)),
+        launched: false,
+        closing: false,
     };
     event_loop.run(move |event, _, control_flow| {
         // Keeps the web context alive as long as the window.
@@ -132,7 +139,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 event: WindowEvent::Resized(_) | WindowEvent::Focused(_),
                 ..
             } => app.rest_when_minimized(),
-            Event::UserEvent(event) => app.handle(event),
+            Event::UserEvent(event) => {
+                app.handle(event);
+                if app.closing {
+                    app.remember_window();
+                    *control_flow = ControlFlow::Exit;
+                }
+            }
             _ => {}
         }
     });
@@ -152,8 +165,11 @@ fn window_builder(state: store::WindowState) -> WindowBuilder {
             platform::windows::{IconExtWindows, WindowBuilderExtWindows},
             window::Icon,
         };
-        // Resource 1 is the icon embedded by build.rs.
+        // Resource 1 is the icon embedded by build.rs. No system title bar:
+        // the interface draws the window buttons (`shell::FRAME_SCRIPT`).
         builder
+            .with_decorations(false)
+            .with_undecorated_shadow(true)
             .with_window_icon(Icon::from_resource(1, None).ok())
             .with_taskbar_icon(Icon::from_resource(1, None).ok())
     };
@@ -210,6 +226,10 @@ struct App {
     resting: bool,
     /// Number of the single sign-on in progress: an older one stops waiting.
     sign_in: Arc<AtomicU64>,
+    /// The saved server was already opened at launch (once per run).
+    launched: bool,
+    /// The person closed the window with its own button.
+    closing: bool,
 }
 
 impl App {
@@ -217,6 +237,14 @@ impl App {
         match event {
             UserEvent::Page(shell::Request::Ready { change }) => {
                 match self.settings.server.clone() {
+                    // First display: the saved server opens at once, without
+                    // waiting for the check; the check runs beside it and
+                    // brings the local page back when the server is gone.
+                    Some(server) if !change && !self.launched => {
+                        self.launched = true;
+                        self.open(&store::app_url(&server));
+                        self.verify_beside(server);
+                    }
                     Some(server) if !change => self.check(server),
                     server => self.show(shell::State {
                         server,
@@ -243,13 +271,36 @@ impl App {
                 self.set_fullscreen(self.window.fullscreen().is_none())
             }
             UserEvent::Page(shell::Request::Sso) => self.sign_in(),
+            UserEvent::Page(shell::Request::Window(action)) if cfg!(windows) => match action {
+                shell::WindowAction::Drag => {
+                    let _ = self.window.drag_window();
+                }
+                shell::WindowAction::Minimize => self.window.set_minimized(true),
+                shell::WindowAction::ToggleMaximize => {
+                    self.window.set_maximized(!self.window.is_maximized())
+                }
+                shell::WindowAction::Close => self.closing = true,
+            },
+            UserEvent::Page(shell::Request::Window(_)) => {}
             UserEvent::Page(shell::Request::Offline) => {
                 if let Some(server) = self.settings.server.clone() {
                     self.open(&store::downloads_url(&server));
                 }
             }
             UserEvent::SignedIn(outcome) => self.signed_in(outcome),
-            UserEvent::Checked { server, result } => match result {
+            UserEvent::Checked {
+                startup: true,
+                result: Ok(()),
+                ..
+            } => {}
+            // The server opened at launch does not answer: the local page
+            // checks it again and offers the downloads or another server.
+            UserEvent::Checked {
+                startup: true,
+                result: Err(_),
+                ..
+            } => self.open(&shell::url(false)),
+            UserEvent::Checked { server, result, .. } => match result {
                 Ok(()) => {
                     self.settings.server = Some(server.clone());
                     self.save_settings();
@@ -376,7 +427,24 @@ impl App {
         let (proxy, device) = (self.proxy.clone(), self.device.clone());
         std::thread::spawn(move || {
             let result = verify(&server, &device);
-            let _ = proxy.send_event(UserEvent::Checked { server, result });
+            let _ = proxy.send_event(UserEvent::Checked {
+                server,
+                result,
+                startup: false,
+            });
+        });
+    }
+
+    /// Checks `server` without touching what the window shows.
+    fn verify_beside(&self, server: String) {
+        let (proxy, device) = (self.proxy.clone(), self.device.clone());
+        std::thread::spawn(move || {
+            let result = verify(&server, &device);
+            let _ = proxy.send_event(UserEvent::Checked {
+                server,
+                result,
+                startup: true,
+            });
         });
     }
 

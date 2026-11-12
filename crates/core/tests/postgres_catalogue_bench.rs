@@ -50,7 +50,7 @@ async fn seed(store: &IdentityStore) {
         "INSERT INTO user_groups(id,name,is_default) VALUES('builtin-role-user','Utilisateurs',0) ON CONFLICT DO NOTHING".to_owned(),
         "INSERT INTO user_group_libraries(group_id,library_id) VALUES('builtin-role-user','lf'),('builtin-role-user','ls')".to_owned(),
         format!("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,display_title_sort,kind,external_ids_json,editorial_json,year,effective_year,added_at,has_available_asset,genres_csv) \
-            SELECT 'f'||n,'lf','f'||n,'Film '||n,'film '||n,'film '||n,'film','{{}}','{{\"plot\":\"Synopsis\",\"genres\":[\"Drame\"]}}',1950+n%75,1950+n%75,1700000000+n,1,'|Drame|' FROM generate_series(1,{FILMS}) n"),
+            SELECT 'f'||n,'lf','f'||n,'Film '||n,'film '||n,'film '||n,'film','{{}}','{{\"plot\":\"Synopsis\",\"genres\":[\"Drame\"]}}',1950+n%75,1950+n%75,1700000000+n,1,CASE WHEN n%50=0 THEN '|drame|western|' WHEN n%2=0 THEN '|drame|' ELSE '|comédie|' END FROM generate_series(1,{FILMS}) n"),
         format!("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,display_title_sort,kind,external_ids_json,year,effective_year,added_at,has_available_asset,season_count_cached,episode_count_cached) \
             SELECT 's'||n,'ls','s'||n,'Serie '||n,'serie '||n,'serie '||n,'series','{{}}',1990+n%30,1990+n%30,1700000000+n,1,2,{EPISODES_PER_SERIES} FROM generate_series(1,{SERIES}) n"),
         format!("INSERT INTO inventory_seasons(id,series_id,season_number) SELECT 's'||n||'-'||k,'s'||n,k FROM generate_series(1,{SERIES}) n, generate_series(1,2) k"),
@@ -112,7 +112,8 @@ async fn postgres_first_screens_stay_fast() {
         "/api/v1/auth/me",
         "/api/v1/catalog?scope=latest&kind=film&q=&sort=added-desc&offset=0&limit=24&count=false",
         "/api/v1/catalog?scope=latest&kind=series&q=&sort=added-desc&offset=0&limit=24&count=false",
-        "/api/v1/catalog?kind=film&q=&sort=title-asc&offset=0&limit=24&count=false&genre=Drame",
+        "/api/v1/catalog?kind=film&q=&sort=title-asc&offset=0&limit=24&count=false&genre=drame",
+        "/api/v1/catalog?kind=film&q=&sort=title-asc&offset=0&limit=24&count=false&genre=western",
         "/api/v1/catalog?kind=film&q=&sort=added-desc&offset=600&limit=30&count=false",
         "/api/v1/catalog?kind=film&q=1234&sort=title-asc&offset=0&limit=24",
         "/api/v1/catalog/f15000?episodeLimit=24&episodeOffset=0",

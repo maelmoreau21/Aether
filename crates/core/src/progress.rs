@@ -7,20 +7,43 @@ use crate::{
 
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, FromRef, Path, State},
     http::{HeaderMap, StatusCode},
-    routing::get,
+    response::{IntoResponse, Response},
+    routing::{get, post},
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 /// Longest duration (7 days, in seconds) accepted as a plausible media length.
 const MAX_DURATION_SECONDS: f64 = 604_800.0;
 
+#[derive(Clone)]
+struct ProgressState {
+    auth: AuthState,
+    commands: Arc<Mutex<HashMap<String, (String, Instant)>>>,
+}
+
+impl FromRef<ProgressState> for AuthState {
+    fn from_ref(state: &ProgressState) -> Self {
+        state.auth.clone()
+    }
+}
+
 pub fn router(auth: AuthState) -> Router {
+    let state = ProgressState {
+        auth,
+        commands: Arc::new(Mutex::new(HashMap::new())),
+    };
     Router::new()
         .route("/api/v1/admin/activity", get(activity))
+        .route("/api/v1/admin/activity/{id}/command", post(admin_command))
         .route(
             "/api/v1/account/playback/{id}",
             axum::routing::put(heartbeat).delete(stop),
@@ -32,7 +55,7 @@ pub fn router(auth: AuthState) -> Router {
             axum::http::header::CACHE_CONTROL,
             axum::http::HeaderValue::from_static("private, no-store"),
         ))
-        .with_state(auth)
+        .with_state(state)
 }
 
 #[derive(Deserialize)]
@@ -44,11 +67,12 @@ struct Heartbeat {
     paused: bool,
 }
 async fn heartbeat(
-    State(auth): State<AuthState>,
+    State(state): State<ProgressState>,
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(input): Json<Heartbeat>,
-) -> Result<StatusCode, StatusCode> {
+) -> Result<Response, StatusCode> {
+    let auth = &state.auth;
     if uuid::Uuid::parse_str(&id).is_err()
         || !input.position.is_finite()
         || !input.duration.is_finite()
@@ -59,7 +83,7 @@ async fn heartbeat(
     {
         return Err(StatusCode::BAD_REQUEST);
     }
-    authorized(&auth, &headers, &input.work_id, true).await?;
+    authorized(auth, &headers, &input.work_id, true).await?;
     let actor = auth.authenticate(&headers).await?;
     let mut tx = auth
         .store
@@ -84,28 +108,84 @@ async fn heartbeat(
     let changed=query("INSERT INTO active_playbacks(id,session_hash,work_id,position_seconds,duration_seconds,paused,updated_at) VALUES(?,?,?,?,?,?,unixepoch()) ON CONFLICT(id) DO UPDATE \
             SET work_id=excluded.work_id,position_seconds=excluded.position_seconds,duration_seconds=excluded.duration_seconds,paused=excluded.paused,updated_at=excluded.updated_at \
             WHERE active_playbacks.session_hash=excluded.session_hash")
-        .bind(id).bind(actor.token_hash).bind(input.work_id).bind(input.position).bind(input.duration).bind(if input.paused{1i64}else{0}).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
+        .bind(&id).bind(actor.token_hash).bind(input.work_id).bind(input.position).bind(input.duration).bind(if input.paused{1i64}else{0}).execute(&mut *tx).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     if changed.rows_affected() == 0 {
         return Err(StatusCode::FORBIDDEN);
     }
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(StatusCode::NO_CONTENT)
+    let command = {
+        let mut commands = state.commands.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        commands
+            .remove(&id)
+            .filter(|(_, at)| now.duration_since(*at) < Duration::from_secs(120))
+            .map(|(action, _)| action)
+    };
+    if let Some(action) = command {
+        Ok((StatusCode::OK, Json(json!({ "command": action }))).into_response())
+    } else {
+        Ok(StatusCode::NO_CONTENT.into_response())
+    }
 }
 async fn stop(
-    State(auth): State<AuthState>,
+    State(state): State<ProgressState>,
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<StatusCode, StatusCode> {
-    let actor = auth.authenticate(&headers).await?;
-    auth.require_csrf(&headers, &actor)?;
+    let actor = state.auth.authenticate(&headers).await?;
+    state.auth.require_csrf(&headers, &actor)?;
     query("DELETE FROM active_playbacks WHERE id=? AND session_hash=?")
-        .bind(id)
+        .bind(&id)
         .bind(actor.token_hash)
-        .execute(&auth.store.pool)
+        .execute(&state.auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state
+        .commands
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AdminPlaybackCommand {
+    action: String,
+}
+
+async fn admin_command(
+    State(state): State<ProgressState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<AdminPlaybackCommand>,
+) -> Result<StatusCode, StatusCode> {
+    if uuid::Uuid::parse_str(&id).is_err()
+        || !matches!(input.action.as_str(), "pause" | "play" | "stop")
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let actor = state.auth.authenticate(&headers).await?;
+    if actor.user.role != Role::Administrator {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    state.auth.require_csrf(&headers, &actor)?;
+    let exists: Option<String> = query_scalar(
+        "SELECT id FROM active_playbacks WHERE id=? AND updated_at>unixepoch()-45",
+    )
+    .bind(&id)
+    .fetch_optional(&state.auth.store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if exists.is_none() {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let mut commands = state.commands.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    commands.retain(|_, (_, at)| now.duration_since(*at) < Duration::from_secs(120));
+    commands.insert(id, (input.action, now));
     Ok(StatusCode::NO_CONTENT)
 }
 async fn activity(

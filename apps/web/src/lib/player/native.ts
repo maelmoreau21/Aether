@@ -14,6 +14,20 @@ import { pageAudio, type AudioEnhancement } from './audio-enhancement';
 import { tr } from '../i18n';
 class VideoSeekTimeoutError extends Error {}
 
+function assertSafeMediaUrl(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed.startsWith('/')) return trimmed;
+  try {
+    const parsed = new URL(trimmed, typeof location !== 'undefined' ? location.origin : 'http://localhost');
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'blob:') {
+      return trimmed;
+    }
+  } catch {
+    // Invalid URL falls through to error.
+  }
+  throw new Error(tr('source_interrupted_or_unavailable_reload_the'));
+}
+
 // Bounded source replacement; failures and recovery remain visible to the UI.
 export class NativePlayer implements Player {
   playbackInfo(): import('../statistics/collector').PlaybackInfo {
@@ -267,6 +281,7 @@ export class NativePlayer implements Player {
     const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
     const canTryProgressive = Boolean(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && ProgressiveVideo.supported(source.videoMime));
     const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
+    if (audioUrl) assertSafeMediaUrl(audioUrl);
     const createAudio = () => segmented
       ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, trackId: source.audioTrackId})
       : new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
@@ -413,7 +428,7 @@ export class NativePlayer implements Player {
         this.video.addEventListener('seeked', seeked);
         this.video.addEventListener('error', failed);
         this.lastUrl = candidateUrl;
-        this.video.src = candidateUrl;
+        this.video.src = assertSafeMediaUrl(candidateUrl);
         this.video.load();
       });
 
@@ -598,10 +613,12 @@ export class NativePlayer implements Player {
     }
     if (subtitle.assUrl && typeof OffscreenCanvas !== 'undefined' && typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined') {
       try {
-        if (subtitle.assUrl.includes('/prepared/')) await this.prepareUrl(subtitle.assUrl);
-        const { createAssRenderer } = await import('./ass-renderer');
+        const [, { createAssRenderer }] = await Promise.all([
+          subtitle.assUrl.includes('/prepared/') ? this.prepareUrl(subtitle.assUrl) : Promise.resolve(),
+          import('./ass-renderer')
+        ]);
         if (this.destroyed || revision !== this.subtitleRevision) return;
-        const renderer = await createAssRenderer(this.video, subtitle.assUrl, this.subtitleOffset);
+        const renderer = await createAssRenderer(this.video, assertSafeMediaUrl(subtitle.assUrl), this.subtitleOffset);
         if (this.destroyed || revision !== this.subtitleRevision) { await renderer.destroy(); return; }
         this.ass = renderer;
         return;
@@ -623,7 +640,7 @@ export class NativePlayer implements Player {
     track.addEventListener('error', () => this.onError(tr('failed_to_load_the_webvtt_subtitles')), { once: true });
     if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
     if (this.destroyed || revision !== this.subtitleRevision) return;
-    track.src = subtitle.url;
+    track.src = assertSafeMediaUrl(subtitle.url);
     this.video.append(track);
     track.track.mode = 'showing';
   }

@@ -3,6 +3,7 @@ import type { ControlsMenu } from './controls-format';
 import type { QualityChoice } from './transcode';
 import type { AudioEnhancement } from './audio-enhancement';
 import type { SleepChoice } from './sleep-timer';
+import type { SubtitleStyle } from './subtitle-style';
 
 export type TranscodeInfo = { height: number; kbps: number; reason: string; encoder?: string; tonemap?: string } | null;
 
@@ -17,6 +18,7 @@ export type ControlsProps = {
   /** Seconds before sleep, `'end'` at the end of this media, `null` when off. */
   sleep?: number | 'end' | null; onSleep?: (value: SleepChoice | null) => void;
   audioOffset?: number; subtitleOffset?: number; onAudioOffset?: (value: number) => void; onSubtitleOffset?: (value: number) => void;
+  subtitleStyle?: SubtitleStyle; onSubtitleStyle?: (style: SubtitleStyle) => void;
   skipBackSeconds?: number; skipForwardSeconds?: number;
   state: PlaybackState;
   media: Media;

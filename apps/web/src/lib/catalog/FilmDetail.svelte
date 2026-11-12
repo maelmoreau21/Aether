@@ -134,7 +134,7 @@
         <MediaStatistics mediaId={work.id} kind="film" />
       {:else}
         <WorkDetails {work}>
-          {#if currentSelectedMedia && !work.synthetic}{#key currentSelectedMedia.id}<ChapterImages assetId={currentSelectedMedia.id} />{/key}{/if}
+          {#if currentSelectedMedia && !work.synthetic}{#key currentSelectedMedia.id}<ChapterImages assetId={currentSelectedMedia.id} hasChapters={currentSelectedMedia.chapters ? currentSelectedMedia.chapters.length > 0 : undefined} />{/key}{/if}
         </WorkDetails>
       {/if}
     </div>

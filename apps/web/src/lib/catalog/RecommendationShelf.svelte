@@ -42,7 +42,7 @@
       <div class="recommendation"><Poster work={item} href={item.kind === 'series' ? resolve(`series/?work=${encodeURIComponent(item.id)}`) : resolve(`films/?work=${encodeURIComponent(item.id)}`)} /><small>{recommendationReasonText(item, $t)}</small></div>
     {/each}
   </MediaShelf>
-{:else if enabled}<p role="status">{$t('no_other_accessible_titles_to_suggest')}</p>{/if}
+{/if}
 {#if error}<p role="status">{error}</p>{/if}
 <style>
   .recommendation { min-width: 0; }

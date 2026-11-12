@@ -213,6 +213,54 @@
     lastPointer = { x: event.clientX, y: event.clientY };
     wake();
   }
+  function updateSubtitleStyle(next: SubtitleStyle) {
+    subtitleStyle = next;
+    engine?.setSubtitlePosition?.(subtitleLine(next));
+    savePreferences({ subtitleStyle: next });
+  }
+  let lastTouchTap: { time: number; side: 'left' | 'right' } | null = null;
+  let touchTapTimer: ReturnType<typeof setTimeout> | undefined;
+  let touchSeekTimer: ReturnType<typeof setTimeout> | undefined;
+  let touchSeekIndicator = $state<{ side: 'left' | 'right'; seconds: number } | null>(null);
+  let lastInteractionPointerType = '';
+  function toggleControlsVisibility() {
+    if (menu) { controls?.closeMenu(); wake(); }
+    else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); }
+    else wake();
+  }
+  function handleVideoClick(event: MouseEvent) {
+    if (lastInteractionPointerType !== 'touch') {
+      toggleControlsVisibility();
+      return;
+    }
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
+    const side: 'left' | 'right' | null = ratio < 0.35 ? 'left' : ratio > 0.65 ? 'right' : null;
+    const now = Date.now();
+    if (side && lastTouchTap && lastTouchTap.side === side && now - lastTouchTap.time < 320 && !busy && !error && active) {
+      clearTimeout(touchTapTimer);
+      lastTouchTap = null;
+      const delta = side === 'left' ? -skipBackSeconds : skipForwardSeconds;
+      const targetTime = Math.max(0, Math.min(playback.duration || Infinity, playback.position + delta));
+      seek(targetTime, 'seek');
+      touchSeekIndicator = { side, seconds: Math.abs(delta) };
+      clearTimeout(touchSeekTimer);
+      touchSeekTimer = setTimeout(() => { touchSeekIndicator = null; }, 700);
+      return;
+    }
+    if (side) {
+      lastTouchTap = { time: now, side };
+      clearTimeout(touchTapTimer);
+      touchTapTimer = setTimeout(() => {
+        lastTouchTap = null;
+        toggleControlsVisibility();
+      }, 260);
+    } else {
+      lastTouchTap = null;
+      toggleControlsVisibility();
+    }
+  }
   // Carte « À suivre » : au début du générique, sinon 30 s avant la fin d'un épisode long.
   const nextCardStart = $derived.by(() => {
     const duration = playback.duration;
@@ -436,7 +484,7 @@
         preview: media.preview
       };
       presence?.stop();presence=undefined;
-      if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state());
+      if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state(),cmd=>{if(cmd==='stop'){close();}else if(cmd==='pause'){engine?.pause();sync();presence?.ping();}else if(cmd==='play'){void engine?.play().then(()=>{sync();presence?.ping();}).catch(()=>{});}});
       if (syncClient) {
         await applyPartyPlayback(engine, syncClient.party?.state === 'playing'
           && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs() ? 'playing' : 'paused',
@@ -572,7 +620,7 @@
     progressTracker = undefined;
     presence?.stop();presence=undefined;
     remote.report(null, true); sendMenu = false;
-    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); clearTimeout(touchTapTimer); clearTimeout(touchSeekTimer); touchSeekIndicator = null; lastTouchTap = null; menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null; bufferedUntil = 0;
     const returnTarget = opener;
     const restoreNavigation = () => {
       if (opened || generation !== closedGeneration) return;
@@ -904,7 +952,12 @@
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}
     ><track kind="captions" /></video>
-    <button class="video-interaction" tabindex="-1" aria-label={$t('show_or_hide_controls')} onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
+    <button class="video-interaction" tabindex="-1" aria-label={$t('show_or_hide_controls')} onpointerdown={(e) => { lastInteractionPointerType = e.pointerType; }} onclick={handleVideoClick}></button>
+    {#if touchSeekIndicator}
+      <div class="touch-seek-badge" class:left={touchSeekIndicator.side === 'left'} class:right={touchSeekIndicator.side === 'right'} aria-hidden="true">
+        <span>{touchSeekIndicator.side === 'left' ? '−' : '+'}{touchSeekIndicator.seconds} s</span>
+      </div>
+    {/if}
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label={$t('back_to_home')} onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
@@ -957,7 +1010,7 @@
     {#if partyModal && active && $watchTogetherEnabled}
       <WatchPartyModal mediaId={active.workId ?? active.id} mediaTitle={active.title} onClose={() => partyModal = false} onJoinParty={partyId => startPartyFromPlayer(partyId)} />
     {/if}
-    {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
+    {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} {subtitleStyle} onSubtitleStyle={updateSubtitleStyle} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       {skipBackSeconds} {skipForwardSeconds}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
@@ -1016,6 +1069,9 @@
   video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 
   .video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; }
+  .touch-seek-badge { position: absolute; top: 50%; transform: translateY(-50%); z-index: 6; pointer-events: none; padding: 10px 18px; border-radius: var(--r-pill, 999px); background: rgb(17 21 31 / 0.82); color: #fff; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgb(0 0 0 / 0.4); }
+  .touch-seek-badge.left { left: 14%; }
+  .touch-seek-badge.right { right: 14%; }
 
   .top-bar {
     display: flex;

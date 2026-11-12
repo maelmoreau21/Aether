@@ -9,8 +9,14 @@
   import { SLEEP_MINUTES, sleepLabel } from './sleep-timer';
   import { t } from '../i18n';
   import type { ControlsProps, Menu } from './controls-props';
+  import { DEFAULT_SUBTITLE_STYLE, sanitizeSubtitleStyle, type SubtitleStyle } from './subtitle-style';
 
-  let { playback, media, catalogue, audio, subtitle, busy, menu = $bindable(), onAudio, onSubtitle, onSource, onSpeed, audioOffset, subtitleOffset, onAudioOffset, onSubtitleOffset, aspectRatio, onAspectRatio, repeat, onRepeat, onStats, quality, maxKbps, onQuality, onMaxKbps, transcode, enhancement, onEnhancement, sleep, onSleep, selectableAudio, title, closeMenu, toggleMenu }: { playback: ControlsProps['state']; media: ControlsProps['media']; catalogue: ControlsProps['catalogue']; audio: ControlsProps['audio']; subtitle: ControlsProps['subtitle']; busy: ControlsProps['busy']; menu: Menu; onAudio: ControlsProps['onAudio']; onSubtitle: ControlsProps['onSubtitle']; onSource: ControlsProps['onSource']; onSpeed: ControlsProps['onSpeed']; audioOffset: number; subtitleOffset: number; onAudioOffset: ControlsProps['onAudioOffset']; onSubtitleOffset: ControlsProps['onSubtitleOffset']; aspectRatio: NonNullable<ControlsProps['aspectRatio']>; onAspectRatio: ControlsProps['onAspectRatio']; repeat: boolean; onRepeat: ControlsProps['onRepeat']; onStats: ControlsProps['onStats']; quality: QualityChoice; maxKbps: number; onQuality: ControlsProps['onQuality']; onMaxKbps: ControlsProps['onMaxKbps']; transcode: NonNullable<ControlsProps['transcode']> | null; enhancement: AudioEnhancement; onEnhancement: ControlsProps['onEnhancement']; sleep: number | 'end' | null; onSleep: ControlsProps['onSleep']; selectableAudio: ReturnType<typeof audioChoices>; title: string; closeMenu: () => void; toggleMenu: (value: Menu) => void } = $props();
+  let { playback, media, catalogue, audio, subtitle, busy, menu = $bindable(), onAudio, onSubtitle, onSource, onSpeed, audioOffset, subtitleOffset, onAudioOffset, onSubtitleOffset, subtitleStyle, onSubtitleStyle, aspectRatio, onAspectRatio, repeat, onRepeat, onStats, quality, maxKbps, onQuality, onMaxKbps, transcode, enhancement, onEnhancement, sleep, onSleep, selectableAudio, title, closeMenu, toggleMenu }: { playback: ControlsProps['state']; media: ControlsProps['media']; catalogue: ControlsProps['catalogue']; audio: ControlsProps['audio']; subtitle: ControlsProps['subtitle']; busy: ControlsProps['busy']; menu: Menu; onAudio: ControlsProps['onAudio']; onSubtitle: ControlsProps['onSubtitle']; onSource: ControlsProps['onSource']; onSpeed: ControlsProps['onSpeed']; audioOffset: number; subtitleOffset: number; onAudioOffset: ControlsProps['onAudioOffset']; onSubtitleOffset: ControlsProps['onSubtitleOffset']; subtitleStyle?: SubtitleStyle; onSubtitleStyle?: ControlsProps['onSubtitleStyle']; aspectRatio: NonNullable<ControlsProps['aspectRatio']>; onAspectRatio: ControlsProps['onAspectRatio']; repeat: boolean; onRepeat: ControlsProps['onRepeat']; onStats: ControlsProps['onStats']; quality: QualityChoice; maxKbps: number; onQuality: ControlsProps['onQuality']; onMaxKbps: ControlsProps['onMaxKbps']; transcode: NonNullable<ControlsProps['transcode']> | null; enhancement: AudioEnhancement; onEnhancement: ControlsProps['onEnhancement']; sleep: number | 'end' | null; onSleep: ControlsProps['onSleep']; selectableAudio: ReturnType<typeof audioChoices>; title: string; closeMenu: () => void; toggleMenu: (value: Menu) => void } = $props();
+
+  const resolvedSubStyle = $derived<Required<SubtitleStyle>>({ ...DEFAULT_SUBTITLE_STYLE, ...sanitizeSubtitleStyle(subtitleStyle) });
+  function patchSubStyle<K extends keyof SubtitleStyle>(key: K, value: SubtitleStyle[K]) {
+    onSubtitleStyle?.({ ...resolvedSubStyle, [key]: value });
+  }
 
   /** Bit rate ceilings offered for remote viewing, kbit/s (0: unlimited). */
   const BITRATES = [0, 40000, 20000, 10000, 8000, 4000, 2000, 1000];
@@ -120,12 +126,14 @@
           </button>
         {/each}
       </div>
-      <button role="menuitem" tabindex="-1" disabled={busy || !source?.externalAudioUrl} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>{$t('audio_offset_action')}</button>
       <label class="offset-control">{$t('audio_offset')}
         <span class="offset-stepper">
           <button type="button" tabindex="-1" aria-label={$t('offset_earlier')} disabled={busy || !source?.externalAudioUrl} onclick={() => onAudioOffset?.(nudge(audioOffset, -0.1))}>−</button>
-          <input aria-label={$t('audio_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} onchange={(e) => onAudioOffset?.(e.currentTarget.valueAsNumber)} />
+          <input aria-label={$t('audio_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={audioOffset} disabled={busy || !source?.externalAudioUrl} oninput={(e) => { const v = e.currentTarget.valueAsNumber; if (Number.isFinite(v)) onAudioOffset?.(v); }} onchange={(e) => { const v = e.currentTarget.valueAsNumber; if (Number.isFinite(v)) onAudioOffset?.(v); }} />
           <button type="button" tabindex="-1" aria-label={$t('offset_later')} disabled={busy || !source?.externalAudioUrl} onclick={() => onAudioOffset?.(nudge(audioOffset, 0.1))}>+</button>
+          {#if audioOffset !== 0}
+            <button type="button" class="offset-reset" tabindex="-1" disabled={busy || !source?.externalAudioUrl} onclick={() => onAudioOffset?.(0)}>{$t('reset')}</button>
+          {/if}
         </span>
       </label>
       {#if !source?.externalAudioUrl}<p class="menu-note">{$t('audio_offset_separate_tracks_only')}</p>{/if}
@@ -161,14 +169,45 @@
           </button>
         {/each}
       </div>
-      <button role="menuitem" tabindex="-1" disabled={busy} onclick={() => panel?.querySelector<HTMLInputElement>('input')?.focus()}>{$t('subtitle_offset_action')}</button>
       <label class="offset-control">{$t('subtitle_offset')}
         <span class="offset-stepper">
           <button type="button" tabindex="-1" aria-label={$t('offset_earlier')} disabled={busy} onclick={() => onSubtitleOffset?.(nudge(subtitleOffset, -0.1))}>−</button>
-          <input aria-label={$t('subtitle_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} onchange={(e) => onSubtitleOffset?.(e.currentTarget.valueAsNumber)} />
+          <input aria-label={$t('subtitle_offset_seconds')} type="number" min="-30" max="30" step="0.05" value={subtitleOffset} disabled={busy} oninput={(e) => { const v = e.currentTarget.valueAsNumber; if (Number.isFinite(v)) onSubtitleOffset?.(v); }} onchange={(e) => { const v = e.currentTarget.valueAsNumber; if (Number.isFinite(v)) onSubtitleOffset?.(v); }} />
           <button type="button" tabindex="-1" aria-label={$t('offset_later')} disabled={busy} onclick={() => onSubtitleOffset?.(nudge(subtitleOffset, 0.1))}>+</button>
+          {#if subtitleOffset !== 0}
+            <button type="button" class="offset-reset" tabindex="-1" disabled={busy} onclick={() => onSubtitleOffset?.(0)}>{$t('reset')}</button>
+          {/if}
         </span>
       </label>
+      {#if onSubtitleStyle}
+        <div class="subtitle-style-panel">
+          <label class="style-row">
+            <span>{$t('font_size')}</span>
+            <select value={resolvedSubStyle.fontSize} onchange={(e) => patchSubStyle('fontSize', e.currentTarget.value as SubtitleStyle['fontSize'])}>
+              <option value="small">{$t('small')}</option>
+              <option value="medium">{$t('medium_default')}</option>
+              <option value="large">{$t('large')}</option>
+              <option value="x-large">{$t('extra_large')}</option>
+            </select>
+          </label>
+          <label class="style-row">
+            <span>{$t('text_outline_shadow')}</span>
+            <select value={resolvedSubStyle.textShadow} onchange={(e) => patchSubStyle('textShadow', e.currentTarget.value as SubtitleStyle['textShadow'])}>
+              <option value="drop-shadow">{$t('drop_shadow_default')}</option>
+              <option value="outline">{$t('strong_black_outline')}</option>
+              <option value="none">{$t('no_outline_shadow')}</option>
+            </select>
+          </label>
+          <label class="style-range">
+            <span>{$t('background_opacity', { value: resolvedSubStyle.backgroundOpacity })}</span>
+            <input type="range" min="0" max="100" step="5" value={resolvedSubStyle.backgroundOpacity} oninput={(e) => patchSubStyle('backgroundOpacity', Number(e.currentTarget.value))} />
+          </label>
+          <label class="style-range">
+            <span>{$t('subtitle_position', { value: resolvedSubStyle.position })}</span>
+            <input type="range" min="0" max="40" step="2" value={resolvedSubStyle.position} oninput={(e) => patchSubStyle('position', Number(e.currentTarget.value))} />
+          </label>
+        </div>
+      {/if}
     {:else if menu === 'video'}
       <div role="group" aria-label={$t('active_video_source')}>
         <p class="menu-section" role="presentation">{$t('active_video_track')}</p>
@@ -337,15 +376,32 @@
     width: 360px;
     max-height: min(480px, calc(100dvh - 200px));
     overflow-y: auto;
-    padding: 10px;
+    padding: 12px;
+    border: 1px solid rgb(255 255 255 / 0.09);
     border-radius: 24px;
-    background: rgb(17 21 31 / 0.92);
+    background: rgb(17 21 31 / 0.94);
     backdrop-filter: blur(24px);
     -webkit-backdrop-filter: blur(24px);
-    box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+    box-shadow: 0 20px 60px rgb(0 0 0 / 0.55);
     color: var(--tx);
     font-family: var(--font);
   }
+
+  .floating-menu button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 0;
+    background: transparent;
+    color: var(--tx);
+    font: inherit;
+    cursor: pointer;
+    transition: background-color var(--t-fast) ease, color var(--t-fast) ease, transform var(--t-fast) var(--ease);
+  }
+
+  .floating-menu button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .floating-menu button:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 
   .menu-heading {
     display: flex;
@@ -455,11 +511,9 @@
 
   .menu-separator { margin: 8px 14px; border-top: 1px solid var(--line); }
 
-  .menu-tabs { display: flex; gap: 4px; margin: 2px 0 10px; padding: 4px; border-radius: var(--r-pill); background: var(--pn); overflow-x: auto; scrollbar-width: none; }
+  .menu-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 10px; padding: 4px; border-radius: 16px; background: var(--pn); }
 
-  .menu-tabs::-webkit-scrollbar { display: none; }
-
-  .floating-menu .menu-tabs button { flex: none; width: auto; min-width: 0; justify-content: center; min-height: 34px; height: 34px; padding: 0 12px; border-radius: var(--r-pill); color: var(--mu); font-size: 13px; font-weight: 700; white-space: nowrap; }
+  .floating-menu .menu-tabs button { flex: 1 1 auto; width: auto; min-width: 0; justify-content: center; min-height: 30px; height: 30px; padding: 0 10px; border-radius: var(--r-pill); color: var(--mu); font-size: 12px; font-weight: 700; white-space: nowrap; }
 
   .floating-menu .menu-tabs button:hover:not(:disabled) { background: var(--pn-2); color: #fff; }
 
@@ -468,39 +522,113 @@
   .offset-control {
     display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px 12px;
+    margin-top: 4px;
     padding: 10px 14px;
-    border-radius: var(--r-xs);
-    background: rgb(255 255 255 / 0.03);
-    font-size: 12px;
-    color: var(--mu);
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.04);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--tx);
   }
 
   .offset-control input {
-    width: 6.5rem;
-    padding: 6px 10px;
-    border: 1px solid transparent;
-    border-radius: 12px;
+    width: 5.5rem;
+    padding: 6px 8px;
+    border: 1px solid rgb(255 255 255 / 0.08);
+    border-radius: 10px;
     background: var(--pn-2);
     color: #fff;
+    font: inherit;
     font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
   }
 
   .offset-control input:focus { outline: none; border-color: var(--ac); }
 
   .offset-stepper { display: inline-flex; align-items: center; gap: 6px; }
 
-  .offset-stepper button { min-width: 32px; min-height: 32px; padding: 0; border-radius: var(--r-pill, 999px); justify-content: center; }
+  .offset-stepper button {
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    border-radius: var(--r-pill, 999px);
+    background: rgb(255 255 255 / 0.08);
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    justify-content: center;
+  }
+
+  .offset-stepper button:hover:not(:disabled) { background: rgb(255 255 255 / 0.16); }
+
+  .offset-stepper .offset-reset {
+    width: auto;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 11.5px;
+    font-weight: 700;
+  }
+
+  .subtitle-style-panel {
+    display: grid;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgb(255 255 255 / 0.04);
+  }
+
+  .style-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--tx);
+  }
+
+  .style-row select {
+    max-width: 55%;
+    padding: 6px 10px;
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 10px;
+    background: var(--pn-2);
+    color: #fff;
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+  }
+
+  .style-range {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--mu);
+  }
+
+  .style-range input[type='range'] {
+    width: 100%;
+    accent-color: var(--ac);
+    cursor: pointer;
+  }
 
   @media (min-width: 769px) {
   .floating-menu {
         position: fixed;
-        top: 16px;
-        right: 16px;
-        bottom: 16px;
+        top: auto;
+        right: 24px;
+        bottom: 96px;
         left: auto;
         width: 380px;
-        max-height: none;
+        max-height: min(560px, calc(100dvh - 130px));
       }
 }
 

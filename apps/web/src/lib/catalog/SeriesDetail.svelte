@@ -254,7 +254,7 @@
                 <WorkTools work={episode} selectedMedia={descriptor} />
                 <button type="button" class="segment-shortcut" onclick={() => editSegments(episode, descriptor?.id ?? null)} title={$t('segment_edit_episode_hint')}><Icon name="edit" size={15} /><span>{$t('segment_edit_episode')}</span></button>
               {/if}
-              {#if descriptor && !episode.synthetic}<ChapterImages assetId={descriptor.id} />{/if}
+              {#if descriptor && !episode.synthetic}<ChapterImages assetId={descriptor.id} hasChapters={descriptor.chapters ? descriptor.chapters.length > 0 : undefined} />{/if}
             </div>
           </div>
         </article>

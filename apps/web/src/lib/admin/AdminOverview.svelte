@@ -17,6 +17,20 @@
   let sessions=$state<Activity[]>([]),activityError=$state(''),updated=$state(''),loading=$state(false);
   let artwork=$state<Record<string,Art>>({});
   let failed=$state<Record<string,number>>({});
+  let commanding=$state<Record<string,boolean>>({});
+  async function controlPlayback(playbackId:string,action:'pause'|'play'|'stop'){
+    if(commanding[playbackId])return;
+    commanding={...commanding,[playbackId]:true};
+    try{
+      await adminRequest(`/api/v1/admin/activity/${encodeURIComponent(playbackId)}/command`,{method:'POST',body:JSON.stringify({action})});
+      if(action==='stop'){sessions=sessions.filter(item=>item.playbackId!==playbackId);}
+      else{sessions=sessions.map(item=>item.playbackId===playbackId?{...item,paused:action==='pause'}:item);}
+    }catch{
+      activityError=$t('activity_unavailable_try_again');
+    }finally{
+      const next={...commanding};delete next[playbackId];commanding=next;
+    }
+  }
   const requested=new SvelteSet<string>();
   const connected=$derived(nodes.filter(node=>node.status==='connected').length);
   const offline=$derived(nodes.filter(node=>node.status==='disconnected').length);
@@ -109,6 +123,31 @@
               </span>
               <span class="avatar" aria-hidden="true">{item.name.slice(0,1).toLocaleUpperCase()}</span>
               <strong class="user">{item.name}</strong>
+              {#if item.playbackId}
+                {@const pid = item.playbackId}
+                <div class="session-actions">
+                  <button
+                    type="button"
+                    class="session-btn"
+                    disabled={!!commanding[pid]}
+                    title={item.paused ? $t('play') : $t('pause')}
+                    aria-label={item.paused ? $t('play') : $t('pause')}
+                    onclick={() => void controlPlayback(pid, item.paused ? 'play' : 'pause')}
+                  >
+                    <Icon name={item.paused ? 'play' : 'pause'} size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    class="session-btn danger"
+                    disabled={!!commanding[pid]}
+                    title={$t('stop')}
+                    aria-label={$t('stop')}
+                    onclick={() => void controlPlayback(pid, 'stop')}
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              {/if}
             </div>
           </li>
         {/each}
@@ -188,6 +227,12 @@
   .watching .state { color: var(--ac); background: var(--ac-soft); }
   .avatar { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--ac-soft); color: var(--ac); font-size: 13px; font-weight: 700; }
   .user { min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+  .session-btn { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--pn); color: var(--tx); cursor: pointer; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease, color var(--t-fast) ease; }
+  .session-btn:hover:not(:disabled) { background: var(--pn-3); border-color: var(--ac); color: #fff; }
+  .session-btn.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
+  .session-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .session-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 
   /* Technical information: always visible. */
   .tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }

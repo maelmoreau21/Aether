@@ -424,7 +424,7 @@
   {/if}
 
   <!-- Films Shelf / Grid -->
-  {#if section !== 'series' && (selectedKindFilter === 'all' || selectedKindFilter === 'film')}
+  {#if section !== 'series' && (selectedKindFilter === 'all' || selectedKindFilter === 'film') && (section !== 'search' || filteredFilms.length > 0)}
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-films-title' : undefined}>
       {#if section === 'search'}
         <div class="section-heading">
@@ -449,7 +449,7 @@
   {/if}
 
   <!-- Series Shelf / Grid -->
-  {#if section !== 'films' && (selectedKindFilter === 'all' || selectedKindFilter === 'series')}
+  {#if section !== 'films' && (selectedKindFilter === 'all' || selectedKindFilter === 'series') && (section !== 'search' || filteredSeries.length > 0)}
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-series-title' : undefined}>
       {#if section === 'search'}
         <div class="section-heading">
@@ -471,6 +471,13 @@
         {/each}
       </div>
     </section>
+  {/if}
+
+  {#if section === 'search' && filteredFilms.length === 0 && filteredSeries.length === 0 && discoverMissing.length === 0}
+    <div class="empty-media-box">
+      <Icon name="search" size={32} />
+      <p>{$t('no_results_search')}</p>
+    </div>
   {/if}
 
   <!-- Pagination -->

@@ -50,9 +50,10 @@ Les simulateurs sont ceux des Mac Apple silicon (tranches arm64 seulement).
 Pour installer sur un appareil, choisir son équipe dans Signing & Capabilities.
 
 Le workflow [`.github/workflows/apple.yml`](../../.github/workflows/apple.yml)
+(appelé par [`.github/workflows/clients.yml`](../../.github/workflows/clients.yml))
 fait la même chose sur un runner macOS et compile les deux apps sans signature
-(`CODE_SIGNING_ALLOWED=NO`, appareils et simulateurs) ; les `.app` non signées
-sont publiées comme artefact.
+(`CODE_SIGNING_ALLOWED=NO`, appareils et simulateurs) ; les `.ipa` non signés
+sont publiés comme artefact (`aether-apple`) et joints aux releases GitHub.
 
 Sans Mac, la partie Rust se vérifie dans Docker (bibliothèques statiques des
 quatre cibles Apple, sans édition de liens) :

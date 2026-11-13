@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Work } from './api';
-import { arrangeTonight, mosaicLayout, pickTonight } from './tonight';
+import { arrangeTonight, mosaicLayout, pickTonight, pickTonightFrom } from './tonight';
 
 const work = (id: string, kind: 'film' | 'series', addedAt?: number): Work => ({ id, kind, title: id, year: null, description: '', libraryId: 'lib', synthetic: false, addedAt });
 const withArt = () => true;
@@ -55,5 +55,12 @@ describe('pour ce soir', () => {
     expect(arrangeTonight(works, item => item.id === 'b').map(item => item.id)).toEqual(['b', 'a', 'c']);
     expect(arrangeTonight(works, () => false)).toBe(works);
     expect(arrangeTonight(works, () => true)).toBe(works);
+  });
+
+  it('keeps the order of a random sample, without the hero works or duplicates', () => {
+    const pool = ['x', 'h', 'b', 'x', 'c', 'd', 'e', 'f', 'g', 'i'].map(id => work(id, 'film'));
+    expect(pickTonightFrom(pool, ['h'], item => item.id !== 'b').map(item => item.id)).toEqual(['x', 'c', 'd', 'e', 'f', 'g', 'i']);
+    expect(pickTonightFrom(pool.slice(0, 5), ['h'], withArt).map(item => item.id)).toEqual(['x', 'b', 'c', 'h']);
+    expect(pickTonightFrom(pool.slice(0, 4), ['h'], withArt)).toEqual([]);
   });
 });

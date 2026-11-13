@@ -450,7 +450,7 @@ export const catalog = {
   view_release_on_github: 'Consulter la release {version} sur GitHub',
   runtime_mode: 'Mode d\'exécution',
   for_tonight: 'Pour ce soir',
-  recent_additions_from_your_libraries: 'Ajouts récents de vos bibliothèques',
+  unwatched_picks_from_your_libraries: 'À découvrir parmi ce que vous n’avez pas encore vu',
   mark_as_unwatched: 'Marquer non vu',
   mark_as_watched: 'Marquer comme vu',
   create_and_add: 'Créer et ajouter',

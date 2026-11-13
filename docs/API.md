@@ -435,6 +435,12 @@ l'autorisation de chaque accès média. Une piste non supportée reste HTTP 422
 `unsupported_track` avant la préparation.
 
 Catalogue : `sort=year-asc|year-desc|added-asc|added-desc` en plus des tris titre.
+`sort=random` : échantillon aléatoire des œuvres éligibles (mêmes filtres de droits,
+contrôle parental et facettes) ; `seed` (entier u64) facultatif rend l'ordre stable pour la
+pagination, absent il est tiré à chaque requête. Avec `sort=random` seulement,
+`minRating=0..10` ne garde que les œuvres dont la note effective (manuelle, sinon
+fournisseur) atteint ce seuil. `unwatched=true` masque les œuvres vues par l'appelant.
+Ces paramètres sont facultatifs : les requêtes existantes sont inchangées.
 `addedAt` est un timestamp Unix ou NULL si la date historique est inconnue.
 
 ## Extension Général / Réseau / profil / actualisation (19 octobre 2026)

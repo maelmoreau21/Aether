@@ -633,3 +633,106 @@ fn test_bounded_catalogue_cache_budget_and_lru_eviction() {
     assert_eq!(cache.stats().0, 0);
     assert_eq!(cache.stats().2, 0);
 }
+
+#[tokio::test]
+async fn random_catalogue_pages_vary_by_seed_and_stay_in_the_eligible_pool() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("random.sqlite"))
+        .await
+        .unwrap();
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('rnd','Random','films','local','/rnd',1)")
+        .execute(&store.pool)
+        .await
+        .unwrap();
+    for index in 0..30 {
+        // Even works are well rated; one odd work carries a malformed rating.
+        let rating = if index % 2 == 0 {
+            "8.1".to_string()
+        } else if index == 1 {
+            "\"n/a\"".to_string()
+        } else {
+            "5".to_string()
+        };
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,kind,external_ids_json,editorial_json,has_available_asset) VALUES(?,'rnd',?,?,?,'film','{}',?,1)")
+            .bind(format!("w{index:02}"))
+            .bind(format!("w{index:02}"))
+            .bind(format!("W{index:02}"))
+            .bind(format!("w{index:02}"))
+            .bind(format!("{{\"rating\":{rating}}}"))
+            .execute(&store.pool)
+            .await
+            .unwrap();
+    }
+    for sql in [
+        "INSERT INTO inventory_editions(id,work_id) SELECT id,id FROM inventory_works",
+        "INSERT INTO inventory_versions(id,edition_id) SELECT id,id FROM inventory_works",
+        "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) SELECT id,id,'rnd','/rnd' FROM inventory_works",
+        "INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) SELECT id,id,'rnd',id||'.mp4',1,'0','video/mp4','{}',1 FROM inventory_works",
+    ] {
+        query(sql).execute(&store.pool).await.unwrap();
+    }
+    let visible = ["rnd".into()];
+    let ids = |page: &serde_json::Value| -> Vec<String> {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap().to_owned())
+            .collect()
+    };
+    let page = async |seed: u64, offset: usize, min_rating: Option<f64>| {
+        let filter = CatalogueFilter {
+            seed: Some(seed),
+            min_rating,
+            ..Default::default()
+        };
+        catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "random",
+            offset,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap()
+    };
+    let first = page(1, 0, None).await;
+    assert_eq!(first["total"], 30);
+    assert_eq!(first["hasMore"], true);
+    let first = ids(&first);
+    assert_eq!(first.len(), 10);
+    assert_eq!(
+        ids(&page(1, 0, None).await),
+        first,
+        "a seed gives a stable order"
+    );
+    assert_ne!(
+        ids(&page(2, 0, None).await),
+        first,
+        "another seed, another sample"
+    );
+    let next = ids(&page(1, 10, None).await);
+    assert_eq!(next.len(), 10);
+    assert!(
+        next.iter().all(|id| !first.contains(id)),
+        "pages do not overlap"
+    );
+    let mut drawn = std::collections::HashSet::new();
+    for seed in 0..8 {
+        let rated = page(seed, 0, Some(7.0)).await;
+        assert_eq!(rated["total"], 15);
+        for id in ids(&rated) {
+            let number: u32 = id[1..].parse().unwrap();
+            assert_eq!(number % 2, 0, "{id} is not in the well-rated pool");
+            drawn.insert(id);
+        }
+    }
+    assert!(
+        drawn.len() > 10,
+        "samples cover more than one fixed top list"
+    );
+}

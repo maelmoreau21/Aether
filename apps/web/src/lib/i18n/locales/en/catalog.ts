@@ -452,7 +452,7 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   view_release_on_github: 'View release {version} on GitHub',
   runtime_mode: 'Runtime mode',
   for_tonight: 'For tonight',
-  recent_additions_from_your_libraries: 'Recent additions from your libraries',
+  unwatched_picks_from_your_libraries: 'Picked from what you have not watched yet',
   mark_as_unwatched: 'Mark as unwatched',
   mark_as_watched: 'Mark as watched',
   create_and_add: 'Create and add',

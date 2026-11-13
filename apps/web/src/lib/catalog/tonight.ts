@@ -47,12 +47,23 @@ export function pickTonight(films: Work[], series: Work[], excludedIds: string[]
     .filter(work => !seen.has(work.id) && Boolean(seen.add(work.id)))
     .sort((a, b) => (b.addedAt ?? 0) - (a.addedAt ?? 0))
     .slice(0, RECENT_WINDOW);
+  return pickTonightFrom(recent, excludedIds, hasArtwork, limit);
+}
+
+/**
+ * Sélection dans un ensemble déjà ordonné (par exemple un échantillon aléatoire d'œuvres non vues
+ * fourni par le Core) : sans doublon, hors œuvres déjà à l'affiche quand c'est possible, celles qui
+ * ont une image d'abord. Moins de quatre œuvres : aucune mosaïque.
+ */
+export function pickTonightFrom(pool: Work[], excludedIds: string[], hasArtwork: (work: Work) => boolean, limit = TONIGHT_MAX): Work[] {
+  const seen = new Set<string>();
+  const unique = pool.filter(work => !seen.has(work.id) && Boolean(seen.add(work.id)));
   const excluded = new Set(excludedIds);
-  const fresh = recent.filter(work => !excluded.has(work.id));
+  const fresh = unique.filter(work => !excluded.has(work.id));
   const ranked = [...fresh.filter(hasArtwork), ...fresh.filter(work => !hasArtwork(work))];
   const picked = ranked.slice(0, limit);
-  // Pas assez d'œuvres nouvelles : on complète avec celles de l'affiche.
-  for (const work of recent) {
+  // Pas assez d'autres œuvres : on complète avec celles de l'affiche.
+  for (const work of unique) {
     if (picked.length >= limit) break;
     if (excluded.has(work.id)) picked.push(work);
   }

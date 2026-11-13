@@ -3,7 +3,7 @@
   import { request, type Work } from './api';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
-  import { buildDiscoverPlan, shuffleWithSeed, type DiscoverSpec } from './discover';
+  import { buildDiscoverPlan, shelfSeed, shuffleWithSeed, type DiscoverSpec } from './discover';
   import { t } from '../i18n';
 
   // Fil sans fin de l'accueil : des rangées thématiques chargées au fil du défilement,
@@ -72,7 +72,8 @@
         sort: spec.sort,
         offset: '0',
         limit: String(SHELF_SIZE),
-        ...(spec.genre ? { genre: spec.genre } : {})
+        ...(spec.genre ? { genre: spec.genre } : {}),
+        ...(spec.sort === 'random' ? { seed: String(shelfSeed(seed, spec.key)) } : {})
       }), signal);
       if (signal.aborted) return true;
       const fresh = shuffleWithSeed((result.items ?? []).filter(item => item.id && !seen.has(item.id)), `${seed}:${spec.key}`);

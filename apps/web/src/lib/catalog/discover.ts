@@ -1,7 +1,7 @@
 import type { Work } from './api';
 
 import { tr, currentFormat } from '../i18n';
-export type DiscoverSort = 'added-desc' | 'added-asc' | 'year-desc' | 'year-asc' | 'title-asc';
+export type DiscoverSort = 'added-desc' | 'added-asc' | 'year-desc' | 'year-asc' | 'title-asc' | 'random';
 export type DiscoverSpec = { key: string; title: string; kind: 'film' | 'series'; sort: DiscoverSort; genre?: string };
 
 function hash(value: string): number {
@@ -11,6 +11,11 @@ function hash(value: string): number {
     result = Math.imul(result, 16777619);
   }
   return result >>> 0;
+}
+
+/** Graine numérique (32 bits) d'une rangée pour le tri `random` du Core : stable pendant une visite. */
+export function shelfSeed(seed: string, key: string): number {
+  return hash(`${seed}:${key}`);
 }
 
 /** Mélange déterministe pour une graine donnée (une visite = un ordre stable). */
@@ -39,10 +44,13 @@ function topGenres(works: Work[], seed: string, limit: number): string[] {
     }
   }
   const ranked = [...counts.values()].sort((a, b) => b.count - a.count || currentFormat().compare(a.label, b.label));
-  // Les genres les plus fréquents restent en tête, mais l'ordre varie d'une visite à l'autre.
-  const head = shuffleWithSeed(ranked.slice(0, 4), `${seed}:head`);
-  const tail = shuffleWithSeed(ranked.slice(4), `${seed}:tail`);
-  return [...head, ...tail].slice(0, limit).map(entry => entry.label);
+  // Tirage pondéré sans remise (Efraimidis-Spirakis) : un genre fréquent sort plus souvent en
+  // tête, sans qu'aucun ne soit fixé en première rangée d'une visite à l'autre.
+  return ranked
+    .map(entry => ({ entry, key: Math.pow((hash(`${seed}:${entry.label.toLowerCase()}`) + 1) / 4294967297, 1 / Math.sqrt(entry.count)) }))
+    .sort((a, b) => b.key - a.key)
+    .slice(0, limit)
+    .map(({ entry }) => entry.label);
 }
 
 /**
@@ -52,16 +60,17 @@ function topGenres(works: Work[], seed: string, limit: number): string[] {
 export function buildDiscoverPlan(works: Work[], seed: string): DiscoverSpec[] {
   const films = works.filter(work => work.kind !== 'series');
   const series = works.filter(work => work.kind === 'series');
-  const sorts: DiscoverSort[] = ['added-desc', 'year-desc', 'title-asc'];
-  const genreSpec = (kind: 'film' | 'series', genre: string, index: number): DiscoverSpec => ({
+  // Rangée de genre : échantillon aléatoire de tout le genre (tri `random` du Core), pas ses
+  // 24 premières œuvres selon un tri fixe.
+  const genreSpec = (kind: 'film' | 'series', genre: string): DiscoverSpec => ({
     key: `${kind}:genre:${genre.toLowerCase()}`,
     title: `${kind === 'film' ? tr('films') : tr('series')} · ${genre}`,
     kind,
     genre,
-    sort: sorts[(hash(`${seed}:${kind}:${genre}`) + index) % sorts.length]
+    sort: 'random'
   });
-  const filmGenres = films.length ? topGenres(films, `${seed}:film`, 12).map((genre, index) => genreSpec('film', genre, index)) : [];
-  const seriesGenres = series.length ? topGenres(series, `${seed}:series`, 12).map((genre, index) => genreSpec('series', genre, index)) : [];
+  const filmGenres = films.length ? topGenres(films, `${seed}:film`, 12).map(genre => genreSpec('film', genre)) : [];
+  const seriesGenres = series.length ? topGenres(series, `${seed}:series`, 12).map(genre => genreSpec('series', genre)) : [];
   const extras: DiscoverSpec[] = [
     ...(films.length ? [
       { key: 'film:rediscover', title: tr('films_to_rediscover'), kind: 'film', sort: 'added-asc' },

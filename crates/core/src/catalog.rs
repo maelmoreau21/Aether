@@ -91,6 +91,13 @@ pub struct CatalogQuery {
     count: Option<bool>,
     scope: Option<String>,
     locale: Option<String>,
+    /// `sort=random` only: same seed, same order (pagination); omitted, a fresh one per request.
+    seed: Option<u64>,
+    /// `sort=random` only: minimum effective rating (0-10) of the sampled works.
+    #[serde(rename = "minRating")]
+    min_rating: Option<f64>,
+    /// Hide the works the caller has watched, whatever their `hidePlayedInLatest` preference.
+    unwatched: Option<bool>,
 }
 
 fn works(available: bool) -> Vec<Work> {
@@ -218,9 +225,18 @@ pub async fn list(
         || !matches!(
             query.sort.as_deref(),
             None | Some(
-                "title-asc" | "title-desc" | "year-asc" | "year-desc" | "added-asc" | "added-desc"
+                "title-asc"
+                    | "title-desc"
+                    | "year-asc"
+                    | "year-desc"
+                    | "added-asc"
+                    | "added-desc"
+                    | "random"
             )
         )
+        || query
+            .min_rating
+            .is_some_and(|v| !(0.0..=10.0).contains(&v) || query.sort.as_deref() != Some("random"))
         || !(1..=100).contains(&limit)
         || query.q.as_ref().is_some_and(|q| q.len() > 200)
         || query.genre.as_ref().is_some_and(|v| v.len() > 100)
@@ -243,7 +259,9 @@ pub async fn list(
         && (!inventory.is_fixture_bench() || visible.0.iter().any(|id| !id.starts_with("fixture-")))
     {
         let user_id = actor.map(|v| v.0.user.id);
-        let hide_watched = if query.scope.as_deref() == Some("latest") {
+        let hide_watched = if query.unwatched == Some(true) {
+            user_id.is_some()
+        } else if query.scope.as_deref() == Some("latest") {
             if let Some(user) = &user_id {
                 let saved: Result<Option<String>, _> = crate::database::query_scalar(
                     "SELECT preferences_json FROM user_preferences WHERE user_id=?",
@@ -293,6 +311,14 @@ pub async fn list(
             codec: query.codec,
             language: query.language,
             person: query.person,
+            // Only a random page carries a seed: it is part of the page cache key.
+            seed: (query.sort.as_deref() == Some("random")).then(|| {
+                query.seed.unwrap_or_else(|| {
+                    use std::hash::BuildHasher;
+                    std::collections::hash_map::RandomState::new().hash_one(offset)
+                })
+            }),
+            min_rating: query.min_rating,
         };
         return match crate::inventory::catalogue_page(
             store,

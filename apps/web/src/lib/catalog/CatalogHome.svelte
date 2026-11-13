@@ -3,7 +3,7 @@
   import { preferenceState, DEFAULT_HOME_SECTIONS } from '../preferences';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
-  import type { Work } from './api';
+  import { request, type Work } from './api';
   import HeroBanner from '../ui/HeroBanner.svelte';
   import { newHeroSeed, pickHero } from './hero-picks';
   import MediaShelf from '../ui/MediaShelf.svelte';
@@ -11,7 +11,8 @@
   import ContinueWatching from './ContinueWatching.svelte';
   import RecommendationShelf from './RecommendationShelf.svelte';
   import TonightMosaic from './TonightMosaic.svelte';
-  import { pickTonight } from './tonight';
+  import { pickTonight, pickTonightFrom } from './tonight';
+  import { shelfSeed } from './discover';
   import DiscoverFeed from './DiscoverFeed.svelte';
   import { page } from '$app/state';
   import { t } from '../i18n';
@@ -34,12 +35,45 @@
   const heroCandidates = $derived(pickHero(films, series, hasWideArt, heroSeed));
   const activeFeatured = $derived(heroCandidates[0] ?? featured ?? allWorks[0] ?? null);
   const showHero = $derived(sections.includes('hero'));
-  const tonight = $derived(pickTonight(films, series, showHero ? heroCandidates.map(work => work.id) : [], hasArt));
-  const topRated = $derived(allWorks.filter(work => (work.rating ?? 0) >= 6).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 12));
+  const library = $derived(page.url.searchParams.get('library') ?? '');
+  // « Pour ce soir » et « Les mieux notés » : échantillons aléatoires tirés par le Core dans toute
+  // la médiathèque visible (œuvres non vues ; œuvres bien notées), nouvelle graine à chaque visite.
+  // `null` pendant le chargement ; en cas d'échec, repli sur les ajouts récents déjà chargés.
+  type Samples = { tonight: Work[] | null; rated: Work[] | null };
+  let samples = $state<Samples | null>(null);
+  $effect(() => {
+    const scope = library;
+    const controller = new AbortController();
+    samples = null;
+    void loadSamples(scope, controller.signal);
+    return () => controller.abort();
+  });
+  async function loadSamples(scope: string, signal: AbortSignal) {
+    const sample = (key: string, params: Record<string, string>) => request<{ items?: Work[] }>(`/api/v1/catalog?${new URLSearchParams({
+      ...(scope ? { library: scope } : {}), q: '', count: 'false', sort: 'random', offset: '0', seed: String(shelfSeed(String(heroSeed), key)), ...params
+    })}`, signal).then(result => result.items ?? []);
+    const [tonightSample, ratedSample] = await Promise.allSettled([
+      sample('tonight', { unwatched: 'true', limit: '24' }),
+      sample('rated', { minRating: '7', limit: '20' }).then(found => found.length >= 8 ? found : sample('rated', { minRating: '6', limit: '20' }))
+    ]);
+    if (signal.aborted) return;
+    samples = {
+      tonight: tonightSample.status === 'fulfilled' ? tonightSample.value : null,
+      rated: ratedSample.status === 'fulfilled' ? ratedSample.value : null
+    };
+  }
+  const heroIds = $derived(showHero ? heroCandidates.map(work => work.id) : []);
+  const tonight = $derived(!samples ? [] : samples.tonight ? pickTonightFrom(samples.tonight, heroIds, hasArt) : pickTonight(films, series, heroIds, hasArt));
+  const topRated = $derived.by(() => {
+    if (!samples) return [];
+    if (!samples.rated) return allWorks.filter(work => (work.rating ?? 0) >= 6).sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0)).slice(0, 12);
+    // Pas deux fois la même œuvre entre la mosaïque et la rangée.
+    const taken = new Set(tonight.map(work => work.id));
+    return samples.rated.filter(work => !taken.has(work.id)).slice(0, 12);
+  });
   let heroTint = $state<string | null>(null);
   // Œuvres déjà mises en avant plus haut : le fil sans fin ne les repropose pas.
   const shownAbove = $derived([...heroCandidates, ...tonight, ...films.slice(0, 16), ...series.slice(0, 16), ...topRated].map(work => work.id));
-  const library = $derived(page.url.searchParams.get('library') ?? '');
 </script>
 
 <div class="catalog-home">

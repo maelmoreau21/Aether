@@ -127,6 +127,12 @@ pub struct CatalogueFilter {
     pub codec: Option<String>,
     pub language: Option<String>,
     pub person: Option<String>,
+    /// Seed of the `random` sort: one seed gives one stable order (pagination), another seed
+    /// another sample. Ignored by the other sorts.
+    pub seed: Option<u64>,
+    /// `random` sort only: keep works whose effective rating (manual, else provider) is at
+    /// least this value.
+    pub min_rating: Option<f64>,
     /// Metadata locale chain of the caller. Part of the cache key through `Debug`:
     /// two languages never share a rendered page. Empty keeps the stored language.
     pub locale_chain: Vec<String>,
@@ -569,18 +575,19 @@ pub async fn catalogue_page(
         .flatten()
         .unwrap_or(0);
 
+    let random = sort == "random";
     // Watched status changes independently of inventory generation. Never reuse
-    // inventory-only cached pages for this account-owned filter.
-    if state_fp > 0
-        && !filter.bypass_cache
-        && !filter.hide_watched
+    // inventory-only cached pages for this account-owned filter. A random page is drawn
+    // afresh from the (cached) eligible pool instead of being cached itself.
+    let pool_cacheable = state_fp > 0 && !filter.bypass_cache && !filter.hide_watched;
+    let cacheable = pool_cacheable && !random;
+    if cacheable
         && let Some(lock) = CATALOGUE_CACHE.get()
         && let Ok(mut guard) = lock.lock()
         && let Some(cached_val) = guard.get(&cache_key, state_fp)
     {
         return Ok(cached_val);
     }
-    let cacheable = state_fp > 0 && !filter.bypass_cache && !filter.hide_watched;
     let flight = cacheable.then(|| cache::flight_lock(&cache_key));
     let _computing = match &flight {
         Some(lock) => Some(lock.lock().await),
@@ -731,7 +738,8 @@ pub async fn catalogue_page(
         .take_arguments()
         .map_err(sqlx::Error::Encode)?
         .unwrap_or_default();
-    let total = if exact_count {
+    // A random page counts its eligible pool itself.
+    let total = if exact_count && !random {
         Some(
             sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(count_sql), arguments)
                 .fetch_one(&store.pool)
@@ -751,11 +759,22 @@ pub async fn catalogue_page(
 
     // Phase 1: Select only matching `w.id`s ordered by the sort key using the covering index
     // (no table heap fetch or joins to libraries/media_nodes during pagination scan).
-    let mut id_builder = sqlx::QueryBuilder::<sqlx::Any>::new(if use_fts_index {
-        "SELECT w.id FROM inventory_works w INDEXED BY inventory_works_fts_sort WHERE w.library_id IN ("
-    } else {
-        "SELECT w.id FROM inventory_works w WHERE w.library_id IN ("
-    });
+    // The rating lives in the metadata JSON: read as text and parsed in Rust, so a malformed
+    // value is skipped instead of failing a PostgreSQL cast.
+    let rated = random && filter.min_rating.is_some();
+    let mut id_builder = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
+        "SELECT w.id{} FROM inventory_works w{} WHERE w.library_id IN (",
+        if rated {
+            ", CAST(COALESCE(json_extract(w.manual_json,'$.rating'),json_extract(w.editorial_json,'$.rating')) AS TEXT) AS rating"
+        } else {
+            ""
+        },
+        if use_fts_index {
+            " INDEXED BY inventory_works_fts_sort"
+        } else {
+            ""
+        }
+    ));
     let mut separated = id_builder.separated(", ");
     for lib in &valid_libs {
         separated.push_bind(lib);
@@ -776,76 +795,106 @@ pub async fn catalogue_page(
         use_fts,
     );
 
-    // Titles sort in the reader's own language when translations exist for it; otherwise the
-    // library-language title keeps its place and the index-friendly column is used as before.
-    let sort_language = match filter.locale_chain.first() {
-        Some(first) => {
-            let language = crate::metadata_locale::language_of(first);
-            let translated = query_scalar::<_, i64>(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
+    let (page_ids, total, has_more) = if random {
+        // Random shelves: the eligible ids (permission, parental and filter checks already in
+        // the SQL) come from one index scan, cached per inventory generation; the page is a
+        // seeded sample of them, so no full-table ORDER BY RANDOM() is ever run.
+        let pool_key = pool_cacheable.then(|| {
+            let shape = CatalogueFilter {
+                seed: None,
+                locale_chain: Vec::new(),
+                ..filter.clone()
+            };
+            format!(
+                "pool|{}|{:?}|{:?}|{}|{:?}",
+                store.cache_scope, visible, target_kind, search, shape
             )
-            .bind(language)
-            .fetch_one(&store.pool)
-            .await
-            .unwrap_or(0)
-                != 0;
-            translated.then_some(language)
+        });
+        let pool = random_pool(store, id_builder, filter.min_rating, pool_key, state_fp).await?;
+        let page_ids: Vec<String> = seeded_sample(
+            &pool,
+            filter.seed.unwrap_or(0),
+            offset.saturating_add(limit),
+        )
+        .into_iter()
+        .skip(offset)
+        .cloned()
+        .collect();
+        let has_more = offset.saturating_add(limit) < pool.len();
+        (page_ids, exact_count.then_some(pool.len()), has_more)
+    } else {
+        // Titles sort in the reader's own language when translations exist for it; otherwise the
+        // library-language title keeps its place and the index-friendly column is used as before.
+        let sort_language = match filter.locale_chain.first() {
+            Some(first) => {
+                let language = crate::metadata_locale::language_of(first);
+                let translated = query_scalar::<_, i64>(
+                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
+                )
+                .bind(language)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap_or(0)
+                    != 0;
+                translated.then_some(language)
+            }
+            None => None,
+        };
+        let language = sort_language;
+        match sort {
+            "title-desc" => {
+                id_builder.push("ORDER BY ");
+                push_title_key(&mut id_builder, language);
+                id_builder.push(" DESC, w.id DESC ");
+            }
+            "year-asc" => {
+                id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year ASC, ");
+                push_title_key(&mut id_builder, language);
+                id_builder.push(" ASC, w.id ASC ");
+            }
+            "year-desc" => {
+                id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year DESC, ");
+                push_title_key(&mut id_builder, language);
+                id_builder.push(" ASC, w.id ASC ");
+            }
+            "added-desc" => {
+                id_builder.push("ORDER BY w.added_at IS NULL, w.added_at DESC, ");
+                push_title_key(&mut id_builder, language);
+                id_builder.push(" ASC, w.id ASC ");
+            }
+            "added-asc" => {
+                id_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, ");
+                push_title_key(&mut id_builder, language);
+                id_builder.push(" ASC, w.id ASC ");
+            }
+            _ => {
+                id_builder.push("ORDER BY ");
+                push_title_key(&mut id_builder, language);
+                id_builder.push(" ASC, w.id ASC ");
+            }
         }
-        None => None,
+
+        id_builder.push("LIMIT ");
+        id_builder.push_bind(limit.saturating_add(usize::from(!exact_count)) as i64);
+        id_builder.push(" OFFSET ");
+        id_builder.push_bind(offset as i64);
+
+        let id_sql = crate::database::normalize_sql(id_builder.sql().as_str());
+        let id_args = id_builder
+            .build()
+            .take_arguments()
+            .map_err(sqlx::Error::Encode)?
+            .unwrap_or_default();
+        let page_ids: Vec<String> =
+            sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(id_sql), id_args)
+                .fetch_all(&store.pool)
+                .await?;
+
+        let has_more = total.map_or(page_ids.len() > limit, |total| {
+            offset.saturating_add(page_ids.len()) < total
+        });
+        (page_ids, total, has_more)
     };
-    let language = sort_language;
-    match sort {
-        "title-desc" => {
-            id_builder.push("ORDER BY ");
-            push_title_key(&mut id_builder, language);
-            id_builder.push(" DESC, w.id DESC ");
-        }
-        "year-asc" => {
-            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year ASC, ");
-            push_title_key(&mut id_builder, language);
-            id_builder.push(" ASC, w.id ASC ");
-        }
-        "year-desc" => {
-            id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year DESC, ");
-            push_title_key(&mut id_builder, language);
-            id_builder.push(" ASC, w.id ASC ");
-        }
-        "added-desc" => {
-            id_builder.push("ORDER BY w.added_at IS NULL, w.added_at DESC, ");
-            push_title_key(&mut id_builder, language);
-            id_builder.push(" ASC, w.id ASC ");
-        }
-        "added-asc" => {
-            id_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, ");
-            push_title_key(&mut id_builder, language);
-            id_builder.push(" ASC, w.id ASC ");
-        }
-        _ => {
-            id_builder.push("ORDER BY ");
-            push_title_key(&mut id_builder, language);
-            id_builder.push(" ASC, w.id ASC ");
-        }
-    }
-
-    id_builder.push("LIMIT ");
-    id_builder.push_bind(limit.saturating_add(usize::from(!exact_count)) as i64);
-    id_builder.push(" OFFSET ");
-    id_builder.push_bind(offset as i64);
-
-    let id_sql = crate::database::normalize_sql(id_builder.sql().as_str());
-    let id_args = id_builder
-        .build()
-        .take_arguments()
-        .map_err(sqlx::Error::Encode)?
-        .unwrap_or_default();
-    let page_ids: Vec<String> =
-        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(id_sql), id_args)
-            .fetch_all(&store.pool)
-            .await?;
-
-    let has_more = total.map_or(page_ids.len() > limit, |total| {
-        offset.saturating_add(page_ids.len()) < total
-    });
     let fetch_ids: Vec<&String> = page_ids.iter().take(limit).collect();
     if fetch_ids.is_empty() {
         return Ok(json!({
@@ -946,6 +995,85 @@ pub async fn catalogue_page(
     }
 
     Ok(response)
+}
+
+/// Ids eligible for a random page, from cache when the inventory has not changed.
+async fn random_pool(
+    store: &IdentityStore,
+    mut id_builder: sqlx::QueryBuilder<sqlx::Any>,
+    min_rating: Option<f64>,
+    cache_key: Option<String>,
+    state_fp: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    if let Some(key) = &cache_key
+        && let Some(lock) = CATALOGUE_CACHE.get()
+        && let Ok(mut guard) = lock.lock()
+        && let Some(Value::Array(ids)) = guard.get(key, state_fp)
+    {
+        return Ok(ids
+            .into_iter()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect());
+    }
+    let sql = crate::database::normalize_sql(id_builder.sql().as_str());
+    let args = id_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let pool: Vec<String> = if let Some(minimum) = min_rating {
+        sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), args)
+            .fetch_all(&store.pool)
+            .await?
+            .iter()
+            .filter(|row| {
+                row.try_get::<Option<String>, _>("rating")
+                    .ok()
+                    .flatten()
+                    .and_then(|text| text.trim().parse::<f64>().ok())
+                    .is_some_and(|rating| rating.is_finite() && rating >= minimum)
+            })
+            .map(|row| row.get::<String, _>("id"))
+            .collect()
+    } else {
+        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(sql), args)
+            .fetch_all(&store.pool)
+            .await?
+    };
+    if let Some(key) = cache_key {
+        let lock = CATALOGUE_CACHE
+            .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
+        if let Ok(mut guard) = lock.lock() {
+            guard.insert(key, state_fp, json!(pool));
+        }
+    }
+    Ok(pool)
+}
+
+/// Stable pseudo-random rank of an id for a seed (FNV-1a then the SplitMix64 finaliser).
+fn seeded_rank(seed: u64, id: &str) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64 ^ seed;
+    for byte in id.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash ^= hash >> 30;
+    hash = hash.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    hash ^= hash >> 27;
+    hash = hash.wrapping_mul(0x94d0_49bb_1331_11eb);
+    hash ^ (hash >> 31)
+}
+
+/// The first `count` ids of the pool in the seed's order, in O(n) without sorting the pool.
+pub(crate) fn seeded_sample(pool: &[String], seed: u64, count: usize) -> Vec<&String> {
+    let mut ranked: Vec<(u64, &String)> =
+        pool.iter().map(|id| (seeded_rank(seed, id), id)).collect();
+    if count < ranked.len() {
+        ranked.select_nth_unstable(count);
+        ranked.truncate(count);
+    }
+    ranked.sort_unstable();
+    ranked.into_iter().map(|(_, id)| id).collect()
 }
 
 pub(crate) fn sort_edition_sources_by_score(editions: &mut [Value]) {

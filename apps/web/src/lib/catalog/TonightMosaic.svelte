@@ -31,7 +31,7 @@
   <section class="tonight" aria-labelledby="tonight-title">
     <div class="head">
       <h2 id="tonight-title">{$t('for_tonight')}</h2>
-      <p>{$t('recent_additions_from_your_libraries')}</p>
+      <p>{$t('unwatched_picks_from_your_libraries')}</p>
     </div>
     <ul class="mosaic {gridClass}">
       {#each layout.tiles as tile, index (ordered[index].id)}

@@ -188,12 +188,12 @@ pub(super) fn is_safe_svg_text(text: &str) -> bool {
                 }
             }
             Ok(quick_xml::events::Event::GeneralRef(r)) => {
-                let name = std::str::from_utf8(r.as_ref()).ok();
+                let name: &str = r.as_ref();
                 let in_text = matches!(
                     stack.last().map(String::as_str),
                     Some("title" | "text" | "tspan")
                 );
-                if !in_text || !matches!(name, Some("amp" | "lt" | "gt" | "quot" | "apos")) {
+                if !in_text || !matches!(name, "amp" | "lt" | "gt" | "quot" | "apos") {
                     return false;
                 }
             }

@@ -9,6 +9,7 @@
   import LanguageLabel from './LanguageLabel.svelte';
 
   let panel: HTMLDivElement;
+  let trigger: HTMLButtonElement;
   let expanded = $state(false);
   let busy = $state(false);
   let error = $state('');
@@ -33,6 +34,11 @@
     }
   }
 
+  /** Keeps the menu below its button when the header is not at the top of the viewport (banners, scaled UI). */
+  function anchor(event: ToggleEvent) {
+    if (event.newState === 'open') panel.style.setProperty('--profile-anchor', `${Math.round(trigger.getBoundingClientRect().bottom + 8)}px`);
+  }
+
   function toggled(event: ToggleEvent) {
     expanded = event.newState === 'open';
     if (expanded) panel.querySelector<HTMLAnchorElement>('a[href]')?.focus();
@@ -55,6 +61,7 @@
 <div class="profile-access">
   <button
     class="profile-trigger"
+    bind:this={trigger}
     popovertarget="profile-menu"
     aria-label={$t('profile_menu')}
     aria-expanded={expanded}
@@ -70,6 +77,7 @@
     class="profile-popover"
     popover="auto"
     bind:this={panel}
+    onbeforetoggle={anchor}
     ontoggle={toggled}
     onfocusout={focusLeft}
   >
@@ -207,11 +215,11 @@
   }
   .profile-popover {
     position: fixed;
-    inset: 76px var(--gutter) auto auto;
+    inset: max(76px, var(--profile-anchor, 0px)) var(--gutter) auto auto;
     margin: 0;
     width: 300px;
     max-width: calc(100vw - 32px);
-    max-height: calc(100dvh - 96px);
+    max-height: calc(100dvh - max(76px, var(--profile-anchor, 0px)) - 20px);
     overflow-y: auto;
     padding: 6px;
     border: 1px solid var(--line);
@@ -393,12 +401,28 @@
     }
   }
   @media (max-width: 760px) {
+    /* Phone: wider panel and finger-sized rows instead of the compact desktop dropdown. */
     .profile-popover {
-      top: 64px;
+      top: max(64px, var(--profile-anchor, 0px));
       right: var(--gutter);
+      width: min(400px, calc(100vw - 2 * var(--gutter)));
+      max-width: none;
+      max-height: calc(100dvh - max(64px, var(--profile-anchor, 0px)) - 16px - env(safe-area-inset-bottom, 0px));
+      padding: 8px;
+      overscroll-behavior: contain;
     }
     .profile-trigger {
       padding-right: 8px;
+    }
+    .profile-entry {
+      min-height: 48px;
+      font-size: 15px;
+    }
+    .lang-pills {
+      padding: 3px;
+    }
+    .lang-pill {
+      min-height: 44px;
     }
   }
 </style>

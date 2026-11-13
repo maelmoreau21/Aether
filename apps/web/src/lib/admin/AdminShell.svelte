@@ -221,13 +221,14 @@
   .admin-header { position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 72px; padding: 10px var(--gutter); border-bottom: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
   .header-left, .header-right { display: flex; align-items: center; gap: 16px; min-width: 0; }
   .header-right { flex: none; gap: 8px; }
-  .admin-brand { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--tx); }
+  .admin-brand { display: flex; align-items: center; gap: 10px; min-width: 28px; font-size: 20px; font-weight: 800; letter-spacing: -0.03em; color: var(--tx); }
   .admin-brand svg { flex: none; }
   .admin-brand span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .header-context { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); font-size: 12px; font-weight: 700; color: var(--tx); }
   .back-link { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: var(--r-sm); font-size: 14px; font-weight: 600; color: var(--mu); transition: background-color var(--t-fast) ease, color var(--t-fast) ease; }
   .back-link:hover { color: var(--tx); background: var(--pn); }
-  .mobile-menu-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 44px; border: 0; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); font-size: 14px; font-weight: 700; max-width: 52vw; }
+  .mobile-menu-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 44px; border: 0; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); font-size: 14px; font-weight: 700; max-width: 52vw; min-width: 0; }
+  .mobile-menu-toggle :global(svg) { flex: none; }
   .mobile-menu-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .admin-dashboard-container { width: 100%; max-width: none; box-sizing: border-box; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px var(--gutter) 64px; transition: grid-template-columns var(--t-fast) ease; }
   .with-sidebar { grid-template-columns: 260px minmax(0, 1fr); }
@@ -279,6 +280,7 @@
   .admin-nav-dialog::backdrop { background: rgb(6 8 14 / 0.55); backdrop-filter: blur(4px); }
   .drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; border-bottom: 1px solid var(--line); flex: none; font-size: 18px; }
   .drawer-heading button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 14px; background: var(--pn); color: inherit; }
+  .admin-nav-dialog .sidebar-nav-item { min-height: 44px; }
   .admin-nav-dialog .sidebar-sections { padding: 20px 12px calc(24px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
   .skip-admin { position: fixed; top: -100px; left: 16px; z-index: 120; padding: 12px 16px; background: var(--btn); color: var(--btn-tx); border-radius: var(--r-sm); font-weight: 700; }
   .skip-admin:focus { top: 12px; }
@@ -287,7 +289,7 @@
   .admin-content-area :global(:where(input, select, button)) { max-width: 100%; }
   @media (min-width: 1100px) { .mobile-menu-toggle { display: none; } }
   @media (max-width: 1099px) { .header-context { display: none; } .admin-header { min-height: 64px; } }
-  @media (max-width: 640px) { .admin-header { gap: 8px; padding: 8px 16px; } .header-left { gap: 8px; } .admin-brand span, .back-link span { display: none; } .back-link { justify-content: center; width: 44px; padding: 0; } .admin-dashboard-container { padding: 16px 16px 48px; } .search-field input { font-size: 16px; } }
+  @media (max-width: 640px) { .admin-header { gap: 8px; padding: 8px 16px; } .header-left { gap: 8px; } .admin-brand span, .back-link span { display: none; } .back-link { justify-content: center; width: 44px; height: 44px; padding: 0; } .header-left { flex: 1 1 auto; } .admin-brand { flex: none; } .section-tabs { gap: 20px; } .admin-dashboard-container { padding: 16px 16px 48px; } .search-field input { font-size: 16px; } }
 
   /* La CSP interdit les attributs style : couleurs du dégradé du logo ici. */
   .logo-stop-a { stop-color: var(--logo-a); }

@@ -51,7 +51,10 @@ fn is_allowed_svg_attr(name: &str, value: &str) -> bool {
                 })
         }
         "offset" => {
-            !value.is_empty() && value.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '%'))
+            !value.is_empty()
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | '%'))
         }
         "fill" | "stroke" | "stop-color" => {
             !value.is_empty()

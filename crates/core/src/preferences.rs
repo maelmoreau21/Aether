@@ -329,21 +329,19 @@ impl Preferences {
                 .is_none_or(|v| matches!(v, "off" | "normalize" | "night"))
             && self.admin_extension_pins.as_ref().is_none_or(|pins| {
                 pins.len() <= 32
-                    && pins.iter().enumerate().all(|(index, id)| {
-                        valid_extension_id(id) && !pins[..index].contains(id)
+                    && pins
+                        .iter()
+                        .enumerate()
+                        .all(|(index, id)| valid_extension_id(id) && !pins[..index].contains(id))
+            })
+            && self.admin_extension_pin_names.as_ref().is_none_or(|names| {
+                names.len() <= 32
+                    && names.iter().all(|(id, name)| {
+                        valid_extension_id(id)
+                            && (1..=80).contains(&name.chars().count())
+                            && !name.chars().any(char::is_control)
                     })
             })
-            && self
-                .admin_extension_pin_names
-                .as_ref()
-                .is_none_or(|names| {
-                    names.len() <= 32
-                        && names.iter().all(|(id, name)| {
-                            valid_extension_id(id)
-                                && (1..=80).contains(&name.chars().count())
-                                && !name.chars().any(char::is_control)
-                        })
-                })
     }
 }
 /// A `null` value removes that preference (back to its default); every other field is validated

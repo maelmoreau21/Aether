@@ -358,13 +358,6 @@ CREATE TABLE user_groups (
     allow_media_download integer,
     CONSTRAINT user_groups_name_check CHECK (((length(name) >= 1) AND (length(name) <= 80)))
 );
-CREATE TABLE group_parental_policies (
-    group_id text PRIMARY KEY REFERENCES user_groups(id) ON DELETE CASCADE,
-    maximum_age integer NOT NULL,
-    allow_unrated integer NOT NULL,
-    blocked_tags_json text NOT NULL,
-    access_schedule_json text NOT NULL
-);
 
 
 
@@ -3150,6 +3143,16 @@ CREATE TABLE oidc_app_grants (
     expires_at BIGINT NOT NULL
 );
 CREATE INDEX oidc_app_grants_expiry ON oidc_app_grants(expires_at);
+
+-- ----- group_parental_policies -----
+-- Per-group parental rules, applied to members with no individual policy of their own.
+CREATE TABLE group_parental_policies (
+    group_id text PRIMARY KEY REFERENCES user_groups(id) ON DELETE CASCADE,
+    maximum_age integer NOT NULL,
+    allow_unrated integer NOT NULL,
+    blocked_tags_json text NOT NULL,
+    access_schedule_json text NOT NULL
+);
 
 -- ----- media_kinds -----
 -- Media types denied to a user or to every member of a group (films, series,

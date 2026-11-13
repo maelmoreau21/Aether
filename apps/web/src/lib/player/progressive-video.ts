@@ -2,8 +2,13 @@ import {bufferedAhead} from './startup-buffer';
 import {mp4TimelineOffset} from './mp4-timeline';
 import {Mp4Fragments,mp4Timescale,mp4RandomAccess} from './mp4-fragments';
 import {EncodedVideoBuffer} from './encoded-video-buffer';
+import {PlaybackFailure, type PlaybackFailureKind} from './diagnostics';
 
 import { tr } from '../i18n';
+function isMobileDevice() {
+  return typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches);
+}
+
 // A packet-copy fallback inside NativePlayer. One continuous FFmpeg response
 // avoids replacing a playing GOP with overlapping independently muxed windows.
 export class ProgressiveVideo {
@@ -16,7 +21,8 @@ export class ProgressiveVideo {
   private closed = false;
   private active = false;
   private restarting = false;
-  private retained = new EncodedVideoBuffer();
+  private maxAhead = isMobileDevice() ? 8 : 12;
+  private retained = new EncodedVideoBuffer(isMobileDevice() ? 48 * 1024 * 1024 : 128 * 1024 * 1024);
   private operation: Promise<void> = Promise.resolve();
   private rejectOpen?: (error: Error) => void;
   private opened: Promise<void>;
@@ -25,14 +31,17 @@ export class ProgressiveVideo {
   private failed?: Error;
   /** What the Node reported about the stream (fallback transcoding). */
   headers: { encoder?: string; tonemap?: string } = {};
-  constructor(private video: HTMLVideoElement,private prefix: string,private duration: number,private mime: string,private onError: (message: string)=>void) {
+  constructor(private video: HTMLVideoElement,private prefix: string,private duration: number,private mime: string,private onError: (message: string, kind?: PlaybackFailureKind)=>void) {
     void this.failure.catch(()=>{});
     this.opened = new Promise<void>((resolve,reject)=>{
       this.rejectOpen=reject;
       this.source.addEventListener('sourceopen',()=>{
         if(this.closed)return;
         try {this.buffer=this.source.addSourceBuffer(this.mime);this.source.duration=this.duration;resolve();}
-        catch(error){reject(error);}
+        catch(error){
+          const message=error instanceof Error?error.message:String(error);
+          reject(new PlaybackFailure('codec',message));
+        }
       },{once:true});
     });
     void this.opened.catch(()=>{});
@@ -62,15 +71,15 @@ export class ProgressiveVideo {
     const buffer=this.buffer;
     return new Promise<void>((resolve,reject)=>{
       const finish=(error?:Error)=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);signal.removeEventListener('abort',abort);if(error)reject(error);else resolve();};
-      const done=()=>finish(),fail=()=>finish(new Error(tr('av1_fragment_rejected_by_the_browser'))),abort=()=>finish(new Error(tr('video_playback_cancelled')));
+      const done=()=>finish(),fail=()=>finish(new PlaybackFailure('codec',tr('av1_fragment_rejected_by_the_browser'))),abort=()=>finish(new Error(tr('video_playback_cancelled')));
       buffer.addEventListener('updateend',done,{once:true});buffer.addEventListener('error',fail,{once:true});buffer.addEventListener('abort',fail,{once:true});signal.addEventListener('abort',abort,{once:true});
     });
   }
   private capacity(signal: AbortSignal) {
-    if(bufferedAhead(this.video)<=12)return Promise.resolve();
+    if(bufferedAhead(this.video)<=this.maxAhead)return Promise.resolve();
     return new Promise<void>((resolve,reject)=>{
       const finish=(error?:Error)=>{clearInterval(timer);this.video.removeEventListener('timeupdate',check);this.video.removeEventListener('seeking',check);signal.removeEventListener('abort',abort);if(error)reject(error);else resolve();};
-      const check=()=>{if(bufferedAhead(this.video)<=12)finish();},abort=()=>finish(new Error(tr('video_playback_cancelled')));
+      const check=()=>{if(bufferedAhead(this.video)<=this.maxAhead)finish();},abort=()=>finish(new Error(tr('video_playback_cancelled')));
       const timer=setInterval(check,200);this.video.addEventListener('timeupdate',check);this.video.addEventListener('seeking',check);signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();else check();
     });
   }
@@ -128,19 +137,39 @@ export class ProgressiveVideo {
       });
       const append=async(bytes:Uint8Array)=>this.exclusive(async()=>{
         if(!current()||!this.buffer)return;await this.idle(signal);if(!current())return;
-        const past=raps.filter(rap=>rap.time>0 && rap.time<=this.video.currentTime-20).at(-1);
-        if(past!==undefined && this.buffer.buffered.length && this.buffer.buffered.start(0)<past.time){this.buffer.remove(0,past.time);await this.idle(signal);if(!current())return;this.retained.evictedBefore(past.start);raps=raps.filter(rap=>rap.time>=past.time);}
+        const evictBefore = async (marginSeconds: number) => {
+          const past=raps.filter(rap=>rap.time>0 && rap.time<=this.video.currentTime-marginSeconds).at(-1);
+          if(past!==undefined && this.buffer!.buffered.length && this.buffer!.buffered.start(0)<past.time){
+            this.buffer!.remove(0,past.time);await this.idle(signal);if(!current())return;
+            this.retained.evictedBefore(past.start);raps=raps.filter(rap=>rap.time>=past.time);
+          } else if (marginSeconds <= 2 && this.buffer!.buffered.length) {
+            const cut = Math.max(0, this.video.currentTime - marginSeconds);
+            if (this.buffer!.buffered.start(0) < cut) {
+              this.buffer!.remove(0, cut);await this.idle(signal);
+              if(current())raps=raps.filter(rap=>rap.time>cut);
+            }
+          }
+        };
+        await evictBefore(20);
+        if(!current()||!this.buffer)return;
         this.retained.append(bytes.byteLength,received);
-        this.buffer.appendBuffer(bytes as Uint8Array<ArrayBuffer>);await this.idle(signal);
+        try {
+          this.buffer.appendBuffer(bytes as Uint8Array<ArrayBuffer>);await this.idle(signal);
+        } catch (appendErr) {
+          if (!(appendErr instanceof DOMException && appendErr.name === 'QuotaExceededError')) throw appendErr;
+          await evictBefore(2);
+          if(!current()||!this.buffer)return;
+          this.buffer.appendBuffer(bytes as Uint8Array<ArrayBuffer>);await this.idle(signal);
+        }
       });
       try {
         while(current()){
           await this.capacity(signal);if(!current())return;
           const {done,value}=await reader.read();if(done)break;
           // Fetch implementations can coalesce network blocks. Feed MSE at most
-          // 64 KiB at a time; only moov/moof indexes retain bounded extra bytes.
-          for(let at=0;at<value.byteLength;at+=65536){
-            if(!current())return;const part=value.subarray(at,Math.min(value.byteLength,at+65536));received+=part.byteLength;index.push(part);
+          // 512 KiB at a time to balance responsiveness and SourceBuffer overhead.
+          for(let at=0;at<value.byteLength;at+=524288){
+            if(!current())return;const part=value.subarray(at,Math.min(value.byteLength,at+524288));received+=part.byteLength;index.push(part);
             if(!appended){
               if(prefix.byteLength+part.byteLength>1024*1024)throw new Error(tr('video_initialisation_larger_than_1_mib'));
               const joined=new Uint8Array(prefix.byteLength+part.byteLength);joined.set(prefix);joined.set(part,prefix.byteLength);prefix=joined;
@@ -158,7 +187,7 @@ export class ProgressiveVideo {
       }finally{if(!complete||!current())await reader.cancel().catch(()=>{});reader.releaseLock();}
     };
     void run().catch(error=>{
-      if(!current())return;const failure=error instanceof Error?error:new Error(String(error));this.failed=failure;this.rejectFailure(failure);controller.abort();if(this.active)this.onError(failure.message);
+      if(!current())return;const failure=error instanceof Error?error:new Error(String(error));this.failed=failure;this.rejectFailure(failure);controller.abort();if(this.active)this.onError(failure.message, failure instanceof PlaybackFailure ? failure.kind : undefined);
     });
     try { await Promise.race([first,this.failure]); }
     finally { signal.removeEventListener('abort',cancelled); }

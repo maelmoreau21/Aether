@@ -131,7 +131,8 @@ async fn list(State(state): State<AuthState>, headers: HeaderMap) -> Response {
     let current = state.authenticate(&headers).await.ok();
     let mut accounts = Vec::new();
     if let Some(identity) = &current {
-        accounts.push(json!({"user": identity.user, "current": true}));
+        let has_pin = crate::profiles::has_pin(&state, &identity.user.id).await;
+        accounts.push(json!({"user": identity.user, "current": true, "hasPin": has_pin}));
         if identity.bearer {
             return Json(json!({"accounts": accounts, "max": 1})).into_response();
         }
@@ -151,7 +152,8 @@ async fn list(State(state): State<AuthState>, headers: HeaderMap) -> Response {
         .bind(hash(&token))
         .execute(&state.store.pool)
         .await;
-        accounts.push(json!({"user": user, "current": false}));
+        let has_pin = crate::profiles::has_pin(&state, &user.id).await;
+        accounts.push(json!({"user": user, "current": false, "hasPin": has_pin}));
         tokens.push(token);
     }
     let mut response = Json(json!({"accounts": accounts, "max": MAX_PARKED + 1})).into_response();
@@ -193,6 +195,9 @@ async fn park(State(state): State<AuthState>, headers: HeaderMap) -> Response {
 struct Target {
     #[serde(rename = "userId")]
     user_id: String,
+    /// Short PIN of the chosen account, when it has one (`switch` only).
+    #[serde(default)]
+    pin: Option<String>,
 }
 
 /// Makes a parked account the active one; the account that was active, if
@@ -215,6 +220,12 @@ async fn switch(
     let Some(position) = others.iter().position(|(_, u)| u.id == target.user_id) else {
         return failure(StatusCode::NOT_FOUND, "account_not_found");
     };
+    // The chosen session already stands; on a shared device its PIN stands in for the password.
+    if let Err(refused) =
+        crate::profiles::check_switch_pin(&state, &target.user_id, target.pin.clone()).await
+    {
+        return refused.into_response();
+    }
     let mut tokens: Vec<String> = others.into_iter().map(|(token, _)| token).collect();
     let chosen = tokens.remove(position);
     if current.is_some()

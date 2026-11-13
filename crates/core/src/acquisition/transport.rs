@@ -195,8 +195,8 @@ pub async fn request(
 
 /// Artwork hosts the interface may show for titles that are not in the library yet.
 /// The host is fixed here and the path is validated by the caller: no URL is client input.
-const IMAGE_HOSTS: [&str; 2] = ["image.tmdb.org", "artworks.thetvdb.com"];
-static IMAGE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+const IMAGE_HOSTS: [&str; 3] = ["image.tmdb.org", "artworks.thetvdb.com", "thetvdb.com"];
+static IMAGE_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(32);
 
 /// Unlike an administrator-configured connection, a public host must never resolve to a
 /// private, loopback or link-local address (DNS rebinding towards the local network).
@@ -238,9 +238,10 @@ pub async fn public_image(host: &str, path: &str) -> Result<(Vec<u8>, &'static s
     {
         return Err(err(StatusCode::FORBIDDEN, "connection_path_forbidden"));
     }
-    let _slot = IMAGE_SLOTS
-        .try_acquire()
-        .map_err(|_| err(StatusCode::TOO_MANY_REQUESTS, "image_busy"))?;
+    let _slot = tokio::time::timeout(Duration::from_secs(10), IMAGE_SLOTS.acquire())
+        .await
+        .map_err(|_| err(StatusCode::TOO_MANY_REQUESTS, "image_busy"))?
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "semaphore_closed"))?;
     let resolved =
         tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((host, 443)))
             .await

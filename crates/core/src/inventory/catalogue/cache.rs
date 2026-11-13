@@ -133,3 +133,26 @@ pub fn catalogue_cache_stats() -> (usize, usize, usize) {
         (0, 0, 0)
     }
 }
+
+/// One computation per cache key at a time: when a page is missing (start-up, after a scan
+/// changed the inventory), concurrent viewers wait for the first one instead of all running
+/// the same catalogue queries at once.
+static IN_FLIGHT: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+> = std::sync::OnceLock::new();
+
+pub(super) fn flight_lock(key: &str) -> std::sync::Arc<tokio::sync::Mutex<()>> {
+    let map = IN_FLIGHT.get_or_init(Default::default);
+    let mut map = map
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(lock) = map.get(key).and_then(std::sync::Weak::upgrade) {
+        return lock;
+    }
+    if map.len() >= 1024 {
+        map.retain(|_, lock| lock.strong_count() > 0);
+    }
+    let lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    map.insert(key.to_owned(), std::sync::Arc::downgrade(&lock));
+    lock
+}

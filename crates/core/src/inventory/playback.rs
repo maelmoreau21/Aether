@@ -153,55 +153,7 @@ async fn descriptor_for_asset(
         };
 
     // Resolve all available sibling copies across multi-location folders and consolidated work groups
-    let sibling_rows = if initial_work_kind == "episode" {
-        query(
-            "SELECT a.id AS asset_id, a.mime, a.library_id, a.size AS size, a.probe_json AS probe_json, fp.fingerprint AS fingerprint, l.node_id, w.id AS work_id \
-             FROM inventory_episodes ep_orig \
-             JOIN inventory_seasons s_orig ON s_orig.id=ep_orig.season_id \
-             JOIN inventory_seasons s_cand ON s_cand.season_number=s_orig.season_number \
-                  AND (s_cand.series_id=s_orig.series_id OR s_cand.series_id IN ( \
-                      SELECT m2.work_id FROM media_group_members m1 \
-                      JOIN media_group_members m2 ON m2.group_id=m1.group_id \
-                      WHERE m1.work_id=s_orig.series_id \
-                  )) \
-             JOIN inventory_episodes ep_cand ON ep_cand.season_id=s_cand.id AND ep_cand.episode_number=ep_orig.episode_number \
-             JOIN inventory_editions e ON e.work_id=ep_cand.work_id \
-             JOIN inventory_versions v ON v.edition_id=e.id \
-             JOIN inventory_sources s ON s.version_id=v.id \
-             JOIN inventory_assets a ON a.source_id=s.id \
-             LEFT JOIN inventory_asset_fingerprints fp ON fp.asset_id=a.id \
-             JOIN inventory_works w ON w.id=e.work_id \
-             JOIN libraries l ON l.id=s.library_id \
-             JOIN media_nodes n ON n.id=l.node_id \
-             WHERE ep_orig.work_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
-        )
-        .bind(&initial_work_id)
-        .fetch_all(&store.pool)
-        .await
-        .unwrap_or_default()
-    } else {
-        query(
-            "SELECT a.id AS asset_id, a.mime, a.library_id, a.size AS size, a.probe_json AS probe_json, fp.fingerprint AS fingerprint, l.node_id, w.id AS work_id \
-             FROM inventory_editions e \
-             JOIN inventory_versions v ON v.edition_id=e.id \
-             JOIN inventory_sources s ON s.version_id=v.id \
-             JOIN inventory_assets a ON a.source_id=s.id \
-             LEFT JOIN inventory_asset_fingerprints fp ON fp.asset_id=a.id \
-             JOIN inventory_works w ON w.id=e.work_id \
-             JOIN libraries l ON l.id=s.library_id \
-             JOIN media_nodes n ON n.id=l.node_id \
-             WHERE (e.work_id=? OR e.work_id IN ( \
-                 SELECT m2.work_id FROM media_group_members m1 \
-                 JOIN media_group_members m2 ON m2.group_id=m1.group_id \
-                 WHERE m1.work_id=? \
-             )) AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1",
-        )
-        .bind(&initial_work_id)
-        .bind(&initial_work_id)
-        .fetch_all(&store.pool)
-        .await
-        .unwrap_or_default()
-    };
+    let sibling_rows = sibling_copies(store, &initial_work_id, &initial_work_kind).await;
 
     // Facts about the copy the viewer asked for, used to decide which other copies may stand in
     // for it. A copy is a candidate only when it is provably the same content (see `equivalence`).
@@ -1092,6 +1044,80 @@ pub(crate) fn valid_chapters(chapters: &[Value], duration: Option<f64>) -> Vec<(
         .collect();
     valid.sort_by(|left, right| left.0.total_cmp(&right.0));
     valid
+}
+
+/// The work itself and the other members of its consolidated groups.
+async fn group_members(store: &IdentityStore, work_id: &str) -> Vec<String> {
+    let mut ids = vec![work_id.to_owned()];
+    let others: Vec<String> = query_scalar(
+        "SELECT DISTINCT m2.work_id FROM media_group_members m1          JOIN media_group_members m2 ON m2.group_id=m1.group_id          WHERE m1.work_id=? AND m2.work_id<>?",
+    )
+    .bind(work_id)
+    .bind(work_id)
+    .fetch_all(&store.pool)
+    .await
+    .unwrap_or_default();
+    ids.extend(others);
+    ids
+}
+
+/// Every available copy of a film, or of the same episode across consolidated series.
+///
+/// The work ids are resolved first and passed as a literal list: with `work_id=? OR work_id
+/// IN (subquery)` PostgreSQL scans every edition of the catalogue (tens of milliseconds at
+/// 50 000 works, on each player start) instead of following the indexes.
+async fn sibling_copies(
+    store: &IdentityStore,
+    work_id: &str,
+    kind: &str,
+) -> Vec<sqlx::any::AnyRow> {
+    const COPY_COLUMNS: &str = "SELECT a.id AS asset_id, a.mime, a.library_id, a.size AS size,         a.probe_json AS probe_json, fp.fingerprint AS fingerprint, l.node_id, w.id AS work_id ";
+    const COPY_JOINS: &str = "JOIN inventory_editions e ON e.work_id=ep_cand.work_id ";
+    const COPY_TAIL: &str = "JOIN inventory_versions v ON v.edition_id=e.id         JOIN inventory_sources s ON s.version_id=v.id         JOIN inventory_assets a ON a.source_id=s.id         LEFT JOIN inventory_asset_fingerprints fp ON fp.asset_id=a.id         JOIN inventory_works w ON w.id=e.work_id         JOIN libraries l ON l.id=s.library_id         JOIN media_nodes n ON n.id=l.node_id         WHERE a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series')         AND n.status != 'revoked' AND l.enabled=1 ";
+    let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(COPY_COLUMNS);
+    if kind == "episode" {
+        let position: Option<(String, i64, i64)> = query_as(
+            "SELECT s.series_id, CAST(s.season_number AS BIGINT), CAST(ep.episode_number AS BIGINT)              FROM inventory_episodes ep JOIN inventory_seasons s ON s.id=ep.season_id WHERE ep.work_id=?",
+        )
+        .bind(work_id)
+        .fetch_optional(&store.pool)
+        .await
+        .ok()
+        .flatten();
+        let Some((series_id, season, episode)) = position else {
+            return Vec::new();
+        };
+        builder.push(
+            "FROM inventory_seasons s_cand              JOIN inventory_episodes ep_cand ON ep_cand.season_id=s_cand.id ",
+        );
+        builder.push(COPY_JOINS).push(COPY_TAIL);
+        builder.push("AND s_cand.season_number=").push_bind(season);
+        builder
+            .push(" AND ep_cand.episode_number=")
+            .push_bind(episode);
+        builder.push(" AND s_cand.series_id IN (");
+        let mut ids = builder.separated(", ");
+        for id in group_members(store, &series_id).await {
+            ids.push_bind(id);
+        }
+        ids.push_unseparated(")");
+    } else {
+        builder.push("FROM inventory_editions e ").push(COPY_TAIL);
+        builder.push("AND e.work_id IN (");
+        let mut ids = builder.separated(", ");
+        for id in group_members(store, work_id).await {
+            ids.push_bind(id);
+        }
+        ids.push_unseparated(")");
+    }
+    let sql = crate::database::normalize_sql(builder.sql().as_str());
+    let Ok(arguments) = sqlx::Execute::take_arguments(&mut builder.build()) else {
+        return Vec::new();
+    };
+    sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), arguments.unwrap_or_default())
+        .fetch_all(&store.pool)
+        .await
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

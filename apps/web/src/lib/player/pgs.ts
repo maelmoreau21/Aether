@@ -36,6 +36,7 @@ export function parsePgs(bytes: Uint8Array): DisplaySet[] {
   const sets: DisplaySet[] = [];
   let palettes = new Map<number, Uint32Array>();
   let objects = new Map<number, PgsObject>();
+  let objectsShared = false;
   const partial = new Map<number, { width: number; height: number; chunks: Uint8Array[]; length: number }>();
   let pending: { time: number; width: number; height: number; paletteId: number; compositions: PgsComposition[] } | undefined;
   let offset = 0;
@@ -52,7 +53,7 @@ export function parsePgs(bytes: Uint8Array): DisplaySet[] {
     if (type === PCS && size >= 11) {
       const state = at(7);
       // Epoch start: earlier palettes and objects no longer exist.
-      if (state & 0x80) { palettes = new Map(); objects = new Map(); partial.clear(); }
+      if (state & 0x80) { palettes = new Map(); objects = new Map(); objectsShared = false; partial.clear(); }
       const count = at(10);
       const compositions: PgsComposition[] = [];
       let cursor = 11;
@@ -93,11 +94,13 @@ export function parsePgs(bytes: Uint8Array): DisplaySet[] {
           const joined = new Uint8Array(object.length);
           let position = 0;
           for (const chunk of object.chunks) { joined.set(chunk, position); position += chunk.length; }
-          objects = new Map(objects).set(id, { width: object.width, height: object.height, data: joined });
+          if (objectsShared) { objects = new Map(objects); objectsShared = false; }
+          objects.set(id, { width: object.width, height: object.height, data: joined });
           partial.delete(id);
         }
       }
     } else if (type === END && pending) {
+      objectsShared = true;
       sets.push({
         time: pending.time, width: pending.width, height: pending.height,
         palette: palettes.get(pending.paletteId) ?? new Uint32Array(256),
@@ -187,8 +190,8 @@ export class PgsRenderer {
     this.loop();
   }
 
-  static async create(video: HTMLVideoElement, url: string, offset: number): Promise<PgsRenderer> {
-    const response = await fetch(url, { credentials: 'same-origin' });
+  static async create(video: HTMLVideoElement, url: string, offset: number, signal?: AbortSignal): Promise<PgsRenderer> {
+    const response = await fetch(url, { credentials: 'same-origin', signal });
     if (!response.ok) throw new Error(tr('pgs_subtitles_unavailable'));
     const sets = parsePgs(new Uint8Array(await response.arrayBuffer()));
     if (!sets.length) throw new Error(tr('pgs_subtitles_unavailable'));
@@ -203,13 +206,18 @@ export class PgsRenderer {
     });
   }
 
-  private schedule = () => { this.draw(); };
+  private schedule = () => {
+    this.draw();
+    if (!this.video.paused && this.frame === undefined) this.loop();
+  };
 
   private loop() {
     if (this.disposed) return;
+    this.frame = undefined;
     this.draw();
+    if (this.video.paused) return;
     const video = this.video as HTMLVideoElement & { requestVideoFrameCallback?: (callback: () => void) => number };
-    if (!this.video.paused && video.requestVideoFrameCallback) this.frame = video.requestVideoFrameCallback(() => this.loop());
+    if (video.requestVideoFrameCallback) this.frame = video.requestVideoFrameCallback(() => this.loop());
     else this.frame = requestAnimationFrame(() => this.loop());
   }
 

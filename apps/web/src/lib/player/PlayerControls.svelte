@@ -35,6 +35,7 @@
     onSpeed,
     onFullscreen,
     audioOffset = 0, subtitleOffset = 0, onAudioOffset, onSubtitleOffset,
+    subtitleStyle, onSubtitleStyle,
     aspectRatio = 'contain', onAspectRatio, repeat = false, onRepeat, onStats,
     skipBackSeconds = 10, skipForwardSeconds = 10,
     onWake,
@@ -159,7 +160,7 @@
 
 </script>
 <div class="player-controls" class:concealed={!visible} inert={!visible}>
-  <ControlsMenu bind:this={menuView} {playback} {media} {catalogue} {audio} {subtitle} {busy} bind:menu {onAudio} {onSubtitle} {onSource} {onSpeed} {audioOffset} {subtitleOffset} {onAudioOffset} {onSubtitleOffset} {aspectRatio} {onAspectRatio} {repeat} {onRepeat} {onStats} {quality} {maxKbps} {onQuality} {onMaxKbps} {transcode} {enhancement} {onEnhancement} {sleep} {onSleep} {selectableAudio} {title} {closeMenu} {toggleMenu} />
+  <ControlsMenu bind:this={menuView} {playback} {media} {catalogue} {audio} {subtitle} {busy} bind:menu {onAudio} {onSubtitle} {onSource} {onSpeed} {audioOffset} {subtitleOffset} {onAudioOffset} {onSubtitleOffset} {subtitleStyle} {onSubtitleStyle} {aspectRatio} {onAspectRatio} {repeat} {onRepeat} {onStats} {quality} {maxKbps} {onQuality} {onMaxKbps} {transcode} {enhancement} {onEnhancement} {sleep} {onSleep} {selectableAudio} {title} {closeMenu} {toggleMenu} />
   <!-- Barre de lecture : tronçons de chapitres séparés par un fin espace, aperçu au survol. -->
   <div
     class="timeline"

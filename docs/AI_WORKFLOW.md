@@ -33,9 +33,8 @@ Ce document décrit une méthode de collaboration, pas une nouvelle tâche à ex
 ## Contexte et outils
 
 - Commun à tous : AGENTS.md, état Git et code concerné.
-- Claude Code : CLAUDE.md ; commandes natives si rtk est absent.
-- Design : .claude/skills/aether-halo/SKILL.md et docs/UI_DIRECTION.md.
-- Mémoire : .ai/MEMORY.md seulement pour retrouver une décision pertinente ; docs/archive/ pour contexte historique sur demande.
+- Design : docs/UI_DIRECTION.md et styles dans apps/web/src/lib/styles/.
+- Historique : docs/archive/ uniquement pour retrouver un contexte passé sur demande.
 - Tests : préférer les commandes locales pertinentes ; distinguer tests synthétiques, système, navigateur et matériel physique.
 
 ## Livrable

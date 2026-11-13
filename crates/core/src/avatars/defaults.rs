@@ -6,29 +6,37 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 
+use std::path::{Path, PathBuf};
+
 static INITIALIZATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 const PACK: &str = "native-orbits";
 pub(crate) const FALLBACK_PACK: &str = "native-orbits-fallback";
 const PALETTE: [(&str, &str, &str); 12] = [
     ("Aurore", "#272E50", "#D5C8F8"),
-    ("Comète", "#34324B", "#E8BCD1"),
+    ("ComÃ¨te", "#34324B", "#E8BCD1"),
     ("Orbite", "#163F45", "#A7DFD5"),
     ("Nova", "#4B3044", "#F3BFA7"),
-    ("Éclipse", "#263B56", "#B3D4F5"),
+    ("Ã‰clipse", "#263B56", "#B3D4F5"),
     ("Halo", "#45402A", "#F0D98E"),
     ("Cosmos", "#34304D", "#C3B5EA"),
     ("Brume", "#304145", "#BFDBD8"),
     ("Solstice", "#4B3430", "#E8BE93"),
     ("Lune", "#343E50", "#CDD9EF"),
-    ("Zénith", "#343E32", "#CADDA9"),
+    ("ZÃ©nith", "#343E32", "#CADDA9"),
     ("Astral", "#44384D", "#DDBAE8"),
 ];
+
+#[derive(Clone, Copy)]
+enum AvatarSource {
+    Embedded(&'static [u8]),
+    External(&'static str),
+}
 
 struct BuiltinAvatar {
     id: &'static str,
     name: &'static str,
     mime: &'static str,
-    bytes: &'static [u8],
+    source: AvatarSource,
 }
 
 struct BuiltinPack {
@@ -46,49 +54,49 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
                 id: "native-abysses-axolotl",
                 name: "Axolotl",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Axolotl.png"),
+                source: AvatarSource::External("abysses/Axolotl.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-baleine",
                 name: "Baleine",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Baleine.png"),
+                source: AvatarSource::External("abysses/Baleine.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-crabe-corail",
                 name: "Crabe Corail",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Crabe_Corail.png"),
+                source: AvatarSource::External("abysses/Crabe_Corail.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-crevette-lumineuse",
                 name: "Crevette Lumineuse",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Crevette_Lumineuse.png"),
+                source: AvatarSource::External("abysses/Crevette_Lumineuse.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-meduse",
-                name: "Méduse",
+                name: "MÃ©duse",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Meduse.png"),
+                source: AvatarSource::External("abysses/Meduse.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-pieuvre-perlee",
-                name: "Pieuvre Perlée",
+                name: "Pieuvre PerlÃ©e",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Pieuvre_Perlee.png"),
+                source: AvatarSource::External("abysses/Pieuvre_Perlee.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-poisson-lanterne",
                 name: "Poisson Lanterne",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Poisson_Lanterne.png"),
+                source: AvatarSource::External("abysses/Poisson_Lanterne.png"),
             },
             BuiltinAvatar {
                 id: "native-abysses-raie-manta",
                 name: "Raie Manta",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/abysses/Raie_Manta.png"),
+                source: AvatarSource::External("abysses/Raie_Manta.png"),
             },
         ],
     },
@@ -98,51 +106,51 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
         avatars: &[
             BuiltinAvatar {
                 id: "native-arcade-blob-neon",
-                name: "Blob Néon",
+                name: "Blob NÃ©on",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Blob_Neon.png"),
+                source: AvatarSource::External("arcade/Blob_Neon.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-chat-arcade",
                 name: "Chat Arcade",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Chat_Arcade.png"),
+                source: AvatarSource::External("arcade/Chat_Arcade.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-fantome-pixel",
-                name: "Fantôme Pixel",
+                name: "FantÃ´me Pixel",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Fantome_Pixel.png"),
+                source: AvatarSource::External("arcade/Fantome_Pixel.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-hibou-disquette",
                 name: "Hibou Disquette",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Hibou_Disquette.png"),
+                source: AvatarSource::External("arcade/Hibou_Disquette.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-koala-synth",
                 name: "Koala Synth",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Koala_Synth.png"),
+                source: AvatarSource::External("arcade/Koala_Synth.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-lapin-joystick",
                 name: "Lapin Joystick",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Lapin_Joystick.png"),
+                source: AvatarSource::External("arcade/Lapin_Joystick.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-manchot-console",
                 name: "Manchot Console",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Manchot_Console.png"),
+                source: AvatarSource::External("arcade/Manchot_Console.png"),
             },
             BuiltinAvatar {
                 id: "native-arcade-ours-cassette",
                 name: "Ours Cassette",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/arcade/Ours_Cassette.png"),
+                source: AvatarSource::External("arcade/Ours_Cassette.png"),
             },
         ],
     },
@@ -154,49 +162,49 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
                 id: "native-botanica-cactus",
                 name: "Cactus",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Cactus.png"),
+                source: AvatarSource::External("botanica/Cactus.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-champignon",
                 name: "Champignon",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Champignon.png"),
+                source: AvatarSource::External("botanica/Champignon.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-chat-tournesol",
                 name: "Chat Tournesol",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Chat_Tournesol.png"),
+                source: AvatarSource::External("botanica/Chat_Tournesol.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-chauve-souris-lierre",
                 name: "Chauve-souris Lierre",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Chauve_souris_Lierre.png"),
+                source: AvatarSource::External("botanica/Chauve_souris_Lierre.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-hibou-bonsai",
-                name: "Hibou Bonsaï",
+                name: "Hibou BonsaÃ¯",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Hibou_Bonsai.png"),
+                source: AvatarSource::External("botanica/Hibou_Bonsai.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-lapin-mousse",
                 name: "Lapin Mousse",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Lapin_Mousse.png"),
+                source: AvatarSource::External("botanica/Lapin_Mousse.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-phoque-lotus",
                 name: "Phoque Lotus",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Phoque_Lotus.png"),
+                source: AvatarSource::External("botanica/Phoque_Lotus.png"),
             },
             BuiltinAvatar {
                 id: "native-botanica-renard-fougere",
-                name: "Renard Fougère",
+                name: "Renard FougÃ¨re",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/botanica/Renard_Fougere.png"),
+                source: AvatarSource::External("botanica/Renard_Fougere.png"),
             },
         ],
     },
@@ -206,53 +214,51 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
         avatars: &[
             BuiltinAvatar {
                 id: "native-constellations-chat-etoile",
-                name: "Chat Étoile",
+                name: "Chat Ã‰toile",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Chat_Etoile.png"),
+                source: AvatarSource::External("constellations/Chat_Etoile.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-esprit-de-lune",
                 name: "Esprit de Lune",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Esprit_de_Lune.png"),
+                source: AvatarSource::External("constellations/Esprit_de_Lune.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-hamster-nebuleuse",
-                name: "Hamster Nébuleuse",
+                name: "Hamster NÃ©buleuse",
                 mime: "image/png",
-                bytes: include_bytes!(
-                    "../../embedded_avatars/constellations/Hamster_Nebuleuse.png"
-                ),
+                source: AvatarSource::External("constellations/Hamster_Nebuleuse.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-hibou-eclipse",
-                name: "Hibou Éclipse",
+                name: "Hibou Ã‰clipse",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Hibou_Eclipse.png"),
+                source: AvatarSource::External("constellations/Hibou_Eclipse.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-lapin-planete",
-                name: "Lapin Planète",
+                name: "Lapin PlanÃ¨te",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Lapin_Planete.png"),
+                source: AvatarSource::External("constellations/Lapin_Planete.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-loutre-satellite",
                 name: "Loutre Satellite",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Loutre_Satellite.png"),
+                source: AvatarSource::External("constellations/Loutre_Satellite.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-ours-aurore",
                 name: "Ours Aurore",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Ours_Aurore.png"),
+                source: AvatarSource::External("constellations/Ours_Aurore.png"),
             },
             BuiltinAvatar {
                 id: "native-constellations-renard-comete",
-                name: "Renard Comète",
+                name: "Renard ComÃ¨te",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/constellations/Renard_Comete.png"),
+                source: AvatarSource::External("constellations/Renard_Comete.png"),
             },
         ],
     },
@@ -264,61 +270,81 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
                 id: "native-galaxie-cosmo",
                 name: "Cosmo",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/01-cosmo.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/01-cosmo.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-orbite",
                 name: "Orbite",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/02-orbite.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/02-orbite.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-nova",
                 name: "Nova",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/03-nova.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/03-nova.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-saturne",
                 name: "Saturne",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/04-saturne.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/04-saturne.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-luna",
                 name: "Luna",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/05-luna.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/05-luna.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-meteore",
-                name: "Météore",
+                name: "MÃ©tÃ©ore",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/06-meteore.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/06-meteore.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-stella",
                 name: "Stella",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/07-stella.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/07-stella.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-astro",
                 name: "Astro",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/08-astro.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/08-astro.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-soleil",
                 name: "Soleil",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/09-soleil.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/09-soleil.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-ovni",
                 name: "O.V.N.I",
                 mime: "image/svg+xml",
-                bytes: include_bytes!("../../embedded_avatars/galaxie/10-o-v-n-i.svg"),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/10-o-v-n-i.svg"
+                )),
             },
         ],
     },
@@ -330,49 +356,49 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
                 id: "native-mythes-cyclope",
                 name: "Cyclope",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Cyclope.png"),
+                source: AvatarSource::External("mythes/Cyclope.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-dragon",
                 name: "Dragon",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Dragon.png"),
+                source: AvatarSource::External("mythes/Dragon.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-griffon",
                 name: "Griffon",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Griffon.png"),
+                source: AvatarSource::External("mythes/Griffon.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-kitsune",
                 name: "Kitsune",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Kitsune.png"),
+                source: AvatarSource::External("mythes/Kitsune.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-licorne-cristal",
                 name: "Licorne Cristal",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Licorne_Cristal.png"),
+                source: AvatarSource::External("mythes/Licorne_Cristal.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-phoenix",
-                name: "Phénix",
+                name: "PhÃ©nix",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Phoenix.png"),
+                source: AvatarSource::External("mythes/Phoenix.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-slime-mage",
                 name: "Slime Mage",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Slime_Mage.png"),
+                source: AvatarSource::External("mythes/Slime_Mage.png"),
             },
             BuiltinAvatar {
                 id: "native-mythes-troll-foret",
-                name: "Troll Forêt",
+                name: "Troll ForÃªt",
                 mime: "image/png",
-                bytes: include_bytes!("../../embedded_avatars/mythes/Troll_Foret.png"),
+                source: AvatarSource::External("mythes/Troll_Foret.png"),
             },
         ],
     },
@@ -490,6 +516,43 @@ pub(crate) async fn assign_missing(store: &IdentityStore) -> Result<u64, AssetEr
     Ok(count)
 }
 
+fn resolve_avatars_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("AETHER_AVATARS_DIR")
+        && !dir.is_empty()
+    {
+        let path = PathBuf::from(dir);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    let candidates: &[&Path] = &[
+        Path::new("assets/avatars"),
+        Path::new("/app/assets/avatars"),
+    ];
+    for candidate in candidates {
+        if candidate.is_dir() {
+            return Some((*candidate).to_path_buf());
+        }
+    }
+    if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        let workspace_assets = Path::new(manifest_dir).join("../../assets/avatars");
+        if workspace_assets.is_dir() {
+            return Some(workspace_assets);
+        }
+    }
+    None
+}
+
+async fn load_avatar_bytes(source: AvatarSource, avatars_dir: Option<&Path>) -> Option<Vec<u8>> {
+    match source {
+        AvatarSource::Embedded(bytes) => Some(bytes.to_vec()),
+        AvatarSource::External(rel) => {
+            let path = avatars_dir?.join(rel);
+            tokio::fs::read(&path).await.ok()
+        }
+    }
+}
+
 /// Seed once, including on existing installations: the "Orbites" gallery on the first
 /// start, and each built-in collection the first time a server version ships it.
 /// Deleting or editing a collection never causes its images to reappear on the next
@@ -523,14 +586,22 @@ pub(crate) async fn initialize(store: &IdentityStore) -> Result<(), AssetError> 
             images.push((format!("native-orbits-{index}"), *name, asset.sha256));
         }
     }
+    let avatars_dir = resolve_avatars_dir();
     let mut pack_data = Vec::with_capacity(pending.len());
     for pack in pending {
         let mut pack_images = Vec::with_capacity(pack.avatars.len());
+        let mut complete = true;
         for avatar in pack.avatars {
-            let asset = store.assets().put_bytes(avatar.bytes, avatar.mime).await?;
+            let Some(bytes) = load_avatar_bytes(avatar.source, avatars_dir.as_deref()).await else {
+                complete = false;
+                break;
+            };
+            let asset = store.assets().put_bytes(&bytes, avatar.mime).await?;
             pack_images.push((avatar.id, avatar.name, asset.sha256));
         }
-        pack_data.push((pack.id, pack.name, pack_images));
+        if complete {
+            pack_data.push((pack.id, pack.name, pack_images));
+        }
     }
     let mut tx = store.pool().begin().await?;
     let marker = query("INSERT INTO avatar_gallery_initialization(singleton) VALUES(1) ON CONFLICT(singleton) DO NOTHING")
@@ -771,23 +842,27 @@ mod tests {
 
     #[test]
     fn builtin_collections_hold_valid_images_with_unique_ids() {
+        let avatars_dir = resolve_avatars_dir().expect("assets/avatars directory must exist");
         let mut ids = std::collections::HashSet::new();
         for pack in BUILTIN_PACKS {
             assert!(ids.insert(pack.id), "{}", pack.id);
             assert!(!pack.avatars.is_empty(), "{}", pack.id);
             for avatar in pack.avatars {
                 assert!(ids.insert(avatar.id), "{}", avatar.id);
+                let bytes = match avatar.source {
+                    AvatarSource::Embedded(bytes) => bytes.to_vec(),
+                    AvatarSource::External(rel) => std::fs::read(avatars_dir.join(rel))
+                        .unwrap_or_else(|err| panic!("{}: {rel}: {err}", avatar.id)),
+                };
                 match avatar.mime {
-                    "image/png" => assert!(
-                        avatar.bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
-                        "{}",
-                        avatar.id
-                    ),
+                    "image/png" => {
+                        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{}", avatar.id)
+                    }
                     // Shipped with the server, so not held to the extension SVG contract
                     // (`validate_svg` refuses `title`/`desc` and ARIA attributes): it must
                     // still be a small, inert document.
                     "image/svg+xml" => {
-                        let svg = std::str::from_utf8(avatar.bytes)
+                        let svg = std::str::from_utf8(&bytes)
                             .expect("UTF-8 SVG")
                             .to_ascii_lowercase();
                         assert!(

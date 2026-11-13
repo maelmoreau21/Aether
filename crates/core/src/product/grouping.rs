@@ -369,14 +369,8 @@ pub async fn expand_detail(
     if let Some(seasons) = value["seasons"].as_array_mut() {
         for season in seasons {
             if let Some(episodes) = season["episodes"].as_array_mut() {
-                let mut filtered = Vec::new();
-                for episode in episodes.drain(..) {
-                    if let Some(id) = episode["id"].as_str()
-                        && parental_allowed(store, user, id).await?
-                    {
-                        filtered.push(episode);
-                    }
-                }
+                let mut filtered: Vec<Value> = std::mem::take(episodes);
+                retain_parental_allowed(store, user, &mut filtered).await?;
                 crate::product::decorate_many(store, &mut filtered)
                     .await
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -421,14 +415,8 @@ pub async fn expand_detail(
                     let s_num = inc_season["number"].as_i64().unwrap_or(0);
                     let mut clean_season = inc_season.clone();
                     if let Some(eps) = clean_season["episodes"].as_array_mut() {
-                        let mut allowed_eps = Vec::new();
-                        for ep in eps.drain(..) {
-                            if let Some(ep_id) = ep["id"].as_str()
-                                && parental_allowed(store, user, ep_id).await?
-                            {
-                                allowed_eps.push(ep);
-                            }
-                        }
+                        let mut allowed_eps: Vec<Value> = std::mem::take(eps);
+                        retain_parental_allowed(store, user, &mut allowed_eps).await?;
                         crate::product::decorate_many(store, &mut allowed_eps)
                             .await
                             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

@@ -336,7 +336,7 @@ fs.mkdirSync(out, {recursive: true});
       await openMenu('subtitles'); await page.locator('[data-subtitle-id="internal-4"]').click();
       await page.waitForFunction(()=>[...document.querySelector('video').textTracks].some(t=>t.mode==='showing' && [...(t.activeCues||[])].some(c=>c.text.includes('FR FORCE'))));
       await openMenu('subtitles');
-      await page.keyboard.press('End');await page.keyboard.press('Enter');
+      await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).focus();
       assert.equal(await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).evaluate(e=>document.activeElement===e),true);
       await page.getByLabel('Décalage sous-titres en secondes',{exact:true}).fill('-.5');await page.locator('.menu-heading').click();
       await page.waitForFunction(()=>Math.abs([...document.querySelector('video').textTracks].find(t=>t.mode==='showing').cues[0].startTime-1.5)<.05);

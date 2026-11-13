@@ -317,6 +317,23 @@ pub(super) async fn search_candidates(
     let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
         .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let context = context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let artwork_locked = context
+        .manual_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|v| v.get("artwork_locked").and_then(Value::as_bool))
+        .unwrap_or(false);
+    if artwork_locked {
+        return Ok(Json(json!({
+            "workId": input.work_id,
+            "downloaded": 0,
+            "duplicates": 0,
+            "skipped": 0,
+            "errors": [],
+            "partial": false,
+            "locked": true
+        })));
+    }
     let payload =
         adapters::metadata_input(&context, &input.work_id, "metadata.search", &json!({}))?;
     let ids = payload["externalIds"]
@@ -501,6 +518,23 @@ pub(super) async fn collect_with_context(
     let context: Option<adapters::WorkContext> = query_as("SELECT library_id,title,year,kind,external_ids_json,editorial_json,manual_json FROM inventory_works WHERE id=?")
         .bind(&input.work_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let context = context.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let artwork_locked = context
+        .manual_json
+        .as_deref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .and_then(|v| v.get("artwork_locked").and_then(Value::as_bool))
+        .unwrap_or(false);
+    if artwork_locked {
+        return Ok(Json(json!({
+            "workId": input.work_id,
+            "downloaded": 0,
+            "duplicates": 0,
+            "skipped": 0,
+            "errors": [],
+            "partial": false,
+            "locked": true
+        })));
+    }
     // Use corrected identifiers from the same canonical context as manual metadata operations.
     let payload =
         adapters::metadata_input(&context, &input.work_id, "metadata.search", &json!({}))?;
@@ -715,10 +749,6 @@ pub(super) async fn collect_with_context(
                 || counts.get(image_kind).copied().unwrap_or(0) > 0
                 || (image_kind == "poster" && legacy_poster > 0))
         {
-            skipped += 1;
-            continue;
-        }
-        if image_kind != "backdrop" && local_kinds.contains(image_kind) {
             skipped += 1;
             continue;
         }

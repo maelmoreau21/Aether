@@ -6,6 +6,7 @@
   import type { Work } from '../catalog/api';
   import { selectArtwork } from '../catalog/artwork-selection';
   import { session } from '../auth/session';
+  import { clusterEnabled } from '../config/presentation';
   import ClientIcon from '../ui/ClientIcon.svelte';
   import Icon from '../ui/Icon.svelte';
   import { clientInfo, clock } from '../ui/client-info';
@@ -17,6 +18,20 @@
   let sessions=$state<Activity[]>([]),activityError=$state(''),updated=$state(''),loading=$state(false);
   let artwork=$state<Record<string,Art>>({});
   let failed=$state<Record<string,number>>({});
+  let commanding=$state<Record<string,boolean>>({});
+  async function controlPlayback(playbackId:string,action:'pause'|'play'|'stop'){
+    if(commanding[playbackId])return;
+    commanding={...commanding,[playbackId]:true};
+    try{
+      await adminRequest(`/api/v1/admin/activity/${encodeURIComponent(playbackId)}/command`,{method:'POST',body:JSON.stringify({action})});
+      if(action==='stop'){sessions=sessions.filter(item=>item.playbackId!==playbackId);}
+      else{sessions=sessions.map(item=>item.playbackId===playbackId?{...item,paused:action==='pause'}:item);}
+    }catch{
+      activityError=$t('activity_unavailable_try_again');
+    }finally{
+      const next={...commanding};delete next[playbackId];commanding=next;
+    }
+  }
   const requested=new SvelteSet<string>();
   const connected=$derived(nodes.filter(node=>node.status==='connected').length);
   const offline=$derived(nodes.filter(node=>node.status==='disconnected').length);
@@ -56,10 +71,28 @@
   </header>
 
   <div class="stats">
-    <div class="stat"><span class="dot" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}></span><div><small>{$t('admin_group_server')}</small><strong>{coreHealth?.status==='ok'?'Actif':coreHealth?$t('to_check'):'—'}</strong></div></div>
-    <div class="stat"><span class="dot" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}></span><div><small>{$t('nodes')}</small><strong>{nodesError?'—':`${connected} / ${nodes.length}`}</strong></div></div>
-    <div class="stat"><span class="dot" class:ok={playing.length>0}></span><div><small>{$t('stats_kpi_plays')}</small><strong>{activityError||!updated?'—':playing.length}</strong></div></div>
-    <div class="stat"><span class="dot" class:ok={running>0}></span><div><small>{$t('admin_indexing')}</small><strong>{running}</strong></div></div>
+    <a class="stat stat-link" href="#server-section">
+      <span class="stat-icon" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}><Icon name="server" size={18} /></span>
+      <div class="stat-body"><small>{$t('admin_group_server')}</small><strong>{coreHealth?.status==='ok'?'Actif':coreHealth?$t('to_check'):'—'}</strong></div>
+      <span class="dot" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}></span>
+    </a>
+    {#if $clusterEnabled}
+    <a class="stat stat-link" href="#nodes-section">
+      <span class="stat-icon" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}><Icon name="globe" size={18} /></span>
+      <div class="stat-body"><small>{$t('nodes')}</small><strong>{nodesError?'—':`${connected} / ${nodes.length}`}</strong></div>
+      <span class="dot" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}></span>
+    </a>
+    {/if}
+    <a class="stat stat-link" href="#activity-heading">
+      <span class="stat-icon" class:ok={playing.length>0}><Icon name="play" size={18} /></span>
+      <div class="stat-body"><small>{$t('stats_kpi_plays')}</small><strong>{activityError||!updated?'—':playing.length}</strong></div>
+      <span class="dot" class:ok={playing.length>0}></span>
+    </a>
+    <a class="stat stat-link" href="#tasks-section">
+      <span class="stat-icon" class:ok={running>0}><Icon name="refresh" size={18} /></span>
+      <div class="stat-body"><small>{$t('admin_indexing')}</small><strong>{running}</strong></div>
+      <span class="dot" class:ok={running>0}></span>
+    </a>
   </div>
 
   {#if issues.length}
@@ -73,11 +106,19 @@
   {/if}
 
   <section class="block" aria-labelledby="activity-heading">
-    <div class="block-head"><h3 id="activity-heading">{$t('right_now')}</h3>{#if updated&&!activityError}<small>{$t('updated_at', { updated })}</small>{/if}</div>
+    <div class="block-head">
+      <div class="block-title-row">
+        <h3 id="activity-heading">{$t('right_now')}</h3>
+        {#if !activityError && updated}
+          <span class="count-pill" class:active={playing.length > 0}>{playing.length}</span>
+        {/if}
+      </div>
+      {#if updated&&!activityError}<small>{$t('updated_at', { updated })}</small>{/if}
+    </div>
     {#if activityError}<p class="empty" role="alert">{activityError}</p>
     {:else if sessions.length}
       <ul class="session-grid">
-        {#each ordered as item,index (index)}
+        {#each ordered as item,index (item.playbackId ?? `${item.userId}:${item.device}:${index}`)}
           {@const client=clientInfo(item.device)}
           {@const art=artwork[keyOf(item)]}
           {@const bg=background(item)}
@@ -109,6 +150,31 @@
               </span>
               <span class="avatar" aria-hidden="true">{item.name.slice(0,1).toLocaleUpperCase()}</span>
               <strong class="user">{item.name}</strong>
+              {#if item.playbackId}
+                {@const pid = item.playbackId}
+                <div class="session-actions">
+                  <button
+                    type="button"
+                    class="session-btn"
+                    disabled={!!commanding[pid]}
+                    title={item.paused ? $t('play') : $t('pause')}
+                    aria-label={item.paused ? $t('play') : $t('pause')}
+                    onclick={() => void controlPlayback(pid, item.paused ? 'play' : 'pause')}
+                  >
+                    <Icon name={item.paused ? 'play' : 'pause'} size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    class="session-btn danger"
+                    disabled={!!commanding[pid]}
+                    title={$t('stop')}
+                    aria-label={$t('stop')}
+                    onclick={() => void controlPlayback(pid, 'stop')}
+                  >
+                    <Icon name="close" size={14} />
+                  </button>
+                </div>
+              {/if}
             </div>
           </li>
         {/each}
@@ -146,15 +212,24 @@
   h3 { margin: 0; font-size: 16px; font-weight: 600; }
   small { font-size: 12px; color: var(--mu); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  .stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 18px 20px; background: var(--pn); border-radius: var(--r-md); }
+  .stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 16px 18px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); color: inherit; text-decoration: none; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .stat-link:hover { background: var(--pn-2); border-color: var(--line-2); }
+  .stat-link:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  .stat-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .stat-icon.ok { background: var(--ok-soft); color: var(--ok); }
+  .stat-icon.warn { background: var(--warn-soft); color: var(--warn); }
+  .stat-body { min-width: 0; flex: 1; }
   .stat small { display: block; margin-bottom: 2px; }
   .stat strong { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
-  .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--line-2); }
+  .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
   .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-  .callout { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 18px; border-radius: var(--r-md); background: var(--warn-soft); font-size: 14px; }
+  .callout { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 18px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--warn-soft); font-size: 14px; }
   .callout a { color: var(--ac); font-weight: 600; text-decoration: none; }
-  .block { padding: 20px; background: var(--pn); border-radius: var(--r-md); min-width: 0; }
-  .block-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+  .block { padding: 20px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+  .block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .block-title-row { display: inline-flex; align-items: center; gap: 8px; }
+  .count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); background: var(--pn-2); color: var(--mu); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .count-pill.active { background: var(--ac-soft); color: var(--ac); }
   .empty { margin: 0; font-size: 14px; color: var(--mu); } .empty[role='alert'] { color: var(--err); }
   .ghost { min-height: 38px; padding: 8px 16px; background: transparent; color: var(--tx); border: 1px solid var(--line-2); border-radius: var(--r-md); font: inherit; font-size: 13px; cursor: pointer; }
   .ghost:hover { background: var(--pn-2); } .ghost:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -188,10 +263,16 @@
   .watching .state { color: var(--ac); background: var(--ac-soft); }
   .avatar { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--ac-soft); color: var(--ac); font-size: 13px; font-weight: 700; }
   .user { min-width: 0; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+  .session-btn { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line-2); border-radius: 50%; background: var(--pn); color: var(--tx); cursor: pointer; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease, color var(--t-fast) ease; }
+  .session-btn:hover:not(:disabled) { background: var(--pn-3); border-color: var(--ac); color: #fff; }
+  .session-btn.danger:hover:not(:disabled) { border-color: var(--err); color: var(--err); }
+  .session-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .session-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 
   /* Technical information: always visible. */
   .tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
-  .tech { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 16px; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .tech { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
   .tech div { display: grid; gap: 2px; min-width: 0; }
   .tech strong { color: var(--tx); font-size: 14px; overflow-wrap: anywhere; }
   .node-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }

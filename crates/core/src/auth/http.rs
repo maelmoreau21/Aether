@@ -95,8 +95,15 @@ async fn bootstrap_status(State(state): State<AuthState>) -> Response {
         .unwrap_or(false);
     let local_enabled = is_local_login_enabled();
     let http_bootstrap_enabled = !is_http_bootstrap_disabled();
+    let has_libraries: i64 = crate::database::query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM libraries l WHERE NOT EXISTS(SELECT 1 FROM deleted_libraries d WHERE d.library_id=l.id)) AS INTEGER)",
+    )
+    .fetch_one(&state.store.pool)
+    .await
+    .unwrap_or(0);
     Json(serde_json::json!({
         "needsBootstrap": closed == 0 && !oidc_admin_configured,
+        "hasLibraries": has_libraries != 0,
         "localLoginEnabled": local_enabled,
         "oidcAdminConfigured": oidc_admin_configured,
         "httpBootstrapEnabled": http_bootstrap_enabled
@@ -121,6 +128,17 @@ async fn bootstrap(
     let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
         return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
     };
+    let client_key = extract_client_key(&headers);
+    for (key, limit) in [
+        (format!("bootstrap:{client_key}"), LOGIN_ATTEMPTS_PER_IP),
+        ("bootstrap:global".to_string(), LOGIN_ATTEMPTS_PER_ACCOUNT),
+    ] {
+        match take_login_attempt(&state, &key, limit).await {
+            Ok(true) => {}
+            Ok(false) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
+            Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+        }
+    }
 
     let expected = state.get_bootstrap_token();
     let Some(expected_token) = expected else {
@@ -222,6 +240,22 @@ pub async fn authenticate(
 ) -> Result<Authenticated, StatusCode> {
     state.authenticate(headers).await
 }
+/// Password attempts per client address and minute.
+const LOGIN_ATTEMPTS_PER_IP: i64 = 10;
+/// Password attempts per login and minute, all addresses together.
+pub(super) const LOGIN_ATTEMPTS_PER_ACCOUNT: i64 = 30;
+
+/// Counts one attempt against `key` in its one-minute window; `false` once spent.
+async fn take_login_attempt(state: &AuthState, key: &str, limit: i64) -> Result<bool, sqlx::Error> {
+    crate::database::query_scalar::<_, i64>(
+        "INSERT INTO login_throttle(throttle_key,window_started,attempts)                 VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE                 SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60                 THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE                 WHEN login_throttle.window_started<=unixepoch()-60 THEN 1                 ELSE login_throttle.attempts+1 END                 WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<?                 RETURNING login_throttle.attempts",
+    )
+    .bind(key)
+    .bind(limit)
+    .fetch_optional(&state.store.pool)
+    .await
+    .map(|attempts| attempts.is_some())
+}
 async fn login(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -241,25 +275,19 @@ async fn login(
     let Ok(_permit) = state.workers.clone().try_acquire_owned() else {
         return failure(StatusCode::TOO_MANY_REQUESTS, "try_later");
     };
-    // Scoped throttle: budget per client IP, durable across restarts.
+    // Scoped throttles, durable across restarts: a budget per client IP, and a wider one
+    // per targeted login so rotating addresses cannot multiply guesses on one account.
     let client_key = extract_client_key(&headers);
-    let allowed = crate::database::query_scalar::<_, i64>(
-        "INSERT INTO login_throttle(throttle_key,window_started,attempts) \
-                VALUES(?,unixepoch(),1) ON CONFLICT(throttle_key) DO UPDATE \
-                SET window_started=CASE WHEN login_throttle.window_started<=unixepoch()-60 \
-                THEN unixepoch() ELSE login_throttle.window_started END, attempts=CASE \
-                WHEN login_throttle.window_started<=unixepoch()-60 THEN 1 \
-                ELSE login_throttle.attempts+1 END \
-                WHERE login_throttle.window_started<=unixepoch()-60 OR login_throttle.attempts<10 \
-                RETURNING login_throttle.attempts",
-    )
-    .bind(&client_key)
-    .fetch_optional(&state.store.pool)
-    .await;
-    match allowed {
-        Ok(Some(_)) => {}
-        Ok(None) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
-        Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+    let mut budgets = vec![(client_key, LOGIN_ATTEMPTS_PER_IP)];
+    if !input.login.is_empty() && input.login.len() <= 64 {
+        budgets.push((format!("login:{}", input.login), LOGIN_ATTEMPTS_PER_ACCOUNT));
+    }
+    for (key, limit) in &budgets {
+        match take_login_attempt(&state, key, *limit).await {
+            Ok(true) => {}
+            Ok(false) => return failure(StatusCode::TOO_MANY_REQUESTS, "try_later"),
+            Err(_) => return failure(StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
+        }
     }
     let _ = crate::database::query(
         "DELETE FROM login_throttle WHERE window_started <= unixepoch() - 300",

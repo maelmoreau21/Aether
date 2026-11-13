@@ -405,50 +405,6 @@ async fn list_filters_counts_pages_by_date_and_rejects_with_a_fixed_reason() {
     assert_eq!(last["code"], "already_available");
     assert!(last.get("actorId").is_none());
 }
-#[tokio::test]
-async fn legacy_import_is_suspended_idempotent_and_delta_safe() {
-    let (_dir, store, _app, _sessions) = fixture().await;
-    let mut value = json!({"id":12,"status":2,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","media":{"mediaType":"movie","tmdbId":123,"externalServiceId":42},"requestedBy":{"displayName":"Historical"}});
-    assert!(
-        import_legacy(&store, "source", &value, Some("owner"), Some("radarr-a"))
-            .await
-            .unwrap()
-    );
-    assert!(
-        !import_legacy(&store, "source", &value, Some("owner"), Some("radarr-a"))
-            .await
-            .unwrap()
-    );
-    value["status"] = json!(5);
-    value["updatedAt"] = json!("2026-01-02T00:00:00Z");
-    assert!(
-        import_legacy(&store, "source", &value, Some("owner"), Some("radarr-a"))
-            .await
-            .unwrap()
-    );
-    let (status, source_status): (String, String) =
-        query_as("SELECT status,source_status FROM media_requests")
-            .fetch_one(store.pool())
-            .await
-            .unwrap();
-    assert_eq!(status, "suspended");
-    assert_eq!(source_status, "completed");
-    let jobs: i64 = query_scalar("SELECT COUNT(*) FROM acquisition_jobs")
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-    assert_eq!(jobs, 0);
-    query("UPDATE media_requests SET status='approved'")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    value["updatedAt"] = json!("2026-01-03T00:00:00Z");
-    assert!(
-        !import_legacy(&store, "source", &value, Some("owner"), Some("radarr-a"))
-            .await
-            .unwrap()
-    );
-}
 #[test]
 fn invalid_selections_never_expand_other_media_types() {
     let base =
@@ -984,6 +940,11 @@ fn a_lookup_poster_is_reduced_to_a_fixed_provider_and_a_plain_path() {
         remote::poster_source(&tvdb),
         Some(("tvdb", "/posters/79488-1.jpg".into()))
     );
+    let tvdb_alt = json!({"images":[{"coverType":"Poster","url":"https://thetvdb.com/banners/posters/12345.JPG"}]});
+    assert_eq!(
+        remote::poster_source(&tvdb_alt),
+        Some(("tvdb", "/posters/12345.JPG".into()))
+    );
     for url in [
         "https://evil.example/t/p/original/a.jpg",
         "https://image.tmdb.org.evil.example/t/p/original/a.jpg",
@@ -999,4 +960,38 @@ fn a_lookup_poster_is_reduced_to_a_fixed_provider_and_a_plain_path() {
         );
     }
     assert_eq!(remote::poster_source(&json!({})), None);
+}
+#[tokio::test]
+async fn destinations_expose_quality_profiles_and_input_validates_profile_id() {
+    let (_dir, store, app, sessions) = fixture().await;
+    let owner = &sessions[0].0;
+    query("UPDATE acquisition_servers SET quality_profiles_json=? WHERE id='radarr-a'")
+        .bind(json!([{"id":1,"name":"HD-1080p"},{"id":4,"name":"Ultra-HD"}]).to_string())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, body) = request(
+        &app,
+        "GET",
+        "/api/v1/requests/destinations",
+        owner,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["servers"][0]["qualityProfileId"], 1);
+    assert_eq!(
+        body["servers"][0]["qualityProfiles"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let mut valid_input = film("101");
+    valid_input.quality_profile_id = Some(4);
+    assert!(valid_input.valid());
+    valid_input.quality_profile_id = Some(0);
+    assert!(!valid_input.valid());
 }

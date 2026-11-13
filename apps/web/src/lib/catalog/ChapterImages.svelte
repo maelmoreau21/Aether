@@ -1,26 +1,62 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { t } from '../i18n';
-  let { assetId }: { assetId: string } = $props();
+  let { assetId, hasChapters }: { assetId: string; hasChapters?: boolean } = $props();
   type Chapter = { index: number; start: number; title: string; imageUrl: string; image?: string; state?: string };
   let chapters = $state<Chapter[]>([]);
+  let available = $state(false);
   let busy = $state(false);
   let error = $state('');
   let opened = $state(false);
-  let controller: AbortController | undefined;
-  function clear() { controller?.abort(); }
-  onDestroy(clear);
-  async function load() {
-    clear();
-    const current = new AbortController(); controller = current;
-    busy = true; error = ''; chapters = [];
+  let listController: AbortController | undefined;
+  let imagesController: AbortController | undefined;
+  function clearImages() { imagesController?.abort(); }
+  function clearAll() { listController?.abort(); clearImages(); }
+  onDestroy(clearAll);
+
+  $effect(() => {
+    const id = assetId;
+    const knownEmpty = hasChapters === false;
+    clearAll();
+    chapters = [];
+    available = false;
+    error = '';
+    opened = false;
+    if (knownEmpty || !id) return;
+    const current = new AbortController();
+    listController = current;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/v1/assets/${encodeURIComponent(id)}/chapter-images`, { signal: current.signal, cache: 'no-store' });
+        if (!response.ok) return;
+        const data = await response.json() as { chapters?: Chapter[] };
+        if (current.signal.aborted) return;
+        const list = Array.isArray(data.chapters) ? data.chapters : [];
+        if (list.length > 0) {
+          chapters = list;
+          available = true;
+        }
+      } catch {
+        // Ignore network/abort errors during availability check.
+      }
+    })();
+    return () => current.abort();
+  });
+
+  async function loadImages() {
+    clearImages();
+    const current = new AbortController(); imagesController = current;
+    busy = true; error = '';
     try {
-      const response = await fetch(`/api/v1/assets/${encodeURIComponent(assetId)}/chapter-images`, { signal: current.signal, cache: 'no-store' });
-      if (response.status === 404) { error = $t('chapter_images_are_disabled_or_unavailable'); return; }
-      if (!response.ok) throw new Error($t('chapter_images_are_unavailable'));
-      chapters = (await response.json()).chapters;
+      if (!chapters.length) {
+        const response = await fetch(`/api/v1/assets/${encodeURIComponent(assetId)}/chapter-images`, { signal: current.signal, cache: 'no-store' });
+        if (response.status === 404) { error = $t('chapter_images_are_disabled_or_unavailable'); return; }
+        if (!response.ok) throw new Error($t('chapter_images_are_unavailable'));
+        chapters = (await response.json()).chapters;
+      }
       for (const chapter of chapters) {
         if (current.signal.aborted) return;
+        if (chapter.image) continue;
         for (let attempt = 0; attempt < 30; attempt++) {
           const image = await fetch(chapter.imageUrl, { method: 'HEAD', signal: current.signal, cache: 'no-store' });
           if (image.status === 200 && ['image/jpeg', 'image/webp'].includes((image.headers.get('content-type') ?? '').split(';')[0].trim())) {
@@ -39,17 +75,22 @@
       chapters = [...chapters];
     } catch (cause) {
       if (!current.signal.aborted) error = cause instanceof Error ? cause.message : $t('chapter_images_are_unavailable');
-    } finally { if (controller === current) busy = false; }
+    } finally { if (imagesController === current) busy = false; }
+  }
+
+  function refreshImages() {
+    chapters = chapters.map(c => ({ ...c, image: undefined, state: undefined }));
+    void loadImages();
   }
 </script>
 
-<details ontoggle={event => { opened = event.currentTarget.open; if (opened) void load(); else clear(); }}>
+{#if available && chapters.length > 0}
+<details ontoggle={event => { opened = event.currentTarget.open; if (opened) void loadImages(); else clearImages(); }}>
   <summary>{$t('chapter_images')}</summary>
   {#if opened}
     <p>{$t('images_extracted_on_demand_by_the')}</p>
     {#if busy}<p role="status">{$t('loading_and_generating_previews')}</p>{/if}
     {#if error}<p role="status">{error}</p>{/if}
-    {#if !busy && !error && !chapters.length}<p>{$t('this_media_item_has_no_identified')}</p>{/if}
     <div class="chapter-images">
       {#each chapters as chapter (chapter.index)}
         <figure>
@@ -58,9 +99,10 @@
         </figure>
       {/each}
     </div>
-    <button type="button" disabled={busy} onclick={load}>{$t('refresh_images')}</button>
+    <button type="button" disabled={busy} onclick={refreshImages}>{$t('refresh_images')}</button>
   {/if}
 </details>
+{/if}
 
 <style>
   details { margin-block: 16px; }

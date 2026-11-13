@@ -438,7 +438,12 @@ pub(crate) fn insights(rows: &[Play], zone: &Zone, now: i64) -> Value {
             title.image = if p.kind == "music" {
                 cover(&p.media_id)
             } else {
-                poster(&p.media_id)
+                poster(
+                    p.series_id
+                        .as_deref()
+                        .filter(|_| p.kind == "episode")
+                        .unwrap_or(&p.media_id),
+                )
             };
         }
         title.add(p);

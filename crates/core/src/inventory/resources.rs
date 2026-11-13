@@ -744,9 +744,20 @@ pub async fn image(
         mime: row.get("mime"),
     };
     drop(row);
+    // Catalogue URLs carry `?v=<modified>-<size>`: a changed image gets a new address, so a
+    // versioned one can stay in the browser instead of being revalidated on every visit
+    // (dozens of conditional requests slowed the posters of the home page down).
+    let versioned = url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
+        .any(|(name, value)| name == "v" && !value.is_empty());
     match crate::node::LocalNode.serve_grant(&grant, &request).await {
         Ok(res) => {
-            let (parts, body) = res.into_parts();
+            let (mut parts, body) = res.into_parts();
+            if versioned && matches!(parts.status, StatusCode::OK | StatusCode::NOT_MODIFIED) {
+                parts.headers.insert(
+                    axum::http::header::CACHE_CONTROL,
+                    axum::http::HeaderValue::from_static("private, max-age=31536000, immutable"),
+                );
+            }
             Response::from_parts(parts, Body::new(body))
         }
         Err(NodeErrorCode::ImageChangedRescanRequired) => {

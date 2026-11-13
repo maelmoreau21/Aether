@@ -32,6 +32,12 @@ pub struct Episode {
     pub season: i64,
     pub episode: i64,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QualityProfile {
+    pub id: i64,
+    pub name: String,
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RequestInput {
@@ -41,6 +47,8 @@ pub struct RequestInput {
     pub external_provider: String,
     #[serde(default)]
     pub server_id: Option<String>,
+    #[serde(default)]
+    pub quality_profile_id: Option<i64>,
     #[serde(default)]
     pub seasons: Vec<i64>,
     #[serde(default)]
@@ -97,6 +105,7 @@ impl RequestInput {
                 == self.album_ids.len()
             && (self.kind == "series" || (self.seasons.is_empty() && self.episodes.is_empty()))
             && (self.kind == "artist" || self.album_ids.is_empty())
+            && self.quality_profile_id.is_none_or(|id| id > 0)
     }
     fn service(&self) -> &str {
         match self.kind.as_str() {
@@ -118,6 +127,7 @@ pub(crate) struct Server {
     pub library_id: String,
     pub root_folder: String,
     pub quality_profile_id: i64,
+    pub quality_profiles_json: String,
     pub metadata_profile_id: Option<i64>,
     pub is_default: i64,
     pub enabled: i64,
@@ -138,8 +148,11 @@ impl Server {
             })?,
         })
     }
+    pub(crate) fn quality_profiles(&self) -> Vec<QualityProfile> {
+        serde_json::from_str::<Vec<QualityProfile>>(&self.quality_profiles_json).unwrap_or_default()
+    }
     fn public(&self) -> Value {
-        json!({"id":self.id,"name":self.name,"kind":self.kind,"baseUrl":self.base_url,"hasApiKey":!self.api_key.is_empty(),"libraryId":self.library_id,"rootFolder":self.root_folder,"qualityProfileId":self.quality_profile_id,"metadataProfileId":self.metadata_profile_id,"isDefault":self.is_default==1,"enabled":self.enabled==1})
+        json!({"id":self.id,"name":self.name,"kind":self.kind,"baseUrl":self.base_url,"hasApiKey":!self.api_key.is_empty(),"libraryId":self.library_id,"rootFolder":self.root_folder,"qualityProfileId":self.quality_profile_id,"qualityProfiles":self.quality_profiles(),"metadataProfileId":self.metadata_profile_id,"isDefault":self.is_default==1,"enabled":self.enabled==1})
     }
     fn api(&self) -> &str {
         if self.kind == "lidarr" {
@@ -168,7 +181,7 @@ impl Server {
         .await
     }
 }
-const SERVER_COLUMNS: &str = "id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,metadata_profile_id,is_default,enabled,generation";
+const SERVER_COLUMNS: &str = "id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,quality_profiles_json,metadata_profile_id,is_default,enabled,generation";
 pub(crate) async fn server(store: &IdentityStore, id: &str) -> Result<Server, Error> {
     let sql = format!("SELECT {SERVER_COLUMNS} FROM acquisition_servers WHERE id=?");
     query_as(sqlx::AssertSqlSafe(sql))
@@ -203,8 +216,10 @@ pub struct RequestRecord {
     pub author_label: Option<String>,
     pub source_status: Option<String>,
     pub source_remote_id: Option<String>,
+    #[serde(skip)]
+    pub progress_json: Option<String>,
 }
-pub(crate) const REQUEST_COLUMNS: &str = "id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,error_code,remote_id,work_id,created_at,updated_at,imported,source_key,author_label,source_status,source_remote_id";
+pub(crate) const REQUEST_COLUMNS: &str = "id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,error_code,remote_id,work_id,created_at,updated_at,imported,source_key,author_label,source_status,source_remote_id,progress_json";
 pub(crate) async fn record(store: &IdentityStore, id: &str) -> Result<RequestRecord, Error> {
     query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {REQUEST_COLUMNS} FROM media_requests WHERE id=?"
@@ -258,209 +273,6 @@ pub(crate) async fn event(
     query("INSERT INTO acquisition_events(id,request_id,actor_id,status,code,created_at) VALUES(?,?,?,?,?,?)")
         .bind(uuid::Uuid::now_v7().to_string()).bind(id).bind(actor).bind(status).bind(code).bind(now()).execute(&mut **tx).await.map_err(db)?;
     Ok(())
-}
-
-/// Historical import is suspended, repeatable and never inserts an execution job.
-pub async fn import_legacy(
-    store: &IdentityStore,
-    source_id: &str,
-    value: &Value,
-    user_id: Option<&str>,
-    server_id: Option<&str>,
-) -> Result<bool, Error> {
-    let source_request_id = value["id"].as_i64().filter(|v| *v > 0).ok_or_else(|| {
-        err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "import_request_id_required",
-        )
-    })?;
-    let source_key = format!("{source_id}:{source_request_id}");
-    let server = match server_id {
-        Some(id) => Some(server(store, id).await?),
-        None => None,
-    };
-    let media = &value["media"];
-    let kind = match media["mediaType"]
-        .as_str()
-        .or_else(|| value["type"].as_str())
-    {
-        Some("movie") => "film",
-        Some("tv") => "series",
-        _ => {
-            return Err(err(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "import_media_type_unknown",
-            ));
-        }
-    };
-    let external_provider = if kind == "series" && media["tvdbId"].as_i64().is_some_and(|id| id > 0)
-    {
-        "tvdb"
-    } else {
-        "tmdb"
-    };
-    let external_id = media[if external_provider == "tvdb" {
-        "tvdbId"
-    } else {
-        "tmdbId"
-    }]
-    .as_i64()
-    .filter(|v| *v > 0)
-    .ok_or_else(|| {
-        err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "import_external_id_required",
-        )
-    })?
-    .to_string();
-    if server.as_ref().is_some_and(|server| {
-        (kind == "film" && server.kind != "radarr") || (kind == "series" && server.kind != "sonarr")
-    }) {
-        return Err(err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "import_server_kind_mismatch",
-        ));
-    }
-    let title = media["title"]
-        .as_str()
-        .or_else(|| value["title"].as_str())
-        .map(str::to_owned)
-        .unwrap_or_else(|| format!("{kind} · {external_provider} {external_id}"));
-    let seasons = value["seasons"]
-        .as_array()
-        .map(|s| {
-            s.iter()
-                .filter_map(|v| v["seasonNumber"].as_i64())
-                .collect()
-        })
-        .unwrap_or_default();
-    let mut input = RequestInput {
-        kind: kind.into(),
-        title: title.clone(),
-        external_id: external_id.clone(),
-        external_provider: external_provider.into(),
-        server_id: server.as_ref().map(|server| server.id.clone()),
-        seasons,
-        episodes: vec![],
-        album_ids: vec![],
-        monitor_future: false,
-    };
-    let source_status = match value["status"].as_i64() {
-        Some(1) => "pending",
-        Some(2) => "approved",
-        Some(3) => "rejected",
-        Some(4) => "failed",
-        Some(5) => "completed",
-        _ => "unknown",
-    };
-    let created = value["createdAt"]
-        .as_str()
-        .and_then(|v| {
-            time::OffsetDateTime::parse(v, &time::format_description::well_known::Rfc3339).ok()
-        })
-        .map(|t| t.unix_timestamp())
-        .unwrap_or_else(now);
-    let updated = value["updatedAt"]
-        .as_str()
-        .and_then(|v| {
-            time::OffsetDateTime::parse(v, &time::format_description::well_known::Rfc3339).ok()
-        })
-        .map(|t| t.unix_timestamp())
-        .unwrap_or(created);
-    let author = value["requestedBy"]["displayName"]
-        .as_str()
-        .or_else(|| value["requestedBy"]["username"].as_str())
-        .unwrap_or("Auteur historique");
-    let id = uuid::Uuid::new_v4().to_string();
-    let mut conn = store.pool().acquire().await.map_err(db)?;
-    let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
-        .await
-        .map_err(db)?;
-    type PreviousImport = (
-        String,
-        String,
-        i64,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-    );
-    let existing: Option<PreviousImport> =
-        query_as("SELECT id,status,updated_at,user_id,server_id,source_status FROM media_requests WHERE source_key=?")
-            .bind(&source_key)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(db)?;
-    let source_remote_id = media[if value["is4k"] == true {
-        "externalServiceId4k"
-    } else {
-        "externalServiceId"
-    }]
-    .as_i64()
-    .filter(|v| *v > 0)
-    .map(|v| v.to_string());
-    if let Some((
-        id,
-        status,
-        previous_updated,
-        previous_user,
-        previous_server,
-        previous_source_status,
-    )) = existing
-    {
-        if status == "suspended"
-            && (updated > previous_updated
-                || previous_user.is_none() && user_id.is_some()
-                || previous_server.is_none() && server.is_some())
-        {
-            input.server_id = previous_server.or(input.server_id);
-            let delta_status = if updated >= previous_updated {
-                Some(source_status)
-            } else {
-                previous_source_status.as_deref()
-            };
-            query("UPDATE media_requests \
-                    SET source_status=?,updated_at=?,user_id=COALESCE(user_id,?),server_id=COALESCE(server_id,?),library_id=COALESCE(library_id,?),input_json=?,source_remote_id=COALESCE(?,source_remote_id),author_label=?,external_id=?,external_provider=?,title=? \
-                    WHERE id=? AND status='suspended'")
-                .bind(delta_status).bind(updated.max(previous_updated)).bind(user_id).bind(server.as_ref().map(|s|s.id.as_str())).bind(server.as_ref().map(|s|s.library_id.as_str())).bind(json!(input).to_string()).bind(&source_remote_id).bind(author.chars().take(128).collect::<String>()).bind(&external_id).bind(external_provider).bind(title.chars().take(512).collect::<String>()).bind(&id).execute(&mut *tx).await.map_err(db)?;
-            event(&mut tx, &id, None, "suspended", Some("legacy_delta_import")).await?;
-            crate::database::commit(tx).await.map_err(db)?;
-            return Ok(true);
-        }
-        crate::database::commit(tx).await.map_err(db)?;
-        return Ok(false);
-    }
-    let result = query(
-        "INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,\
-            external_provider,input_json,status,error_code,remote_id,created_at,updated_at,\
-            imported,source_key,author_label,source_status,source_remote_id) \
-            VALUES(?,?,?,?,?,?,?,?,?,'suspended',NULL,NULL,?,?,?,?,?,?,?) \
-            ON CONFLICT(source_key) DO NOTHING",
-    )
-    .bind(&id)
-    .bind(user_id)
-    .bind(server.as_ref().map(|s| s.id.as_str()))
-    .bind(server.as_ref().map(|s| s.library_id.as_str()))
-    .bind(kind)
-    .bind(title.chars().take(512).collect::<String>())
-    .bind(external_id)
-    .bind(external_provider)
-    .bind(json!(input).to_string())
-    .bind(created)
-    .bind(updated)
-    .bind(1i64)
-    .bind(source_key)
-    .bind(author.chars().take(128).collect::<String>())
-    .bind(source_status)
-    .bind(source_remote_id)
-    .execute(&mut *tx)
-    .await
-    .map_err(db)?;
-    let inserted = result.rows_affected() > 0;
-    if inserted {
-        event(&mut tx, &id, None, "suspended", Some("legacy_import")).await?;
-    }
-    crate::database::commit(tx).await.map_err(db)?;
-    Ok(inserted)
 }
 
 #[cfg(test)]

@@ -211,7 +211,8 @@ CREATE TABLE scheduled_scans (
     last_outcome TEXT NOT NULL DEFAULT 'never'
 , last_request_key TEXT NOT NULL DEFAULT '');
 
-CREATE TABLE user_groups (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 80), is_default INTEGER NOT NULL DEFAULT 0) STRICT;
+CREATE TABLE user_groups (id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL UNIQUE CHECK(length(name) BETWEEN 1 AND 80), is_default INTEGER NOT NULL DEFAULT 0, allow_media_download INTEGER) STRICT;
+CREATE TABLE group_parental_policies (group_id TEXT PRIMARY KEY NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE, maximum_age INTEGER NOT NULL, allow_unrated INTEGER NOT NULL, blocked_tags_json TEXT NOT NULL, access_schedule_json TEXT NOT NULL) STRICT;
 
 CREATE TABLE user_group_members (group_id TEXT NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, PRIMARY KEY(group_id,user_id)) STRICT;
 
@@ -1351,6 +1352,7 @@ CREATE TABLE acquisition_servers (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('radarr','sonarr','lidarr')),
  base_url TEXT NOT NULL, api_key TEXT NOT NULL, allowed_ips_json TEXT NOT NULL,
  library_id TEXT NOT NULL REFERENCES libraries(id), root_folder TEXT NOT NULL, quality_profile_id BIGINT NOT NULL,
+ quality_profiles_json TEXT NOT NULL DEFAULT '[]',
  metadata_profile_id BIGINT, is_default BIGINT NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)), enabled BIGINT NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), generation TEXT NOT NULL
 );
 CREATE TABLE media_requests (
@@ -1358,7 +1360,7 @@ CREATE TABLE media_requests (
  library_id TEXT REFERENCES libraries(id), kind TEXT NOT NULL, title TEXT NOT NULL, external_id TEXT NOT NULL, external_provider TEXT NOT NULL,
  input_json TEXT NOT NULL, status TEXT NOT NULL, error_code TEXT, remote_id TEXT, work_id TEXT,
  created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, imported BIGINT NOT NULL DEFAULT 0 CHECK(imported IN (0,1)),
- source_key TEXT UNIQUE, author_label TEXT, source_status TEXT, source_remote_id TEXT
+ source_key TEXT UNIQUE, author_label TEXT, source_status TEXT, source_remote_id TEXT, progress_json TEXT
 );
 CREATE INDEX media_requests_owner ON media_requests(user_id,created_at);
 CREATE INDEX media_requests_identity ON media_requests(server_id,kind,external_id,status);
@@ -1660,33 +1662,7 @@ CREATE TABLE group_media_kind_denials (
 );
 
 -- ----- role_groups -----
-CREATE VIEW effective_user_group_members AS
-SELECT group_id,user_id FROM user_group_members
-WHERE group_id NOT IN ('builtin-role-user','builtin-role-administrator')
-UNION SELECT 'builtin-role-user',id FROM users WHERE role='user'
-UNION SELECT 'builtin-role-administrator',id FROM users WHERE role='administrator';
--- Every user-facing query reads this view: denied media types never leak
--- through catalogue, search, details, playback, music, lists or SyncPlay.
-CREATE VIEW effective_library_permissions AS
-WITH account_grants AS (
-    SELECT library_id,user_id FROM library_permissions
-    UNION SELECT l.library_id,m.user_id FROM user_group_libraries l JOIN effective_user_group_members m ON m.group_id=l.group_id
-    UNION SELECT l.library_id,u.id FROM user_group_libraries l JOIN user_groups g ON g.id=l.group_id CROSS JOIN users u WHERE g.is_default=1
-), direct_grants AS (
-    SELECT library_id,user_id FROM account_grants
-    -- A profile sees what its owner sees; an administrator's access is implicit, so
-    -- its profiles get every library administrators have not been excluded from.
-    UNION SELECT a.library_id,p.user_id FROM account_profiles p JOIN account_grants a ON a.user_id=p.owner_id WHERE p.user_id<>p.owner_id
-    UNION SELECT lib.id,p.user_id FROM account_profiles p JOIN users o ON o.id=p.owner_id AND o.role='administrator' CROSS JOIN libraries lib
-      WHERE p.user_id<>p.owner_id AND COALESCE(lib.options_json,'') NOT LIKE '%adminAccess__false%'
-), granted AS (
-    SELECT d.library_id,d.user_id FROM direct_grants d WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=d.library_id)
-    UNION SELECT f.library_id,d.user_id FROM direct_grants d JOIN library_folders f ON f.parent_id=d.library_id AND f.active=1
-)
-SELECT g.library_id,g.user_id FROM granted g JOIN libraries lib ON lib.id=g.library_id
-WHERE NOT EXISTS(SELECT 1 FROM user_media_kind_denials x WHERE x.user_id=g.user_id AND x.kind=lib.kind)
-AND NOT EXISTS(SELECT 1 FROM group_media_kind_denials x JOIN effective_user_group_members m ON m.group_id=x.group_id WHERE m.user_id=g.user_id AND x.kind=lib.kind)
-AND NOT EXISTS(SELECT 1 FROM group_media_kind_denials x JOIN user_groups dg ON dg.id=x.group_id WHERE dg.is_default=1 AND x.kind=lib.kind);
+-- Views effective_user_group_members and effective_library_permissions: derived.sql.
 
 -- ----- default_avatars -----
 -- Separate from the pack: removing a default collection is a durable choice.

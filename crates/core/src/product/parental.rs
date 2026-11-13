@@ -194,6 +194,53 @@ pub const BLOCKED_TAGS_SQL: &str = "EXISTS(SELECT 1 FROM parental_blocked_tags b
         AND instr(lower(COALESCE(json_extract(tw.manual_json,'$.tags'),\
         json_extract(tw.editorial_json,'$.tags'),'[]')),bt.tag_json)>0)))";
 
+/// Keep the episodes this account may watch, with one query for the whole list.
+pub async fn retain_parental_allowed(
+    store: &IdentityStore,
+    user: &str,
+    items: &mut Vec<Value>,
+) -> Result<(), Error> {
+    let ids: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect();
+    if ids.is_empty() {
+        items.clear();
+        return Ok(());
+    }
+    let mut builder =
+        sqlx::QueryBuilder::<sqlx::Any>::new("SELECT w.id FROM inventory_works w WHERE w.id IN (");
+    let mut bound = builder.separated(", ");
+    for id in &ids {
+        bound.push_bind(id.to_string());
+    }
+    bound.push_unseparated(
+        ") AND NOT EXISTS(SELECT 1 FROM parental_policies policy WHERE policy.user_id=",
+    );
+    builder
+        .push_bind(user.to_owned())
+        .push(" AND ((")
+        .push(AGE_SQL)
+        .push(")>policy.maximum_age OR ((")
+        .push(AGE_SQL)
+        .push(") IS NULL AND policy.allow_unrated=0) OR ")
+        .push(BLOCKED_TAGS_SQL)
+        .push("))");
+    let sql = crate::database::normalize_sql(builder.sql().as_str());
+    let arguments = sqlx::Execute::take_arguments(&mut builder.build())
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .unwrap_or_default();
+    let allowed: std::collections::HashSet<String> =
+        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(sql), arguments)
+            .fetch_all(&store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .into_iter()
+            .collect();
+    items.retain(|item| item["id"].as_str().is_some_and(|id| allowed.contains(id)));
+    Ok(())
+}
+
 pub async fn parental_allowed(
     store: &IdentityStore,
     user: &str,

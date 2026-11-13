@@ -3,6 +3,7 @@ import type { Media, Player, PlaybackState, Source } from './types';
 import { ExternalAudio } from './external-audio';
 import { SegmentedAudio } from './segmented-audio';
 import { ProgressiveVideo } from './progressive-video';
+import { ClientTranscoder } from './client-transcode';
 import { chooseSource } from './source-selection';
 import { AudioSelectionRetainedError } from './errors';
 import { unsupportedAudio } from './compatibility';
@@ -13,6 +14,20 @@ import { pageAudio, type AudioEnhancement } from './audio-enhancement';
 
 import { tr } from '../i18n';
 class VideoSeekTimeoutError extends Error {}
+
+function assertSafeMediaUrl(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed.startsWith('/')) return trimmed;
+  try {
+    const parsed = new URL(trimmed, typeof location !== 'undefined' ? location.origin : 'http://localhost');
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'blob:') {
+      return trimmed;
+    }
+  } catch {
+    // Invalid URL falls through to error.
+  }
+  throw new Error(tr('source_interrupted_or_unavailable_reload_the'));
+}
 
 // Bounded source replacement; failures and recovery remain visible to the UI.
 export class NativePlayer implements Player {
@@ -31,9 +46,10 @@ export class NativePlayer implements Player {
   private source?: Source;
   private externalAudio?: ExternalAudio;
   private pendingAudio?: ExternalAudio;
-  private progressiveVideo?: ProgressiveVideo;
+  private progressiveVideo?: ProgressiveVideo | ClientTranscoder;
   private subtitle: string | null = null;
   private subtitleRevision = 0;
+  private subtitleAbort?: AbortController;
   /** libass (ASS/SSA) or PGS bitmaps drawn over the video. */
   private ass?: { timeOffset: number; destroy(): Promise<void> };
   private streamOptions: TranscodeOptions = { quality: 'auto', maxKbps: 0, toneMapping: 'auto', audioChannels: 'stereo' };
@@ -260,15 +276,16 @@ export class NativePlayer implements Player {
     if (source.transcodeOnly && !plan) throw new Error(tr('this_track_needs_transcoding_unavailable'));
     this.busy = true;
     const previous = this.source;
-    const independentSwitch = previous?.url === source.url && Boolean(source.externalAudioUrl) && forced === undefined && !plan && !this.transcoding;
+    const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
+    const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
+    const independentSwitch = previous?.url === source.url && Boolean(audioUrl) && forced === undefined && !plan && !this.transcoding;
     let pausedForReplacement = false;
     let resumeReplacement = false;
     let replacementPauseRevision: number | undefined;
-    const segmented = Boolean(source.audioSegmentUrl && SegmentedAudio.supported());
     const canTryProgressive = Boolean(source.videoStreamUrl && source.videoMime && Number.isFinite(source.durationSeconds) && source.durationSeconds! > 0 && ProgressiveVideo.supported(source.videoMime));
-    const audioUrl = segmented ? source.audioSegmentUrl! : source.externalAudioUrl;
+    if (audioUrl) assertSafeMediaUrl(audioUrl);
     const createAudio = () => segmented
-      ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, trackId: source.audioTrackId})
+      ? new SegmentedAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError, {mode: source.audioSegmentMode, duration: source.durationSeconds, trackId: source.audioTrackId})
       : new ExternalAudio(this.video, (source.audioOffsetSeconds ?? 0) + this.audioOffset, this.audioError);
     // Keep the current presentation running while the replacement audio is
     // prepared. A cold Node preparation must not freeze an otherwise healthy
@@ -413,7 +430,7 @@ export class NativePlayer implements Player {
         this.video.addEventListener('seeked', seeked);
         this.video.addEventListener('error', failed);
         this.lastUrl = candidateUrl;
-        this.video.src = candidateUrl;
+        this.video.src = assertSafeMediaUrl(candidateUrl);
         this.video.load();
       });
 
@@ -450,15 +467,18 @@ export class NativePlayer implements Player {
         if (!offer) throw new Error(tr('this_track_needs_transcoding_unavailable'));
         this.status(chosen.height ? tr('transcoding_to_quality', { height: chosen.height }) : tr('converting_the_audio_track'));
         if (chosen.audio !== undefined && this.externalAudio) { this.externalAudio.destroy(); this.externalAudio = undefined; audioLoading = undefined; }
-        const stream = new ProgressiveVideo(this.video, chosen.prefix, offer.durationSeconds, chosen.mime, message => {
-          this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.transcoding=undefined;this.onError(message);
-        });
+        const onStreamError = (message: string, kind?: PlaybackFailureKind) => {
+          this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.transcoding=undefined;this.onError(message, kind);
+        };
+        const stream = chosen.mode === 'client'
+          ? new ClientTranscoder(this.video, media, source, offer.durationSeconds, chosen.height, chosen.kbps, chosen.mime, onStreamError)
+          : new ProgressiveVideo(this.video, chosen.prefix, offer.durationSeconds, chosen.mime, onStreamError);
         this.progressiveVideo = stream;
         try { await Promise.race([Promise.all([stream.load(position), loadCandidate(stream.url)]), stream.failure]); stream.activate(); }
         catch (error) { this.cancel?.(); stream.destroy(); if (this.progressiveVideo === stream) this.progressiveVideo = undefined; throw error; }
         this.transcoding = chosen;
         this.transcodeHeaders = stream.headers;
-        console.info('[media playback]', { stage: 'transcode', reason: chosen.reason, height: chosen.height, kbps: chosen.kbps, flags: chosen.flags, ...stream.headers });
+        console.info('[media playback]', { stage: 'transcode', mode: chosen.mode ?? 'server', reason: chosen.reason, height: chosen.height, kbps: chosen.kbps, flags: chosen.flags, ...stream.headers });
       };
       if (plan) await startTranscode(plan);
       else try {
@@ -481,8 +501,8 @@ export class NativePlayer implements Player {
         if (this.destroyed) throw originalError;
         if(canTryProgressive && source.videoStreamUrl && source.videoMime) {
           this.status(tr('original_video_not_playable_progressive'));
-          const progressive=new ProgressiveVideo(this.video,source.videoStreamUrl,source.durationSeconds!,source.videoMime,message=>{
-            this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.onError(message);
+          const progressive=new ProgressiveVideo(this.video,source.videoStreamUrl,source.durationSeconds!,source.videoMime,(message, kind)=>{
+            this.pause();this.externalAudio?.destroy();this.externalAudio=undefined;this.progressiveVideo?.destroy();this.progressiveVideo=undefined;this.source=undefined;this.onError(message, kind);
           });
           this.progressiveVideo=progressive;
           try {await Promise.race([Promise.all([progressive.load(position),loadCandidate(progressive.url)]),progressive.failure]);progressive.activate();}
@@ -499,7 +519,7 @@ export class NativePlayer implements Player {
           }
         } else {
           if(!source.preparedVideoUrl) {
-            if(source.videoStreamUrl)throw new Error(`La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
+            if(source.videoStreamUrl)throw new PlaybackFailure('codec', `La lecture vidéo progressive n’est pas disponible pour ce navigateur ou ce descripteur (${source.videoMime??'codec MSE absent'}). Aucun remux intégral automatique.`);
             throw originalError;
           }
           this.status(tr('original_video_not_playable_in_this'));
@@ -551,7 +571,7 @@ export class NativePlayer implements Player {
     try { await this.replace(source, state.position, state.paused); }
     catch(error) {
       const contextual = withContext(error, message => tr('track', { value: source.language.toUpperCase(), audioTrackId: source.audioTrackId, message }));
-      if (!this.destroyed && !this.busy && previous && this.source === previous && this.video.paused === state.paused) throw new AudioSelectionRetainedError(contextual.message);
+      if (!this.destroyed && !this.busy && previous && this.source === previous && this.state().paused === state.paused) throw new AudioSelectionRetainedError(contextual.message);
       throw contextual;
     }
   }
@@ -565,6 +585,9 @@ export class NativePlayer implements Player {
   }
   async selectSubtitle(id: string | null) {
     const revision = ++this.subtitleRevision;
+    this.subtitleAbort?.abort();
+    const subtitleController = new AbortController();
+    this.subtitleAbort = subtitleController;
     this.subtitle = id;
     const previousAss = this.ass; this.ass = undefined;
     if (previousAss) await previousAss.destroy().catch(() => {});
@@ -573,7 +596,10 @@ export class NativePlayer implements Player {
     const subtitle = id === null ? undefined : this.media?.subtitles.find(s => s.id === id);
     if (id !== null && !subtitle) throw new Error(tr('subtitles_unavailable'));
     // Bitmaps the browser cannot draw (VobSub, DVB, PGS without canvas) are burnt in.
-    const { PgsRenderer } = subtitle?.image === 'pgs' ? await import('./pgs') : { PgsRenderer: undefined };
+    const [, { PgsRenderer }] = await Promise.all([
+      subtitle?.image === 'pgs' && subtitle.url.includes('/prepared/') ? this.prepareUrl(subtitle.url) : Promise.resolve(),
+      subtitle?.image === 'pgs' ? import('./pgs') : Promise.resolve({ PgsRenderer: undefined })
+    ]);
     if (this.destroyed || revision !== this.subtitleRevision) return;
     const needsBurn = subtitle?.image === 'burn' || (subtitle?.image === 'pgs' && !PgsRenderer?.supported());
     const burn = needsBurn ? subtitle?.burnIndex ?? undefined : undefined;
@@ -589,19 +615,19 @@ export class NativePlayer implements Player {
     }
     if (!subtitle || burn !== undefined) return;
     if (subtitle.image === 'pgs' && PgsRenderer) {
-      if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
-      if (this.destroyed || revision !== this.subtitleRevision) return;
-      const renderer = await PgsRenderer.create(this.video, subtitle.url, this.subtitleOffset);
+      const renderer = await PgsRenderer.create(this.video, assertSafeMediaUrl(subtitle.url), this.subtitleOffset, subtitleController.signal);
       if (this.destroyed || revision !== this.subtitleRevision) { await renderer.destroy(); return; }
       this.ass = renderer;
       return;
     }
     if (subtitle.assUrl && typeof OffscreenCanvas !== 'undefined' && typeof Worker !== 'undefined' && typeof WebAssembly !== 'undefined') {
       try {
-        if (subtitle.assUrl.includes('/prepared/')) await this.prepareUrl(subtitle.assUrl);
-        const { createAssRenderer } = await import('./ass-renderer');
+        const [, { createAssRenderer }] = await Promise.all([
+          subtitle.assUrl.includes('/prepared/') ? this.prepareUrl(subtitle.assUrl) : Promise.resolve(),
+          import('./ass-renderer')
+        ]);
         if (this.destroyed || revision !== this.subtitleRevision) return;
-        const renderer = await createAssRenderer(this.video, subtitle.assUrl, this.subtitleOffset);
+        const renderer = await createAssRenderer(this.video, assertSafeMediaUrl(subtitle.assUrl), this.subtitleOffset);
         if (this.destroyed || revision !== this.subtitleRevision) { await renderer.destroy(); return; }
         this.ass = renderer;
         return;
@@ -623,7 +649,7 @@ export class NativePlayer implements Player {
     track.addEventListener('error', () => this.onError(tr('failed_to_load_the_webvtt_subtitles')), { once: true });
     if (subtitle.url.includes('/prepared/')) await this.prepareUrl(subtitle.url);
     if (this.destroyed || revision !== this.subtitleRevision) return;
-    track.src = subtitle.url;
+    track.src = assertSafeMediaUrl(subtitle.url);
     this.video.append(track);
     track.track.mode = 'showing';
   }
@@ -669,7 +695,11 @@ export class NativePlayer implements Player {
     }
   }
   pause() { this.pauseRevision++; this.startup?.abort(); this.externalAudio?.pause(); this.pendingAudio?.pause(); this.video.pause(); clearInterval(this.stuckTimer); }
-  seek(position: number) { if (Number.isFinite(position)) this.video.currentTime = Math.max(0, Math.min(position, this.video.duration || 0)); }
+  seek(position: number) {
+    if (!Number.isFinite(position)) return;
+    const duration = Number.isFinite(this.video.duration) && this.video.duration > 0 ? this.video.duration : (this.source?.durationSeconds ?? 0);
+    this.video.currentTime = Math.max(0, Math.min(position, duration));
+  }
   setVolume(volume: number) { this.video.volume = Math.max(0, Math.min(1, volume)); }
   setAudioOffset(seconds: number) {
     if (!Number.isFinite(seconds) || Math.abs(seconds) > 30) return;
@@ -698,6 +728,7 @@ export class NativePlayer implements Player {
   setSpeed(speed: number) { if ([0.5, 1, 1.5, 2].includes(speed)) this.video.playbackRate = speed; }
   destroy() {
     this.destroyed = true;
+    this.subtitleAbort?.abort();
     for (const stop of this.startupObservers) stop();
     this.startupObservers = [];
     if (this.ass) { void this.ass.destroy().catch(() => {}); this.ass = undefined; }

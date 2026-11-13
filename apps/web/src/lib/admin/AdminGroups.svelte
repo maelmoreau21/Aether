@@ -4,7 +4,12 @@
   import type { Library } from './types';
   import Icon from '../ui/Icon.svelte';
   import { modalFocus } from './modal-focus';
-  import { t, fmt } from '../i18n';
+  import { t, fmt, type TranslationKey } from '../i18n';
+  import ExtensionPermissions from './ExtensionPermissions.svelte';
+  import {
+    features, loadFeatures, loadPolicyOverview, saveGroupPolicy, deleteGroupPolicy,
+    type PolicyRule
+  } from '../applications/api';
 
   let {
     groups,
@@ -20,7 +25,7 @@
 
   let selectedGroupIds = $state<string[]>([]);
   let editorOpen = $state(false);
-  let activeTab = $state<'info' | 'members' | 'permissions'>('info');
+  let activeTab = $state<'info' | 'members' | 'permissions' | 'parental'>('info');
 
   let name = $state('');
   let isDefault = $state(false);
@@ -28,8 +33,43 @@
   let libraryIds = $state<string[]>([]);
   const kindOptions = [{ id: 'films', get label() { return $t('films'); } }, { id: 'series', get label() { return $t('series'); } }, { id: 'music', get label() { return $t('music'); } }] as const;
   let allowedKinds = $state<string[]>(['films', 'series', 'music']);
+  let allowMediaDownload = $state<boolean | null>(null);
   let editing = $state<string | null>(null);
   const systemRole = $derived(groups.find(group => group.id === editing)?.systemRole);
+  let requestsRule = $state<PolicyRule>({ film: {}, series: {}, music: {} });
+
+  // Group parental policy
+  type AccessWindow = { day: number; startMinute: number; endMinute: number };
+  const ageTiers = [
+    { value: 0, get label() { return $t('all_audiences_only'); } },
+    { value: 10, get label() { return $t('n_10_years_10'); } },
+    { value: 12, get label() { return $t('n_12_years_12'); } },
+    { value: 16, get label() { return $t('n_16_years_16'); } },
+    { value: 18, get label() { return $t('n_18_years_18'); } },
+    { value: 21, get label() { return $t('no_age_limit'); } }
+  ];
+  const days = $derived([1, 2, 3, 4, 5, 6, 0].map(day => $t(`sched_day_${day}` as TranslationKey)));
+  let parentalEnabled = $state(false);
+  let parentalMaxAge = $state(12);
+  let parentalAllowUnrated = $state(false);
+  let parentalTags = $state('');
+  let parentalWindows = $state<AccessWindow[]>([]);
+  let parentalLoaded = $state(false);
+
+  function formatTime(minutes: number) {
+    return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  }
+  function parseMinutes(value: string) {
+    const [h, m] = value.split(':').map(Number);
+    return h * 60 + m;
+  }
+
+  function hasPolicyOverrides(rule: PolicyRule): boolean {
+    return (['film', 'series', 'music'] as const).some(c => {
+      const cr = rule[c];
+      return cr !== undefined && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.quota !== undefined);
+    });
+  }
 
   let busy = $state(false);
   let error = $state('');
@@ -48,13 +88,66 @@
     allowedKinds = ['films', 'series', 'music'];
     userIds = [];
     libraryIds = [];
+    allowMediaDownload = null;
+    requestsRule = { film: {}, series: {}, music: {} };
+    parentalEnabled = false;
+    parentalMaxAge = 12;
+    parentalAllowUnrated = false;
+    parentalTags = '';
+    parentalWindows = [];
+    parentalLoaded = false;
     activeTab = 'info';
+  }
+
+  async function loadGroupExtensionPermissions(groupId: string | null, role: string | null | undefined) {
+    requestsRule = { film: {}, series: {}, music: {} };
+    parentalEnabled = false;
+    parentalMaxAge = 12;
+    parentalAllowUnrated = false;
+    parentalTags = '';
+    parentalWindows = [];
+    parentalLoaded = !groupId;
+    try {
+      const available = await loadFeatures();
+      if (available.requests && groupId && role !== 'administrator') {
+        const overview = await loadPolicyOverview();
+        const found = overview.groups.find(g => g.id === groupId)?.rule;
+        if (found) {
+          requestsRule = {
+            film: found.film ? { ...found.film } : {},
+            series: found.series ? { ...found.series } : {},
+            music: found.music ? { ...found.music } : {}
+          };
+        }
+      }
+    } catch {
+      // Non-fatal: keep default inherited rule if policy endpoint is unavailable.
+    }
+    if (groupId && role !== 'administrator') {
+      try {
+        const p = await adminRequest<{
+          maximumAge: number;
+          allowUnrated: boolean;
+          blockedTags?: string[];
+          accessSchedule?: AccessWindow[];
+        } | null>(`/api/v1/admin/groups/${encodeURIComponent(groupId)}/parental`);
+        parentalEnabled = p !== null;
+        parentalMaxAge = p?.maximumAge ?? 12;
+        parentalAllowUnrated = p?.allowUnrated ?? false;
+        parentalTags = (p?.blockedTags ?? []).join(', ');
+        parentalWindows = p?.accessSchedule ?? [];
+        parentalLoaded = true;
+      } catch {
+        parentalLoaded = false;
+      }
+    }
   }
 
   function edit(group: UserGroup | null) {
     if (!group) {
       reset();
       editorOpen = true;
+      void loadGroupExtensionPermissions(null, null);
       return;
     }
     editing = group.id;
@@ -63,8 +156,10 @@
     userIds = [...group.userIds];
     libraryIds = [...group.libraryIds];
     allowedKinds = [...(group.allowedKinds ?? ['films', 'series', 'music'])];
+    allowMediaDownload = group.allowMediaDownload ?? null;
     editorOpen = true;
     activeTab = 'info';
+    void loadGroupExtensionPermissions(group.id, group.systemRole);
   }
 
   async function save(event?: SubmitEvent) {
@@ -74,7 +169,9 @@
     error = '';
     notice = '';
     try {
-      await adminRequest(
+      const wasEditing = editing;
+      const wasSystemRole = systemRole;
+      const saved = await adminRequest<{ id?: string }>(
         editing ? `/api/v1/admin/groups/${encodeURIComponent(editing)}` : '/api/v1/admin/groups',
         {
           method: editing ? 'PUT' : 'POST',
@@ -83,10 +180,36 @@
             isDefault,
             userIds: systemRole ? [] : userIds,
             libraryIds,
-            allowedKinds: kindOptions.map(option => option.id).filter(kind => allowedKinds.includes(kind))
+            allowedKinds: kindOptions.map(option => option.id).filter(kind => allowedKinds.includes(kind)),
+            allowMediaDownload
           })
         }
       );
+      const savedId = wasEditing ?? saved?.id;
+      if ($features.requests && savedId && wasSystemRole !== 'administrator') {
+        if (hasPolicyOverrides(requestsRule)) {
+          await saveGroupPolicy(savedId, requestsRule);
+        } else if (wasEditing) {
+          await deleteGroupPolicy(savedId).catch(() => {});
+        }
+      }
+      if (savedId && wasSystemRole !== 'administrator' && (parentalLoaded || parentalEnabled)) {
+        if (parentalEnabled) {
+          await adminRequest(`/api/v1/admin/groups/${encodeURIComponent(savedId)}/parental`, {
+            method: 'PUT',
+            body: JSON.stringify({
+              maximumAge: parentalMaxAge,
+              allowUnrated: parentalAllowUnrated,
+              blockedTags: parentalTags.split(',').map(v => v.trim()).filter(Boolean),
+              accessSchedule: parentalWindows
+            })
+          });
+        } else if (wasEditing) {
+          await adminRequest(`/api/v1/admin/groups/${encodeURIComponent(savedId)}/parental`, {
+            method: 'DELETE'
+          }).catch(() => {});
+        }
+      }
       reset();
       await onchanged();
       notice = $t('group_saved_successfully');
@@ -196,6 +319,11 @@
           <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'permissions'} onclick={() => activeTab = 'permissions'}>
             <Icon name="film" size={15} /> {$t('permissions')}
           </button>
+          {#if systemRole !== 'administrator'}
+            <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'parental'} onclick={() => activeTab = 'parental'}>
+              <Icon name="shield" size={15} /> {$t('parental_control')}
+            </button>
+          {/if}
         </div>
 
         <div class="dsm-modal-body">
@@ -350,6 +478,102 @@
                     {/each}
                   </tbody>
                 </table>
+              </div>
+            </div>
+            <div class="dsm-form-section">
+              <h4 class="form-section-title">{$t('download_and_sync')}</h4>
+              <p class="section-desc">{$t('this_right_controls_the_download_offered')}</p>
+              <select
+                disabled={busy || systemRole === 'administrator'}
+                value={allowMediaDownload === true ? 'true' : allowMediaDownload === false ? 'false' : 'inherit'}
+                onchange={e => {
+                  const v = e.currentTarget.value;
+                  allowMediaDownload = v === 'inherit' ? null : v === 'true';
+                }}
+              >
+                <option value="inherit">{$t('ext_inherit')}</option>
+                <option value="true">{$t('ext_allow')}</option>
+                <option value="false">{$t('ext_deny')}</option>
+              </select>
+            </div>
+            <ExtensionPermissions
+              bind:rule={requestsRule}
+              isAdminTarget={systemRole === 'administrator'}
+              requestsEnabled={$features.requests}
+              disabled={busy}
+            />
+          {:else if activeTab === 'parental'}
+            <div class="dsm-form-section">
+              <h4 class="form-section-title">{$t('parental_restrictions')}</h4>
+              <div class="dsm-grid-form">
+                <label class="dsm-checkbox-label">
+                  <input type="checkbox" bind:checked={parentalEnabled} disabled={busy} />
+                  <span><strong>{$t('restrict_this_account')}</strong></span>
+                </label>
+
+                {#if parentalEnabled}
+                  <label class="form-row">
+                    <span class="row-label">{$t('maximum_allowed_age')}</span>
+                    <div class="row-field">
+                      <select bind:value={parentalMaxAge} disabled={busy}>
+                        {#each ageTiers as tier (tier.value)}
+                          <option value={tier.value}>{tier.label}</option>
+                        {/each}
+                        {#if !ageTiers.some(tier => tier.value === parentalMaxAge)}
+                          <option value={parentalMaxAge}>{$t('years_existing_setting', { maximumAge: parentalMaxAge })}</option>
+                        {/if}
+                      </select>
+                    </div>
+                  </label>
+
+                  <label class="dsm-checkbox-label">
+                    <input type="checkbox" bind:checked={parentalAllowUnrated} disabled={busy} />
+                    <span>{$t('allow_media_with_no_known_rating')}</span>
+                  </label>
+
+                  <label class="form-row">
+                    <span class="row-label">{$t('blocked_tags_separated_by_commas')}</span>
+                    <div class="row-field">
+                      <input bind:value={parentalTags} maxlength="6400" disabled={busy} placeholder={$t('horror_adult')} />
+                      <span class="field-hint">{$t('exact_match_on_nfo_or_manual')}</span>
+                    </div>
+                  </label>
+
+                  <div class="dsm-form-section">
+                    <h4 class="form-section-title">{$t('access_hours_utc')}</h4>
+                    <p class="section-desc">{$t('with_no_range_access_all_week')}</p>
+                    {#each parentalWindows as window, index (window)}
+                      <div class="dsm-window-row">
+                        <label>
+                          <span>{$t('sched_day')}</span>
+                          <select bind:value={window.day} disabled={busy}>
+                            {#each days as day, number (day)}<option value={number}>{day}</option>{/each}
+                          </select>
+                        </label>
+                        <label>
+                          <span>{$t('sched_started')}</span>
+                          <input type="time" required disabled={busy} value={formatTime(window.startMinute)} onchange={e => window.startMinute = parseMinutes(e.currentTarget.value)} />
+                        </label>
+                        <label>
+                          <span>{$t('sched_ended')}</span>
+                          <select disabled={busy} value={window.endMinute === 1440 ? 'midnight' : 'time'} onchange={e => window.endMinute = e.currentTarget.value === 'midnight' ? 1440 : 1200}>
+                            <option value="time">{$t('sched_time')}</option>
+                            <option value="midnight">24:00</option>
+                          </select>
+                          {#if window.endMinute !== 1440}
+                            <input aria-label={$t('end_time')} type="time" required disabled={busy} value={formatTime(window.endMinute)} onchange={e => window.endMinute = parseMinutes(e.currentTarget.value)} />
+                          {/if}
+                        </label>
+                        <button type="button" class="btn btn-default" disabled={busy} onclick={() => parentalWindows = parentalWindows.filter((_, i) => i !== index)}>{$t('remove')}</button>
+                      </div>
+                    {/each}
+                    <div>
+                      <button type="button" class="btn btn-default" disabled={busy || parentalWindows.length >= 56} onclick={() => parentalWindows = [...parentalWindows, { day: 0, startMinute: 480, endMinute: 1200 }]}>
+                        {$t('add_a_range')}
+                      </button>
+                    </div>
+                  </div>
+                {/if}
               </div>
             </div>
           {/if}

@@ -2,35 +2,32 @@ name: Apple
 
 # Builds the iPhone/iPad and Apple TV apps without signing: the Rust core as an
 # XCFramework, its Swift bindings, the Xcode project (XcodeGen), then xcodebuild
-# for devices and simulators. Signing and distribution stay manual.
+# for devices and simulators, packaged as unsigned .ipa archives. Signing and
+# distribution stay manual. Called by clients.yml on every CI/release run.
 on:
-  push:
-    branches:
-      - develop
-    paths:
-      - 'apps/apple/**'
-      - 'crates/client/**'
-      - 'crates/client-ffi/**'
-      - 'Cargo.lock'
-      - '.github/workflows/apple.yml'
-  pull_request:
-    branches:
-      - main
-      - develop
-    paths:
-      - 'apps/apple/**'
-      - 'crates/client/**'
-      - 'crates/client-ffi/**'
-      - 'Cargo.lock'
-      - '.github/workflows/apple.yml'
   workflow_dispatch:
-
-concurrency:
-  group: apple-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    inputs:
+      version:
+        description: "Version du produit compilée dans les applications"
+        type: string
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      version:
+        description: "Version du produit compilée dans les applications"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Lue par aether-client (option_env!) : vide ou absente = build de développement,
+  # qui ne signale jamais de mise à jour.
+  AETHER_CLIENT_VERSION: ${{ inputs.version }}
 
 jobs:
   build:
@@ -61,7 +58,7 @@ jobs:
 
       - name: Générer le projet Xcode (XcodeGen)
         run: |
-          brew install xcodegen
+          command -v xcodegen >/dev/null || brew install xcodegen
           cd apps/apple && xcodegen generate
 
       - name: Compiler l'app iPhone et iPad (appareil)
@@ -88,18 +85,26 @@ jobs:
           -configuration Debug -destination 'generic/platform=tvOS Simulator'
           -derivedDataPath build/apple CODE_SIGNING_ALLOWED=NO
 
-      - name: Archiver les apps non signées
+      - name: Archiver les apps non signées (.ipa)
         run: |
+          short=$(git rev-parse --short HEAD)
           mkdir -p dist
-          for app in build/apple/Build/Products/Release-iphoneos/Aether.app build/apple/Build/Products/Release-appletvos/Aether.app; do
-            platform=$(basename "$(dirname "$app")")
-            ditto -c -k --keepParent "$app" "dist/Aether-$platform-unsigned.zip"
+          for entry in "Release-iphoneos:ios" "Release-appletvos:tvos"; do
+            dir="${entry%%:*}"
+            platform="${entry##*:}"
+            app="build/apple/Build/Products/$dir/Aether.app"
+            test -d "$app"
+            stage=$(mktemp -d)
+            mkdir -p "$stage/Payload"
+            cp -R "$app" "$stage/Payload/"
+            (cd "$stage" && ditto -c -k --sequesterRsrc --keepParent Payload "$GITHUB_WORKSPACE/dist/Aether-$platform-unsigned-$short.ipa")
+            rm -rf "$stage"
           done
           ls -l dist
 
       - name: Publier les apps non signées
         uses: actions/upload-artifact@v4
         with:
-          name: aether-apple-unsigned
-          path: dist/*.zip
-          retention-days: 14
+          name: aether-apple
+          path: dist/*.ipa
+          retention-days: 30

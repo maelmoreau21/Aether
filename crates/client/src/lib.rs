@@ -390,7 +390,7 @@ impl Client {
                 pairs.append_pair("library", library);
             }
             pairs.append_pair("offset", &query.offset.to_string());
-            pairs.append_pair("limit", &query.limit.clamp(1, 200).to_string());
+            pairs.append_pair("limit", &query.limit.clamp(1, 100).to_string());
         }
         let path = format!("{}?{}", url.path(), url.query().unwrap_or(""));
         self.get(&path).await

@@ -1,4 +1,9 @@
 import type { Media, Source } from './types';
+import {
+  canClientTranscode,
+  detectClientTranscodeCapabilities,
+  type ClientTranscodeCapabilities
+} from './client-transcode';
 
 /**
  * Fallback transcoding, decided in the browser from the descriptor's `transcode` offer.
@@ -64,6 +69,8 @@ export interface TranscodeOptions {
 
 export interface TranscodePlan {
   reason: TranscodeReason;
+  /** Where transcoding runs; defaults to `'server'`. `'client'` runs in the browser even if server transcoding is off. */
+  mode?: 'server' | 'client';
   video: number;
   audio?: number;
   subtitle?: number;
@@ -82,13 +89,16 @@ export interface Environment {
   /** HTMLMediaElement.canPlayType, for passthrough codecs. */
   canPlay: (mime: string) => string;
   hdrDisplay: boolean;
+  /** Browser-side WebCodecs transcoding capabilities when server transcoding is off. */
+  clientTranscode?: ClientTranscodeCapabilities;
 }
 
 export function browserEnvironment(video: HTMLVideoElement): Environment {
   return {
     mse: mime => typeof MediaSource !== 'undefined' && MediaSource.isTypeSupported(mime),
     canPlay: mime => video.canPlayType?.(mime) ?? '',
-    hdrDisplay: typeof matchMedia === 'function' && (matchMedia('(dynamic-range: high)').matches || matchMedia('(video-dynamic-range: high)').matches)
+    hdrDisplay: typeof matchMedia === 'function' && (matchMedia('(dynamic-range: high)').matches || matchMedia('(video-dynamic-range: high)').matches),
+    clientTranscode: detectClientTranscodeCapabilities()
   };
 }
 
@@ -185,16 +195,24 @@ export function planTranscode(media: Media, source: Source, reason: TranscodeRea
   const track = audioTrack(media, audio);
   let flags = 0;
   let audioCodec: string | undefined;
+  let needsClientAudio = false;
   if (audio !== undefined) {
     const codec = track?.codec_name;
     const passthrough = options.audioChannels === 'passthrough' && (codec === 'eac3' || codec === 'ac3')
       && Boolean(environment.canPlay(`audio/mp4; codecs="${codec === 'eac3' ? 'ec-3' : 'ac-3'}"`));
     if (passthrough && !options.serverAudio) { flags |= FLAG_COPY_AUDIO; audioCodec = codec === 'eac3' ? 'ec-3' : 'ac-3'; }
     else if (offer.audio === false) {
-      // Audio encoding is off on this server: only a copy of the original track remains.
-      audioCodec = codec ? COPY_AUDIO[codec] : undefined;
-      if (!audioCodec) return undefined;
-      flags |= FLAG_COPY_AUDIO;
+      // Server audio encoding is off: copy if possible, otherwise transcode client-side if supported.
+      const copyCodec = codec ? COPY_AUDIO[codec] : undefined;
+      if (copyCodec) {
+        audioCodec = copyCodec;
+        flags |= FLAG_COPY_AUDIO;
+      } else if (canClientTranscode(environment.clientTranscode, false, true)) {
+        needsClientAudio = true;
+        audioCodec = 'mp4a.40.2';
+      } else {
+        return undefined;
+      }
     } else {
       audioCodec = 'mp4a.40.2';
       if ((options.audioChannels === 'surround' || options.audioChannels === 'passthrough') && (track?.channels ?? 0) >= 6) flags |= FLAG_SURROUND;
@@ -210,13 +228,16 @@ export function planTranscode(media: Media, source: Source, reason: TranscodeRea
     && copyCodecs !== undefined && environment.mse(`video/mp4; codecs="${copyCodecs}${audioPart}"`);
   const target = rung(offer, options);
   const height = canCopy ? 0 : target.height;
-  // Video encoding is off on this server: nothing but a copied picture can be offered.
-  if (height !== 0 && offer.video === false) return undefined;
+  const needsClientVideo = height !== 0 && offer.video === false;
+  if (needsClientVideo && !canClientTranscode(environment.clientTranscode, true, needsClientAudio)) {
+    return undefined;
+  }
+  const mode: 'server' | 'client' = needsClientVideo || needsClientAudio ? 'client' : 'server';
   if (height !== 0 && tonemap) flags |= FLAG_TONEMAP;
   const mime = `video/mp4; codecs="${canCopy ? copyCodecs : h264Codec(height)}${audioPart}"`;
   if (!environment.mse(mime)) return undefined;
   const plan = { video: offer.videoIndex, audio, subtitle: height === 0 ? undefined : options.burnSubtitle, height, kbps: target.kbps, flags };
-  return { ...plan, reason, mime, prefix: resourcePrefix(offer, plan) };
+  return { ...plan, ...(mode === 'client' ? { mode } : {}), reason, mime, prefix: resourcePrefix(offer, plan) };
 }
 
 /** One rung down, or `undefined` at the bottom of the ladder. */

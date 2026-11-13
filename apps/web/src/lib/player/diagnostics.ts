@@ -117,6 +117,7 @@ export interface ProbeOptions {
  * decoding diagnosis. Never throws; bounded by `timeoutMs` (default 3 s).
  */
 export async function probeFailure(url: string, options: ProbeOptions = {}): Promise<PlaybackFailure | undefined> {
+  if (url.startsWith('blob:')) return undefined;
   const fetcher = options.fetcher ?? (typeof fetch === 'function' ? fetch : undefined);
   if (!fetcher) return undefined;
   const controller = new AbortController();

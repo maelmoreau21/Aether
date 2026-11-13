@@ -756,7 +756,12 @@ fn redirects_and_abi_follow_the_published_policy() {
         assert_eq!(github_release_asset(other), None, "{other}");
     }
     assert!(abi_supported("1") && abi_supported("1.0") && abi_supported("1.0.0.0"));
-    assert!(!abi_supported("1.1") && !abi_supported("2.0") && !abi_supported("0.9"));
+    assert!(abi_supported("1.1") && abi_supported("1.1.0"));
+    assert!(!abi_supported("1.2") && !abi_supported("2.0") && !abi_supported("0.9"));
+    // Only a package built for 1.1 receives requests larger than the 1.0 size.
+    assert!(super::accepts_large_input(Some("1.1")) && super::accepts_large_input(Some("1.1.0")));
+    assert!(!super::accepts_large_input(Some("1.0")) && !super::accepts_large_input(None));
+    assert!(!super::accepts_large_input(Some("x")));
     assert!(!abi_supported("1.0.0.0.0") && !abi_supported("x"));
 }
 
@@ -801,7 +806,7 @@ fn versioned_catalogue_lists_every_version_and_keeps_limits() {
     );
     assert!(parse_manifest(&serde_json::to_vec(&json!([many])).unwrap()).is_err());
     let mut newer_abi = items[0].clone();
-    newer_abi.target_abi = Some("1.1".into());
+    newer_abi.target_abi = Some("1.2".into());
     assert!(!item_compatible(&newer_abi));
 }
 
@@ -1019,5 +1024,33 @@ async fn versioned_catalogue_installs_zip_assets_and_older_versions() {
     let mut documents = test_documents().lock().unwrap();
     for url in urls.iter().chain([&manifest_url, &image_url]) {
         documents.remove(url);
+    }
+}
+
+#[test]
+fn svg_image_validation_rejects_bypass_vectors() {
+    assert_eq!(
+        super::images::image_type(
+            br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z" fill="#fff"/></svg>"##
+        ),
+        Some("image/svg+xml")
+    );
+    let malicious = [
+        br#"<svg><svg:script>alert(1)</svg:script></svg>"#.as_slice(),
+        br#"<svg xmlns:svg="http://www.w3.org/2000/svg"><svg:foreignObject/></svg>"#,
+        br#"<svg><a href="&#x6a;avascript:alert(1)"><rect width="10" height="10"/></a></svg>"#,
+        br#"<svg><style>@import url(https://evil.example/x.css);</style></svg>"#,
+        br#"<svg><image href="https://evil.example/track.png"/></svg>"#,
+        br#"<svg onload="alert(1)"/>"#,
+        br#"<svg/><svg/>"#,
+        br#"<rect width="10" height="10"/>"#,
+    ];
+    for payload in malicious {
+        assert_eq!(
+            super::images::image_type(payload),
+            None,
+            "expected rejection for {}",
+            String::from_utf8_lossy(payload)
+        );
     }
 }

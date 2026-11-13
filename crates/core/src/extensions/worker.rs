@@ -14,13 +14,20 @@ use tokio::{
 /// Largest frame the worker may send: one SDK JSON payload plus its envelope.
 pub(crate) const MAX_FRAME: usize = media_extension_sdk::MAX_JSON + 4096;
 
-/// The worker binary sits next to the Core executable (or one level up from
-/// Cargo's `deps` directory in tests).
+/// The worker binary sits next to the Core executable. In Cargo's tests it is in
+/// the profile directory: one level up from `deps` (Rust ≤ 1.99), or four up from
+/// `build/<package>/<hash>/out` (the build directory layout of Rust 1.100).
 fn binary() -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let mut directory = exe.parent()?;
-    if directory.file_name().is_some_and(|name| name == "deps") {
+    let named = |dir: &std::path::Path, name: &str| dir.file_name().is_some_and(|n| n == name);
+    if named(directory, "deps") {
         directory = directory.parent()?;
+    } else if named(directory, "out")
+        && let Some(build) = directory.ancestors().nth(3)
+        && named(build, "build")
+    {
+        directory = build.parent()?;
     }
     Some(directory.join(if cfg!(windows) {
         "media-extension-worker.exe"

@@ -580,6 +580,20 @@ pub async fn catalogue_page(
     {
         return Ok(cached_val);
     }
+    let cacheable = state_fp > 0 && !filter.bypass_cache && !filter.hide_watched;
+    let flight = cacheable.then(|| cache::flight_lock(&cache_key));
+    let _computing = match &flight {
+        Some(lock) => Some(lock.lock().await),
+        None => None,
+    };
+    // Another request may have filled the page while this one waited.
+    if cacheable
+        && let Some(lock) = CATALOGUE_CACHE.get()
+        && let Ok(mut guard) = lock.lock()
+        && let Some(cached_val) = guard.get(&cache_key, state_fp)
+    {
+        return Ok(cached_val);
+    }
 
     // 1. Pre-filter visible libraries to enabled libraries on non-revoked nodes matching target_kind.
     let mut lib_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
@@ -1012,113 +1026,58 @@ pub(crate) fn refresh_work_availability_from_editions(value: &mut Value) {
     }
 }
 
+const EDITION_COLUMNS: &str = "SELECT e.work_id, e.id AS edition_id, COALESCE(em.label, 'Édition locale') AS edition_label, \
+        v.id AS version_id, COALESCE(vm.label, 'Version locale') AS version_label, \
+        s.id AS source_id, a.id AS asset_id, a.mime AS mime, l.node_id AS node_id ";
+const EDITION_JOINS: &str = "LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
+        JOIN inventory_versions v ON v.edition_id=e.id \
+        LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
+        JOIN inventory_sources s ON s.version_id=v.id \
+        JOIN inventory_assets a ON a.source_id=s.id \
+        JOIN libraries l ON l.id=s.library_id \
+        JOIN media_nodes n ON n.id=l.node_id \
+        WHERE a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') \
+        AND n.status != 'revoked' AND l.enabled=1 ";
+
 async fn load_work_editions(
     store: &IdentityStore,
     work_id: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
+    Ok(load_editions(store, &[work_id.to_owned()])
+        .await?
+        .remove(work_id)
+        .unwrap_or_default())
+}
+
+/// Editions of several works (a page of episodes) in one query instead of one per work.
+async fn load_editions(
+    store: &IdentityStore,
+    work_ids: &[String],
+) -> Result<HashMap<String, Vec<Value>>, sqlx::Error> {
+    if work_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
     crate::nodes::ensure_node_registry_warm(store).await?;
-    let rows = query(
-        "SELECT e.id AS edition_id, COALESCE(em.label, 'Édition locale') AS edition_label, \
-                v.id AS version_id, COALESCE(vm.label, 'Version locale') AS version_label, \
-                s.id AS source_id, a.id AS asset_id, a.mime AS mime, l.node_id AS node_id \
-         FROM inventory_editions e \
-         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
-         JOIN inventory_versions v ON v.edition_id=e.id \
-         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
-         JOIN inventory_sources s ON s.version_id=v.id \
-         JOIN inventory_assets a ON a.source_id=s.id \
-         JOIN libraries l ON l.id=s.library_id \
-         JOIN media_nodes n ON n.id=l.node_id \
-         WHERE e.work_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1 \
-         ORDER BY e.id, v.id, s.id, a.id",
-    )
-    .bind(work_id)
-    .fetch_all(&store.pool)
-    .await?;
-
-    let now = media_contracts::protocol::unix_now();
-    let mut editions = Vec::new();
-    let mut current_edition_id = String::new();
-    let mut current_edition_label = String::from("Édition locale");
-    let mut current_version_id = String::new();
-    let mut current_version_label = String::from("Version locale");
-    let mut current_versions = Vec::new();
-    let mut current_sources = Vec::new();
-
-    for row in rows {
-        let edition_id: String = row.get("edition_id");
-        let edition_label: String = row.get("edition_label");
-        let version_id: String = row.get("version_id");
-        let version_label: String = row.get("version_label");
-        let source_id: String = row.get("source_id");
-        let asset_id: String = row.get("asset_id");
-        let mime: String = row.get("mime");
-        let node_id: String = row.get("node_id");
-
-        let (node_status, conn_mode, score) = match store.node_registry.get(&node_id) {
-            Some(entry) => crate::nodes::score_node_entry(&entry, Some(&mime), None, now),
-            None => ("connected".to_owned(), "local".to_owned(), 12_000),
-        };
-
-        if edition_id != current_edition_id {
-            if !current_sources.is_empty() {
-                current_versions.push(json!({
-                    "id": current_version_id,
-                    "label": current_version_label,
-                    "sources": std::mem::take(&mut current_sources)
-                }));
-            }
-            if !current_versions.is_empty() {
-                editions.push(json!({
-                    "id": current_edition_id,
-                    "label": current_edition_label,
-                    "versions": std::mem::take(&mut current_versions)
-                }));
-            }
-            current_edition_id = edition_id;
-            current_edition_label = edition_label;
-            current_version_id = version_id.clone();
-            current_version_label = version_label;
-        } else if version_id != current_version_id {
-            if !current_sources.is_empty() {
-                current_versions.push(json!({
-                    "id": current_version_id,
-                    "label": current_version_label,
-                    "sources": std::mem::take(&mut current_sources)
-                }));
-            }
-            current_version_id = version_id.clone();
-            current_version_label = version_label;
-        }
-
-        current_sources.push(json!({
-            "id": source_id,
-            "assetIds": [asset_id.clone()],
-            "playbackMediaId": asset_id,
-            "nodeId": node_id,
-            "nodeStatus": node_status,
-            "connectionMode": conn_mode,
-            "score": score
-        }));
+    let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(EDITION_COLUMNS);
+    builder
+        .push("FROM inventory_editions e ")
+        .push(EDITION_JOINS)
+        .push("AND e.work_id IN (");
+    let mut ids = builder.separated(", ");
+    for id in work_ids {
+        ids.push_bind(id);
     }
-
-    if !current_sources.is_empty() {
-        current_versions.push(json!({
-            "id": current_version_id,
-            "label": current_version_label,
-            "sources": current_sources
-        }));
-    }
-    if !current_versions.is_empty() {
-        editions.push(json!({
-            "id": current_edition_id,
-            "label": current_edition_label,
-            "versions": current_versions
-        }));
-    }
-
-    sort_edition_sources_by_score(&mut editions);
-    Ok(editions)
+    ids.push_unseparated(") ORDER BY e.work_id, e.id, v.id, s.id, a.id");
+    let sql = crate::database::normalize_sql(builder.sql().as_str());
+    let arguments = builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), arguments)
+        .fetch_all(&store.pool)
+        .await?;
+    Ok(group_edition_rows(store, rows))
 }
 
 async fn load_series_editions(
@@ -1126,27 +1085,25 @@ async fn load_series_editions(
     series_id: &str,
 ) -> Result<HashMap<String, Vec<Value>>, sqlx::Error> {
     crate::nodes::ensure_node_registry_warm(store).await?;
-    let rows = query(
-        "SELECT e.work_id, e.id AS edition_id, COALESCE(em.label, 'Édition locale') AS edition_label, \
-                v.id AS version_id, COALESCE(vm.label, 'Version locale') AS version_label, \
-                s.id AS source_id, a.id AS asset_id, a.mime AS mime, l.node_id AS node_id \
-         FROM inventory_seasons se \
+    let sql = format!(
+        "{EDITION_COLUMNS}FROM inventory_seasons se \
          JOIN inventory_episodes ep ON ep.season_id=se.id \
          JOIN inventory_editions e ON e.work_id=ep.work_id \
-         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
-         JOIN inventory_versions v ON v.edition_id=e.id \
-         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
-         JOIN inventory_sources s ON s.version_id=v.id \
-         JOIN inventory_assets a ON a.source_id=s.id \
-         JOIN libraries l ON l.id=s.library_id \
-         JOIN media_nodes n ON n.id=l.node_id \
-         WHERE se.series_id=? AND a.available=1 AND s.root_snapshot=l.root AND l.kind IN ('films', 'series') AND n.status != 'revoked' AND l.enabled=1 \
-         ORDER BY e.work_id, e.id, v.id, s.id, a.id",
-    )
-    .bind(series_id)
-    .fetch_all(&store.pool)
-    .await?;
+         {EDITION_JOINS}AND se.series_id=? \
+         ORDER BY e.work_id, e.id, v.id, s.id, a.id"
+    );
+    let rows = query(sqlx::AssertSqlSafe(sql))
+        .bind(series_id)
+        .fetch_all(&store.pool)
+        .await?;
+    Ok(group_edition_rows(store, rows))
+}
 
+/// Rows ordered by work, edition, version and source, nested as each work's editions.
+fn group_edition_rows(
+    store: &IdentityStore,
+    rows: Vec<sqlx::any::AnyRow>,
+) -> HashMap<String, Vec<Value>> {
     let now = media_contracts::protocol::unix_now();
     let mut map: HashMap<String, Vec<Value>> = HashMap::new();
     let mut current_work_id = String::new();
@@ -1174,7 +1131,7 @@ async fn load_series_editions(
             None => ("connected".to_owned(), "local".to_owned(), 12_000),
         };
 
-        if work_id != current_work_id {
+        if work_id != current_work_id || edition_id != current_edition_id {
             if !current_sources.is_empty() {
                 current_versions.push(json!({
                     "id": current_version_id,
@@ -1189,33 +1146,16 @@ async fn load_series_editions(
                     "versions": std::mem::take(&mut current_versions)
                 }));
             }
-            if !editions.is_empty() {
-                sort_edition_sources_by_score(&mut editions);
-                map.insert(current_work_id, std::mem::take(&mut editions));
-            }
-            current_work_id = work_id;
-            current_edition_id = edition_id;
-            current_edition_label = edition_label;
-            current_version_id = version_id.clone();
-            current_version_label = version_label;
-        } else if edition_id != current_edition_id {
-            if !current_sources.is_empty() {
-                current_versions.push(json!({
-                    "id": current_version_id,
-                    "label": current_version_label,
-                    "sources": std::mem::take(&mut current_sources)
-                }));
-            }
-            if !current_versions.is_empty() {
-                editions.push(json!({
-                    "id": current_edition_id,
-                    "label": current_edition_label,
-                    "versions": std::mem::take(&mut current_versions)
-                }));
+            if work_id != current_work_id {
+                if !editions.is_empty() {
+                    sort_edition_sources_by_score(&mut editions);
+                    map.insert(current_work_id, std::mem::take(&mut editions));
+                }
+                current_work_id = work_id;
             }
             current_edition_id = edition_id;
             current_edition_label = edition_label;
-            current_version_id = version_id.clone();
+            current_version_id = version_id;
             current_version_label = version_label;
         } else if version_id != current_version_id {
             if !current_sources.is_empty() {
@@ -1225,7 +1165,7 @@ async fn load_series_editions(
                     "sources": std::mem::take(&mut current_sources)
                 }));
             }
-            current_version_id = version_id.clone();
+            current_version_id = version_id;
             current_version_label = version_label;
         }
 
@@ -1258,8 +1198,7 @@ async fn load_series_editions(
         sort_edition_sources_by_score(&mut editions);
         map.insert(current_work_id, editions);
     }
-
-    Ok(map)
+    map
 }
 
 pub struct EpisodePage {
@@ -1522,13 +1461,15 @@ async fn populate_episode_page(
         selected_season
     };
     let mut by_season: HashMap<String, Vec<Value>> = HashMap::new();
+    let page_ids: Vec<String> = rows.iter().map(|row| row.get("id")).collect();
+    let mut page_editions = load_editions(store, &page_ids).await?;
     for row in rows {
         let id: String = row.get("id");
         let mut episode = work(&row);
         episode["kind"] = json!("episode");
         episode["number"] = json!(row.get::<i64, _>("episode_number"));
         episode["seasonNumber"] = json!(row.get::<i64, _>("season_number"));
-        episode["editions"] = json!(load_work_editions(store, &id).await?);
+        episode["editions"] = json!(page_editions.remove(&id).unwrap_or_default());
         refresh_work_availability_from_editions(&mut episode);
         by_season
             .entry(row.get("season_id"))

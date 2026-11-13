@@ -1,10 +1,10 @@
 name: Applications clientes
 
 # Builds the client applications: Android (APK), desktop (the web interface in a native window) for Windows
-# (Setup installer and portable .zip), Linux and macOS, the TV shells (webOS .ipk, Tizen staged without signature) and the
-# Roku channel, as artifacts named aether-*. CI calls it on every push and pull
-# request; the beta pre-release (ci.yml) and the stable Release (release.yml)
-# attach those artifacts. The iPhone, iPad and Apple TV apps are built by apple.yml.
+# (Setup installer and portable .zip), Linux and macOS, the TV shells (webOS .ipk, Tizen staged without signature), the
+# Roku channel, and the iPhone, iPad and Apple TV apps (unsigned .ipa via apple.yml), as artifacts named aether-*.
+# CI calls it on every push and pull request; the beta pre-release (ci.yml) and the stable Release (release.yml)
+# attach those artifacts.
 on:
   workflow_dispatch:
   workflow_call:
@@ -236,3 +236,9 @@ jobs:
           name: aether-tv
           path: dist/*
           retention-days: 30
+
+  apple:
+    name: iOS, iPadOS et tvOS (sans signature)
+    uses: ./.github/workflows/apple.yml
+    with:
+      version: ${{ inputs.version }}

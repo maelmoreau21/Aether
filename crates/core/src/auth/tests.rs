@@ -249,6 +249,55 @@ async fn several_accounts_share_a_browser_and_switch_without_signing_in_again() 
     assert_eq!(offered.status(), StatusCode::OK);
     assert_eq!(cookie_set(&offered, "aether_session"), first);
 
+    // With a short PIN, the parked account opens only with it, and the list says so.
+    let encoded = crate::profiles::hash_pin(&state, "2468".into())
+        .await
+        .unwrap();
+    crate::database::query(
+        "INSERT INTO account_profiles(user_id,owner_id,pin_hash,created_at) VALUES(?,?,?,unixepoch())",
+    )
+    .bind(&first_id)
+    .bind(&first_id)
+    .bind(encoded)
+    .execute(&state.store.pool)
+    .await
+    .unwrap();
+    let listed = call("/api/v1/auth/accounts", aside.clone(), None, null.clone()).await;
+    let listed: serde_json::Value = serde_json::from_slice(
+        &axum::body::to_bytes(listed.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(listed["accounts"][0]["hasPin"], true);
+    for (body, status, code) in [
+        (target.clone(), StatusCode::FORBIDDEN, Some("pin_required")),
+        (
+            serde_json::json!({"userId": first_id, "pin": "1357"}),
+            StatusCode::FORBIDDEN,
+            Some("invalid_pin"),
+        ),
+        (
+            serde_json::json!({"userId": first_id, "pin": "2468"}),
+            StatusCode::OK,
+            None,
+        ),
+    ] {
+        let answered = call("/api/v1/auth/accounts/switch", aside.clone(), None, body).await;
+        assert_eq!(answered.status(), status);
+        if let Some(code) = code {
+            let error: serde_json::Value = serde_json::from_slice(
+                &axum::body::to_bytes(answered.into_body(), usize::MAX)
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(error["error"], code);
+        } else {
+            assert_eq!(cookie_set(&answered, "aether_session"), first);
+        }
+    }
+
     // Forgetting a parked account closes its session.
     let forgotten = call(
         "/api/v1/auth/accounts/forget",
@@ -1207,4 +1256,106 @@ async fn native_bearer_login_refresh_and_logout() {
         .status(),
         StatusCode::OK
     );
+}
+
+#[tokio::test]
+async fn rotating_addresses_cannot_bypass_the_account_budget() {
+    let (_temp, state) = setup().await;
+    let attempt = |ip: String, login: &'static str, password: &'static str| {
+        let state = state.clone();
+        async move {
+            request_with_ip(
+                &state,
+                "/api/v1/auth/login",
+                "POST",
+                None,
+                Some(ORIGIN),
+                None,
+                Some(&ip),
+                serde_json::json!({"login":login,"password":password}),
+            )
+            .await
+            .status()
+        }
+    };
+    // Attempts from different addresses all count against the one login.
+    for n in 0..3 {
+        let ip = format!("203.0.113.{}", n + 1);
+        assert_eq!(
+            attempt(ip, "admin", "wrong").await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let counted: i64 =
+        crate::database::query_scalar("SELECT attempts FROM login_throttle WHERE throttle_key=?")
+            .bind("login:admin")
+            .fetch_one(&state.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(counted, 3);
+    // The rest of the budget is spent directly: thirty Argon2 checks can outlast the one-minute
+    // window on a slow runner, which would reopen it before the last attempt.
+    crate::database::query(
+        "UPDATE login_throttle SET attempts=?, window_started=unixepoch() WHERE throttle_key=?",
+    )
+    .bind(super::http::LOGIN_ATTEMPTS_PER_ACCOUNT)
+    .bind("login:admin")
+    .execute(&state.store.pool)
+    .await
+    .unwrap();
+    // A fresh address no longer helps for this login, even with the right password...
+    assert_eq!(
+        attempt("198.51.100.1".into(), "admin", PASSWORD).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // ...while other logins keep their own budget.
+    assert_eq!(
+        attempt("198.51.100.2".into(), "someone", "wrong").await,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
+async fn bootstrap_is_rate_limited() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("bootstrap-limit.db");
+    let store = IdentityStore::open(&db).await.unwrap();
+    let state = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let token = state.get_bootstrap_token().expect("bootstrap token");
+
+    for _ in 0..10 {
+        let res = request(
+            &state,
+            "/api/v1/auth/bootstrap",
+            "POST",
+            None,
+            Some("http://127.0.0.1:3000"),
+            None,
+            serde_json::json!({
+                "login": "admin",
+                "password": "my-secure-admin-password-1234",
+                "bootstrap_token": "wrong-token"
+            }),
+        )
+        .await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    let throttled = request(
+        &state,
+        "/api/v1/auth/bootstrap",
+        "POST",
+        None,
+        Some("http://127.0.0.1:3000"),
+        None,
+        serde_json::json!({
+            "login": "admin",
+            "password": "my-secure-admin-password-1234",
+            "bootstrap_token": token
+        }),
+    )
+    .await;
+    assert_eq!(throttled.status(), StatusCode::TOO_MANY_REQUESTS);
 }

@@ -440,7 +440,7 @@ async fn comprehensive_series_flow_indexing_playback_permissions_and_rescan() {
         .unwrap();
     assert_eq!(
         response.headers()[header::CACHE_CONTROL],
-        "private, no-cache"
+        "private, max-age=31536000, immutable"
     );
     let etag = response.headers()[header::ETAG].clone();
     for (cookie, expected) in [

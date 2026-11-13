@@ -562,5 +562,32 @@ pub(crate) async fn poster(
     axum::extract::Query(options): axum::extract::Query<crate::artwork::PreviewOptions>,
 ) -> Result<Response, Error> {
     crate::feedback::authorized(&auth, &headers, &work, false).await?;
-    crate::artwork::legacy(&auth.store, &work, options.width.unwrap_or(0), &headers).await
+    match crate::artwork::legacy(&auth.store, &work, options.width.unwrap_or(0), &headers).await {
+        Ok(response) => Ok(response),
+        Err(StatusCode::NOT_FOUND) => {
+            let local_id: Option<String> = query_scalar(
+                "SELECT i.id FROM inventory_images i \
+                 JOIN libraries l ON l.id=i.library_id \
+                 JOIN media_nodes n ON n.id=l.node_id \
+                 LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+                 WHERE i.work_id=? AND i.role='poster' AND i.available=1 \
+                   AND i.root_snapshot=l.root AND l.enabled=1 AND n.status='connected' \
+                   AND h.image_id IS NULL \
+                 ORDER BY i.priority ASC, i.id ASC LIMIT 1",
+            )
+            .bind(&work)
+            .fetch_optional(&auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if let Some(id) = local_id {
+                use axum::response::IntoResponse;
+                return Ok(axum::response::Redirect::temporary(&format!(
+                    "/api/v1/assets/{id}/image"
+                ))
+                .into_response());
+            }
+            Err(StatusCode::NOT_FOUND)
+        }
+        Err(status) => Err(status),
+    }
 }

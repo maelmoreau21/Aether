@@ -24,6 +24,11 @@ pub(crate) const UNIDENTIFIED_ERROR: &str = "metadata_unidentified";
 /// 105 M of the guest's 200 M fuel and 63 KB of its 64 KiB request; a fourth exceeds both. The
 /// Core used to send up to eight (170 KB), which the runtime refuses as `input_too_large`.
 const MARKER_BATCH_MAX: usize = 3;
+/// Words kept for a package of extension ABI 1.0, whose requests stay within `MAX_JSON`: the
+/// first 300 s of the head (2500 words) and the last 186 s of the tail (1500 words), the
+/// windows Nodes extracted before November 2026.
+const LEGACY_HEAD_ITEMS: usize = 2500;
+const LEGACY_TAIL_ITEMS: usize = 1500;
 /// JSON added by the keys, ids and numbers of one episode besides its two base64 fingerprints.
 const MARKER_EPISODE_OVERHEAD: usize = 320;
 /// Left free in the request for the extension settings' growth and the envelope.
@@ -290,7 +295,17 @@ pub(crate) async fn run_automated(
             .into_iter()
             .filter_map(|i| candidates[i].take())
             .collect();
-        let request_budget = media_extension_sdk::MAX_JSON.saturating_sub(
+        // ABI 1.1 packages take the Node's whole windows (up to 10 min of head, 7 min 30 of
+        // tail); older ones get the windows and the request size they were built for.
+        let large = crate::extensions::repositories::accepts_large_input(
+            package.manifest.target_abi.as_deref(),
+        );
+        let request_limit = if large {
+            media_extension_sdk::MAX_INPUT_JSON
+        } else {
+            media_extension_sdk::MAX_JSON
+        };
+        let request_budget = request_limit.saturating_sub(
             serde_json::to_vec(&settings).map_or(0, |bytes| bytes.len()) + MARKER_REQUEST_MARGIN,
         );
         let mut request_bytes = 0usize;
@@ -316,6 +331,11 @@ pub(crate) async fn run_automated(
             else {
                 continue;
             };
+            let words = if large {
+                &words[..]
+            } else {
+                &words[..words.len().min(LEGACY_HEAD_ITEMS)]
+            };
             let mut bytes = Vec::with_capacity(words.len() * 4);
             let mut valid = true;
             for word in words {
@@ -331,10 +351,16 @@ pub(crate) async fn run_automated(
             }
 
             let mut tail_compact = None;
+            // Words dropped from the start of the tail for a 1.0 package: its start moves on.
+            let mut tail_skipped = 0usize;
             if let Some(tail_words) = result["tailFingerprints"]
                 .as_array()
                 .filter(|v| !v.is_empty() && v.len() <= 4000)
             {
+                if !large {
+                    tail_skipped = tail_words.len().saturating_sub(LEGACY_TAIL_ITEMS);
+                }
+                let tail_words = &tail_words[tail_skipped..];
                 let mut tail_bytes = Vec::with_capacity(tail_words.len() * 4);
                 let mut tail_valid = true;
                 for word in tail_words {
@@ -398,7 +424,8 @@ pub(crate) async fn run_automated(
                 ep_val["tailFingerprintsCompact"] = json!(compact);
             }
             if let Some(ts) = result["tailStart"].as_f64() {
-                ep_val["tailStart"] = json!(ts);
+                ep_val["tailStart"] =
+                    json!(ts + tail_skipped as f64 / media_node::tasks::FINGERPRINT_RATE);
             }
             episodes.push(ep_val);
         }

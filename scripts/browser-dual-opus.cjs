@@ -94,7 +94,7 @@ function compile(name) {
     // native.ts imports every one of these modules: keep them before it, in dependency order.
     // The production player imports the i18n catalogue; the harness only needs stable keys.
     await page.addScriptTag({content:"window['/i18n']={tr:(key,params)=>params?key+JSON.stringify(params):key};"});
-    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','diagnostics','startup-timeline','transcode','audio-enhancement','native']) {
+    for(const name of ['startup-buffer','errors','compatibility','source-selection','external-audio','segmented-audio','mp4-timeline','mp4-fragments','encoded-video-buffer','progressive-video','diagnostics','startup-timeline','client-transcode','transcode','audio-enhancement','native']) {
       // Name and code go in as arguments, never spliced into a script's text.
       await page.evaluate(({name,code})=>{window[name]={};new Function('exports','require',code)(window[name],other=>window[other.slice(2)]);},{name,code:compile(name)});
     }

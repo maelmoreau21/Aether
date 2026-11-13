@@ -19,6 +19,7 @@
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
   import { rememberPendingParty } from '../lib/syncplay/launch';
   import { installTvNavigation } from '../lib/tv/navigation';
+  import { parkAccount, shouldAskWhoIsWatching } from '../lib/auth/accounts';
 
   onMount(() => {
     initTheme();
@@ -38,28 +39,45 @@
   let verified = $state(false);
   let error = $state('');
   const isLogin = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/login'));
+  const isSetup = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/setup'));
   const isDownloads = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/downloads'));
   const isConnect = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/connect'));
+  const isAccounts = $derived(page.url.pathname.replace(/\/$/, '').endsWith('/accounts'));
   $effect(() => {
     const loginPage = isLogin;
+    const setupPage = isSetup;
     const connectPage = isConnect;
+    const accountsPage = isAccounts;
     let cancelled = false;
     verified = false; error = '';
     if (isDownloads) { verified=true; return; }
     readSession().then(async current => {
       if (cancelled) return;
-      if (!current && !loginPage) {
+      // Signed out on a shared device: the accounts set aside are offered there.
+      if (!current && accountsPage) { verified = true; return; }
+      if (!current && !loginPage && !setupPage) {
         if (connectPage) {
           const code = normalizeDeviceCode(window.location.hash.slice(1));
           if (code) sessionStorage.setItem(PENDING_DEVICE_CODE, code);
         }
         rememberPendingParty(window.location.search);
-        void goto(resolve('login/'), { replaceState: true }); return;
+        const bootstrap = await fetch('/api/v1/auth/bootstrap/status', { credentials: 'same-origin', cache: 'no-store' })
+          .then(r => r.ok ? r.json() as Promise<{ needsBootstrap?: boolean }> : null)
+          .catch(() => null);
+        if (cancelled) return;
+        void goto(resolve(bootstrap?.needsBootstrap ? 'setup/' : 'login/'), { replaceState: true }); return;
       }
-      if (current && !connectPage && normalizeDeviceCode(sessionStorage.getItem(PENDING_DEVICE_CODE) ?? '')) {
+      if (current && !connectPage && !setupPage && normalizeDeviceCode(sessionStorage.getItem(PENDING_DEVICE_CODE) ?? '')) {
         void goto(resolve('connect/'), { replaceState: true }); return;
       }
       if (current && loginPage) { void goto(resolve('/'), { replaceState: true }); return; }
+      // Several accounts on this device and none chosen since the app opened: the active
+      // one is set aside, so coming back to it asks for its PIN like the others.
+      if (current && !accountsPage && !connectPage && !setupPage && shouldAskWhoIsWatching()) {
+        await parkAccount(current.csrfToken).catch(() => undefined);
+        if (!cancelled) window.location.replace(resolve('accounts/'));
+        return;
+      }
       if (current) {
         const generation = getSessionGeneration();
         const loadingPreferences = hydratePreferences();
@@ -83,7 +101,7 @@
 {#if verified}
   {#if $preferenceSyncError}<p class="preference-error" role="alert">{$preferenceSyncError}</p>{/if}
   {@render children()}
-  {#if !isLogin && !isDownloads}<MusicPlayer /><RemotePanel />{/if}
+  {#if !isLogin && !isSetup && !isDownloads}<MusicPlayer /><RemotePanel />{/if}
 {:else if error}
   <main class="session-status"><p role="alert">{error}</p><button onclick={() => window.location.reload()}>{$t('request_retry')}</button></main>
 {:else}

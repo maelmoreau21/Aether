@@ -1,6 +1,0 @@
----
-description: Design system Halo d'Aether ; pour les modifications UI dans apps/web, utiliser les références versionnées.
-globs: apps/web/**
-alwaysApply: false
----
-Lire la partie pertinente de docs/UI_DIRECTION.md et les styles apps/web/src/lib/styles/halo.css et tokens.css. Inspecter les composants Svelte concernés. Ne pas exiger .agents/skills/aether-halo/ : ce dossier local est ignoré par Git et peut être absent. Préserver les interactions, l'accessibilité et les contrats API.

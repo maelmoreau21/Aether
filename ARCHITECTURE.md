@@ -37,7 +37,7 @@ binaires par blocs dans des tables distinctes de la base existante. Les scopes
 s'appuient sur les grants et le compte courant, sans SQL ni chemin guest.
 Contrat, quotas et limites multi-Core : [EXTENSION_STORAGE.md](docs/EXTENSION_STORAGE.md).
 
-Jalon J1 (`docs/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
+Jalon J1 (`docs/archive/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : découpage effectif du
 workspace Rust en trois crates (`crates/core`, `crates/node`, `crates/shared`),
 aucune dépendance de `media-node` vers `aether-core` ou `sqlx`, et confinement +
 streaming/lecture de descripteurs ouverts (`OpenedFile`) sans réouverture par chemin
@@ -294,7 +294,7 @@ Ne pas créer tous les dossiers vides pour faire semblant d'avoir terminé l'arc
 
 ## 11. Découpage d'implémentation
 
-Voir `docs/DEVELOPMENT_PLAN.md`. **La première réalisation** est un banc d'essai reproductible de MKV et MP4 AV1+Opus, pas un catalogue complet.
+Voir `docs/archive/DEVELOPMENT_PLAN.md` (historique). **La première réalisation** est un banc d'essai reproductible de MKV et MP4 AV1+Opus, pas un catalogue complet.
 
 ### État P0C Shaka
 

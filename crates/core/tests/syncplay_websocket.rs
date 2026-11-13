@@ -84,6 +84,8 @@ async fn host_and_follower_sync_over_real_websockets_and_reconnect() {
         .bootstrap("host", Zeroizing::new(PASSWORD.into()))
         .await
         .unwrap();
+    query("INSERT INTO server_settings (singleton,settings_json) VALUES (1,'{\"serverName\":\"Aether\",\"welcomeMessage\":\"\",\"watchTogetherEnabled\":true}') ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json")
+        .execute(store.pool()).await.unwrap();
     query("INSERT INTO media_nodes (id,name,base_url,status,shared_secret) VALUES ('local','Local','http://127.0.0.1','connected','fixture') ON CONFLICT(id) DO UPDATE SET status='connected'")
         .execute(store.pool()).await.unwrap();
     query("INSERT INTO libraries (id,name,kind,node_id,root,enabled) VALUES ('films','Films','films','local','/fixture',1)")
@@ -263,6 +265,8 @@ async fn another_account_finds_and_joins_an_open_party_that_ends_when_everyone_l
         .bootstrap("host", Zeroizing::new(PASSWORD.into()))
         .await
         .unwrap();
+    query("INSERT INTO server_settings (singleton,settings_json) VALUES (1,'{\"serverName\":\"Aether\",\"welcomeMessage\":\"\",\"watchTogetherEnabled\":true}') ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json")
+        .execute(store.pool()).await.unwrap();
     query("INSERT INTO media_nodes (id,name,base_url,status,shared_secret) VALUES ('local','Local','http://127.0.0.1','connected','fixture') ON CONFLICT(id) DO UPDATE SET status='connected'")
         .execute(store.pool()).await.unwrap();
     query("INSERT INTO libraries (id,name,kind,node_id,root,enabled) VALUES ('films','Films','films','local','/fixture',1)")

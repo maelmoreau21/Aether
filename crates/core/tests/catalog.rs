@@ -106,12 +106,15 @@ async fn catalog_search_pagination_errors_and_origin_guards() {
         let (_, page) = get(router.clone(), &format!("/api/v1/catalog?{query}")).await;
         assert!(page["items"].as_array().unwrap().is_empty());
     }
+    // Apps released before the 100-work page (Android 0.2.1 asks for 200) get a full page.
+    let (status, page) = get(router.clone(), "/api/v1/catalog?limit=200").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page["items"].as_array().unwrap().len() <= 100);
     for query in [
         "kind=episode",
         "kind=all",
         "sort=recent",
         "limit=0",
-        "limit=101",
         "offset=-1",
         "limit=invalid",
         "path=private",

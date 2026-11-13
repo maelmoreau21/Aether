@@ -225,7 +225,20 @@ impl IdentityStore {
         if !matches!(parsed.scheme(), "postgres" | "postgresql") {
             return Err(IdentityError::Configuration);
         }
-        let pool = configure_pool_options(false)?.connect(url).await?;
+        let pool = configure_pool_options(false)?
+            .after_connect(|conn, _| {
+                Box::pin(async move {
+                    // Each connection keeps its prepared statements: plan them once. With the
+                    // default custom plans PostgreSQL re-plans the permission and catalogue
+                    // queries on every call, which costs more than running them.
+                    crate::database::query("SET plan_cache_mode = force_generic_plan")
+                        .execute(&mut *conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(url)
+            .await?;
         let mut conn = pool.acquire().await?;
         crate::database::initialize_fresh_schema(&mut conn).await?;
         crate::inventory::backfill_title_sort_unicode(&mut conn).await?;

@@ -3,6 +3,7 @@
   import { resolve } from '$app/paths';
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
+  import ArtworkJobs from './ArtworkJobs.svelte';
   import type { AdminNode, Library, Scan } from './types';
   import { t, fmt } from '../i18n';
   import {
@@ -343,6 +344,7 @@
     {:else}
       {#if loaded && tasks.length}<p class="empty-filter">{$t('sched_filter_empty')}</p>{/if}
     {/each}
+    <ArtworkJobs {libraryNames} />
   {/if}
   {#if loadError}<p class="feedback error" role="alert">{loadError} <button class="ghost" onclick={() => void refresh()}><Icon name="refresh" size={16} /></button></p>{/if}
   {#if error && !editor?.open}<p class="feedback error" role="alert">{error}</p>{/if}

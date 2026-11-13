@@ -810,3 +810,62 @@ async fn postgres18_http_contract_and_reopen() {
         .unwrap();
     pool.close().await;
 }
+
+#[tokio::test]
+#[ignore = "requires a temporary PostgreSQL 18 server and MEDIA_TEST_POSTGRES_URL"]
+async fn postgres18_v1_to_v2_migration_preserves_data_and_is_idempotent() {
+    use sqlx::Connection;
+
+    let connection = Zeroizing::new(
+        std::env::var("MEDIA_TEST_POSTGRES_URL")
+            .expect("set MEDIA_TEST_POSTGRES_URL to a disposable PostgreSQL 18 server"),
+    );
+    let pool = sqlx::PgPool::connect(&connection).await.unwrap();
+    let schema = format!("mig_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut url = url::Url::parse(&connection).unwrap();
+    url.query_pairs_mut()
+        .append_pair("options", &format!("-csearch_path={schema}"));
+
+    sqlx::any::install_default_drivers();
+    let mut conn = sqlx::AnyConnection::connect(url.as_str()).await.unwrap();
+    aether_core::database::initialize_fresh_schema(&mut conn)
+        .await
+        .unwrap();
+    query("INSERT INTO users(id,role,display_name) VALUES('u1','administrator','Admin')")
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+    let steps = [aether_core::database::MigrationStep {
+        version: 2,
+        name: "0002_test_migration",
+        sqlite_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
+        postgres_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
+    }];
+    let version = aether_core::database::upgrade_schema_with_steps(&mut conn, 2, &steps)
+        .await
+        .unwrap();
+    assert_eq!(version, 2);
+
+    // Re-running is idempotent and existing data is intact
+    let version_again = aether_core::database::upgrade_schema_with_steps(&mut conn, 2, &steps)
+        .await
+        .unwrap();
+    assert_eq!(version_again, 2);
+    let kept: String = query_scalar("SELECT display_name FROM users WHERE id='u1'")
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+    assert_eq!(kept, "Admin");
+
+    drop(conn);
+    sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+        .execute(&pool)
+        .await
+        .unwrap();
+    pool.close().await;
+}

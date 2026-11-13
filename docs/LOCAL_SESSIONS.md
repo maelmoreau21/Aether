@@ -154,6 +154,29 @@ Règles de sécurité :
 Vérifié par les tests unitaires `auth::` et par `tests/postgres.rs`, qui rejoue ce
 parcours à travers `secure_app` sur SQLite et sur PostgreSQL 18 (`--include-ignored`).
 
+## Plusieurs comptes sur un appareil partagé — 12 novembre 2026
+
+Jusqu'à six comptes restent connectés sur un même navigateur ou une même télévision :
+la session active est le cookie habituel, les autres sont « mises de côté » dans le
+cookie `HttpOnly` `aether_accounts` (`GET /api/v1/auth/accounts`, `POST …/park`,
+`…/switch`, `…/forget`).
+
+- **Code de compte** : chaque compte peut définir un code de 4 à 6 chiffres
+  (Paramètres → Sécurité, `PUT /api/v1/account/profiles/{sonId}/pin`, `{"pin": null}`
+  pour le retirer). Il est stocké haché (Argon2id) dans `account_profiles`, ligne
+  `user_id = owner_id`, sans changement de schéma.
+- **Bascule** : `POST /api/v1/auth/accounts/switch` accepte `{"userId","pin"}`. Un
+  compte protégé répond `403 pin_required` sans code et `403 invalid_pin` avec un
+  mauvais code ; 5 essais par minute et par compte, tous appareils confondus
+  (`429 try_later`). La liste expose `hasPin` pour chaque compte.
+- **Au lancement** : lorsque plusieurs comptes sont connectés et qu'aucun n'a encore
+  été choisi dans cette session de l'application (`sessionStorage`), le Web met le
+  compte actif de côté et ouvre « Qui regarde ? » (`/accounts`), avec un pavé
+  numérique utilisable à la télécommande. Revenir sur le compte précédent demande
+  donc aussi son code.
+- **Limite** : le choix au lancement est appliqué par l'interface ; c'est le Core qui
+  exige le code lors de la bascule. Un compte sans code s'ouvre sans saisie.
+
 ## Permissions et isolation P0
 
 Le constructeur `secure_app` du binaire impose une session puis le droit de

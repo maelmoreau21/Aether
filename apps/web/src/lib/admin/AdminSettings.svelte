@@ -11,8 +11,10 @@
   let trickplayColumns = $state(10), trickplayRows = $state(10), trickplayMaxCacheMb = $state(5120);
   // Server-wide defaults a library in "inherit" mode follows (each library can force on or off).
   let chapterImagesEnabled = $state(true), introDetectionEnabled = $state(true), markerMinConfidence = $state(80);
+  let introAnalysisPercent = $state(25), introAnalysisMaxMinutes = $state(10);
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
+  let clusterEnabled = $state(false);
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   let clearingFingerprints = $state(false);
@@ -40,9 +42,10 @@
           trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
           trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
           trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
-          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
+          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number; introAnalysisPercent?: number; introAnalysisMaxMinutes?: number;
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
+          clusterEnabled?: boolean;
         }>('/api/v1/admin/settings');
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
@@ -59,10 +62,13 @@
         chapterImagesEnabled = data.chapterImagesEnabled ?? true;
         introDetectionEnabled = data.introDetectionEnabled ?? true;
         markerMinConfidence = data.markerMinConfidence ?? 80;
+        introAnalysisPercent = data.introAnalysisPercent ?? 25;
+        introAnalysisMaxMinutes = data.introAnalysisMaxMinutes ?? 10;
         minResumePct = data.minResumePct ?? 0; maxResumePct = data.maxResumePct ?? 90;
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
         corsHosts = (data.corsHosts ?? []).join(', ');
+        clusterEnabled = data.clusterEnabled === true;
       }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
@@ -79,9 +85,10 @@
           trickplayEnabled, trickplayAutoGenerate,
           trickplayQuality, trickplayWidth, trickplayIntervalSeconds,
           trickplayColumns, trickplayRows, trickplayMaxCacheMb,
-          chapterImagesEnabled, introDetectionEnabled, markerMinConfidence,
+          chapterImagesEnabled, introDetectionEnabled, markerMinConfidence, introAnalysisPercent, introAnalysisMaxMinutes,
           minResumePct, maxResumePct, minResumeDurationSeconds,
           activityLogRetentionDays,
+          clusterEnabled,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
         })
       });
@@ -90,9 +97,10 @@
         trickplayEnabled?: boolean; trickplayAutoGenerate?: boolean;
         trickplayQuality?: number; trickplayWidth?: number; trickplayIntervalSeconds?: number;
         trickplayColumns?: number; trickplayRows?: number; trickplayMaxCacheMb?: number;
-          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number;
+          chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number; introAnalysisPercent?: number; introAnalysisMaxMinutes?: number;
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
+        clusterEnabled?: boolean;
       }>('/api/v1/admin/settings');
       blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
       name = saved.serverName;
@@ -109,10 +117,13 @@
       chapterImagesEnabled = saved.chapterImagesEnabled ?? true;
       introDetectionEnabled = saved.introDetectionEnabled ?? true;
       markerMinConfidence = saved.markerMinConfidence ?? 80;
+      introAnalysisPercent = saved.introAnalysisPercent ?? 25;
+      introAnalysisMaxMinutes = saved.introAnalysisMaxMinutes ?? 10;
       minResumePct = saved.minResumePct ?? 0; maxResumePct = saved.maxResumePct ?? 90;
       minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
       corsHosts = (saved.corsHosts ?? []).join(', ');
+      clusterEnabled = saved.clusterEnabled === true;
       serverPresentation.set(saved);
       notice = $t('settings_saved');
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('operation_failed'); }
@@ -157,6 +168,8 @@
         <label class="policy-toggle"><input type="checkbox" bind:checked={introDetectionEnabled} />{$t('detect_intros_with_enabled_extensions')}</label>
         {#if introDetectionEnabled}
           <label>{$t('marker_min_confidence', { value: markerMinConfidence })}<input type="range" min="50" max="99" step="1" bind:value={markerMinConfidence} /><small>{$t('marker_min_confidence_hint')}</small></label>
+          <label>{$t('intro_analysis_percent', { value: introAnalysisPercent })}<input type="range" min="1" max="50" step="1" bind:value={introAnalysisPercent} /><small>{$t('intro_analysis_percent_hint')}</small></label>
+          <label>{$t('intro_analysis_max_minutes')}<input type="number" min="1" max="10" step="1" required bind:value={introAnalysisMaxMinutes} /><small>{$t('intro_analysis_max_minutes_hint')}</small></label>
           <p class="hint">{$t('server_intro_thresholds_note')}</p>
         {/if}
       </fieldset>
@@ -192,6 +205,13 @@
         </div>
       </fieldset>
     </details>
+    <details class="adv">
+      <summary>{$t('advanced_capabilities_heading')}</summary>
+      <fieldset class="settings-fieldset">
+        <p>{$t('advanced_capabilities_note')}</p>
+        <label class="policy-toggle"><input type="checkbox" bind:checked={clusterEnabled} />{$t('enable_cluster_nodes')}</label>
+      </fieldset>
+    </details>
     <div class="actions"><button type="submit">{saving ? $t('loading') : $t('save')}</button></div>
   </fieldset></form>
   <PlaylistPolicy />
@@ -199,8 +219,6 @@
 {:else if section === '#network-section'}
 <section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">{$t('network')}</h2>
   {#if network}<dl><div><dt>{$t('public_address')}</dt><dd>{network.publicUrl}</dd></div><div><dt>{$t('web_interface')}</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>{$t('secure_session_cookies')}</dt><dd>{network.secureCookies ? $t('enabled') : $t('disabled_local_http')}</dd></div></dl>{/if}
-  <details><summary>{$t('edit_connection')}</summary><p>{$t('network_note')}</p>
-  <p>{$t('media_node_addresses_are_managed_under')}</p></details>
 </section>
 {/if}
 {#if ['#general-section','#network-section'].includes(section)}
@@ -250,7 +268,6 @@
   details:not(.adv) { padding: 0 20px; border-radius: var(--radius-md); background: var(--color-surface); }
   details:not(.adv) summary { display: flex; align-items: center; min-height: 52px; font-size: 14px; font-weight: 600; cursor: pointer; }
   details:not(.adv)[open] { padding-bottom: 16px; }
-  details:not(.adv) p + p { margin-top: 8px; }
   :global(code) { font-family: ui-monospace, monospace; font-size: 12px; color: var(--color-text); }
   @media (max-width: 640px) {
     dl div { grid-template-columns: minmax(0, 1fr); gap: 6px; }

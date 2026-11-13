@@ -150,7 +150,7 @@ crée des images dans le cache séparé ; aucun encodage vidéo n'est imposé à
 | Variable | Composant | Défaut | Description |
 | :--- | :--- | :--- | :--- |
 | `MEDIA_TRICKPLAY_CACHE_DIR` | Media Node | `{data_dir}/trickplay` | Emplacement persistant du cache de miniatures |
-| `MEDIA_TRICKPLAY_MAX_CACHE_MB` | Media Node | `5120` | Quota maximum du cache disque par nœud en Mo |
+| `MEDIA_TRICKPLAY_MAX_CACHE_MB` | Media Node | `5120` | Quota maximum du cache disque par nœud en Mo. Si la variable est définie, elle prime ; sinon le réglage administrateur « Taille max du cache » s'applique au Node local dès l'enregistrement et aux Nodes distants à la tâche suivante |
 | `MEDIA_TRICKPLAY_GENERATE` | Media Node | `true` | Autorise ou interdit l'appel FFmpeg sur ce nœud |
 | `MEDIA_TRICKPLAY_FFMPEG` | Media Node | `/usr/bin/ffmpeg` | Chemin d'accès au binaire FFmpeg |
 

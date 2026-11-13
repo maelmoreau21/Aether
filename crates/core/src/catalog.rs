@@ -210,7 +210,9 @@ pub async fn list(
                 .retain(|id| id == library || children.contains(id));
         }
     }
-    let limit = query.limit.unwrap_or(24);
+    // A larger page is served as 100 works (with `hasMore`) rather than refused: apps released
+    // before the limit (Android 0.2.1 asks for 200) would otherwise show an empty catalogue.
+    let limit = query.limit.unwrap_or(24).min(100);
     if !matches!(query.scope.as_deref(), None | Some("latest"))
         || !matches!(query.kind.as_deref(), None | Some("film" | "series"))
         || !matches!(

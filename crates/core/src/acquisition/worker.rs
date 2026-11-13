@@ -123,7 +123,7 @@ async fn persist(
     crate::database::commit(tx).await.map_err(db)?;
     Ok(())
 }
-async fn validate_target(server: &Server) -> Result<(), Error> {
+async fn validate_target(server: &Server, quality_profile_id: i64) -> Result<(), Error> {
     let roots = server.call("GET", "rootfolder", &[], None).await?;
     let profiles = server.call("GET", "qualityprofile", &[], None).await?;
     if !roots.as_array().is_some_and(|items| {
@@ -133,7 +133,7 @@ async fn validate_target(server: &Server) -> Result<(), Error> {
     }) || !profiles.as_array().is_some_and(|items| {
         items
             .iter()
-            .any(|v| v["id"].as_i64() == Some(server.quality_profile_id))
+            .any(|v| v["id"].as_i64() == Some(quality_profile_id))
     }) {
         return Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -282,7 +282,13 @@ async fn run(store: &IdentityStore, job: &Claimed) -> Result<(), Error> {
         remote::verify_identity(&server, effect, id).await?;
         id.to_owned()
     } else {
-        validate_target(&server).await?;
+        validate_target(
+            &server,
+            effect
+                .quality_profile_id
+                .unwrap_or(server.quality_profile_id),
+        )
+        .await?;
         let canonical = if let Some(single) = &single {
             single.canonical.clone()
         } else {
@@ -358,6 +364,20 @@ async fn run(store: &IdentityStore, job: &Claimed) -> Result<(), Error> {
     } else {
         status
     };
+    let progress_json = if status == "available" {
+        None
+    } else {
+        progress
+            .download
+            .as_ref()
+            .and_then(|d| serde_json::to_string(d).ok())
+    };
+    query("UPDATE media_requests SET progress_json=? WHERE id=?")
+        .bind(progress_json)
+        .bind(&job.request.id)
+        .execute(store.pool())
+        .await
+        .map_err(db)?;
     persist(
         store,
         job,
@@ -385,7 +405,7 @@ pub async fn tick(store: &IdentityStore) -> Result<(), Error> {
             .unwrap_or_else(|_| Err(err(StatusCode::GATEWAY_TIMEOUT, "acquisition_timeout")));
         match result {
             Ok(()) => {
-                query("UPDATE acquisition_jobs SET lease_token=NULL,lease_until=0,attempts=0,available_at=? WHERE request_id=? AND lease_token=?").bind(now()+60).bind(&job.request.id).bind(&job.lease).execute(store.pool()).await.map_err(db)?;
+                query("UPDATE acquisition_jobs SET lease_token=NULL,lease_until=0,attempts=0,available_at=? WHERE request_id=? AND lease_token=?").bind(now()+20).bind(&job.request.id).bind(&job.lease).execute(store.pool()).await.map_err(db)?;
             }
             Err((status, Json(error))) => {
                 let code = error["error"].as_str().unwrap_or("acquisition_failed");

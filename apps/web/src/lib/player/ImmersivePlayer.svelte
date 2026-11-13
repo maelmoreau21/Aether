@@ -19,6 +19,7 @@
   import { preferences, savePreferences, ensurePreferences } from '../preferences';
   import { isForeignAudio, languageDefaults, playbackPreferences, trackPreferences } from './playback-preferences';
   import { chooseSource, playbackMime, audioLanguage } from './source-selection';
+  import { mediaCompatibilityWarning, subtitleCompatibilityWarning } from './compatibility';
   import { AudioSelectionRetainedError } from './errors';
   import { failoverHelps, failureKindOf, type PlaybackFailureKind } from './diagnostics';
   import { revalidateMediaDescriptor } from '../catalog/api';
@@ -176,7 +177,11 @@
     paused = snapshot.paused;
     bufferedUntil = bufferedEnd(playback.position);
     const running = engine.transcodeState?.() ?? null;
-    transcodeInfo = running ? { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap } : null;
+    if (!running) {
+      if (transcodeInfo !== null) transcodeInfo = null;
+    } else if (!transcodeInfo || transcodeInfo.height !== running.plan.height || transcodeInfo.kbps !== running.plan.kbps || transcodeInfo.reason !== running.plan.reason || transcodeInfo.encoder !== running.encoder || transcodeInfo.tonemap !== running.tonemap) {
+      transcodeInfo = { height: running.plan.height, kbps: running.plan.kbps, reason: running.plan.reason, encoder: running.encoder, tonemap: running.tonemap };
+    }
     if (!busy) { progressTracker?.save(playback); reportRemote(); }
     if (!busy && !paused && syncClient?.connected && syncClient.party?.state === 'playing'
       && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs()) {
@@ -212,6 +217,54 @@
     if (!visible && distance < 4) return;
     lastPointer = { x: event.clientX, y: event.clientY };
     wake();
+  }
+  function updateSubtitleStyle(next: SubtitleStyle) {
+    subtitleStyle = next;
+    engine?.setSubtitlePosition?.(subtitleLine(next));
+    savePreferences({ subtitleStyle: next });
+  }
+  let lastTouchTap: { time: number; side: 'left' | 'right' } | null = null;
+  let touchTapTimer: ReturnType<typeof setTimeout> | undefined;
+  let touchSeekTimer: ReturnType<typeof setTimeout> | undefined;
+  let touchSeekIndicator = $state<{ side: 'left' | 'right'; seconds: number } | null>(null);
+  let lastInteractionPointerType = '';
+  function toggleControlsVisibility() {
+    if (menu) { controls?.closeMenu(); wake(); }
+    else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); }
+    else wake();
+  }
+  function handleVideoClick(event: MouseEvent) {
+    if (lastInteractionPointerType !== 'touch') {
+      toggleControlsVisibility();
+      return;
+    }
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const ratio = rect.width > 0 ? (event.clientX - rect.left) / rect.width : 0.5;
+    const side: 'left' | 'right' | null = ratio < 0.35 ? 'left' : ratio > 0.65 ? 'right' : null;
+    const now = Date.now();
+    if (side && lastTouchTap && lastTouchTap.side === side && now - lastTouchTap.time < 320 && !busy && !error && active) {
+      clearTimeout(touchTapTimer);
+      lastTouchTap = null;
+      const delta = side === 'left' ? -skipBackSeconds : skipForwardSeconds;
+      const targetTime = Math.max(0, Math.min(playback.duration || Infinity, playback.position + delta));
+      seek(targetTime, 'seek');
+      touchSeekIndicator = { side, seconds: Math.abs(delta) };
+      clearTimeout(touchSeekTimer);
+      touchSeekTimer = setTimeout(() => { touchSeekIndicator = null; }, 700);
+      return;
+    }
+    if (side) {
+      lastTouchTap = { time: now, side };
+      clearTimeout(touchTapTimer);
+      touchTapTimer = setTimeout(() => {
+        lastTouchTap = null;
+        toggleControlsVisibility();
+      }, 260);
+    } else {
+      lastTouchTap = null;
+      toggleControlsVisibility();
+    }
   }
   // Carte « À suivre » : au début du générique, sinon 30 s avant la fin d'un épisode long.
   const nextCardStart = $derived.by(() => {
@@ -407,6 +460,12 @@
       if (enhancement !== 'off' && engine.setAudioEnhancement && !engine.setAudioEnhancement(enhancement)) notice = $t('audio_enhancement_unavailable');
       foreignAudio = isForeignAudio(source.language, subtitleLanguage);
       const usableSubtitle = preferredSubtitle(media.subtitles, foreignAudio ? foreignSubtitlePreference : subtitlePreference, subtitleLanguage, preferSdh);
+      const activeSubtitleTrack = media.subtitles.find(track => track.id === usableSubtitle);
+      if (!notice) {
+        notice = mediaCompatibilityWarning(source, mime => video.canPlayType(mime))
+          ?? subtitleCompatibilityWarning(activeSubtitleTrack)
+          ?? '';
+      }
       // Embedded subtitle extraction can take substantially longer than the
       // first video/audio data. Start it now but do not hold playback for it.
       const subtitleLoading = engine.selectSubtitle(usableSubtitle);
@@ -436,7 +495,7 @@
         preview: media.preview
       };
       presence?.stop();presence=undefined;
-      if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state());
+      if(media.workId&&!media.synthetic)presence=new PlaybackPresence(media.workId,()=>engine?.state(),cmd=>{if(cmd==='stop'){close();}else if(cmd==='pause'){engine?.pause();sync();presence?.ping();}else if(cmd==='play'){void engine?.play().then(()=>{sync();presence?.ping();}).catch(()=>{});}});
       if (syncClient) {
         await applyPartyPlayback(engine, syncClient.party?.state === 'playing'
           && syncClient.party.positionUpdatedServerMs <= syncClient.getCurrentServerEpochMs() ? 'playing' : 'paused',
@@ -572,7 +631,7 @@
     progressTracker = undefined;
     presence?.stop();presence=undefined;
     remote.report(null, true); sendMenu = false;
-    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null;
+    opened = false; generation++; const closedGeneration = generation; clearTimeout(idle); clearTimeout(touchTapTimer); clearTimeout(touchSeekTimer); touchSeekIndicator = null; lastTouchTap = null; menu = null; markerEditor = false; sleepTimer = SLEEP_OFF; transcodeInfo = null; bufferedUntil = 0;
     const returnTarget = opener;
     const restoreNavigation = () => {
       if (opened || generation !== closedGeneration) return;
@@ -705,10 +764,11 @@
     const accountGeneration = getSessionGeneration();
     void action(async player => { await player.selectAudio(id);
       if (current !== generation || !opened || accountGeneration !== getSessionGeneration()) return;
-      audio = id; notice = '';
+      const nextSource = active?.sources.find(source => source.audioTrackId === id);
+      audio = id; notice = mediaCompatibilityWarning(nextSource, mime => video.canPlayType(mime)) ?? '';
       const info = player.playbackInfo?.();
       if (info?.audio) collector?.track('audio', info.audio, 'manual');
-      const language = audioLanguage(active?.sources.find(source => source.audioTrackId === id)?.language ?? 'und');
+      const language = audioLanguage(nextSource?.language ?? 'und');
       if (language && language !== 'und') preferredLanguage = language;
       foreignAudio = isForeignAudio(language, subtitleLanguage);
       manualAudio = { mediaId: active?.id ?? '', trackId: id, ...(language && language !== 'und' ? { language } : {}) };
@@ -731,6 +791,7 @@
     subtitle = id;
     trackSubtitle(id, 'manual');
     const track = active?.subtitles.find(track => track.id === id);
+    notice = subtitleCompatibilityWarning(track) ?? '';
     const chosen: SubtitlePreference = track ? { enabled: true, language: track.language, forced: track.forced, sdh: track.sdh } : { enabled: false };
     // A choice made in VO applies to every VO; one made in the person's language, to the others.
     if (foreignAudio) {
@@ -904,16 +965,21 @@
       onpause={() => { sync(); if (!busy && engine) progressTracker?.save(engine.state(), true); }}
       onended={ended}
     ><track kind="captions" /></video>
-    <button class="video-interaction" tabindex="-1" aria-label={$t('show_or_hide_controls')} onclick={() => { if (menu) { controls?.closeMenu(); wake(); } else if (!paused && !busy && !error) { visible = !visible; if (visible) armIdle(); else surface?.focus(); } else wake(); }}></button>
+    <button class="video-interaction" tabindex="-1" aria-label={$t('show_or_hide_controls')} onpointerdown={(e) => { lastInteractionPointerType = e.pointerType; }} onclick={handleVideoClick}></button>
+    {#if touchSeekIndicator}
+      <div class="touch-seek-badge" class:left={touchSeekIndicator.side === 'left'} class:right={touchSeekIndicator.side === 'right'} aria-hidden="true">
+        <span>{touchSeekIndicator.side === 'left' ? '−' : '+'}{touchSeekIndicator.seconds} s</span>
+      </div>
+    {/if}
     <div class="top-bar" class:concealed={!visible} inert={!visible}>
       <button class="return" aria-label={$t('back_to_home')} onclick={close}><Icon name="back" size={24} /></button>
       <div class="title"><span>{active?.title ?? $t('your_session')}</span></div>
       {#if active && !active.synthetic}<ReportButton variant="player" workId={active.workId} assetId={active.id} title={active.title} positionSeconds={playback.position} context={() => ({ engine: engine?.playbackInfo?.().method, audioTrackId: selectedSource?.reportTrackId, subtitleTrackId: active?.subtitles.find(track => track.id === subtitle)?.reportTrackId })} />{/if}
       {#if nextTitle && onNext && !syncClient}<div class="next-episode"><label title={nextTitle}><input type="checkbox" bind:checked={autoplayNext} onchange={() => savePreferences({ autoplayNextEpisode: autoplayNext })} /> {$t('play_next_automatically')}</label></div>{/if}
-      {#if $watchTogetherEnabled && active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /><span>{$t('watch_together')}</span></button>{/if}
+      {#if $watchTogetherEnabled && active && !active.synthetic && !syncClient}<button type="button" class="watch-together" title={$t('watch_together_from_player')} aria-label={$t('watch_together')} onclick={() => { menu = null; partyModal = true; }}><Icon name="users" size={20} /></button>{/if}
       {#if active?.workId && !active.synthetic && !syncClient && sendTargets.length}
         <div class="send-to">
-          <button type="button" class="watch-together" aria-expanded={sendMenu} aria-haspopup="menu" title={$t('send_to_device')} onclick={() => { menu = null; sendMenu = !sendMenu; }}><Icon name="tv" size={20} /><span>{$t('send_to')}</span></button>
+          <button type="button" class="watch-together" aria-expanded={sendMenu} aria-haspopup="menu" title={$t('send_to_device')} aria-label={$t('send_to')} onclick={() => { menu = null; sendMenu = !sendMenu; }}><Icon name="tv" size={20} /></button>
           {#if sendMenu}
             <div class="send-menu" role="menu" aria-label={$t('send_to_device')}>
               {#each sendTargets as device (device.deviceId)}<button type="button" role="menuitem" onclick={() => sendTo(device)}>{device.name}</button>{/each}
@@ -957,7 +1023,7 @@
     {#if partyModal && active && $watchTogetherEnabled}
       <WatchPartyModal mediaId={active.workId ?? active.id} mediaTitle={active.title} onClose={() => partyModal = false} onJoinParty={partyId => startPartyFromPlayer(partyId)} />
     {/if}
-    {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
+    {#if active}<PlayerControls bind:this={controls} bind:menu {audioOffset} {subtitleOffset} onAudioOffset={(v) => offset('audio', v)} onSubtitleOffset={(v) => offset('subtitle', v)} {subtitleStyle} onSubtitleStyle={updateSubtitleStyle} state={playback} media={active} {catalogue} {audio} {subtitle} {visible} {busy} {fullscreen}
       {skipBackSeconds} {skipForwardSeconds}
       {aspectRatio} onAspectRatio={r => aspectRatio = r} {repeat} onRepeat={r => repeat = r} onStats={() => { statistics = true; wake(); }}
       onPlay={togglePlayback} onVolume={volume} onMute={mute} onSeek={seek} onAudio={selectAudio} onSubtitle={selectSubtitle} onSource={selectSource}
@@ -1015,7 +1081,10 @@
 
   video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 
-  .video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; }
+  .video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  .touch-seek-badge { position: absolute; top: 50%; transform: translateY(-50%); z-index: 6; pointer-events: none; padding: 10px 18px; border-radius: var(--r-pill, 999px); background: rgb(17 21 31 / 0.82); color: #fff; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgb(0 0 0 / 0.4); }
+  .touch-seek-badge.left { left: 14%; }
+  .touch-seek-badge.right { right: 14%; }
 
   .top-bar {
     display: flex;
@@ -1190,16 +1259,12 @@
 
   .next-episode label { font-size: 13px; font-weight: 700; }
 
-  .watch-together { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 0; border-radius: 16px; background: rgb(255 255 255 / 0.14); color: #f4f6fb; font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+  /* Icon-only actions (watch together, send to): the label is the tooltip and aria-label. */
+  .watch-together { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: rgb(255 255 255 / 0.14); color: #f4f6fb; cursor: pointer; }
 
   .watch-together:hover { background: rgb(255 255 255 / 0.22); }
 
   .watch-together:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
-
-  @media (max-width: 640px) {
-  .watch-together span { display: none; }
-  .watch-together { padding: 0 10px; }
-}
 
   .send-to { position: relative; }
 

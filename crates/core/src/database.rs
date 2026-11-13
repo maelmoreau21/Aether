@@ -170,15 +170,36 @@ pub async fn begin_write_serialized(
     }
 }
 
-/// Install the one current schema on an empty database. A database that already holds it is left
-/// untouched; any other one is refused explicitly: schemas are never upgraded in place, the
-/// database is recreated instead (see `docs/MIGRATIONS.md`).
+/// Ordered schema upgrade step between persisted schema versions (`v1 -> v2 -> ...`).
+pub struct MigrationStep {
+    pub version: i64,
+    pub name: &'static str,
+    pub sqlite_sql: &'static str,
+    pub postgres_sql: &'static str,
+}
+
+/// Current frozen v1 baseline schema version.
+pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+
+/// Install the frozen v1 schema (`crates/core/migrations/0001_initial_v1.sql`) on an empty
+/// database, or refresh derived views/indexes on an existing v1 database.
 pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
-    const SQLITE_SCHEMA: &str = include_str!("../schema/sqlite.sql");
-    const POSTGRES_SCHEMA: &str = include_str!("../schema/postgres.sql");
+    upgrade_schema_with_steps(conn, CURRENT_SCHEMA_VERSION, &[]).await?;
+    Ok(())
+}
+
+/// Install the v1 baseline if the database is empty, then apply any pending sequential
+/// `MigrationStep` entries up to `target_version` inside a single serialized transaction.
+/// Returns the resulting schema version.
+pub async fn upgrade_schema_with_steps(
+    conn: &mut AnyConnection,
+    target_version: i64,
+    steps: &[MigrationStep],
+) -> Result<i64, sqlx::Error> {
+    const SQLITE_SCHEMA: &str = include_str!("../migrations/0001_initial_v1.sql");
+    const POSTGRES_SCHEMA: &str = include_str!("../migrations/postgres/0001_initial_v1.sql");
     const SEED: &str = include_str!("../schema/seed.sql");
-    /// Value of the single `schema_version` row written by the schema files.
-    const SCHEMA_VERSION: i64 = 1;
+    const DERIVED: &str = include_str!("../schema/derived.sql");
     const SCHEMA_LOCK_ID: i64 = 0x4d45444941534348;
 
     let sqlite = conn.backend_name() == "SQLite";
@@ -192,6 +213,8 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
             .fetch_one(&mut *tx)
             .await?
     };
+
+    let mut current_version: i64;
     if tables == 0 {
         sqlx::raw_sql(if sqlite {
             SQLITE_SCHEMA
@@ -200,8 +223,10 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
         })
         .execute(&mut *tx)
         .await?;
+        sqlx::raw_sql(DERIVED).execute(&mut *tx).await?;
         crate::groups::initialize_role_groups(&mut tx).await?;
         sqlx::raw_sql(SEED).execute(&mut *tx).await?;
+        current_version = 1;
     } else if has_users == 0 {
         return Err(sqlx::Error::Protocol(
             "Database schema is not empty; choose a fresh database".into(),
@@ -223,16 +248,73 @@ pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sql
                 "Existing database uses an unsupported schema; choose a fresh database".into(),
             ));
         }
-        let version: i64 = sqlx::query_scalar("SELECT CAST(version AS BIGINT) FROM schema_version")
+        current_version = sqlx::query_scalar("SELECT CAST(version AS BIGINT) FROM schema_version")
             .fetch_one(&mut *tx)
             .await?;
-        if version != SCHEMA_VERSION {
+        if current_version < 1 || current_version > target_version {
             return Err(sqlx::Error::Protocol(
                 "Unsupported database schema version; choose a fresh database".into(),
             ));
         }
     }
-    tx.commit().await
+
+    if current_version < target_version {
+        sqlx::raw_sql(
+            "CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at BIGINT NOT NULL)",
+        )
+        .execute(&mut *tx)
+        .await?;
+        for step in steps {
+            if step.version <= current_version || step.version > target_version {
+                continue;
+            }
+            if step.version != current_version + 1 {
+                return Err(sqlx::Error::Protocol(format!(
+                    "Non-sequential migration step {} after version {}",
+                    step.version, current_version
+                )));
+            }
+            let sql = if sqlite {
+                step.sqlite_sql
+            } else {
+                step.postgres_sql
+            };
+            if !sql.trim().is_empty() {
+                sqlx::raw_sql(sql).execute(&mut *tx).await?;
+            }
+            // v1 created `schema_version` with `CHECK(version=1)`; replace it when upgrading past v1.
+            sqlx::raw_sql(
+                "DROP TABLE IF EXISTS schema_version; CREATE TABLE schema_version(version INTEGER PRIMARY KEY);",
+            )
+            .execute(&mut *tx)
+            .await?;
+            query("INSERT INTO schema_version(version) VALUES(?)")
+                .bind(step.version)
+                .execute(&mut *tx)
+                .await?;
+            query("INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)")
+                .bind(step.version)
+                .bind(step.name)
+                .bind(media_contracts::protocol::unix_now())
+                .execute(&mut *tx)
+                .await?;
+            current_version = step.version;
+        }
+        if current_version != target_version {
+            return Err(sqlx::Error::Protocol(format!(
+                "Missing migration steps to reach target schema version {}",
+                target_version
+            )));
+        }
+    }
+
+    if tables != 0 {
+        // Views and indexes carry no data: refreshing them lets a database already in
+        // service pick up their current, faster definition.
+        sqlx::raw_sql(DERIVED).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    Ok(current_version)
 }
 
 /// Integer flags retain the existing SQLite schema and JSON boolean contract.
@@ -341,5 +423,53 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn sqlite_v1_to_v2_migration_preserves_data_and_is_idempotent() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        // 1. Start at frozen v1
+        super::initialize_fresh_schema(&mut conn).await.unwrap();
+        super::query(
+            "INSERT INTO users(id,role,display_name) VALUES('u1','administrator','Admin')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+
+        // 2. Upgrade v1 -> v2
+        let steps = [super::MigrationStep {
+            version: 2,
+            name: "0002_test_migration",
+            sqlite_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
+            postgres_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
+        }];
+        let version = super::upgrade_schema_with_steps(&mut conn, 2, &steps)
+            .await
+            .unwrap();
+        assert_eq!(version, 2);
+
+        // 3. Re-running is idempotent and existing data is intact
+        let version_again = super::upgrade_schema_with_steps(&mut conn, 2, &steps)
+            .await
+            .unwrap();
+        assert_eq!(version_again, 2);
+        let kept: String = super::query_scalar("SELECT display_name FROM users WHERE id='u1'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(kept, "Admin");
+        super::query("UPDATE users SET note='upgraded' WHERE id='u1'")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let note: String = super::query_scalar("SELECT note FROM users WHERE id='u1'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(note, "upgraded");
     }
 }

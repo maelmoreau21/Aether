@@ -13,15 +13,43 @@ use tokio::io::AsyncReadExt;
 /// Until November 2026 this was announced as 11025/1280 = 8.6133, which stretched every marker
 /// time by about 6 %: measured on `ffmpeg -f chromaprint` output of a repeated 60 s theme.
 pub const FINGERPRINT_RATE: f64 = 11025.0 / 1365.0;
-/// Audio decoded from the start of the file.
-pub const HEAD_SECONDS: f64 = 300.0;
+/// Longest audio decoded from the start of the file. Like intro-skipper, a quarter of the
+/// file is read, between [`HEAD_MIN_SECONDS`] and this (10 min): an opening after a long cold
+/// open is still inside, an opening is never looked for in the middle of an episode.
+pub const HEAD_SECONDS: f64 = 600.0;
+/// Shortest head window (the window of every extraction before November 2026).
+pub const HEAD_MIN_SECONDS: f64 = 300.0;
 /// The head and the tail each keep at most this many items.
-const HEAD_ITEMS: usize = 2500;
-const TAIL_ITEMS: usize = 1500;
-/// The tail window ends with the file and is exactly as long as what is kept (1500 items =
-/// 185.7 s). It used to start 200 s before the end and keep the first 1500 items, so the last
-/// 14 s of every credits sequence were never analysed.
-const TAIL_SECONDS: f64 = 186.0;
+const HEAD_ITEMS: usize = 4850;
+const TAIL_ITEMS: usize = 3635;
+/// The tail window ends with the file and is exactly as long as what is kept (3635 items =
+/// 450 s, intro-skipper's longest credits).
+const TAIL_SECONDS: f64 = 450.0;
+/// Layout of the windows above, stored with each result: 2 since November 2026 (head up to
+/// 10 min, tail 7 min 30). An entry without it was extracted with 300 s / 186 s.
+pub const WINDOW_VERSION: u64 = 2;
+
+/// Start window of a fingerprint when the Core sends none: a quarter of the file, at most 10 min.
+pub const DEFAULT_FINGERPRINT_OPTIONS: media_contracts::protocol::FingerprintTaskOptions =
+    media_contracts::protocol::FingerprintTaskOptions {
+        head_percent: 25,
+        head_max_seconds: 600,
+    };
+
+/// Head window for a file of this duration: `head_percent` of it, at least 5 minutes, at most
+/// `head_max_seconds` (which wins when shorter), 10 minutes at most in any case. Unknown
+/// duration: the maximum.
+pub fn head_seconds(
+    duration: Option<f64>,
+    options: &media_contracts::protocol::FingerprintTaskOptions,
+) -> f64 {
+    let max = f64::from(options.head_max_seconds.clamp(60, 600)).min(HEAD_SECONDS);
+    duration.map_or(max, |d| {
+        (d * f64::from(options.head_percent.clamp(1, 50)) / 100.0)
+            .max(HEAD_MIN_SECONDS)
+            .min(max)
+    })
+}
 
 /// `MEDIA_FINGERPRINT_CACHE_DIR`, else `<data dir>/cache/fingerprints` (never the working directory).
 fn fingerprint_cache_dir() -> std::path::PathBuf {
@@ -37,10 +65,16 @@ fn fingerprint_cache_path(asset_id: &str, size: u64, modified_ns: &str) -> std::
 /// A cached extraction is reused only if it was made with the current rate (and so the current tail
 /// window). The check is on the content, not the file name, so only entries that are truly stale
 /// are recomputed.
-fn is_current_cache_entry(value: &Value) -> bool {
+fn is_current_cache_entry(
+    value: &Value,
+    options: &media_contracts::protocol::FingerprintTaskOptions,
+) -> bool {
     value["fingerprintRate"]
         .as_f64()
         .is_some_and(|rate| (rate - FINGERPRINT_RATE).abs() < 1e-9)
+        && value["window"].as_u64() == Some(WINDOW_VERSION)
+        && value["headPercent"].as_u64() == Some(u64::from(options.head_percent))
+        && value["headMaxSeconds"].as_u64() == Some(u64::from(options.head_max_seconds))
 }
 
 pub async fn clear_fingerprint_cache() -> io::Result<u64> {
@@ -143,7 +177,11 @@ async fn run_single_chromaprint(
     Ok(fps)
 }
 
-async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) -> io::Result<Value> {
+async fn audio_fingerprint(
+    opened: &crate::files::OpenedFile,
+    asset_id: &str,
+    options: &media_contracts::protocol::FingerprintTaskOptions,
+) -> io::Result<Value> {
     let cache_path = fingerprint_cache_path(asset_id, opened.size(), opened.modified_ns());
     // An entry written with the previous rate also has the previous tail window: it is stale, not
     // merely mislabelled, and is recomputed in place.
@@ -151,7 +189,7 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
         && let Ok(val) = serde_json::from_str::<Value>(&content)
         && val.get("fingerprints").is_some()
         && val.get("algorithm").is_some()
-        && is_current_cache_entry(&val)
+        && is_current_cache_entry(&val, options)
     {
         return Ok(val);
     }
@@ -169,14 +207,14 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
         .filter(|d| d.is_finite() && *d > 0.0);
 
     // Seekable input first; a Node whose ffmpeg predates the `fd:` protocol uses the pipe.
-    let (mut intro_fps, seekable) =
-        match run_single_chromaprint(opened, None, HEAD_SECONDS, true).await {
-            Ok(fps) if !fps.is_empty() => (fps, true),
-            Ok(_) | Err(_) => (
-                run_single_chromaprint(opened, None, HEAD_SECONDS, false).await?,
-                false,
-            ),
-        };
+    let head = head_seconds(duration, options);
+    let (mut intro_fps, seekable) = match run_single_chromaprint(opened, None, head, true).await {
+        Ok(fps) if !fps.is_empty() => (fps, true),
+        Ok(_) | Err(_) => (
+            run_single_chromaprint(opened, None, head, false).await?,
+            false,
+        ),
+    };
     if intro_fps.is_empty() {
         return Err(io::Error::other("fingerprint_empty"));
     }
@@ -184,7 +222,7 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
     let analyzed_seconds = intro_fps.len() as f64 / FINGERPRINT_RATE;
 
     let (tail_fps, tail_start) = if let Some(dur) = duration {
-        if dur <= HEAD_SECONDS {
+        if dur <= head {
             let t_start = (dur - TAIL_SECONDS).max(0.0);
             let start_idx = ((t_start * FINGERPRINT_RATE).round() as usize).min(intro_fps.len());
             (Some(intro_fps[start_idx..].to_vec()), Some(t_start))
@@ -207,7 +245,10 @@ async fn audio_fingerprint(opened: &crate::files::OpenedFile, asset_id: &str) ->
         "fingerprints": intro_fps,
         "fingerprintRate": FINGERPRINT_RATE,
         "analyzedSeconds": analyzed_seconds,
-        "algorithm": "chromaprint-v1"
+        "algorithm": "chromaprint-v1",
+        "window": WINDOW_VERSION,
+        "headPercent": options.head_percent,
+        "headMaxSeconds": options.head_max_seconds
     });
 
     if let (Some(tf), Some(ts)) = (tail_fps, tail_start)
@@ -270,6 +311,7 @@ pub async fn run_task_on_grant(
         expected_modified_ns,
         None,
         None,
+        None,
     )
     .await
 }
@@ -287,6 +329,7 @@ pub async fn run_task_with_trickplay_options(
     expected_size: u64,
     expected_modified_ns: &str,
     trickplay: Option<&media_contracts::protocol::TrickplayTaskOptions>,
+    fingerprint: Option<&media_contracts::protocol::FingerprintTaskOptions>,
     manager: Option<&crate::trickplay::TrickplayManager>,
 ) -> io::Result<Value> {
     let invalid = || {
@@ -304,6 +347,13 @@ pub async fn run_task_with_trickplay_options(
     }) {
         return Err(invalid());
     }
+    if fingerprint.is_some_and(|options| {
+        component != Some("fingerprint")
+            || !(1..=50).contains(&options.head_percent)
+            || !(60..=600).contains(&options.head_max_seconds)
+    }) {
+        return Err(invalid());
+    }
     let root = Path::new(&grant.root_snapshot);
     let relative = Path::new(&grant.relative_path);
     let opened = LocalNode.open_media(root, relative).await?;
@@ -313,7 +363,12 @@ pub async fn run_task_with_trickplay_options(
     match (category, &grant.target) {
         ("analyze", ReadTarget::Asset(asset_id)) => {
             if component == Some("fingerprint") {
-                return audio_fingerprint(&opened, asset_id.as_str()).await;
+                return audio_fingerprint(
+                    &opened,
+                    asset_id.as_str(),
+                    fingerprint.unwrap_or(&DEFAULT_FINGERPRINT_OPTIONS),
+                )
+                .await;
             }
             if component == Some(crate::end_credits::COMPONENT) {
                 return crate::end_credits::scan(&opened).await;
@@ -396,6 +451,9 @@ pub async fn run_task_with_trickplay_options(
                 fallback = crate::trickplay::global_manager();
                 &fallback
             };
+            if let Some(mb) = trickplay.and_then(|options| options.max_cache_mb) {
+                mgr.set_max_cache_mb(mb);
+            }
             if component == Some("chapters") {
                 // Same profile and boundaries as the on-demand chapter route,
                 // so the player is served from this cache afterwards.
@@ -478,17 +536,44 @@ mod tests {
     fn only_extractions_made_with_the_current_rate_are_reused() {
         // Chromaprint: 11025 Hz, one item per 1365 samples.
         assert!((FINGERPRINT_RATE - 8.076923).abs() < 1e-6);
-        assert!(is_current_cache_entry(
-            &json!({"fingerprintRate": FINGERPRINT_RATE})
+        let options = DEFAULT_FINGERPRINT_OPTIONS;
+        let current = json!({"fingerprintRate": FINGERPRINT_RATE, "window": WINDOW_VERSION,
+            "headPercent": 25, "headMaxSeconds": 600});
+        assert!(is_current_cache_entry(&current, &options));
+        // The administrator changed the start window: made again with the new one.
+        let narrower = media_contracts::protocol::FingerprintTaskOptions {
+            head_percent: 10,
+            head_max_seconds: 600,
+        };
+        assert!(!is_current_cache_entry(&current, &narrower));
+        // Same rate, but extracted with the 300 s / 186 s windows: made again.
+        assert!(!is_current_cache_entry(
+            &json!({"fingerprintRate": FINGERPRINT_RATE}),
+            &options
         ));
         // Written before November 2026: mislabelled rate and a tail that stopped 14 s early.
         assert!(!is_current_cache_entry(
-            &json!({"fingerprintRate": 8.61328125})
+            &json!({"fingerprintRate": 8.61328125}),
+            &options
         ));
-        assert!(!is_current_cache_entry(&json!({})));
+        assert!(!is_current_cache_entry(&json!({}), &options));
         // The window the Node asks for is what it keeps, so the tail reaches the end of the file.
         assert!((TAIL_ITEMS as f64 / FINGERPRINT_RATE - TAIL_SECONDS).abs() < 1.0);
         assert!(HEAD_ITEMS as f64 / FINGERPRINT_RATE > HEAD_SECONDS);
+        // A quarter of the file, within 5 and 10 minutes, 10 when the duration is unknown.
+        assert_eq!(head_seconds(Some(18.0 * 60.0), &options), HEAD_MIN_SECONDS);
+        assert_eq!(head_seconds(Some(44.0 * 60.0), &options), HEAD_SECONDS);
+        assert_eq!(head_seconds(Some(32.0 * 60.0), &options), 480.0);
+        assert_eq!(head_seconds(None, &options), HEAD_SECONDS);
+        // 40 % within 8 minutes; a maximum under 5 minutes wins over the 5-minute floor.
+        let custom =
+            |head_percent, minutes: u32| media_contracts::protocol::FingerprintTaskOptions {
+                head_percent,
+                head_max_seconds: minutes * 60,
+            };
+        assert_eq!(head_seconds(Some(30.0 * 60.0), &custom(40, 8)), 480.0);
+        assert_eq!(head_seconds(Some(10.0 * 60.0), &custom(40, 8)), 300.0);
+        assert_eq!(head_seconds(Some(60.0 * 60.0), &custom(25, 3)), 180.0);
     }
 
     #[tokio::test]
@@ -528,6 +613,7 @@ mod tests {
             quality: 12,
             columns: 10,
             rows: 10,
+            max_cache_mb: None,
         };
         let result = run_task_with_trickplay_options(
             "trickplay",
@@ -538,6 +624,7 @@ mod tests {
             opened.size(),
             opened.modified_ns(),
             Some(&profile),
+            None,
             Some(&manager),
         )
         .await
@@ -683,7 +770,9 @@ mod tests {
         assert!((result["fingerprintRate"].as_f64().unwrap() - FINGERPRINT_RATE).abs() < 1e-9);
         let head = result["fingerprints"].as_array().unwrap().len() as f64;
         assert!(
-            (head / FINGERPRINT_RATE - HEAD_SECONDS).abs() < 3.0,
+            (head / FINGERPRINT_RATE - head_seconds(Some(400.0), &DEFAULT_FINGERPRINT_OPTIONS))
+                .abs()
+                < 3.0,
             "head {head}"
         );
         let tail = result["tailFingerprints"].as_array().unwrap().len() as f64;
@@ -691,7 +780,7 @@ mod tests {
         let end = start + tail / FINGERPRINT_RATE;
         // Chromaprint itself ends about 3 s before the audio does (the old window ended 14 s early).
         assert!(
-            (start - (400.0 - TAIL_SECONDS)).abs() < 1.0,
+            (start - (400.0 - TAIL_SECONDS).max(0.0)).abs() < 1.0,
             "start {start}"
         );
         assert!(

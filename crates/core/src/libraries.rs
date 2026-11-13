@@ -89,6 +89,10 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
         .route("/api/v1/admin/roots", get(roots))
         .route("/api/v1/admin/filesystem/browse", get(browse_filesystem))
         .route(
+            "/api/v1/admin/filesystem/check",
+            axum::routing::post(check_filesystem),
+        )
+        .route(
             "/api/v1/admin/libraries/{id}/images/{kind}",
             get(image).put(upload_image).delete(remove_image),
         )
@@ -505,6 +509,137 @@ async fn browse_filesystem(
         path: target_path_str,
         parent,
         directories,
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CheckFilesystemInput {
+    path: String,
+    #[serde(default)]
+    node_id: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckFilesystemResult {
+    readable: bool,
+    path: String,
+    entries_count: usize,
+    media_files_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+fn is_media_extension(name: &str) -> bool {
+    let Some((_, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "mkv"
+            | "mp4"
+            | "avi"
+            | "mov"
+            | "webm"
+            | "m4v"
+            | "ts"
+            | "flac"
+            | "mp3"
+            | "ogg"
+            | "opus"
+            | "m4a"
+            | "wav"
+            | "aac"
+    )
+}
+
+/// Tests whether a candidate library folder exists and is readable by the Core/Node.
+async fn check_filesystem(
+    State(state): State<LibraryState>,
+    headers: HeaderMap,
+    Json(input): Json<CheckFilesystemInput>,
+) -> Result<Json<CheckFilesystemResult>, StatusCode> {
+    administrator(&state, &headers, true).await?;
+    let trimmed = input.path.trim().to_string();
+    if trimmed.is_empty() {
+        return Ok(Json(CheckFilesystemResult {
+            readable: false,
+            path: trimmed,
+            entries_count: 0,
+            media_files_count: 0,
+            error: Some("Le chemin du dossier est requis.".to_string()),
+        }));
+    }
+    let node_id = input.node_id.as_deref().unwrap_or("local");
+    if node_id != "local" {
+        return Ok(Json(CheckFilesystemResult {
+            readable: false,
+            path: trimmed,
+            entries_count: 0,
+            media_files_count: 0,
+            error: Some(
+                "Le test de lecture direct n'est disponible que pour le stockage local."
+                    .to_string(),
+            ),
+        }));
+    }
+    let validated = match crate::local_mounts::validate(DiskPath::new(&trimmed), &state.root).await
+    {
+        Ok(path) => path,
+        Err(_) => {
+            return Ok(Json(CheckFilesystemResult {
+                readable: false,
+                path: trimmed,
+                entries_count: 0,
+                media_files_count: 0,
+                error: Some(
+                    "Ce dossier n'existe pas ou se trouve hors des racines autorisées.".to_string(),
+                ),
+            }));
+        }
+    };
+    let mut entries = match tokio::fs::read_dir(&validated).await {
+        Ok(entries) => entries,
+        Err(_) => {
+            return Ok(Json(CheckFilesystemResult {
+                readable: false,
+                path: validated.to_string_lossy().into_owned(),
+                entries_count: 0,
+                media_files_count: 0,
+                error: Some("Permissions insuffisantes pour lire ce dossier.".to_string()),
+            }));
+        }
+    };
+    let mut entries_count = 0usize;
+    let mut media_files_count = 0usize;
+    while entries_count < 500 {
+        match entries.next_entry().await {
+            Ok(Some(entry)) => {
+                entries_count += 1;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if is_media_extension(&name) {
+                    media_files_count += 1;
+                }
+            }
+            Ok(None) => break,
+            Err(_) => {
+                return Ok(Json(CheckFilesystemResult {
+                    readable: false,
+                    path: validated.to_string_lossy().into_owned(),
+                    entries_count,
+                    media_files_count,
+                    error: Some("Erreur de lecture pendant l'inspection du dossier.".to_string()),
+                }));
+            }
+        }
+    }
+    Ok(Json(CheckFilesystemResult {
+        readable: true,
+        path: validated.to_string_lossy().into_owned(),
+        entries_count,
+        media_files_count,
+        error: None,
     }))
 }
 
@@ -1583,5 +1718,132 @@ mod browse_tests {
                 .is_none()
         );
         assert!(super::resolve_directory("Films/Action").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn filesystem_check_verifies_readability_and_media_count() {
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
+        use http_body_util::BodyExt;
+        use serde_json::json;
+        use tower::ServiceExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let media_dir = temp.path().join("Films");
+        std::fs::create_dir_all(&media_dir).unwrap();
+        std::fs::write(media_dir.join("movie.mkv"), b"fake").unwrap();
+        std::fs::write(media_dir.join("notes.txt"), b"note").unwrap();
+
+        let store = crate::identity::IdentityStore::open(&temp.path().join("check.sqlite"))
+            .await
+            .unwrap();
+        store
+            .bootstrap(
+                "admin",
+                zeroize::Zeroizing::new("very-long-admin-password".into()),
+            )
+            .await
+            .unwrap();
+        let origin = "http://127.0.0.1:3000";
+        let auth = crate::auth::AuthState::new(store, origin.into())
+            .await
+            .unwrap();
+        let app =
+            crate::auth::router(auth.clone()).merge(super::router(auth, temp.path().to_path_buf()));
+
+        // Login as admin to get session + csrf
+        let login_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/auth/login")
+                    .method("POST")
+                    .header("origin", origin)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"login":"admin","password":"very-long-admin-password"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(login_res.status(), StatusCode::OK);
+        let cookie = login_res.headers()["set-cookie"]
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_owned();
+        let login_body: serde_json::Value =
+            serde_json::from_slice(&login_res.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        let csrf = login_body["csrfToken"].as_str().unwrap();
+
+        // Unauthenticated -> 401
+        let unauth = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/filesystem/check")
+                    .method("POST")
+                    .header("origin", origin)
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({"path": media_dir}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
+
+        // Valid readable folder -> readable: true, entriesCount: 2, mediaFilesCount: 1
+        let ok_res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/filesystem/check")
+                    .method("POST")
+                    .header("origin", origin)
+                    .header("cookie", &cookie)
+                    .header("x-csrf-token", csrf)
+                    .header("content-type", "application/json")
+                    .body(Body::from(json!({"path": media_dir}).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(ok_res.status(), StatusCode::OK);
+        let ok_json: serde_json::Value =
+            serde_json::from_slice(&ok_res.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(ok_json["readable"], true);
+        assert_eq!(ok_json["entriesCount"], 2);
+        assert_eq!(ok_json["mediaFilesCount"], 1);
+
+        // Missing folder -> readable: false
+        let missing_res = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/admin/filesystem/check")
+                    .method("POST")
+                    .header("origin", origin)
+                    .header("cookie", &cookie)
+                    .header("x-csrf-token", csrf)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({"path": temp.path().join("DoesNotExist")}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing_res.status(), StatusCode::OK);
+        let missing_json: serde_json::Value =
+            serde_json::from_slice(&missing_res.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
+        assert_eq!(missing_json["readable"], false);
+        assert!(missing_json["error"].as_str().is_some());
     }
 }

@@ -44,35 +44,59 @@ pub async fn legacy(
     if ![0, 320, 640, 1280].contains(&width) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let (revision, sha256): (String, String) =
-        query_as("SELECT revision,sha256 FROM work_posters WHERE work_id=?")
+    if let Some((revision, sha256)) =
+        query_as::<_, (String, String)>("SELECT revision,sha256 FROM work_posters WHERE work_id=?")
             .bind(work)
             .fetch_optional(&store.pool)
             .await
             .map_err(db)?
-            .ok_or(StatusCode::NOT_FOUND)?;
-    if width == 0 {
+    {
+        if width == 0 {
+            return store
+                .assets
+                .response_after_authorization(&sha256, headers)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        let cached: Option<String> = query_scalar(
+            "SELECT sha256 FROM poster_previews WHERE work_id=? AND width=? AND revision=?",
+        )
+        .bind(work)
+        .bind(i64::from(width))
+        .bind(&revision)
+        .fetch_optional(&store.pool)
+        .await
+        .map_err(db)?;
+
+        // Missing previews are prepared by import/migration, never by a GET.
+        let target_sha = cached.unwrap_or(sha256);
         return store
             .assets
-            .response_after_authorization(&sha256, headers)
+            .response_after_authorization(&target_sha, headers)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
     }
-    let cached: Option<String> = query_scalar(
-        "SELECT sha256 FROM poster_previews WHERE work_id=? AND width=? AND revision=?",
+
+    let fallback_sha: Option<String> = query_scalar(
+        "SELECT COALESCE( \
+           (SELECT d.sha256 FROM work_image_data d WHERE d.image_id=e.id AND d.width=?), \
+           (SELECT d.sha256 FROM work_image_data d WHERE d.image_id=e.id AND d.width=0) \
+         ) \
+         FROM work_image_entries e \
+         LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id \
+         WHERE e.work_id=? AND e.kind='poster' \
+         ORDER BY e.pinned DESC, COALESCE(o.position, e.position) ASC, e.id ASC LIMIT 1",
     )
-    .bind(work)
     .bind(i64::from(width))
-    .bind(&revision)
+    .bind(work)
     .fetch_optional(&store.pool)
     .await
-    .map_err(db)?;
-
-    // Missing previews are prepared by import/migration, never by a GET.
-    let target_sha = cached.unwrap_or(sha256);
+    .map_err(db)?
+    .flatten();
+    let sha256 = fallback_sha.ok_or(StatusCode::NOT_FOUND)?;
     store
         .assets
-        .response_after_authorization(&target_sha, headers)
+        .response_after_authorization(&sha256, headers)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
@@ -114,6 +138,10 @@ pub fn router(auth: AuthState) -> Router {
         .route(
             "/api/v1/works/{work}/images/order",
             axum::routing::put(order),
+        )
+        .route(
+            "/api/v1/works/{work}/images/lock",
+            axum::routing::put(lock_artwork),
         )
         .route("/api/v1/works/{work}/images/similar", get(similar_images))
         .route(
@@ -303,12 +331,62 @@ async fn list(
 ) -> Result<Json<Value>, StatusCode> {
     allowed(&auth, &headers, &work, false).await?;
     let original = original_language(&auth.store, &work).await.map_err(db)?;
+    let locked = artwork_locked(&auth.store, &work).await.map_err(db)?;
     let images: Vec<_> = entries(&auth.store, &[work])
         .await
         .map_err(db)?
         .into_iter()
         .collect();
-    Ok(Json(json!({"images":images,"originalLanguage":original})))
+    Ok(Json(
+        json!({"images":images,"originalLanguage":original,"artworkLocked":locked}),
+    ))
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LockInput {
+    locked: bool,
+}
+async fn lock_artwork(
+    State(auth): State<AuthState>,
+    Path(work): Path<String>,
+    headers: HeaderMap,
+    Json(input): Json<LockInput>,
+) -> Result<StatusCode, StatusCode> {
+    allowed(&auth, &headers, &work, true).await?;
+    let existing: Option<Option<String>> =
+        query_scalar("SELECT manual_json FROM inventory_works WHERE id=?")
+            .bind(&work)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let Some(manual_raw) = existing else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    let mut manual: Value = manual_raw
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    manual["artwork_locked"] = json!(input.locked);
+    query("UPDATE inventory_works SET manual_json=? WHERE id=?")
+        .bind(manual.to_string())
+        .bind(&work)
+        .execute(auth.store.pool())
+        .await
+        .map_err(db)?;
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn artwork_locked(store: &IdentityStore, work: &str) -> Result<bool, sqlx::Error> {
+    let manual: Option<Option<String>> =
+        query_scalar("SELECT manual_json FROM inventory_works WHERE id=?")
+            .bind(work)
+            .fetch_optional(store.pool())
+            .await?;
+    Ok(manual
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|v| v.get("artwork_locked").and_then(Value::as_bool))
+        .unwrap_or(false))
 }
 pub(crate) async fn original_language(
     store: &IdentityStore,

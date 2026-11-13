@@ -41,17 +41,19 @@ fn directory(store: &IdentityStore, id: &str) -> io::Result<PathBuf> {
 }
 
 fn real_directory(metadata: &std::fs::Metadata) -> bool {
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt;
-        if metadata.file_attributes() & 0x400 != 0 {
-            return false;
-        }
-    }
-    true
+    metadata.is_dir() && !metadata.file_type().is_symlink() && !reparse_point(metadata)
+}
+
+/// Windows junctions and other reparse points are links too, without being symlinks.
+#[cfg(windows)]
+fn reparse_point(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes() & 0x400 != 0
+}
+
+#[cfg(not(windows))]
+fn reparse_point(_: &std::fs::Metadata) -> bool {
+    false
 }
 
 async fn clean_staging(root: &Path) {

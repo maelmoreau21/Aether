@@ -12,7 +12,6 @@
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
   import { remote } from '../remote/remote.svelte';
   import type { Media, PlayerFactory } from '../player/types';
-  import { accessibleLibraries } from './libraries';
   import Navbar from '../ui/Navbar.svelte';
   import { bestVersion } from '../player/version-choice';
   import CatalogHome from './CatalogHome.svelte';
@@ -164,7 +163,6 @@
 
   const workId = $derived(page.url.searchParams.get('work') ?? '');
   const libraryId = $derived(page.url.searchParams.get('library') ?? '');
-  const library = $derived($accessibleLibraries.find(item=>item.id===libraryId));
   const query = $derived(page.url.searchParams.get('q') ?? '');
   const order = $derived(
     ['title-asc', 'title-desc', 'year-asc', 'year-desc', 'added-asc', 'added-desc'].includes(
@@ -177,7 +175,7 @@
   );
   const offset = $derived(Math.max(0, Number(page.url.searchParams.get('offset')) || 0));
   const title = $derived(
-    library?.name ?? (section === 'settings'
+    section === 'settings'
       ? $t('settings_title')
       : section === 'films'
         ? $t('films')
@@ -185,7 +183,7 @@
           ? $t('series')
           : section === 'search'
             ? $t('search')
-            : $t('home'))
+            : $t('home')
   );
   /** A film started from a poster's quick action, without leaving the current page. */
   let quickWork = $state<Work | null>(null);

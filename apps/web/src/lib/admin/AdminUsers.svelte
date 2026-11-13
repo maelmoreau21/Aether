@@ -7,6 +7,11 @@
   import { modalFocus } from './modal-focus';
   import { locale, t } from '../i18n';
   import { activityLabel as formatActivity, filterAndSortUsers, groupMembershipUpdates, userMutationErrorMessage } from './user-list';
+  import ExtensionPermissions from './ExtensionPermissions.svelte';
+  import {
+    features, loadFeatures, loadUserEffectivePolicy, saveUserPolicy, deleteUserPolicy,
+    type MyPolicy, type PolicyRule
+  } from '../applications/api';
 
   interface Props {
     users: Account[];
@@ -48,6 +53,36 @@
   let newPassword = $state('');
   let libraryIds = $state<string[]>([]);
   let assignedGroupIds = $state<string[]>([]);
+  let requestsRule = $state<PolicyRule>({ film: {}, series: {}, music: {} });
+  let requestsEffective = $state<MyPolicy | null>(null);
+
+  function hasPolicyOverrides(rule: PolicyRule): boolean {
+    return (['film', 'series', 'music'] as const).some(c => {
+      const cr = rule[c];
+      return cr !== undefined && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.quota !== undefined);
+    });
+  }
+
+  async function loadUserExtensionPermissions(userId: string | null, userRole: string) {
+    requestsRule = { film: {}, series: {}, music: {} };
+    requestsEffective = null;
+    try {
+      const available = await loadFeatures();
+      if (available.requests && userId && userRole !== 'administrator') {
+        const data = await loadUserEffectivePolicy(userId);
+        requestsEffective = data.effective;
+        if (data.rule) {
+          requestsRule = {
+            film: data.rule.film ? { ...data.rule.film } : {},
+            series: data.rule.series ? { ...data.rule.series } : {},
+            music: data.rule.music ? { ...data.rule.music } : {}
+          };
+        }
+      }
+    } catch {
+      // Non-fatal: keep default inherited rule if policy endpoint is unavailable.
+    }
+  }
 
   // Search & Filter
   let search = $state('');
@@ -81,6 +116,7 @@
     assignedGroupIds = user ? groups.filter(g => !g.isDefault && !g.systemRole && g.userIds.includes(user.id)).map(g => g.id) : [];
     message = '';
     failed = false;
+    void loadUserExtensionPermissions(user?.id ?? null, user?.role ?? 'user');
   }
 
   async function mutate(path: string, method: string, body: object) {
@@ -139,6 +175,13 @@
           libraryIds: role === 'administrator' ? [] : libraryIds
         });
         await syncUserGroups(editing.id, assignedGroupIds);
+        if ($features.requests && role !== 'administrator') {
+          if (hasPolicyOverrides(requestsRule)) {
+            await saveUserPolicy(editing.id, requestsRule);
+          } else {
+            await deleteUserPolicy(editing.id).catch(() => {});
+          }
+        }
         message = $t('account_saved_successfully');
       } else {
         await mutate('/api/v1/admin/users', 'POST', {
@@ -462,6 +505,15 @@
                 </div>
               {/if}
             </div>
+            {#if editing}
+              <ExtensionPermissions
+                bind:rule={requestsRule}
+                effective={requestsEffective}
+                isAdminTarget={role === 'administrator'}
+                requestsEnabled={$features.requests}
+                disabled={busy}
+              />
+            {/if}
           {:else if editing && activeTab === 'parental'}
             <ParentalPolicy userId={editing.id} />
           {:else if editing && activeTab === 'media'}

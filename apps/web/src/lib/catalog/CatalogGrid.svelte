@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { SvelteSet } from 'svelte/reactivity';
   import { page } from '$app/state';
   import { onMount, tick } from 'svelte';
   import { slide } from 'svelte/transition';
@@ -183,6 +184,8 @@
 
   // On-demand discovery state
   let discoverResults = $state<SearchResult[]>([]);
+  // Posters that failed to load fall back to the placeholder (reactive set).
+  const failedPosters = new SvelteSet<string>();
   const discoverMissing = $derived.by(() => {
     return discoverResults.filter(r => !r.inLibrary && (selectedKindFilter === 'all' || selectedKindFilter === r.kind));
   });
@@ -421,7 +424,7 @@
   {/if}
 
   <!-- Films Shelf / Grid -->
-  {#if section !== 'series' && (selectedKindFilter === 'all' || selectedKindFilter === 'film')}
+  {#if section !== 'series' && (selectedKindFilter === 'all' || selectedKindFilter === 'film') && (section !== 'search' || filteredFilms.length > 0)}
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-films-title' : undefined}>
       {#if section === 'search'}
         <div class="section-heading">
@@ -446,7 +449,7 @@
   {/if}
 
   <!-- Series Shelf / Grid -->
-  {#if section !== 'films' && (selectedKindFilter === 'all' || selectedKindFilter === 'series')}
+  {#if section !== 'films' && (selectedKindFilter === 'all' || selectedKindFilter === 'series') && (section !== 'search' || filteredSeries.length > 0)}
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-series-title' : undefined}>
       {#if section === 'search'}
         <div class="section-heading">
@@ -468,6 +471,13 @@
         {/each}
       </div>
     </section>
+  {/if}
+
+  {#if section === 'search' && filteredFilms.length === 0 && filteredSeries.length === 0 && discoverMissing.length === 0}
+    <div class="empty-media-box">
+      <Icon name="search" size={32} />
+      <p>{$t('no_results_search')}</p>
+    </div>
   {/if}
 
   <!-- Pagination -->
@@ -529,8 +539,16 @@
         {#each discoverMissing as item (`${item.externalProvider}:${item.externalId}`)}
           <div class="discover-card">
             <div class="discover-poster-wrap">
-              {#if item.poster}
-                <img src={posterUrl(item.poster)} alt="" loading="lazy" class="discover-poster" />
+              {#if item.poster && !failedPosters.has(`${item.externalProvider}:${item.externalId}`)}
+                <img
+                  src={posterUrl(item.poster)}
+                  alt=""
+                  loading="lazy"
+                  class="discover-poster"
+                  onerror={() => {
+                    failedPosters.add(`${item.externalProvider}:${item.externalId}`);
+                  }}
+                />
               {:else}
                 <div class="discover-poster placeholder">
                   <span>{item.title.trim().charAt(0).toUpperCase() || '?'}</span>
@@ -539,10 +557,6 @@
               {#if item.request}
                 <span class="discover-badge tone-{statusTone(item.request.status)}">
                   {item.request.mine ? $t('rq_requested_by_you') : $t('rq_already_requested')}
-                </span>
-              {:else if item.canRequest}
-                <span class="discover-badge tone-{item.autoApprove ? 'ok' : 'info'}">
-                  {item.autoApprove ? $t('rq_auto_approved_badge') : $t('rq_needs_review_badge')}
                 </span>
               {/if}
             </div>

@@ -41,7 +41,8 @@ pub(crate) struct FingerprintRequest<'a> {
     pub asset: &'a str,
     pub source: &'a str,
     /// Extract again a completed result that has no tail although the file is longer than the
-    /// head window (builds before November 2026 often lost the tail on slow storage).
+    /// shortest head window (builds before November 2026 often lost the tail on slow storage), or
+    /// that was made with the windows of those builds (300 s head, 186 s tail).
     pub reextract_tailless: bool,
 }
 
@@ -56,7 +57,7 @@ pub(crate) async fn queue_fingerprint(
     let key = fingerprint_key(request.asset, request.source)?;
     let rows: Vec<(String, String, Option<i64>, i64)> = query_as(
         "SELECT id,status,lease_until,CAST(CASE WHEN result_json LIKE '%\"tailFingerprints\"%' \
-            THEN 1 ELSE 0 END AS BIGINT) \
+            AND result_json LIKE '%\"window\":2%' THEN 1 ELSE 0 END AS BIGINT) \
             FROM durable_tasks \
             WHERE idempotency_key=? AND target_id=? AND category='analyze' \
             AND component='fingerprint' \
@@ -82,7 +83,7 @@ pub(crate) async fn queue_fingerprint(
                     .as_str()
                     .and_then(|s| s.parse::<f64>().ok())
             })
-            .is_some_and(|duration| duration > media_node::tasks::HEAD_SECONDS);
+            .is_some_and(|duration| duration > media_node::tasks::HEAD_MIN_SECONDS);
         if !long {
             return Ok(FingerprintState::Completed(id.clone()));
         }

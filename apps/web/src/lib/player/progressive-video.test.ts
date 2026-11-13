@@ -55,7 +55,7 @@ describe('progressive packet-copy video',()=>{
     const loading=player.load(0);source.dispatchEvent(new Event('sourceopen'));await loading;player.activate();
     const failed=expect(player.failure).rejects.toThrow('128 Mio');
     buffer.ranges=[];deliver(box('mdat',new Uint8Array(100)));await vi.advanceTimersByTimeAsync(200);await failed;
-    expect(aborted).toHaveBeenCalledOnce();expect(error).toHaveBeenCalledWith(expect.stringContaining('tampon vidéo encodé'));
+    expect(aborted).toHaveBeenCalledOnce();expect(error).toHaveBeenCalledWith(expect.stringContaining('tampon vidéo encodé'), undefined);
     player.destroy();await vi.advanceTimersByTimeAsync(0);expect(vi.getTimerCount()).toBe(0);
   });
   it('applies backpressure while paused and aborts the reader without a late fatal callback on destruction',async()=>{

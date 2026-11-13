@@ -131,6 +131,7 @@ async fn background_tasks_resolve_only_owned_inventory_targets() {
         component: None,
         width: None,
         trickplay: None,
+        fingerprint: None,
         core_base_url: String::new(),
     };
     assert!(task_grant(&state, &req).is_ok());

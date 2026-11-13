@@ -1957,17 +1957,7 @@ async fn persistent_storage_synthetic_guest_survives_worker_restart_and_database
             (8192u64 << 32) | output.len() as u64
         ))
         .unwrap();
-        let worker = std::env::current_exe()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join(if cfg!(windows) {
-                "media-extension-worker.exe"
-            } else {
-                "media-extension-worker"
-            });
+        let worker = std::path::PathBuf::from(env!("CARGO_BIN_EXE_media-extension-worker"));
         let mut child = Command::new(worker)
             .env_clear()
             .stdin(Stdio::piped())

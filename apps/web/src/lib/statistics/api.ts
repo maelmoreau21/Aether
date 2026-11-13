@@ -22,7 +22,7 @@ export interface Statistics {
 }
 export interface Detail {
   session: SessionSummary; detailsExpired: boolean; eventsTruncated: boolean; nextSequence: number | null;
-  events: { occurredAt: number; event: { sequence: number; kind: string; position: number; origin: string; track?: { id: string; language: string }; previousTrack?: { id: string; language: string }; fromPosition?: number; errorCode?: string } }[];
+  events: { occurredAt: number; event: { sequence: number; kind: string; position: number; rate?: number; origin: string; track?: { id: string; language: string }; previousTrack?: { id: string; language: string }; fromPosition?: number; errorCode?: string } }[];
 }
 /** Ranked entry shared by insights and Wrapped (titles, shows, genres, artists…). */
 export interface Rank { id: string; title: string; subtitle: string; image: string; kind: string; seconds: number; plays: number; users: number; items: number }

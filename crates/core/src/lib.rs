@@ -29,7 +29,6 @@ pub mod database;
 pub mod dlna;
 pub mod extensions;
 pub mod groups;
-pub mod imports;
 pub mod oidc;
 pub mod postgres_backup;
 pub mod reports;
@@ -291,7 +290,6 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(applications::router(auth.clone()))
             .merge(acquisition::router(auth.clone()))
             .merge(reports::router(auth.clone()))
-            .merge(imports::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(parties::router(auth.clone()))
             .merge(remote::router(auth.clone()))
@@ -643,6 +641,10 @@ fn public_routes(mode: &'static str, web_dist: std::path::PathBuf) -> Router {
                 get(|| async { axum::response::Redirect::temporary("/app/") }),
             )
             .route(
+                "/setup",
+                get(|| async { axum::response::Redirect::temporary("/app/setup/") }),
+            )
+            .route(
                 "/favicon.ico",
                 get(|| async { axum::response::Redirect::temporary("/app/favicon.svg") }),
             )
@@ -770,6 +772,14 @@ pub fn local_security_with_store(
                     && req.headers().get("sec-fetch-mode").is_none_or(|v| v == "navigate")
                     && req.headers().get("sec-fetch-dest").is_none_or(|v| v == "document");
 
+                // 1b. A native application opens the sign-in in the phone's browser (a Custom
+                // Tab launched by the app is a cross-site top-level navigation). It only
+                // redirects to the provider; the handler validates challenge and redirect.
+                let oidc_app_start = method == axum::http::Method::GET
+                    && req_path == "/api/v1/auth/oidc/app/start"
+                    && req.headers().get("sec-fetch-mode").is_none_or(|v| v == "navigate")
+                    && req.headers().get("sec-fetch-dest").is_none_or(|v| v == "document");
+
                 // 2. Safe top-level web navigation to frontend routes (/, /app, /app/*, /favicon*)
                 // When an end-user navigates from an external portal (like Authentik) or third-party link,
                 // browsers send sec-fetch-mode: navigate (and/or sec-fetch-dest: document).
@@ -814,6 +824,7 @@ pub fn local_security_with_store(
                     && (
                         is_top_level_navigation
                         || oidc_callback
+                        || oidc_app_start
                         || (!is_cross_site && origin_matches && (origin_header.is_none() || is_primary_origin))
                         || is_trusted_external
                     );

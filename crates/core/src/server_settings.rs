@@ -438,9 +438,7 @@ async fn write(
         watch_together_enabled: input
             .watch_together_enabled
             .unwrap_or(previous.watch_together_enabled),
-        cluster_enabled: input
-            .cluster_enabled
-            .unwrap_or(previous.cluster_enabled),
+        cluster_enabled: input.cluster_enabled.unwrap_or(previous.cluster_enabled),
         video_transcoding_enabled: input
             .video_transcoding_enabled
             .unwrap_or(previous.video_transcoding_enabled),

@@ -43,7 +43,7 @@
   function defaultNameForKind(kind: LibraryKind): string {
     if (kind === 'series') return $t('kind_series');
     if (kind === 'music') return $t('music');
-    return $t('kind_movies');
+    return $t('films');
   }
 
   function selectKind(kind: LibraryKind) {
@@ -136,7 +136,7 @@
       }
 
       markAccountChosen();
-      await readSession(true);
+      await readSession();
       step = 'library';
       await loadRoots();
     } catch {
@@ -318,7 +318,7 @@
           <div class="field-group">
             <span class="field-label">{$t('setup_library_kind')}</span>
             <div class="kind-grid" role="radiogroup" aria-label={$t('setup_library_kind')}>
-              <button type="button" class="kind-chip" class:selected={libraryKind === 'films'} onclick={() => selectKind('films')}>{$t('kind_movies')}</button>
+              <button type="button" class="kind-chip" class:selected={libraryKind === 'films'} onclick={() => selectKind('films')}>{$t('films')}</button>
               <button type="button" class="kind-chip" class:selected={libraryKind === 'series'} onclick={() => selectKind('series')}>{$t('kind_series')}</button>
               <button type="button" class="kind-chip" class:selected={libraryKind === 'music'} onclick={() => selectKind('music')}>{$t('music')}</button>
             </div>

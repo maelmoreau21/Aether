@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const origin = process.env.MEDIA_TEST_ORIGIN ?? 'http://127.0.0.1:5187';
 const base = process.env.MEDIA_WEB_TEST_URL ?? `${origin}/app`;
 
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ channel: 'chrome', headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, locale: 'fr-FR' });
   const errors = [];

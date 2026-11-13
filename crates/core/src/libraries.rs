@@ -589,7 +589,9 @@ async fn check_filesystem(
                 path: trimmed,
                 entries_count: 0,
                 media_files_count: 0,
-                error: Some("Ce dossier n'existe pas ou se trouve hors des racines autorisées.".to_string()),
+                error: Some(
+                    "Ce dossier n'existe pas ou se trouve hors des racines autorisées.".to_string(),
+                ),
             }));
         }
     };
@@ -1716,7 +1718,10 @@ mod browse_tests {
 
     #[tokio::test]
     async fn filesystem_check_verifies_readability_and_media_count() {
-        use axum::{body::Body, http::{Request, StatusCode}};
+        use axum::{
+            body::Body,
+            http::{Request, StatusCode},
+        };
         use http_body_util::BodyExt;
         use serde_json::json;
         use tower::ServiceExt;
@@ -1731,12 +1736,18 @@ mod browse_tests {
             .await
             .unwrap();
         store
-            .bootstrap("admin", zeroize::Zeroizing::new("very-long-admin-password".into()))
+            .bootstrap(
+                "admin",
+                zeroize::Zeroizing::new("very-long-admin-password".into()),
+            )
             .await
             .unwrap();
         let origin = "http://127.0.0.1:3000";
-        let auth = crate::auth::AuthState::new(store, origin.into()).await.unwrap();
-        let app = crate::auth::router(auth.clone()).merge(super::router(auth, temp.path().to_path_buf()));
+        let auth = crate::auth::AuthState::new(store, origin.into())
+            .await
+            .unwrap();
+        let app =
+            crate::auth::router(auth.clone()).merge(super::router(auth, temp.path().to_path_buf()));
 
         // Login as admin to get session + csrf
         let login_res = app
@@ -1762,10 +1773,9 @@ mod browse_tests {
             .next()
             .unwrap()
             .to_owned();
-        let login_body: serde_json::Value = serde_json::from_slice(
-            &login_res.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let login_body: serde_json::Value =
+            serde_json::from_slice(&login_res.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
         let csrf = login_body["csrfToken"].as_str().unwrap();
 
         // Unauthenticated -> 401
@@ -1801,10 +1811,9 @@ mod browse_tests {
             .await
             .unwrap();
         assert_eq!(ok_res.status(), StatusCode::OK);
-        let ok_json: serde_json::Value = serde_json::from_slice(
-            &ok_res.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let ok_json: serde_json::Value =
+            serde_json::from_slice(&ok_res.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
         assert_eq!(ok_json["readable"], true);
         assert_eq!(ok_json["entriesCount"], 2);
         assert_eq!(ok_json["mediaFilesCount"], 1);
@@ -1827,10 +1836,9 @@ mod browse_tests {
             .await
             .unwrap();
         assert_eq!(missing_res.status(), StatusCode::OK);
-        let missing_json: serde_json::Value = serde_json::from_slice(
-            &missing_res.into_body().collect().await.unwrap().to_bytes(),
-        )
-        .unwrap();
+        let missing_json: serde_json::Value =
+            serde_json::from_slice(&missing_res.into_body().collect().await.unwrap().to_bytes())
+                .unwrap();
         assert_eq!(missing_json["readable"], false);
         assert!(missing_json["error"].as_str().is_some());
     }

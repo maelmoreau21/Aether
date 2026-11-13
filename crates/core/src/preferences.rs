@@ -7,6 +7,7 @@ use axum::{
     routing::get,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -103,6 +104,10 @@ struct Preferences {
     prefer_audio_description: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     prefer_sdh_subtitles: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    admin_extension_pins: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    admin_extension_pin_names: Option<BTreeMap<String, String>>,
 }
 fn default_true() -> bool {
     true
@@ -181,6 +186,14 @@ fn language(value: &str) -> bool {
 }
 fn hex_color(value: &str) -> bool {
     value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+fn valid_extension_id(id: &str) -> bool {
+    let bytes = id.as_bytes();
+    (1..=64).contains(&bytes.len())
+        && (bytes[0].is_ascii_lowercase() || bytes[0].is_ascii_digit())
+        && bytes[1..].iter().all(|b| {
+            b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'.' | b'_' | b'-')
+        })
 }
 impl Preferences {
     fn valid(&self) -> bool {
@@ -314,6 +327,23 @@ impl Preferences {
                 .audio_enhancement
                 .as_deref()
                 .is_none_or(|v| matches!(v, "off" | "normalize" | "night"))
+            && self.admin_extension_pins.as_ref().is_none_or(|pins| {
+                pins.len() <= 32
+                    && pins.iter().enumerate().all(|(index, id)| {
+                        valid_extension_id(id) && !pins[..index].contains(id)
+                    })
+            })
+            && self
+                .admin_extension_pin_names
+                .as_ref()
+                .is_none_or(|names| {
+                    names.len() <= 32
+                        && names.iter().all(|(id, name)| {
+                            valid_extension_id(id)
+                                && (1..=80).contains(&name.chars().count())
+                                && !name.chars().any(char::is_control)
+                        })
+                })
     }
 }
 /// A `null` value removes that preference (back to its default); every other field is validated
@@ -482,5 +512,24 @@ mod tests {
         assert!(!ok(
             serde_json::json!({"metadataFallbackLocales": ["fr", "en", "de", "es", "it"]})
         ));
+    }
+
+    #[test]
+    fn admin_extension_pins_are_validated() {
+        let ok =
+            |value: serde_json::Value| split_patch(value).is_some_and(|(patch, _)| patch.valid());
+        assert!(ok(serde_json::json!({
+            "adminExtensionPins": ["media-requests", "fanart-tv"],
+            "adminExtensionPinNames": {"fanart-tv": "Fanart.tv"}
+        })));
+        assert!(!ok(serde_json::json!({
+            "adminExtensionPins": ["Bad id!"]
+        })));
+        assert!(!ok(serde_json::json!({
+            "adminExtensionPins": ["fanart-tv", "fanart-tv"]
+        })));
+        assert!(!ok(serde_json::json!({
+            "adminExtensionPinNames": {"Bad id!": "Fanart.tv"}
+        })));
     }
 }

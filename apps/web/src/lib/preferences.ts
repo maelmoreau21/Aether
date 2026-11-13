@@ -43,6 +43,8 @@ export type Preferences = {
   audioEnhancement?: 'off' | 'normalize' | 'night';
   preferAudioDescription?: boolean;
   preferSdhSubtitles?: boolean;
+  adminExtensionPins?: string[];
+  adminExtensionPinNames?: Record<string, string>;
 };
 /** A `null` value removes the preference on the server and here (back to its default). */
 export type PreferencePatch = { [K in keyof Preferences]?: Preferences[K] | null };
@@ -127,6 +129,28 @@ function legacyPreferences(userId: string, loaded: Preferences): Preferences {
       const sanitized = sanitizeSubtitleStyle(styleObj);
       if (Object.keys(sanitized).length > 0) patch.subtitleStyle = sanitized;
     }
+  }
+  if (loaded.adminExtensionPins === undefined) {
+    try {
+      const rawPins = JSON.parse(localStorage.getItem(`media_admin_extension_pins_${userId}`) ?? 'null') as unknown;
+      const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/.test(id);
+      if (Array.isArray(rawPins)) {
+        const pins = [...new Set(rawPins.filter(validId))].slice(0, 32);
+        if (pins.length > 0) {
+          patch.adminExtensionPins = pins;
+          const rawNames = object(`media_admin_extension_pin_names_${userId}`);
+          if (rawNames) {
+            const pinNames = Object.fromEntries(
+              Object.entries(rawNames)
+                .filter(([id, name]) => validId(id) && typeof name === 'string' && name.length > 0)
+                .slice(0, 32)
+                .map(([id, name]) => [id, (name as string).slice(0, 80)])
+            );
+            if (Object.keys(pinNames).length > 0) patch.adminExtensionPinNames = pinNames;
+          }
+        }
+      }
+    } catch { /* Optional browser cache. */ }
   }
   return patch;
 }

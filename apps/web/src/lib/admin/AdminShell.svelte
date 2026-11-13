@@ -8,6 +8,7 @@
   import { t } from '../i18n';
   import { adminNavigation, adminDestinationLabel, adminEntryFor, normalizeAdminSearch, searchAdmin, type AdminSearchResult } from './navigation';
   import { extensionPins, extensionPinNames, hasOwnPage } from './extension-pins';
+  import { ensurePreferences } from '../preferences';
   import { features, loadFeatures } from '../applications/api';
 
   let { title, currentHash, administrator, onnavigate, children }: {
@@ -73,7 +74,10 @@
   }
   onMount(() => {
     try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch {}
-    if (administrator) void loadFeatures().catch(() => {});
+    if (administrator) {
+      void loadFeatures().catch(() => {});
+      void ensurePreferences().catch(() => {});
+    }
     const media = matchMedia('(min-width: 1100px)');
     const resize = () => {
       const wasNavigating = menuOpen || Boolean(sidebar?.contains(document.activeElement));
@@ -95,8 +99,18 @@
 </script>
 
 {#snippet navigation(place: 'side' | 'menu')}
-  {#if place === 'side'}
-    <div class="sidebar-collapse-row">
+  <div class="sidebar-top" class:only-toggle={place === 'side' && collapsed}>
+    {#if place !== 'side' || !collapsed}
+      <div class="settings-search" role="search">
+        <label class="h-sr" for={`admin-settings-search-${place}`}>{$t('admin_search_label')}</label>
+        <div class="search-field">
+          <Icon name="search" size={18} />
+          <input id={`admin-settings-search-${place}`} type="search" placeholder={$t('admin_search_placeholder')} autocomplete="off" spellcheck="false" bind:value={query} onkeydown={searchKeydown} aria-controls={searching ? `admin-settings-results-${place}` : undefined} />
+        </div>
+        <p class="h-sr" aria-live="polite">{searching ? (results.length ? $t('settings_found', { count: results.length }) : $t('no_matching_setting')) : ''}</p>
+      </div>
+    {/if}
+    {#if place === 'side'}
       <button
         type="button"
         class="sidebar-collapse-btn"
@@ -106,20 +120,9 @@
         title={collapsed ? $t('expand_the_menu') : $t('collapse_the_menu')}
       >
         <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={16} />
-        {#if !collapsed}<span>{$t('collapse')}</span>{/if}
       </button>
-    </div>
-  {/if}
-  {#if place !== 'side' || !collapsed}
-    <div class="settings-search" role="search">
-      <label class="h-sr" for={`admin-settings-search-${place}`}>{$t('admin_search_label')}</label>
-      <div class="search-field">
-        <Icon name="search" size={18} />
-        <input id={`admin-settings-search-${place}`} type="search" placeholder={$t('admin_search_placeholder')} autocomplete="off" spellcheck="false" bind:value={query} onkeydown={searchKeydown} aria-controls={searching ? `admin-settings-results-${place}` : undefined} />
-      </div>
-      <p class="h-sr" aria-live="polite">{searching ? (results.length ? $t('settings_found', { count: results.length }) : $t('no_matching_setting')) : ''}</p>
-    </div>
-  {/if}
+    {/if}
+  </div>
   {#if searching && (place !== 'side' || !collapsed)}
     <nav class="sidebar-sections search-results" id={`admin-settings-results-${place}`} aria-label={$t('settings_search_results')}>
       {#if results.length}
@@ -240,12 +243,11 @@
   .section-tabs a[aria-current='page'] { color: var(--tx); border-bottom-color: var(--ac); }
   .desktop-sidebar { position: sticky; top: 96px; align-self: start; max-height: calc(100dvh - 112px); overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
   .desktop-sidebar::-webkit-scrollbar { display: none; }
-  .sidebar-collapse-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
-  .desktop-sidebar.collapsed .sidebar-collapse-row { justify-content: center; }
-  .sidebar-collapse-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--pn); color: var(--mu); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .sidebar-top { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+  .sidebar-top.only-toggle { justify-content: center; margin-bottom: 12px; }
+  .sidebar-collapse-btn { display: grid; place-items: center; flex: none; width: 42px; height: 42px; padding: 0; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--pn); color: var(--mu); cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease; }
   .sidebar-collapse-btn:hover { background: var(--pn-2); color: var(--tx); border-color: var(--line-2); }
   .sidebar-collapse-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
-  .desktop-sidebar.collapsed .sidebar-collapse-btn { width: 42px; height: 38px; padding: 0; justify-content: center; }
   .desktop-sidebar.collapsed .sidebar-sections { gap: 8px; }
   .desktop-sidebar.collapsed .group-label { display: none; }
   .desktop-sidebar.collapsed .sidebar-nav-item { justify-content: center; padding: 0; width: 42px; margin-inline: auto; }
@@ -258,7 +260,7 @@
   .sidebar-nav-item span { min-width: 0; overflow-wrap: anywhere; }
   .sidebar-nav-item:hover { color: var(--tx); background: var(--pn); }
   .sidebar-nav-item.active { background: var(--pn-2); color: var(--tx); }
-  .settings-search { flex: none; margin-bottom: 20px; }
+  .settings-search { flex: 1; min-width: 0; }
   .search-field { display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 12px; border-radius: var(--r-sm); background: var(--pn); color: var(--mu); transition: background-color var(--t-fast) ease; }
   .search-field:hover { background: var(--pn-2); }
   .search-field:focus-within { outline: 2px solid var(--ac); outline-offset: 2px; background: var(--pn); }

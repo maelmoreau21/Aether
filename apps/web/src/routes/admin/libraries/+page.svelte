@@ -184,8 +184,9 @@
     error = '';
     notice = '';
     try {
-      await request(editing ? `/api/v1/admin/libraries/${encodeURIComponent(editing)}` : '/api/v1/admin/libraries', {
-        method: editing ? 'PUT' : 'POST',
+      const targetId = editing;
+      const saved = await request<Library>(targetId ? `/api/v1/admin/libraries/${encodeURIComponent(targetId)}` : '/api/v1/admin/libraries', {
+        method: targetId ? 'PUT' : 'POST',
         headers: { 'content-type': 'application/json', 'x-csrf-token': $session.csrfToken },
         body: JSON.stringify({ name: name.trim(), kind, nodeId: folders[0]?.nodeId ?? nodeId, root: folders[0]?.root ?? root, folders, enabled, excludedPatterns: excludedPatterns.trim(), userIds, options: libraryOptions })
       });
@@ -197,7 +198,7 @@
       nodes = nodeList.nodes;
       reset();
       notice = $t('library_saved_access_permissions_are_managed');
-      return true;
+      return targetId ?? saved?.id ?? true;
     } catch (failure) {
       error = failure instanceof Error ? failure.message : $t('saving_failed');
       return false;

@@ -8,21 +8,36 @@
 
   let groupIds = $state<string[]>([]);
   let busy = $state(false), message = $state(''), failed = $state(false);
+  let lastLibraryId: string | undefined;
+
+  export function reset() {
+    lastLibraryId = undefined;
+    groupIds = [];
+    message = '';
+    failed = false;
+  }
 
   // Re-read the server state whenever the edited library or the account data changes.
   $effect(() => {
     const id = library?.id;
-    groupIds = id ? groups.filter(group => group.libraryIds.includes(id)).map(group => group.id) : [];
-    message = '';
+    if (id) {
+      lastLibraryId = id;
+      groupIds = groups.filter(group => group.libraryIds.includes(id)).map(group => group.id);
+      message = '';
+    } else if (lastLibraryId !== undefined) {
+      lastLibraryId = undefined;
+      groupIds = [];
+      message = '';
+    }
   });
 
   const initialGroups = $derived(library ? groups.filter(group => group.libraryIds.includes(library.id)).map(group => group.id) : []);
-  const dirty = $derived(groupIds.length !== initialGroups.length || groupIds.some(id => !initialGroups.includes(id)));
+  const dirty = $derived(library ? (groupIds.length !== initialGroups.length || groupIds.some(id => !initialGroups.includes(id))) : groupIds.length > 0);
 
-  /** Called by the library editor's « Enregistrer » before the library itself is saved. */
-  export async function saveGroups(): Promise<boolean> {
-    if (!library || busy || !dirty) return true;
-    const id = library.id;
+  /** Called by the library editor's « Enregistrer » (or right after creation with the new ID). */
+  export async function saveGroups(targetLibraryId?: string): Promise<boolean> {
+    const id = targetLibraryId ?? library?.id;
+    if (!id || busy || !dirty) return true;
     busy = true; message = ''; failed = false;
     try {
       for (const group of groups) {
@@ -52,21 +67,17 @@
 
 <h3>{$t('access_library')}</h3>
 <p class="lead">{$t('choose_the_groups_that_see_this')}</p>
-{#if !library}
-  <p class="notice">{$t('save_the_library_first_then_reopen')}</p>
-{:else}
-  <fieldset disabled={busy}>
-    <legend>{$t('groups')}</legend>
-    {#each groups as group (group.id)}
-      {#if group.systemRole === 'administrator'}
-        <label class="check"><input type="checkbox" bind:checked={() => options.adminAccess !== false, value => options.adminAccess = value} /><span>{group.name}<small>{$t('member_count', { count: group.userIds.length })} · {options.adminAccess === false ? $t('no_access_to_media_except_through') : $t('access_to_all_media_in_the')}</small></span></label>
-      {:else}
-        <label class="check"><input type="checkbox" value={group.id} bind:group={groupIds} /><span>{group.name}<small>{$t('member_count', { count: group.userIds.length })}{group.isDefault ? $t('admin_default_group') : ''}</small></span></label>
-      {/if}
-    {:else}<p class="hint">{$t('no_groups_create_some_under_groups')}</p>{/each}
-  </fieldset>
-  {#if message}<p role={failed ? 'alert' : 'status'} class:failed>{message}</p>{/if}
-{/if}
+<fieldset disabled={busy}>
+  <legend>{$t('groups')}</legend>
+  {#each groups as group (group.id)}
+    {#if group.systemRole === 'administrator'}
+      <label class="check"><input type="checkbox" bind:checked={() => options.adminAccess !== false, value => options.adminAccess = value} /><span>{group.name}<small>{$t('member_count', { count: group.userIds.length })} · {options.adminAccess === false ? $t('no_access_to_media_except_through') : $t('access_to_all_media_in_the')}</small></span></label>
+    {:else}
+      <label class="check"><input type="checkbox" value={group.id} bind:group={groupIds} /><span>{group.name}<small>{$t('member_count', { count: group.userIds.length })}{group.isDefault ? $t('admin_default_group') : ''}</small></span></label>
+    {/if}
+  {:else}<p class="hint">{$t('no_groups_create_some_under_groups')}</p>{/each}
+</fieldset>
+{#if message}<p role={failed ? 'alert' : 'status'} class:failed>{message}</p>{/if}
 <p class="hint">{$t('media_stays_read_only_adding_a')}</p>
 
 <style>

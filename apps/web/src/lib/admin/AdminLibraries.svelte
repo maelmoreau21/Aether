@@ -20,11 +20,11 @@
       name: string; kind: 'films' | 'series' | 'music'; nodeId: string; root: string; folders: { nodeId: string; root: string }[]; enabled: boolean;
       excludedPatterns: string;
       options: LibraryOptions; onchanged: () => Promise<void>;
-      onsave: (event: SubmitEvent) => Promise<boolean>; onscan: (library: Library, mode?: RefreshMode) => Promise<void>;
+      onsave: (event: SubmitEvent) => Promise<boolean | string>; onscan: (library: Library, mode?: RefreshMode) => Promise<void>;
       onedit: (library: Library) => void; onreset: () => void; onnodechange: () => void;
   } = $props();
   let editor = $state<HTMLDialogElement>(), refresher = $state<HTMLDialogElement>();
-  let access = $state<{ saveGroups: () => Promise<boolean> }>();
+  let access = $state<{ saveGroups: (targetLibraryId?: string) => Promise<boolean>; reset?: () => void }>();
   let imageTarget = $state<Library | null>(null);
   let target = $state<Library | null>(null), mode = $state<RefreshMode>('incremental'), refreshing = $state(false);
   let showPathPicker = $state(false);
@@ -114,7 +114,7 @@
       deleteError = cause instanceof Error && !cause.message.startsWith('Ce nom') ? cause.message : $t('deletion_is_not_possible_during_a');
     } finally { deleting = false; confirmDelete = false; }
   }
-  function manage(library?: Library) { if (library) onedit(library); else onreset(); activeSection = 'general'; presetApplied = false; formError = ''; confirmDelete = false; deleteError = ''; editor?.showModal(); }
+  function manage(library?: Library) { if (library) onedit(library); else { onreset(); access?.reset?.(); } activeSection = 'general'; presetApplied = false; formError = ''; confirmDelete = false; deleteError = ''; editor?.showModal(); }
   function refreshLibrary(library: Library | null) { target = library; mode = 'incremental'; refresher?.showModal(); }
   async function submit(event: SubmitEvent) {
     event.preventDefault();
@@ -138,9 +138,17 @@
       await tick(); editor?.querySelector<HTMLInputElement>('#library-root')?.focus();
       return;
     }
-    // Group grants are saved first: a failure keeps the editor open on the access tab.
-    if (access && !(await access.saveGroups())) { chooseEditorSection('access'); return; }
-    if (await onsave(event)) editor?.close();
+    if (editedLibrary) {
+      // Group grants are saved first when editing: a failure keeps the editor open on the access tab.
+      if (access && !(await access.saveGroups())) { chooseEditorSection('access'); return; }
+      if (await onsave(event)) editor?.close();
+    } else {
+      const saved = await onsave(event);
+      if (!saved) return;
+      const createdId = typeof saved === 'string' ? saved : undefined;
+      if (createdId && access && !(await access.saveGroups(createdId))) { chooseEditorSection('access'); return; }
+      editor?.close();
+    }
   }
   async function refresh(event: SubmitEvent) {
     event.preventDefault(); if (refreshing) return; refreshing = true;

@@ -1044,6 +1044,8 @@ fn svg_image_validation_rejects_bypass_vectors() {
         br#"<svg onload="alert(1)"/>"#,
         br#"<svg/><svg/>"#,
         br#"<rect width="10" height="10"/>"#,
+        br#"<svg><rect fill="url(https://evil.example/grad.svg#g)"/></svg>"#,
+        br#"<svg><text>&custom;</text></svg>"#,
     ];
     for payload in malicious {
         assert_eq!(
@@ -1053,4 +1055,22 @@ fn svg_image_validation_rejects_bypass_vectors() {
             String::from_utf8_lossy(payload)
         );
     }
+}
+
+#[test]
+fn svg_image_validation_accepts_plugin_banners_with_gradients_and_text() {
+    let tmdb_like = br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" width="800" height="240">
+  <defs>
+    <linearGradient id="tmdbLogoGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#90cea1"/>
+      <stop offset="100%" stop-color="#01b4e4"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="240" fill="#0d253f"/>
+  <g transform="translate(200, 60)">
+    <text x="200" y="88" font-family="'Source Sans Pro', 'Helvetica Neue', Arial, sans-serif" font-weight="900" font-size="92" fill="url(#tmdbLogoGrad)" text-anchor="middle" letter-spacing="4">TMDB</text>
+    <text x="200" y="130" font-size="18" fill="#94a3b8">Audio &amp; Chapitres</text>
+  </g>
+</svg>"##;
+    assert_eq!(super::images::image_type(tmdb_like), Some("image/svg+xml"));
 }

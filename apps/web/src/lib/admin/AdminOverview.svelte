@@ -65,10 +65,6 @@
 </script>
 
 <section id="overview" aria-label={$t('admin_nav_overview')} class="overview">
-  <header class="page-head">
-    <button class="ghost" disabled={loading} onclick={()=>void refresh()}>{$t('refresh')}</button>
-  </header>
-
   <div class="stats">
     <a class="stat stat-link" href="#server-section">
       <span class="stat-icon" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}><Icon name="server" size={18} /></span>
@@ -112,7 +108,13 @@
           <span class="count-pill" class:active={playing.length > 0}>{playing.length}</span>
         {/if}
       </div>
-      {#if updated&&!activityError}<small>{$t('updated_at', { updated })}</small>{/if}
+      <div class="block-actions">
+        {#if updated&&!activityError}<small>{$t('updated_at', { updated })}</small>{/if}
+        <button type="button" class="refresh-btn" disabled={loading} onclick={()=>void refresh()} aria-label={$t('refresh')}>
+          <Icon name="refresh" size={14} />
+          <span>{$t('refresh')}</span>
+        </button>
+      </div>
     </div>
     {#if activityError}<p class="empty" role="alert">{activityError}</p>
     {:else if sessions.length}
@@ -181,20 +183,31 @@
     {:else}<p class="empty">{loading?'Chargement…':$t('no_recently_active_users')}</p>{/if}
   </section>
 
-  <section class="block technical" aria-labelledby="technical-heading">
-    <div class="block-head"><h3 id="technical-heading">{$t('technical_information')}</h3></div>
-    <div class="tech-grid">
-      <div class="tech"><Icon name="server" size={20} /><div><small>{$t('server_version')}</small><strong>{coreHealth?.version??$t('not_reported')}</strong></div></div>
-      <div class="tech"><Icon name="shield" size={20} /><div><small>{$t('mode')}</small><strong>{coreHealth?.mode??$t('not_communicated')}</strong></div></div>
-      <div class="tech"><Icon name="tv" size={20} /><div><small>{$t('nodes')}</small><strong>{nodesError?'Indisponible':nodes.length?$t('connected_out_of', { connected, count: nodes.length }):$t('admin_no_nodes')}</strong></div></div>
+  <section class="tech-strip" aria-labelledby="technical-heading">
+    <div class="tech-row">
+      <h3 id="technical-heading" class="tech-title">{$t('technical_information')}</h3>
+      <dl class="tech-items">
+        <div class="tech-item">
+          <dt><Icon name="server" size={14} /><span>{$t('server_version')}</span></dt>
+          <dd>{coreHealth?.version??$t('not_reported')}</dd>
+        </div>
+        <div class="tech-item">
+          <dt><Icon name="shield" size={14} /><span>{$t('mode')}</span></dt>
+          <dd>{coreHealth?.mode??$t('not_communicated')}</dd>
+        </div>
+        <div class="tech-item">
+          <dt><Icon name="tv" size={14} /><span>{$t('nodes')}</span></dt>
+          <dd>{nodesError?'Indisponible':nodes.length?$t('connected_out_of', { connected, count: nodes.length }):$t('admin_no_nodes')}</dd>
+        </div>
+      </dl>
     </div>
     {#if nodes.length}
-      <ul class="node-list">
+      <ul class="node-chips">
         {#each nodes as node (node.id)}
-          <li>
+          <li class="node-chip">
             <span class="dot" class:ok={node.status==='connected'} class:warn={node.status==='disconnected'}></span>
             <strong>{node.name}</strong>
-            <span class="pill">{node.kind==='local'?'Local':'Distant'}</span>
+            <span class="node-kind">{node.kind==='local'?'Local':'Distant'}</span>
             <span class="node-version">{node.version||$t('admin_version_not_reported')}</span>
           </li>
         {/each}
@@ -204,12 +217,11 @@
 </section>
 
 <style>
-  .overview { display: grid; gap: 24px; min-width: 0; font-family: var(--font); color: var(--tx); }
-  .page-head { display: flex; align-items: center; justify-content: flex-end; gap: 12px 16px; flex-wrap: wrap; }
+  .overview { display: grid; gap: 16px; min-width: 0; font-family: var(--font); color: var(--tx); }
   h3 { margin: 0; font-size: 16px; font-weight: 600; }
   small { font-size: 12px; color: var(--mu); }
-  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
-  .stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 16px 18px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); color: inherit; text-decoration: none; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .stat { display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); color: inherit; text-decoration: none; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
   .stat-link:hover { background: var(--pn-2); border-color: var(--line-2); }
   .stat-link:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
   .stat-icon { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
@@ -220,17 +232,19 @@
   .stat strong { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--line-2); }
   .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-  .callout { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 18px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--warn-soft); font-size: 14px; }
+  .callout { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--warn-soft); font-size: 14px; }
   .callout a { color: var(--ac); font-weight: 600; text-decoration: none; }
-  .block { padding: 20px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+  .block { padding: 18px 20px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
   .block-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
   .block-title-row { display: inline-flex; align-items: center; gap: 8px; }
+  .block-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
   .count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 22px; padding: 0 8px; border-radius: var(--r-pill); background: var(--pn-2); color: var(--mu); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .count-pill.active { background: var(--ac-soft); color: var(--ac); }
   .empty { margin: 0; font-size: 14px; color: var(--mu); } .empty[role='alert'] { color: var(--err); }
-  .ghost { min-height: 38px; padding: 8px 16px; background: transparent; color: var(--tx); border: 1px solid var(--line-2); border-radius: var(--r-md); font: inherit; font-size: 13px; cursor: pointer; }
-  .ghost:hover { background: var(--pn-2); } .ghost:disabled { opacity: 0.5; cursor: not-allowed; }
-  .ghost:focus-visible, .callout a:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .refresh-btn { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 5px 12px; background: transparent; color: var(--tx); border: 1px solid var(--line-2); border-radius: var(--r-sm); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .refresh-btn:hover:not(:disabled) { background: var(--pn-2); border-color: var(--line-2); }
+  .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .refresh-btn:focus-visible, .callout a:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 
   /* Session cards: image of what is playing, client, title, progress and user. */
   .session-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
@@ -267,16 +281,18 @@
   .session-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .session-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
 
-  /* Technical information: always visible. */
-  .tech-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
-  .tech { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
-  .tech div { display: grid; gap: 2px; min-width: 0; }
-  .tech strong { color: var(--tx); font-size: 14px; overflow-wrap: anywhere; }
-  .node-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 2px; }
-  .node-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 4px; border-top: 1px solid var(--line); font-size: 13px; }
-  .node-list li:first-child { border-top: 0; }
-  .node-list strong { font-size: 14px; }
-  .pill { padding: 2px 8px; border-radius: var(--r-pill); background: var(--pn-2); color: var(--mu); font-size: 11px; font-weight: 700; }
-  .node-version { margin-left: auto; color: var(--mu); font-variant-numeric: tabular-nums; }
-  @media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .node-version { margin-left: 0; width: 100%; } }
+  /* Compact technical status strip. */
+  .tech-strip { display: grid; gap: 10px; padding: 12px 16px; background: var(--pn); border: 1px solid var(--line); border-radius: var(--r-md); min-width: 0; }
+  .tech-row { display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap; }
+  .tech-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--mu); }
+  .tech-items { display: flex; align-items: center; gap: 8px 20px; flex-wrap: wrap; margin: 0; }
+  .tech-item { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+  .tech-item dt { display: inline-flex; align-items: center; gap: 5px; color: var(--mu); }
+  .tech-item dd { margin: 0; font-weight: 600; color: var(--tx); font-variant-numeric: tabular-nums; }
+  .node-chips { list-style: none; margin: 0; padding: 10px 0 0; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .node-chip { display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: var(--r-pill); background: var(--pn-2); border: 1px solid var(--line); font-size: 12px; }
+  .node-chip strong { font-size: 12px; font-weight: 600; }
+  .node-kind { color: var(--mu); }
+  .node-version { color: var(--mu); font-variant-numeric: tabular-nums; }
+  @media (max-width: 520px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

@@ -7,15 +7,31 @@ pub(super) fn image_cache() -> &'static ImageCache {
     &CACHE
 }
 
+fn is_safe_local_url_ref(value: &str) -> bool {
+    let trimmed = value.trim();
+    let Some(inner) = trimmed
+        .strip_prefix("url(#")
+        .and_then(|rest| rest.strip_suffix(')'))
+    else {
+        return false;
+    };
+    !inner.is_empty()
+        && inner
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 fn is_allowed_svg_attr(name: &str, value: &str) -> bool {
     let lower_val = value.to_ascii_lowercase();
     if lower_val.contains("javascript:")
         || lower_val.contains("vbscript:")
         || lower_val.contains("data:")
-        || lower_val.contains("url(")
         || lower_val.contains("expression(")
     {
         return false;
+    }
+    if lower_val.contains("url(") {
+        return matches!(name, "fill" | "stroke") && is_safe_local_url_ref(value);
     }
     match name {
         "xmlns" => value == "http://www.w3.org/2000/svg",
@@ -25,23 +41,34 @@ fn is_allowed_svg_attr(name: &str, value: &str) -> bool {
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         }
-        "viewbox" | "width" | "height" | "x" | "y" | "rx" | "ry" | "cx" | "cy" | "r" | "x1"
-        | "x2" | "y1" | "y2" | "stroke-width" | "opacity" | "fill-opacity" | "stroke-opacity" => {
+        "viewbox" | "width" | "height" | "x" | "y" | "dx" | "dy" | "rx" | "ry" | "cx" | "cy"
+        | "fx" | "fy" | "r" | "x1" | "x2" | "y1" | "y2" | "stroke-width" | "opacity"
+        | "fill-opacity" | "stroke-opacity" | "stop-opacity" | "font-size" | "letter-spacing" => {
             !value.is_empty()
                 && value.chars().all(|c| {
                     c.is_ascii_digit()
                         || matches!(c, '.' | '-' | '+' | '%' | ' ' | ',' | 'p' | 'x' | 'e' | 'm')
                 })
         }
-        "fill" | "stroke" => {
+        "offset" => {
+            !value.is_empty() && value.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '%'))
+        }
+        "fill" | "stroke" | "stop-color" => {
             !value.is_empty()
                 && value.chars().all(|c| {
                     c.is_ascii_alphanumeric()
                         || matches!(c, '#' | '(' | ')' | ',' | '.' | ' ' | '%' | '-')
                 })
         }
-        "stroke-linecap" | "stroke-linejoin" | "fill-rule" | "clip-rule" => {
-            !value.is_empty() && value.chars().all(|c| c.is_ascii_alphabetic() || c == '-')
+        "font-family" => {
+            !value.is_empty()
+                && value
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | ',' | '-' | '\'' | '"'))
+        }
+        "stroke-linecap" | "stroke-linejoin" | "fill-rule" | "clip-rule" | "font-weight"
+        | "font-style" | "text-anchor" | "dominant-baseline" | "gradientunits" | "spreadmethod" => {
+            !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
         }
         "d" => value.chars().all(|c| {
             c.is_ascii_alphanumeric()
@@ -50,7 +77,7 @@ fn is_allowed_svg_attr(name: &str, value: &str) -> bool {
         "points" => value.chars().all(|c| {
             c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | ',' | ' ' | '\t' | '\n' | '\r')
         }),
-        "transform" => value.chars().all(|c| {
+        "transform" | "gradienttransform" => value.chars().all(|c| {
             c.is_ascii_alphanumeric() || matches!(c, '(' | ')' | '.' | '-' | '+' | ',' | ' ')
         }),
         _ => false,
@@ -79,6 +106,11 @@ fn validate_svg_tag(tag: &quick_xml::events::BytesStart<'_>, is_root: bool) -> O
             | "polygon"
             | "polyline"
             | "defs"
+            | "lineargradient"
+            | "radialgradient"
+            | "stop"
+            | "text"
+            | "tspan"
             | "title"
     );
     if !allowed_tag {
@@ -100,9 +132,6 @@ fn validate_svg_tag(tag: &quick_xml::events::BytesStart<'_>, is_root: bool) -> O
 }
 
 pub(super) fn is_safe_svg_text(text: &str) -> bool {
-    if text.contains('&') {
-        return false;
-    }
     let mut reader = quick_xml::Reader::from_str(text);
     reader.config_mut().trim_text(true);
     let mut stack: Vec<String> = Vec::new();
@@ -149,7 +178,22 @@ pub(super) fn is_safe_svg_text(text: &str) -> bool {
             Ok(quick_xml::events::Event::Text(t)) => {
                 let text_content: &str = t.as_ref();
                 let trimmed = text_content.trim();
-                if !trimmed.is_empty() && stack.last().map(String::as_str) != Some("title") {
+                if !trimmed.is_empty()
+                    && !matches!(
+                        stack.last().map(String::as_str),
+                        Some("title" | "text" | "tspan")
+                    )
+                {
+                    return false;
+                }
+            }
+            Ok(quick_xml::events::Event::GeneralRef(r)) => {
+                let name = std::str::from_utf8(r.as_ref()).ok();
+                let in_text = matches!(
+                    stack.last().map(String::as_str),
+                    Some("title" | "text" | "tspan")
+                );
+                if !in_text || !matches!(name, Some("amp" | "lt" | "gt" | "quot" | "apos")) {
                     return false;
                 }
             }
@@ -158,8 +202,7 @@ pub(super) fn is_safe_svg_text(text: &str) -> bool {
             Ok(
                 quick_xml::events::Event::DocType(_)
                 | quick_xml::events::Event::PI(_)
-                | quick_xml::events::Event::CData(_)
-                | quick_xml::events::Event::GeneralRef(_),
+                | quick_xml::events::Event::CData(_),
             )
             | Err(_) => return false,
         }

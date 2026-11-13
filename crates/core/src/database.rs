@@ -439,10 +439,12 @@ mod tests {
             .unwrap();
         // 1. Start at frozen v1
         super::initialize_fresh_schema(&mut conn).await.unwrap();
-        super::query("INSERT INTO users(id,role,display_name) VALUES('u1','administrator','Admin')")
-            .execute(&mut conn)
-            .await
-            .unwrap();
+        super::query(
+            "INSERT INTO users(id,role,display_name) VALUES('u1','administrator','Admin')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
 
         // 2. Upgrade v1 -> v2
         let steps = [super::MigrationStep {

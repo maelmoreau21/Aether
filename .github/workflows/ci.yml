@@ -413,7 +413,7 @@ jobs:
 
       - name: Exécuter les tests UI Playwright (E2E)
         working-directory: apps/web
-        run: npm run test:e2e
+        run: npm run test:e2e -- setup
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures

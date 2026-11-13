@@ -270,61 +270,81 @@ static BUILTIN_PACKS: &[BuiltinPack] = &[
                 id: "native-galaxie-cosmo",
                 name: "Cosmo",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/01-cosmo.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/01-cosmo.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-orbite",
                 name: "Orbite",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/02-orbite.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/02-orbite.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-nova",
                 name: "Nova",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/03-nova.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/03-nova.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-saturne",
                 name: "Saturne",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/04-saturne.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/04-saturne.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-luna",
                 name: "Luna",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/05-luna.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/05-luna.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-meteore",
                 name: "MÃ©tÃ©ore",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/06-meteore.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/06-meteore.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-stella",
                 name: "Stella",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/07-stella.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/07-stella.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-astro",
                 name: "Astro",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/08-astro.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/08-astro.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-soleil",
                 name: "Soleil",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/09-soleil.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/09-soleil.svg"
+                )),
             },
             BuiltinAvatar {
                 id: "native-galaxie-ovni",
                 name: "O.V.N.I",
                 mime: "image/svg+xml",
-                source: AvatarSource::Embedded(include_bytes!("../../embedded_avatars/galaxie/10-o-v-n-i.svg")),
+                source: AvatarSource::Embedded(include_bytes!(
+                    "../../embedded_avatars/galaxie/10-o-v-n-i.svg"
+                )),
             },
         ],
     },
@@ -505,7 +525,10 @@ fn resolve_avatars_dir() -> Option<PathBuf> {
             return Some(path);
         }
     }
-    let candidates: &[&Path] = &[Path::new("assets/avatars"), Path::new("/app/assets/avatars")];
+    let candidates: &[&Path] = &[
+        Path::new("assets/avatars"),
+        Path::new("/app/assets/avatars"),
+    ];
     for candidate in candidates {
         if candidate.is_dir() {
             return Some((*candidate).to_path_buf());
@@ -832,11 +855,9 @@ mod tests {
                         .unwrap_or_else(|err| panic!("{}: {rel}: {err}", avatar.id)),
                 };
                 match avatar.mime {
-                    "image/png" => assert!(
-                        bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
-                        "{}",
-                        avatar.id
-                    ),
+                    "image/png" => {
+                        assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{}", avatar.id)
+                    }
                     // Shipped with the server, so not held to the extension SVG contract
                     // (`validate_svg` refuses `title`/`desc` and ARIA attributes): it must
                     // still be a small, inert document.

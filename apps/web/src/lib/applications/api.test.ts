@@ -41,7 +41,7 @@ describe('demandes et signalements', () => {
     session.set(null);
     finish(new Response(JSON.stringify({ requests: true, reports: true })));
     await expect(loading).rejects.toThrow('Votre session a changé');
-    expect(get(features)).toEqual({ requests: false, reports: false });
+    expect(get(features)).toEqual({ requests: false, reports: false, cluster: false, syncplay: false });
   });
   it('formats playback moments and season ranges for people, not machines', () => {
     expect(formatPosition(65)).toBe('1:05');

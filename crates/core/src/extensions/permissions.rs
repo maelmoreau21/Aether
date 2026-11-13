@@ -50,9 +50,12 @@ pub(crate) fn is_application_operation(capability: &str, operation: &str) -> boo
 /// an application extension starts with an empty scope and refuses every call
 /// with `library_permission_denied`.
 pub(super) fn default_all_libraries(permissions: &[String]) -> bool {
-    permissions
-        .iter()
-        .any(|permission| matches!(permission.as_str(), "metadata.read" | "reports" | "requests"))
+    permissions.iter().any(|permission| {
+        matches!(
+            permission.as_str(),
+            "metadata.read" | "reports" | "requests"
+        )
+    })
 }
 
 #[cfg(test)]
@@ -95,7 +98,10 @@ mod tests {
         assert!(is_application_operation("reports", "reports.classify"));
         assert!(is_application_operation("reports", "reports.validate"));
         assert!(!is_application_operation("requests", "reports.classify"));
-        assert!(!is_application_operation("metadata.read", "metadata.search"));
+        assert!(!is_application_operation(
+            "metadata.read",
+            "metadata.search"
+        ));
     }
 
     #[test]

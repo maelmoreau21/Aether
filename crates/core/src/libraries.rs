@@ -578,10 +578,14 @@ async fn check_filesystem(
             path: trimmed,
             entries_count: 0,
             media_files_count: 0,
-            error: Some("Le test de lecture direct n'est disponible que pour le stockage local.".to_string()),
+            error: Some(
+                "Le test de lecture direct n'est disponible que pour le stockage local."
+                    .to_string(),
+            ),
         }));
     }
-    let validated = match crate::local_mounts::validate(DiskPath::new(&trimmed), &state.root).await {
+    let validated = match crate::local_mounts::validate(DiskPath::new(&trimmed), &state.root).await
+    {
         Ok(path) => path,
         Err(_) => {
             return Ok(Json(CheckFilesystemResult {

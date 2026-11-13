@@ -269,13 +269,10 @@ pub async fn upgrade_schema_with_steps(
                 continue;
             }
             if step.version != current_version + 1 {
-                return Err(sqlx::Error::Protocol(
-                    format!(
-                        "Non-sequential migration step {} after version {}",
-                        step.version, current_version
-                    )
-                    .into(),
-                ));
+                return Err(sqlx::Error::Protocol(format!(
+                    "Non-sequential migration step {} after version {}",
+                    step.version, current_version
+                )));
             }
             let sql = if sqlite {
                 step.sqlite_sql
@@ -304,13 +301,10 @@ pub async fn upgrade_schema_with_steps(
             current_version = step.version;
         }
         if current_version != target_version {
-            return Err(sqlx::Error::Protocol(
-                format!(
-                    "Missing migration steps to reach target schema version {}",
-                    target_version
-                )
-                .into(),
-            ));
+            return Err(sqlx::Error::Protocol(format!(
+                "Missing migration steps to reach target schema version {}",
+                target_version
+            )));
         }
     }
 

@@ -293,7 +293,7 @@
                     <p class="muted small">
                       {server.baseUrl} · {$t('default_quality_profile')}: <strong>{defaultProfileLabel(server)}</strong>
                       {#if (server.qualityProfiles?.length ?? 0) > 1}
-                        ({server.qualityProfiles?.length} profils)
+                        ({$t('quality_profiles_count', { count: server.qualityProfiles?.length ?? 0 })})
                       {/if}
                     </p>
                   </div>
@@ -516,8 +516,8 @@
             <p class="muted">{$t('rq_policy_moved_desc')}</p>
           </div>
           <div class="row">
-            <a class="button-link" href={embedded ? '#groups-section' : resolve('admin/#groups-section')}>{$t('rq_open_groups')}</a>
-            <a class="button-link" href={embedded ? '#users-section' : resolve('admin/#users-section')}>{$t('rq_open_users')}</a>
+            <a class="button-link" href={embedded ? '#groups-section' : resolve(`admin/libraries/#groups-section`)}>{$t('rq_open_groups')}</a>
+            <a class="button-link" href={embedded ? '#users-section' : resolve(`admin/libraries/#users-section`)}>{$t('rq_open_users')}</a>
           </div>
         </section>
       </div>

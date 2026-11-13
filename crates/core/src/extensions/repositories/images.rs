@@ -208,12 +208,33 @@ pub(super) async fn image(
         .find(|item| item.id == extension)
         .and_then(|item| item.image_url)
         .ok_or_else(|| err(StatusCode::NOT_FOUND, "extension_image_not_found"))?;
+    let disk_path = {
+        use sha2::Digest;
+        let digest = format!("{:x}", sha2::Sha256::digest(url.as_bytes()));
+        auth.store
+            .plugins_path
+            .join("repository-images")
+            .join(format!("{digest}.txt"))
+    };
     let cached = image_cache()
         .lock()
         .ok()
         .and_then(|cache| cache.get(&url).cloned())
-        .filter(|(time, _)| time.elapsed() < Duration::from_secs(3600))
-        .map(|(_, data)| data);
+        .filter(|(time, _)| time.elapsed() < Duration::from_secs(86400))
+        .map(|(_, data)| data)
+        .or_else(|| {
+            std::fs::read_to_string(&disk_path)
+                .ok()
+                .filter(|data| data.starts_with("data:image/"))
+                .inspect(|data| {
+                    if let Ok(mut cache) = image_cache().lock() {
+                        if cache.len() >= 128 {
+                            cache.clear();
+                        }
+                        cache.insert(url.clone(), (Instant::now(), data.clone()));
+                    }
+                })
+        });
     let data = match cached {
         Some(data) => data,
         None => {
@@ -235,6 +256,10 @@ pub(super) async fn image(
             let kind = image_type(&bytes)
                 .ok_or_else(|| err(StatusCode::BAD_GATEWAY, "extension_image_invalid"))?;
             let data = format!("data:{kind};base64,{}", STANDARD.encode(&bytes));
+            if let Some(parent) = disk_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&disk_path, &data);
             if let Ok(mut cache) = image_cache().lock() {
                 if cache.len() >= 128 {
                     cache.clear();
@@ -245,7 +270,7 @@ pub(super) async fn image(
         }
     };
     Ok((
-        [(header::CACHE_CONTROL, "private, max-age=3600")],
+        [(header::CACHE_CONTROL, "private, max-age=86400")],
         Json(json!({"dataUrl": data})),
     ))
 }

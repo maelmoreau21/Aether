@@ -11,7 +11,7 @@ pub(super) struct WorkContext {
     pub(super) kind: String,
     external_ids_json: String,
     editorial_json: String,
-    manual_json: Option<String>,
+    pub(super) manual_json: Option<String>,
 }
 pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Result<(), Error> {
     let permission = match operation {

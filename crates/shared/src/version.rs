@@ -96,7 +96,7 @@ mod tests {
             "origin/develop",
             " develop ",
         ] {
-            let ver = version_policy::version_for_branch("0.2.0", Some(branch));
+            let ver = version_policy::version_for_build("0.2.0", Some(branch), None, None);
             assert!(ver.starts_with("0.2.0-beta.0-dev"));
             assert_eq!(version_policy::channel_for_version(&ver), "dev");
         }

@@ -85,6 +85,17 @@ async fn heartbeat(
     }
     authorized(auth, &headers, &input.work_id, true).await?;
     let actor = auth.authenticate(&headers).await?;
+    {
+        let mut commands = state.commands.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        if let Some((action, at)) = commands.get(&id)
+            && action == "stop"
+            && now.duration_since(*at) < Duration::from_secs(120)
+        {
+            commands.remove(&id);
+            return Ok((StatusCode::OK, Json(json!({ "command": "stop" }))).into_response());
+        }
+    }
     let mut tx = auth
         .store
         .pool
@@ -181,10 +192,26 @@ async fn admin_command(
     if exists.is_none() {
         return Err(StatusCode::NOT_FOUND);
     }
-    let mut commands = state.commands.lock().unwrap_or_else(|e| e.into_inner());
-    let now = Instant::now();
-    commands.retain(|_, (_, at)| now.duration_since(*at) < Duration::from_secs(120));
-    commands.insert(id, (input.action, now));
+    {
+        let mut commands = state.commands.lock().unwrap_or_else(|e| e.into_inner());
+        let now = Instant::now();
+        commands.retain(|_, (_, at)| now.duration_since(*at) < Duration::from_secs(120));
+        commands.insert(id.clone(), (input.action.clone(), now));
+    }
+    if input.action == "stop" {
+        query("DELETE FROM active_playbacks WHERE id=?")
+            .bind(&id)
+            .execute(&state.auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    } else {
+        query("UPDATE active_playbacks SET paused=? WHERE id=?")
+            .bind(if input.action == "pause" { 1i64 } else { 0i64 })
+            .bind(&id)
+            .execute(&state.auth.store.pool)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 async fn activity(
@@ -751,6 +778,61 @@ mod activity_tests {
                 .await
                 .unwrap(),
             1
+        );
+        let cmd_path = format!("/api/v1/admin/activity/{id}/command");
+        assert_eq!(
+            call(&app, &cmd_path, "POST", &b, &bc, json!({"action":"pause"}))
+                .await
+                .0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(&app, &cmd_path, "POST", &a, &ac, json!({"action":"pause"}))
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+        let paused_activity = call(&app, "/api/v1/admin/activity", "GET", &a, "", Value::Null)
+            .await
+            .1;
+        let paused_row = paused_activity["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["playbackId"] == id)
+            .unwrap();
+        assert_eq!(paused_row["paused"], true);
+        let (hb_status, hb_body) = call(&app, &path, "PUT", &b, &bc, body.clone()).await;
+        assert_eq!(hb_status, StatusCode::OK);
+        assert_eq!(hb_body["command"], "pause");
+        assert_eq!(
+            call(&app, &cmd_path, "POST", &a, &ac, json!({"action":"stop"}))
+                .await
+                .0,
+            StatusCode::NO_CONTENT
+        );
+        assert!(
+            call(&app, "/api/v1/admin/activity", "GET", &a, "", Value::Null)
+                .await
+                .1["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|row| row["playbackId"].is_null())
+        );
+        let (stop_status, stop_body) = call(&app, &path, "PUT", &b, &bc, body.clone()).await;
+        assert_eq!(stop_status, StatusCode::OK);
+        assert_eq!(stop_body["command"], "stop");
+        assert_eq!(
+            query_scalar::<_, i64>("SELECT COUNT(*) FROM active_playbacks")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            call(&app, &path, "PUT", &b, &bc, body.clone()).await.0,
+            StatusCode::NO_CONTENT
         );
         query("UPDATE active_playbacks SET updated_at=unixepoch()-46")
             .execute(&store.pool)

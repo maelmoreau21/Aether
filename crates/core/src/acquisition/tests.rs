@@ -963,22 +963,31 @@ fn a_lookup_poster_is_reduced_to_a_fixed_provider_and_a_plain_path() {
 }
 #[tokio::test]
 async fn destinations_expose_quality_profiles_and_input_validates_profile_id() {
-    let (store, sessions, auth) = fixture().await;
+    let (_dir, store, app, sessions) = fixture().await;
     let owner = &sessions[0].0;
     query("UPDATE acquisition_servers SET quality_profiles_json=? WHERE id='radarr-a'")
         .bind(json!([{"id":1,"name":"HD-1080p"},{"id":4,"name":"Ultra-HD"}]).to_string())
         .execute(store.pool())
         .await
         .unwrap();
-    query("INSERT INTO library_permissions(library_id,user_id) VALUES('request-films','owner')")
-        .execute(store.pool())
-        .await
-        .unwrap();
-    let app = router(auth);
-    let (status, body) = request(&app, "GET", "/api/v1/requests/destinations", owner, "", Value::Null).await;
+    let (status, body) = request(
+        &app,
+        "GET",
+        "/api/v1/requests/destinations",
+        owner,
+        "",
+        Value::Null,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["servers"][0]["qualityProfileId"], 1);
-    assert_eq!(body["servers"][0]["qualityProfiles"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        body["servers"][0]["qualityProfiles"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     let mut valid_input = film("101");
     valid_input.quality_profile_id = Some(4);

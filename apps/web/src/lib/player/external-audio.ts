@@ -85,7 +85,7 @@ export class ExternalAudio {
     if (this.naturalTail()) { this.audio.pause(); this.recover(); return; }
     if (this.active && !this.audio.seeking && !this.video.seeking && !this.video.paused && !this.waiting) this.holdVideo();
   };
-  private audioStalled = () => { if (this.audio.readyState < 3) this.audioWaiting(); };
+  private audioStalled = () => { if (this.audio.readyState < 2) this.audioWaiting(); };
   private recover = () => {
     if (!this.active || this.stopped || this.failed || this.audio.seeking || (this.audio.readyState < 2 && !this.naturalTail())) return;
     if (this.holdingVideo) {

@@ -60,4 +60,4 @@ Rapport concis : fichiers changés, comportement préservé/modifié, commandes 
 
 Mettre à jour la documentation de domaine uniquement si un contrat ou comportement change. Pour une décision durable, ajouter une note courte et sourcée dans .ai/MEMORY.md ; ne pas recopier un journal de session ni archiver automatiquement de gros blocs.
 
-Les documents historiques (docs/archive/, docs/ARCHITECTURE_ROADMAP.md, docs/SPECIFICATION.md, docs/DEVELOPMENT_PLAN.md et l'ancien prompt de démarrage) servent de contexte, **pas de backlog implicite ni de consignes actives**.
+Les documents historiques (docs/archive/ et l'ancien prompt de démarrage) servent de contexte, **pas de backlog implicite ni de consignes actives**.

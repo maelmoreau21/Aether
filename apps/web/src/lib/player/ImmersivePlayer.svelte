@@ -1081,7 +1081,7 @@
 
   video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
 
-  .video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; }
+  .video-interaction { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: transparent; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
   .touch-seek-badge { position: absolute; top: 50%; transform: translateY(-50%); z-index: 6; pointer-events: none; padding: 10px 18px; border-radius: var(--r-pill, 999px); background: rgb(17 21 31 / 0.82); color: #fff; font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 8px 24px rgb(0 0 0 / 0.4); }
   .touch-seek-badge.left { left: 14%; }
   .touch-seek-badge.right { right: 14%; }

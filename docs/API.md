@@ -648,6 +648,6 @@ désactivée par défaut ; elle n'altère pas les API de progression ou de feedb
 # Applications facultatives : demandes et signalements
 
 Les routes `/api/v1/requests`, `/api/v1/reports`,
-`/api/v1/admin/acquisition/*` et `/api/v1/admin/imports/*` sont conditionnées aux
+et `/api/v1/admin/acquisition/*` sont conditionnées aux
 extensions officielles activées, avec session, CSRF pour les mutations et droits
 vivants. [Contrat détaillé](REQUESTS_AND_REPORTS.md#connexions-et-api).

@@ -29,7 +29,6 @@ pub mod database;
 pub mod dlna;
 pub mod extensions;
 pub mod groups;
-pub mod imports;
 pub mod oidc;
 pub mod postgres_backup;
 pub mod reports;
@@ -291,7 +290,6 @@ async fn secure_app_with_jobs_and_web_dist(
             .merge(applications::router(auth.clone()))
             .merge(acquisition::router(auth.clone()))
             .merge(reports::router(auth.clone()))
-            .merge(imports::router(auth.clone()))
             .merge(music::router(auth.clone()))
             .merge(parties::router(auth.clone()))
             .merge(remote::router(auth.clone()))

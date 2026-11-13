@@ -206,8 +206,6 @@
 {:else if section === '#network-section'}
 <section id="network-section" aria-labelledby="network-heading"><h2 id="network-heading">{$t('network')}</h2>
   {#if network}<dl><div><dt>{$t('public_address')}</dt><dd>{network.publicUrl}</dd></div><div><dt>{$t('web_interface')}</dt><dd>{network.webPath}</dd></div><div><dt>API</dt><dd>{network.apiPath}</dd></div><div><dt>{$t('secure_session_cookies')}</dt><dd>{network.secureCookies ? $t('enabled') : $t('disabled_local_http')}</dd></div></dl>{/if}
-  <details><summary>{$t('edit_connection')}</summary><p>{$t('network_note')}</p>
-  <p>{$t('media_node_addresses_are_managed_under')}</p></details>
 </section>
 {/if}
 {#if ['#general-section','#network-section'].includes(section)}
@@ -257,7 +255,6 @@
   details:not(.adv) { padding: 0 20px; border-radius: var(--radius-md); background: var(--color-surface); }
   details:not(.adv) summary { display: flex; align-items: center; min-height: 52px; font-size: 14px; font-weight: 600; cursor: pointer; }
   details:not(.adv)[open] { padding-bottom: 16px; }
-  details:not(.adv) p + p { margin-top: 8px; }
   :global(code) { font-family: ui-monospace, monospace; font-size: 12px; color: var(--color-text); }
   @media (max-width: 640px) {
     dl div { grid-template-columns: minmax(0, 1fr); gap: 6px; }

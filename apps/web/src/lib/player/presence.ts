@@ -21,6 +21,7 @@ export class PlaybackPresence {
       const response=await req;
       if(!this.stopped&&response.status===200&&this.onCommand){
         const payload=await response.json().catch(()=>null) as {command?:unknown}|null;
+        this.pending=false;
         if(payload?.command==='pause'||payload?.command==='play'||payload?.command==='stop')this.onCommand(payload.command);
       }
     }catch{/* Presence expires if the client cannot report. */}finally{this.pending=false;}

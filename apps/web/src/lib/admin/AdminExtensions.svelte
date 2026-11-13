@@ -75,18 +75,39 @@
     })}));
   });
   // Catalogue images arrive as data: URLs from the Core (the page only loads local images).
+  const PLUGIN_IMAGE_CACHE_KEY = 'aether:plugin-images:v1';
   const images = new SvelteMap<string,string>();
   const requestedImages = new SvelteSet<string>();
+  function hydrateCachedImages() {
+    try {
+      const raw = localStorage.getItem(PLUGIN_IMAGE_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      if (!parsed || typeof parsed !== 'object') return;
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string' && v.startsWith('data:image/')) images.set(k, v);
+      }
+    } catch { /* Storage unavailable or corrupted. */ }
+  }
+  function persistCachedImages() {
+    try {
+      const entries = [...images.entries()].slice(-32);
+      localStorage.setItem(PLUGIN_IMAGE_CACHE_KEY, JSON.stringify(Object.fromEntries(entries)));
+    } catch { /* Ignore quota errors. */ }
+  }
+  hydrateCachedImages();
   async function loadImages() {
+    let changed = false;
     for (const group of catalogueGroups) {
       const entry = group.entries[0];
-      if (!entry.hasImage || requestedImages.has(group.key)) continue;
+      if (!entry.hasImage || images.has(group.key) || requestedImages.has(group.key)) continue;
       requestedImages.add(group.key);
       try {
         const image = await adminRequest<{ dataUrl: string }>(`/api/v1/admin/extensions/repositories/${encodeURIComponent(entry.repositoryId)}/image/${encodeURIComponent(entry.manifest.id)}`);
-        if (image.dataUrl.startsWith('data:image/')) images.set(group.key, image.dataUrl);
+        if (image.dataUrl.startsWith('data:image/')) { images.set(group.key, image.dataUrl); changed = true; }
       } catch { /* The generated artwork stays in place. */ }
     }
+    if (changed) persistCachedImages();
   }
   const imageFor = (id: string) => {
     const group = catalogueGroups.find(item => item.entries[0].manifest.id === id && images.has(item.key));
@@ -750,7 +771,8 @@
 
   /* Dépôts : liste en lignes */
   .section-title { justify-content: space-between; margin: 20px 0 12px; }
-  .repository-form { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; align-items: end; padding: 16px 20px; background: var(--color-surface); border-radius: var(--radius-md); }
+  .repository-form { grid-template-columns: minmax(160px, 1fr) minmax(0, 2.5fr) auto; align-items: end; padding: 16px 20px; background: var(--color-surface); border-radius: var(--radius-md); }
+  .repository-form .actions { grid-column: 1 / -1; }
   .card { min-width: 0; background: var(--color-surface); border-radius: var(--radius-md); }
   .repository-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 24px; margin: 0; padding: 16px 20px; border-radius: 0; border-top: 1px solid var(--color-line-subtle); }
   .repository-card:first-of-type { border-top-left-radius: var(--radius-md); border-top-right-radius: var(--radius-md); }

@@ -9,13 +9,13 @@ Point d'entrée thématique de `docs/`. Les documents datés peuvent décrire un
 | [`../AGENTS.md`](../AGENTS.md) | Invariants et méthode de contribution des agents ; pas de mission par défaut |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Composants et frontières |
 | [`../.ai/MEMORY.md`](../.ai/MEMORY.md) | Index historique des décisions ; archives : [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md) |
-| [`SPECIFICATION.md`](SPECIFICATION.md) | Périmètre historique du premier démonstrateur P0/P1 |
+| [`archive/SPECIFICATION.md`](archive/SPECIFICATION.md) | Périmètre historique du premier démonstrateur P0/P1 |
 | [`MEDIA_FORMATS.md`](MEDIA_FORMATS.md) | Modèle des pistes et formats |
 | [`STREAMING_COMPATIBILITY.md`](STREAMING_COMPATIBILITY.md) | Preuves de lecture observées |
 | [`SECURITY.md`](SECURITY.md) | Modèle de menaces et authentification |
 | [`API.md`](API.md) | Contrats d'API provisoires |
 | [`TEST_PLAN.md`](TEST_PLAN.md) | Vérifications et jeux d'essai |
-| [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) | Plan historique d'octobre 2026 ; ne pas exécuter comme roadmap courante |
+| [`archive/DEVELOPMENT_PLAN.md`](archive/DEVELOPMENT_PLAN.md) | Plan historique d'octobre 2026 ; ne pas exécuter comme roadmap courante |
 
 ## Démarrer
 
@@ -25,14 +25,14 @@ Point d'entrée thématique de `docs/`. Les documents datés peuvent décrire un
 - [`../.ai/DEV_STATE.md`](../.ai/DEV_STATE.md) : journal historique ; vérifier le commit courant avant d'en déduire l'état.
 - [`AI_WORKFLOW.md`](AI_WORKFLOW.md) : méthode actuelle pour Claude Code, Codex et autres agents (périmètre, worktrees, validation, clôture).
 - [`../.ai/ORIGINAL_REQUEST.md`](../.ai/ORIGINAL_REQUEST.md) et [`../.ai/PROMPT_DEMARRAGE_IA.md`](../.ai/PROMPT_DEMARRAGE_IA.md) : archives de la demande initiale et du premier prompt, **à ne pas relancer automatiquement**.
-- [`PRODUCT_FEATURES.md`](PRODUCT_FEATURES.md) et [`PRODUCT_BACKLOG.md`](PRODUCT_BACKLOG.md) : fonctions produit et demandes suivies.
+- [`PRODUCT_FEATURES.md`](PRODUCT_FEATURES.md) : fonctions produit livrées. [`archive/PRODUCT_BACKLOG_2026_10_20.md`](archive/PRODUCT_BACKLOG_2026_10_20.md) : demandes historiques du 20 octobre 2026, closes depuis.
 - [`JELLYFIN_FUNCTIONAL_GAPS.md`](JELLYFIN_FUNCTIONAL_GAPS.md) : comparaison fonctionnelle Jellyfin / Aether.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) et [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) : contribution et conduite.
 
 ## Architecture
 
 - [`../ARCHITECTURE.md`](../ARCHITECTURE.md) : vue d'ensemble Core / Node / Web.
-- [`ARCHITECTURE_ROADMAP.md`](ARCHITECTURE_ROADMAP.md) : audit Rust daté d'octobre 2026, historique ; état du découpage livré dans `BACKEND_MODULES.md`.
+- [`archive/ARCHITECTURE_ROADMAP.md`](archive/ARCHITECTURE_ROADMAP.md) : audit Rust daté d'octobre 2026, historique ; état du découpage livré dans `BACKEND_MODULES.md`.
 - [`BACKEND_MODULES.md`](BACKEND_MODULES.md) : modules internes du backend.
 - [`DISTRIBUTED_TASKS.md`](DISTRIBUTED_TASKS.md), [`SCHEDULED_TASKS.md`](SCHEDULED_TASKS.md), [`AUTOMATION.md`](AUTOMATION.md) : moteur de tâches, planification, automatisation événementielle.
 - [`MULTI_NODE_RELIABILITY.md`](MULTI_NODE_RELIABILITY.md) : un Core, plusieurs Media Nodes — audit, correctifs, mesures avant/après, limites.

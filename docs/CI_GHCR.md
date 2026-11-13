@@ -5,7 +5,7 @@
 Le nouveau parcours construit et vérifie les images une seule fois par architecture,
 puis les promeut depuis des archives liées au commit et aux IDs natifs vérifiés.
 La CI complète est aussi requise par les releases main. Audit, mesures, règles de
-reprise et limites : [CI_PERFORMANCE_2026_11_04.md](CI_PERFORMANCE_2026_11_04.md).
+reprise et limites : [archive/ci/CI_PERFORMANCE_2026_11_04.md](archive/ci/CI_PERFORMANCE_2026_11_04.md).
 Les sections datées ci-dessous décrivent les parcours historiques.
 
 ## A01 — Définition Bake locale et SHA explicite — 3 novembre 2026

@@ -311,7 +311,9 @@ pub async fn ensure(
         object.remove("_singleRecordingId");
         object.remove("_singleReleaseId");
     }
-    let quality_profile_id = input.quality_profile_id.unwrap_or(server.quality_profile_id);
+    let quality_profile_id = input
+        .quality_profile_id
+        .unwrap_or(server.quality_profile_id);
     body["rootFolderPath"] = json!(server.root_folder);
     body["qualityProfileId"] = json!(quality_profile_id);
     body["monitored"] = json!(!single);
@@ -613,7 +615,11 @@ async fn queue_progress(server: &Server, kind: &str, id: &str) -> Option<Downloa
         percent: percent.clamp(0.0, 100.0),
         total_bytes,
         remaining_bytes,
-        status: if status.is_empty() { "downloading".into() } else { status },
+        status: if status.is_empty() {
+            "downloading".into()
+        } else {
+            status
+        },
         timeleft,
         items: items.len(),
     })

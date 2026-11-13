@@ -210,7 +210,7 @@ Une panne de collecte n'affecte pas la lecture ni la progression.
 ## Vérification et limites
 
 Résultats réellement obtenus et parcours restant :
-[validation locale du 4 novembre 2026](STATISTICS_VALIDATION_2026_11_04.md).
+[validation locale du 4 novembre 2026](archive/ci/STATISTICS_VALIDATION_2026_11_04.md).
 
 Les tests ciblés couvrent les calculs de pause/déplacement/répétition/vitesse et
 chargement, les pistes et leur origine, le même contrat HTTP sur SQLite et

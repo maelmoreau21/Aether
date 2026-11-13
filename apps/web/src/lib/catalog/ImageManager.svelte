@@ -65,7 +65,7 @@
   let error = $state(''), busy = $state(false), loading = $state(true), adding = $state(false);
   let fileInput = $state<HTMLInputElement>();
   let imageLanguages = $state(preferences().locale === 'en' ? 'en, fr' : 'fr, en'), includeNeutral = $state(true), collectionMessage = $state('');
-  let uploadLanguage = $state(''), originalLanguage = $state<string | null>(null);
+  let uploadLanguage = $state(''), originalLanguage = $state<string | null>(null), artworkLocked = $state(false);
   let similarPairs = $state<{ first: string; second: string }[] | null>(null), uncompared = $state(0), similarVisible = $state(20), similarTruncated = $state(false);
 
   // Live visual search state (Jellyfin-style image picker)
@@ -81,12 +81,12 @@
 
   const kinds = $derived(library ? ['poster', 'backdrop'] : Object.keys(labels));
   const groups = $derived(library
-    ? [{ id: 'poster', title: 'Image principale', kinds: ['poster'] }, { id: 'backdrop', title: 'Arrière-plan', kinds: ['backdrop'] }]
+    ? [{ id: 'poster', title: $t('main_image'), kinds: ['poster'] }, { id: 'backdrop', title: labels.backdrop, kinds: ['backdrop'] }]
     : [
-      { id: 'poster', title: 'Affiches', kinds: ['poster'] },
-      { id: 'logo', title: 'Logo', kinds: ['logo'] },
-      { id: 'backdrop', title: 'Arrière-plans', kinds: ['backdrop'] },
-      { id: 'other', title: 'Autres images', kinds: ['thumb', 'landscape', 'banner', 'disc', 'illustration'] }
+      { id: 'poster', title: $t('posters'), kinds: ['poster'] },
+      { id: 'logo', title: labels.logo, kinds: ['logo'] },
+      { id: 'backdrop', title: $t('backdrops'), kinds: ['backdrop'] },
+      { id: 'other', title: $t('other_images'), kinds: ['thumb', 'landscape', 'banner', 'disc', 'illustration'] }
     ]);
   const base = $derived(workId ? `/api/v1/works/${encodeURIComponent(workId)}/images` : `/api/v1/admin/libraries/${encodeURIComponent(library?.id ?? '')}/images`);
   const imageUrl = (entry: Entry, small = true) => workId ? `${entry.url}${entry.url.includes('?') ? '&' : '?'}width=${small ? 320 : 1280}` : entry.url;
@@ -107,6 +107,7 @@
     const result = await response.json();
     const incoming: Entry[] = result.images;
     originalLanguage = result.originalLanguage ?? null;
+    artworkLocked = result.artworkLocked === true;
     entries = incoming.map(entry => {
       const previous = entries.find(old => old.id === entry.id);
       return { ...entry, width: entry.width ?? previous?.width, height: entry.height ?? previous?.height };
@@ -195,6 +196,26 @@
       });
       if (!response.ok) throw new Error($t('pin_not_saved'));
       await load(); await onchanged();
+    } catch (cause) { error = cause instanceof Error ? cause.message : 'Erreur'; }
+    finally { busy = false; }
+  }
+
+  async function toggleLock() {
+    if (busy || !workId) return;
+    busy = true; error = '';
+    const next = !artworkLocked;
+    try {
+      const response = await fetch(`${base}/lock`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': $session?.csrfToken ?? '' },
+        body: JSON.stringify({ locked: next }),
+        signal: AbortSignal.timeout(8000)
+      });
+      if (!response.ok) throw new Error($t('pin_not_saved'));
+      artworkLocked = next;
+      if (next) collectionMessage = $t('images_locked_aether_will_not_fill_in');
+      else collectionMessage = $t('images_unlocked');
+      await onchanged();
     } catch (cause) { error = cause instanceof Error ? cause.message : 'Erreur'; }
     finally { busy = false; }
   }
@@ -405,9 +426,15 @@
 
     {#if workId && $session?.user.role === 'administrator'}
       <div class="toolbar" role="group" aria-label={$t('image_tools')}>
-        <button type="button" disabled={busy || loading} onclick={collect} title={$t('adds_provider_images_according_to_the')}>{$t('collect_images')}</button>
+        <button type="button" disabled={busy || loading || artworkLocked} onclick={collect} title={artworkLocked ? $t('images_locked') : $t('adds_provider_images_according_to_the')}>{$t('collect_images')}</button>
+        <button type="button" class:locked-btn={artworkLocked} aria-pressed={artworkLocked} disabled={busy || loading} onclick={toggleLock} title={artworkLocked ? $t('unlock_images_to_allow_automatic_fill') : $t('lock_images_to_prevent_automatic_fill')}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            {#if artworkLocked}<rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />{:else}<rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.5-2" />{/if}
+          </svg>
+          {artworkLocked ? $t('images_locked') : $t('lock_images')}
+        </button>
         <button type="button" disabled={busy || loading} onclick={findSimilar} title={$t('compares_every_saved_image_without_deleting')}>{$t('find_duplicates')}</button>
-        <span class="toolbar-hint">{$t('languages_number_of_images_and_tolerance')}</span>
+        <span class="toolbar-hint">{artworkLocked ? $t('locked_no_further_image_download') : $t('languages_number_of_images_and_tolerance')}</span>
       </div>
       {#if collectionMessage}<p role="status" class="toolbar-status">{collectionMessage}</p>{/if}
       {#if similarPairs !== null}
@@ -486,16 +513,22 @@
                   {#if workId && entry.origin === 'provider'}{artworkCategories(entry.language, originalLanguage).join(' · ')}{#if entry.provider} · {entry.provider}{/if}{:else}{provenance(entry)}{/if}{#if entry.width && entry.height} · <span class="res">{entry.width}×{entry.height}</span>{/if}
                 </p>
                 <div class="card-actions">
-                  {#if workId && $session?.user.role === 'administrator'}
-                    <button type="button" disabled={busy} aria-label={entry.pinned ? $t('unpin_this_image') : $t('pin_this_image')} title={entry.pinned ? 'Désépingler' : $t('pin_for_all_users')} onclick={() => togglePin(entry)}>{entry.pinned ? '◆' : '◇'}</button>
+                  {#if workId}
+                    <button type="button" class="pin-btn" class:active={entry.pinned} disabled={busy} aria-label={entry.pinned ? $t('unpin_this_image') : $t('pin_this_image')} title={entry.pinned ? $t('unpin_this_image') : $t('pin_for_all_users')} onclick={() => togglePin(entry)}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill={entry.pinned ? 'currentColor' : 'none'} stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M12 2a6 6 0 0 0-6 6c0 2.6 1.4 3.9 2.4 5.6.5.8.9 1.6 1.2 2.4l2.4 6 2.4-6c.3-.8.7-1.6 1.2-2.4C16.6 11.9 18 10.6 18 8a6 6 0 0 0-6-6Z" /></svg>
+                    </button>
                   {/if}
-                  <button type="button" disabled={busy} aria-label={$t('replace', { value: labels[entry.kind] })} title={$t('replace_with_a_file')} onclick={() => add(entry.kind, entry)}>↥</button>
-                  {#if entry.kind === 'backdrop' && workId}
-                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop')[0]?.id === entry.id} aria-label={$t('move_the_backdrop_left')} onclick={() => move(entry, -1)}>‹</button>
-                    <button type="button" disabled={busy || items.filter(e => e.kind === 'backdrop').at(-1)?.id === entry.id} aria-label={$t('move_the_backdrop_right')} onclick={() => move(entry, 1)}>›</button>
+                  {#if entry.kind === 'backdrop'}
+                    {@const position = items.findIndex(e => e.id === entry.id)}
+                    <button type="button" class="reorder-btn" disabled={busy || position <= 0} aria-label={$t('move_the_backdrop_left')} title={$t('move_the_backdrop_left')} onclick={() => move(entry, -1)}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+                    </button>
+                    <button type="button" class="reorder-btn" disabled={busy || position < 0 || position >= items.length - 1} aria-label={$t('move_the_backdrop_right')} title={$t('move_the_backdrop_right')} onclick={() => move(entry, 1)}>
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+                    </button>
                   {/if}
-                  <button type="button" class="danger" disabled={busy} aria-label={$t('catalog_delete', { value: labels[entry.kind] })} title={entry.origin === 'local' ? $t('hide_this_image_in_the_catalogue') : $t('delete_this_custom_image')} onclick={() => remove(entry)}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>
+                  <button type="button" class="delete-btn" disabled={busy} aria-label={$t('catalog_delete', { value: labels[entry.kind] })} title={entry.origin === 'local' ? $t('hide_this_image_in_the_catalogue') : $t('delete_this_custom_image')} onclick={() => remove(entry)}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7" /></svg>
                   </button>
                 </div>
               </article>
@@ -660,7 +693,10 @@
 
   /* Toolbar & duplicates */
   .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 18px; }
-  .toolbar button { min-height: 40px; padding: 0 14px; font-size: 13px; }
+  .toolbar button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 14px; font-size: 13px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--pn); color: var(--tx); cursor: pointer; }
+  .toolbar button:hover:not(:disabled) { background: var(--pn-2); border-color: var(--line-2); }
+  .toolbar button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .toolbar button.locked-btn { background: var(--ac-soft); border-color: var(--ac); color: var(--ac); }
   .toolbar-hint { flex: 1 1 260px; color: var(--mu); font-size: 12px; line-height: 1.4; }
   .toolbar-status { margin: -8px 0 16px; }
   .ghost { background: transparent; }
@@ -723,9 +759,12 @@
   .kind-badge { left: auto; right: 6px; }
   .meta { margin: 6px 2px 0; font-size: 12px; line-height: 1.35; text-align: center; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
   .res { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-  .card-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; margin-top: 4px; }
-  .card-actions button { width: 40px; min-width: 40px; min-height: 40px; padding: 0; border-radius: 12px; background: transparent; font-size: 17px; font-weight: 500; }
-  .card-actions button:hover:not(:disabled) { background: var(--pn); }
+  .card-actions { display: flex; justify-content: center; gap: 6px; margin-top: 8px; }
+  .card-actions .delete-btn, .card-actions .pin-btn, .card-actions .reorder-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 50%; border: 1px solid var(--line); background: var(--pn); color: var(--mu); cursor: pointer; transition: background-color var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease); }
+  .card-actions .delete-btn:hover:not(:disabled) { background: var(--err-soft); border-color: var(--err); color: var(--err); }
+  .card-actions .pin-btn:hover:not(:disabled), .card-actions .pin-btn.active { background: var(--ac-soft); border-color: var(--ac); color: var(--ac); }
+  .card-actions .reorder-btn:hover:not(:disabled) { background: var(--pn-2); color: var(--tx); }
+  .card-actions .delete-btn:disabled, .card-actions .pin-btn:disabled, .card-actions .reorder-btn:disabled { opacity: 0.45; cursor: not-allowed; }
   .empty { margin: 0; font-size: 13px; }
   @media (hover: hover) and (pointer: fine) {
     .card-actions { opacity: 0.55; transition: opacity var(--t-fast) var(--ease); }

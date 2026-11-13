@@ -205,42 +205,18 @@ Principales routes, sous `/api/v1` :
 | `POST /reports/{id}/comments` | Commenter |
 | `POST /reports/{id}/status` | Transition d'état, avec message facultatif |
 | `POST /reports/{id}/priority` | Priorité de traitement (administrateur) |
-| `GET /admin/imports` | Progression des imports |
-| `POST /admin/imports/preview` | Analyse d'une source, sans mutation de celle-ci |
-| `POST /admin/imports/{id}/start` | Correspondances et démarrage/reprise |
-| `POST /admin/imports/{id}/run` | Traitement d'une page bornée |
-| `POST /admin/imports/{id}/pause` | Suspension persistante |
 
 Les mutations exigent session, origine autorisée et CSRF. Les listes sont paginées.
 Un accès individuel ne doit pas révéler les dossiers d'un autre utilisateur.
 
 ## Migration et bascule
 
-L'importateur lit les API de demandes, utilisateurs, services et signalements
-d'une installation source compatible, dont Seerr. Il ne reprend ni mots de passe
-ni privilèges et ne modifie jamais cette installation. L'aperçu n'expose pas les
-clés des services retournées par la source.
-
-Les correspondances de comptes sont explicites. Les serveurs source utilisent
-des clés telles que `radarr:1` et `sonarr:1`, car leurs identifiants numériques
-peuvent coïncider. Les éléments non associés restent historiques ; un auteur
-inconnu devient une étiquette historique, jamais un nouveau compte privilégié.
-
-Les imports avancent par pages, avec curseur et lease persistants. Une pause est
-revérifiée après les lectures réseau. Identité de source et identifiants d'origine
-dédupliquent les relances. Les deltas ne remplacent pas les traitements natifs
-déjà repris dans Aether. Les commentaires conservent auteurs, dates et portée
-saison/épisode disponibles dans la source.
-
-Toute demande importée reste `suspended` : aucun job ni notification n'est créé.
-Son statut et son identifiant distant d'origine sont conservés séparément.
-La reprise administrative exige une destination et un auteur valide, puis
-réconcilie l'objet distant avant toute commande. Une disponibilité historique
-n'est jamais présentée comme une preuve de présence dans Aether.
-
-Pour basculer : suspendre les nouvelles demandes sur la source, importer un
-dernier delta, vérifier associations/erreurs, puis reprendre les dossiers voulus
-dans Aether. Conserver l'ancienne installation pendant cette vérification.
+L'importateur depuis une installation Seerr (`/api/v1/admin/imports/*`) a été
+retiré avant la version officielle : son écran avait déjà disparu de
+l'administration. La table `application_imports` reste dans le schéma pour ne
+pas toucher aux bases existantes. Les demandes déjà importées gardent leur état
+`suspended` et leur identifiant distant d'origine ; leur reprise administrative
+exige toujours une destination et un auteur valide.
 
 ## Notifications et validation
 

@@ -227,8 +227,12 @@ async fn save_server(
             name: p.name.trim().to_owned(),
         })
         .collect();
-    let quality_profiles_json =
-        serde_json::to_string(&quality_profiles).map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_acquisition_server"))?;
+    let quality_profiles_json = serde_json::to_string(&quality_profiles).map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_acquisition_server",
+        )
+    })?;
     let library:Option<String>=query_scalar("SELECT l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status!='revoked'").bind(&input.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let expected = match input.kind.as_str() {
         "radarr" => "films",

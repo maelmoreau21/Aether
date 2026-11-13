@@ -5,9 +5,10 @@ import fontUrl from 'jassub/dist/default.woff2?url';
 
 import { tr } from '../i18n';
 export async function createAssRenderer(video: HTMLVideoElement, url: string, offset: number) {
+  const mobile = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches);
   const renderer = new JASSUB({
     video, subUrl: url, timeOffset: -offset, queryFonts: false, fonts: [fontUrl],
-    maxRenderHeight: 2160, libassMemoryLimit: 64 * 1024 * 1024,
+    maxRenderHeight: mobile ? 1080 : 2160, libassMemoryLimit: (mobile ? 32 : 64) * 1024 * 1024,
     libassGlyphLimit: 16 * 1024 * 1024
   });
   let timeout: ReturnType<typeof setTimeout> | undefined;

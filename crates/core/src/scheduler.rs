@@ -184,9 +184,6 @@ impl Scheduler {
                 {
                     eprintln!("Acquisition pass failed; retrying on next tick");
                 }
-                if crate::imports::tick(&application_auth.store).await.is_err() {
-                    eprintln!("Application import pass failed; retrying on next tick");
-                }
                 if crate::artwork::migrate_one(&application_auth.store)
                     .await
                     .is_err()

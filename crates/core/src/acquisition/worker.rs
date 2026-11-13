@@ -282,7 +282,13 @@ async fn run(store: &IdentityStore, job: &Claimed) -> Result<(), Error> {
         remote::verify_identity(&server, effect, id).await?;
         id.to_owned()
     } else {
-        validate_target(&server, effect.quality_profile_id.unwrap_or(server.quality_profile_id)).await?;
+        validate_target(
+            &server,
+            effect
+                .quality_profile_id
+                .unwrap_or(server.quality_profile_id),
+        )
+        .await?;
         let canonical = if let Some(single) = &single {
             single.canonical.clone()
         } else {

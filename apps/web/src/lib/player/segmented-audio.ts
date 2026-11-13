@@ -187,7 +187,24 @@ export class SegmentedAudio extends ExternalAudio {
         this.buffer.appendWindowEnd = Infinity;
         this.buffer.appendWindowStart = start;
         this.buffer.appendWindowEnd = Math.min(this.duration(), start + SECONDS);
-        this.buffer.appendBuffer(bytes);await this.idle(signal);this.loaded.add(chunk);
+        try {
+          this.buffer.appendBuffer(bytes);await this.idle(signal);
+        } catch (appendErr) {
+          if (!(appendErr instanceof DOMException && appendErr.name === 'QuotaExceededError')) throw appendErr;
+          for (const old of [...this.loaded]) {
+            if (Math.abs(old - current) > 1 && !this.closed) {
+              await this.idle(signal);if(this.closed || epoch !== this.seekEpoch)return;
+              this.buffer.remove(old * SECONDS, (old + 1) * SECONDS);await this.idle(signal);this.loaded.delete(old);
+            }
+          }
+          if (this.closed || epoch !== this.seekEpoch) return;
+          this.buffer.timestampOffset = this.timeline?.mode === 'absolute' ? 0 : Math.max(0, start - 1);
+          this.buffer.appendWindowEnd = Infinity;
+          this.buffer.appendWindowStart = start;
+          this.buffer.appendWindowEnd = Math.min(this.duration(), start + SECONDS);
+          this.buffer.appendBuffer(bytes);await this.idle(signal);
+        }
+        this.loaded.add(chunk);
       }
       // Bound browser buffers even on long episodes and repeated seeks.
       for (const chunk of [...this.loaded]) {

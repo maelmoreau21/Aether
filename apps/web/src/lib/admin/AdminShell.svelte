@@ -13,12 +13,21 @@
   let { title, currentHash, administrator, onnavigate, children }: {
     title: string; currentHash: string; administrator: boolean; onnavigate: (hash: string) => void; children: Snippet;
   } = $props();
+  const SIDEBAR_COLLAPSED_KEY = 'aether:admin-sidebar-collapsed';
+
   let wide = $state(false);
+  let collapsed = $state(false);
   let menuOpen = $state(false);
   let navigationDialog = $state<HTMLDialogElement>();
   let menuButton = $state<HTMLButtonElement>();
   let content: HTMLElement;
   let sidebar = $state<HTMLElement>();
+
+  function toggleCollapsed() {
+    collapsed = !collapsed;
+    if (collapsed) query = '';
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch {}
+  }
   const currentEntry = $derived(adminEntryFor(currentHash));
   /** Pinned extensions without a dedicated administration page open their extension page. */
   const pinnedPages = $derived($extensionPins.filter(id => !hasOwnPage(id)));
@@ -63,6 +72,7 @@
     window.scrollTo({ top: 0, behavior: 'instant' });
   }
   onMount(() => {
+    try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch {}
     if (administrator) void loadFeatures().catch(() => {});
     const media = matchMedia('(min-width: 1100px)');
     const resize = () => {
@@ -85,15 +95,32 @@
 </script>
 
 {#snippet navigation(place: 'side' | 'menu')}
-  <div class="settings-search" role="search">
-    <label class="h-sr" for={`admin-settings-search-${place}`}>{$t('admin_search_label')}</label>
-    <div class="search-field">
-      <Icon name="search" size={18} />
-      <input id={`admin-settings-search-${place}`} type="search" placeholder={$t('admin_search_placeholder')} autocomplete="off" spellcheck="false" bind:value={query} onkeydown={searchKeydown} aria-controls={searching ? `admin-settings-results-${place}` : undefined} />
+  {#if place === 'side'}
+    <div class="sidebar-collapse-row">
+      <button
+        type="button"
+        class="sidebar-collapse-btn"
+        onclick={toggleCollapsed}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? $t('expand_the_menu') : $t('collapse_the_menu')}
+        title={collapsed ? $t('expand_the_menu') : $t('collapse_the_menu')}
+      >
+        <Icon name={collapsed ? 'chevron-right' : 'chevron-left'} size={16} />
+        {#if !collapsed}<span>{$t('collapse')}</span>{/if}
+      </button>
     </div>
-    <p class="h-sr" aria-live="polite">{searching ? (results.length ? $t('settings_found', { count: results.length }) : $t('no_matching_setting')) : ''}</p>
-  </div>
-  {#if searching}
+  {/if}
+  {#if place !== 'side' || !collapsed}
+    <div class="settings-search" role="search">
+      <label class="h-sr" for={`admin-settings-search-${place}`}>{$t('admin_search_label')}</label>
+      <div class="search-field">
+        <Icon name="search" size={18} />
+        <input id={`admin-settings-search-${place}`} type="search" placeholder={$t('admin_search_placeholder')} autocomplete="off" spellcheck="false" bind:value={query} onkeydown={searchKeydown} aria-controls={searching ? `admin-settings-results-${place}` : undefined} />
+      </div>
+      <p class="h-sr" aria-live="polite">{searching ? (results.length ? $t('settings_found', { count: results.length }) : $t('no_matching_setting')) : ''}</p>
+    </div>
+  {/if}
+  {#if searching && (place !== 'side' || !collapsed)}
     <nav class="sidebar-sections search-results" id={`admin-settings-results-${place}`} aria-label={$t('settings_search_results')}>
       {#if results.length}
         <ul>
@@ -117,7 +144,7 @@
         {#each group.links as link (link.hash)}
           {#if !link.extensionId || ($extensionPins.includes(link.extensionId) && (link.extensionId === 'media-requests' ? $features.requests : $features.reports))}
           {@const active = currentEntry?.hash === link.hash}
-          <a class="sidebar-nav-item" class:active href={resolve(`admin/libraries/#${link.hash.slice(1)}`)} aria-current={active ? 'page' : undefined} onclick={event => choose(event, link.hash)}>
+          <a class="sidebar-nav-item" class:active href={resolve(`admin/libraries/#${link.hash.slice(1)}`)} aria-current={active ? 'page' : undefined} title={place === 'side' && collapsed ? adminDestinationLabel(link, $t) : undefined} onclick={event => choose(event, link.hash)}>
             <Icon name={link.icon} size={18} /><span>{adminDestinationLabel(link, $t)}</span>
           </a>
           {/if}
@@ -154,10 +181,10 @@
   <div class="header-right"><a class="back-link" href={resolve('/')} aria-label={$t('back_to_library')}><Icon name="back" size={18} /><span>{$t('library')}</span></a><ProfileMenu /></div>
 </header>
 
-<div class="admin-dashboard-container" class:with-sidebar={administrator && wide}>
+<div class="admin-dashboard-container" class:with-sidebar={administrator && wide} class:collapsed={administrator && wide && collapsed}>
   {#if administrator}
     {#if wide}
-      <aside class="admin-sidebar desktop-sidebar" aria-label={$t('admin_navigation')} bind:this={sidebar}>
+      <aside class="admin-sidebar desktop-sidebar" class:collapsed aria-label={$t('admin_navigation')} bind:this={sidebar}>
         {@render navigation('side')}
       </aside>
     {:else}
@@ -199,8 +226,9 @@
   .back-link:hover { color: var(--tx); background: var(--pn); }
   .mobile-menu-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; height: 44px; border: 0; border-radius: var(--r-sm); background: var(--pn-2); color: var(--tx); font-size: 14px; font-weight: 700; max-width: 52vw; }
   .mobile-menu-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .admin-dashboard-container { width: 100%; max-width: none; box-sizing: border-box; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px var(--gutter) 64px; }
+  .admin-dashboard-container { width: 100%; max-width: none; box-sizing: border-box; margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 24px var(--gutter) 64px; transition: grid-template-columns var(--t-fast) ease; }
   .with-sidebar { grid-template-columns: 260px minmax(0, 1fr); }
+  .with-sidebar.collapsed { grid-template-columns: 64px minmax(0, 1fr); gap: 24px; }
   .admin-content-area { display: flex; flex-direction: column; gap: 20px; min-width: 0; width: 100%; }
   .admin-content-area:focus { outline: none; }
   .section-title { display: flex; flex-direction: column; gap: 14px; }
@@ -210,7 +238,18 @@
   .section-tabs a { display: flex; align-items: center; height: 46px; border-bottom: 2px solid transparent; margin-bottom: -1px; color: var(--mu); font-size: 14px; font-weight: 700; white-space: nowrap; transition: color var(--t-fast) ease; }
   .section-tabs a:hover { color: var(--tx); }
   .section-tabs a[aria-current='page'] { color: var(--tx); border-bottom-color: var(--ac); }
-  .desktop-sidebar { position: sticky; top: 96px; align-self: start; max-height: calc(100dvh - 112px); overflow-y: auto; scrollbar-width: thin; }
+  .desktop-sidebar { position: sticky; top: 96px; align-self: start; max-height: calc(100dvh - 112px); overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none; }
+  .desktop-sidebar::-webkit-scrollbar { display: none; }
+  .sidebar-collapse-row { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+  .desktop-sidebar.collapsed .sidebar-collapse-row { justify-content: center; }
+  .sidebar-collapse-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--pn); color: var(--mu); font-size: 12px; font-weight: 600; cursor: pointer; transition: background-color var(--t-fast) ease, color var(--t-fast) ease, border-color var(--t-fast) ease; }
+  .sidebar-collapse-btn:hover { background: var(--pn-2); color: var(--tx); border-color: var(--line-2); }
+  .sidebar-collapse-btn:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
+  .desktop-sidebar.collapsed .sidebar-collapse-btn { width: 42px; height: 38px; padding: 0; justify-content: center; }
+  .desktop-sidebar.collapsed .sidebar-sections { gap: 8px; }
+  .desktop-sidebar.collapsed .group-label { display: none; }
+  .desktop-sidebar.collapsed .sidebar-nav-item { justify-content: center; padding: 0; width: 42px; margin-inline: auto; }
+  .desktop-sidebar.collapsed .sidebar-nav-item span { display: none; }
   .sidebar-sections { display: grid; gap: 20px; }
   .sidebar-group { display: grid; gap: 2px; }
   .group-label { margin: 0; padding: 0 12px 6px; color: var(--mu); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }

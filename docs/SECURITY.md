@@ -14,7 +14,7 @@
 > Contrat, configuration et limites : [OIDC](OIDC.md). Les exclusions OIDC
 > dans les jalons historiques ci-dessous ne décrivent plus ce parcours.
 
-> Jalon J1 (`ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : confinement et streaming
+> Jalon J1 (`archive/ARCHITECTURE_ROADMAP.md`, 16 octobre 2026) : confinement et streaming
 > sur descripteur de fichier ouvert (`OpenedFile` dans `crates/node`). Sous Linux/Docker,
 > traversée relative confinée via `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)`
 > avec repli `openat(O_NOFOLLOW)` composant par composant ; sous Windows, ouverture avec

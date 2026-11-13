@@ -136,11 +136,12 @@ async fn list(
 ) -> Result<Json<Value>, StatusCode> {
     administrator(&auth, &headers, false).await?;
     let mut tx = auth.store.pool.begin().await.map_err(database)?;
-    let rows: Vec<(String, String, crate::database::DbBool, Option<i64>)> =
-        query_as("SELECT id,name,is_default,allow_media_download FROM user_groups ORDER BY name,id")
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(database)?;
+    let rows: Vec<(String, String, crate::database::DbBool, Option<i64>)> = query_as(
+        "SELECT id,name,is_default,allow_media_download FROM user_groups ORDER BY name,id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(database)?;
     let members: Vec<(String, String)> =
         query_as("SELECT group_id,user_id FROM effective_user_group_members ORDER BY user_id")
             .fetch_all(&mut *tx)
@@ -249,14 +250,16 @@ async fn save(
             return Err(StatusCode::CONFLICT);
         }
         if let Some(dl) = download_setting {
-            query("INSERT INTO user_groups(id,name,is_default,allow_media_download) VALUES(?,?,?,?)")
-                .bind(id)
-                .bind(name)
-                .bind(i64::from(input.is_default))
-                .bind(dl)
-                .execute(&mut *tx)
-                .await
-                .map_err(database)?;
+            query(
+                "INSERT INTO user_groups(id,name,is_default,allow_media_download) VALUES(?,?,?,?)",
+            )
+            .bind(id)
+            .bind(name)
+            .bind(i64::from(input.is_default))
+            .bind(dl)
+            .execute(&mut *tx)
+            .await
+            .map_err(database)?;
         } else {
             query("INSERT INTO user_groups(id,name,is_default) VALUES(?,?,?)")
                 .bind(id)
@@ -343,8 +346,15 @@ async fn save(
     .await
     .map_err(database)?;
     if let Some((max_age, allow_unrated, tags_json, schedule_json)) = group_parental {
-        apply_parental_to_members(&mut tx, id, max_age, allow_unrated, &tags_json, &schedule_json)
-            .await?;
+        apply_parental_to_members(
+            &mut tx,
+            id,
+            max_age,
+            allow_unrated,
+            &tags_json,
+            &schedule_json,
+        )
+        .await?;
     }
     tx.commit().await.map_err(database)?;
     Ok(())
@@ -493,7 +503,9 @@ async fn save_parental(
         input
             .access_schedule
             .iter()
-            .map(|w| json!({"day": w.day, "startMinute": w.start_minute, "endMinute": w.end_minute}))
+            .map(
+                |w| json!({"day": w.day, "startMinute": w.start_minute, "endMinute": w.end_minute})
+            )
             .collect::<Vec<_>>()
     )
     .to_string();
@@ -520,7 +532,15 @@ async fn save_parental(
         .execute(&mut *tx)
         .await
         .map_err(database)?;
-    apply_parental_to_members(&mut tx, &id, input.maximum_age, allow_unrated, &tags_json, &schedule_json).await?;
+    apply_parental_to_members(
+        &mut tx,
+        &id,
+        input.maximum_age,
+        allow_unrated,
+        &tags_json,
+        &schedule_json,
+    )
+    .await?;
     tx.commit().await.map_err(database)?;
     crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)

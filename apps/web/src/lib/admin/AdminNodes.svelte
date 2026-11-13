@@ -30,6 +30,10 @@
     ongeneratetoken
   }: Props = $props();
 
+  let onlineCount = $derived(nodes.filter(n => n.status === 'connected').length);
+  let offlineCount = $derived(nodes.filter(n => n.status === 'disconnected').length);
+  let libraryCount = $derived(nodes.reduce((sum, n) => sum + n.libraries.length, 0));
+
   let showEnrollModal = $state(false);
   let generatingToken = $state(false);
   let activeToken = $state<EnrollmentToken | null>(null);
@@ -222,165 +226,235 @@
     </div>
   {/if}
 
-  <div class="columns">
-    <!-- Registered Media Nodes List -->
+  <div class="nodes-layout">
+    <!-- Summary Strip -->
+    <div class="nodes-summary">
+      <div class="summary-tile">
+        <span class="summary-label">{$t('nodes')}</span>
+        <strong class="summary-value">{nodes.length}</strong>
+      </div>
+      <div class="summary-tile">
+        <span class="summary-label">{nodeStatusLabels.connected}</span>
+        <strong class="summary-value ok">{onlineCount}</strong>
+      </div>
+      <div class="summary-tile">
+        <span class="summary-label">{nodeStatusLabels.disconnected}</span>
+        <strong class="summary-value" class:warn={offlineCount > 0}>{offlineCount}</strong>
+      </div>
+      <div class="summary-tile">
+        <span class="summary-label">{$t('attached_libraries')}</span>
+        <strong class="summary-value">{libraryCount}</strong>
+      </div>
+    </div>
+
+    <!-- Registered Media Nodes List (Full Width) -->
     <section class="card" aria-labelledby="node-list">
       <div class="card-header">
         <h3 id="node-list">{$t('registered_media_nodes', { count: nodes.length })}</h3>
         <span class="badge count-badge">
-          {$t('nodes_online_total', { online: nodes.filter(n => n.status === 'connected').length, total: nodes.length })}
+          {$t('nodes_online_total', { online: onlineCount, total: nodes.length })}
         </span>
       </div>
 
       {#if nodes.length === 0}
         <p class="muted">{$t('no_nodes')}</p>
-      {/if}
+      {:else}
+        <div class="nodes-list">
+          {#each nodes as node (node.id)}
+            <article class="node-card" data-status={node.status}>
+              <div class="node-card-header">
+                <div class="node-title-group">
+                  <span class="node-status-icon" data-status={node.status} aria-hidden="true">
+                    <Icon name="server" size={18} />
+                  </span>
+                  <div class="node-title-meta">
+                    <div class="item-title-row">
+                      <h4>{node.name}</h4>
+                      <span class="badge" data-status={node.status}>
+                        {nodeStatusLabels[node.status] || node.status}
+                      </span>
+                      <span class="badge kind-badge">
+                        {node.kind === 'local' ? $t('local_built_in') : $t('remote_standalone')}
+                      </span>
+                      {#if node.kind === 'remote'}
+                        <span class="badge mode-badge" data-mode={node.connectionMode || 'outbound'}>
+                          {connectionModeLabels[node.connectionMode || 'outbound'] || node.connectionMode || $t('outbound_relay')}
+                        </span>
+                      {/if}
+                      {#if node.version}
+                        <span class="badge version-badge" title={$t('media_node_version_v', { version: node.version })}>
+                          v{node.version}
+                        </span>
+                      {:else}
+                        <span class="badge version-badge version-unknown" title={$t('version_not_reported')}>
+                          v?
+                        </span>
+                      {/if}
+                    </div>
+                  </div>
+                </div>
 
-      <div class="items-list">
-        {#each nodes as node (node.id)}
-          <article class="item-card">
-            <div class="item-content">
-              <div class="item-title-row">
-                <h4>{node.name}</h4>
-                <span class="badge" data-status={node.status}>
-                  {nodeStatusLabels[node.status] || node.status}
-                </span>
-                <span class="badge kind-badge">
-                  {node.kind === 'local' ? $t('local_built_in') : $t('remote_standalone')}
-                </span>
-                {#if node.kind === 'remote'}
-                  <span class="badge mode-badge" data-mode={node.connectionMode || 'outbound'}>
-                    {connectionModeLabels[node.connectionMode || 'outbound'] || node.connectionMode || $t('outbound_relay')}
-                  </span>
-                {/if}
-                {#if node.version}
-                  <span class="badge version-badge" title={$t('media_node_version_v', { version: node.version })}>
-                    v{node.version}
-                  </span>
-                {:else}
-                  <span class="badge version-badge version-unknown" title={$t('version_not_reported')}>
-                    v?
-                  </span>
+                {#if node.kind === 'remote' && node.status !== 'revoked'}
+                  <div class="node-actions">
+                    <button
+                      class="action-btn compact-btn"
+                      disabled={!!nodeActionBusy}
+                      onclick={() => onnodeaction(node, 'reconnect')}
+                      aria-label={$t('admin_reconnect', { name: node.name })}
+                    >
+                      <Icon name="refresh" size={14} />
+                      <span>{$t('reconnect')}</span>
+                    </button>
+                    <button
+                      class="action-btn compact-btn"
+                      disabled={!!nodeActionBusy}
+                      onclick={() => onnodeaction(node, 'rotate-secret')}
+                      aria-label={$t('renew_the_secret_of', { name: node.name })}
+                    >
+                      <Icon name="shield" size={14} />
+                      <span>{$t('renew_secret')}</span>
+                    </button>
+                    <button
+                      class="action-btn compact-btn danger-btn"
+                      disabled={!!nodeActionBusy}
+                      onclick={() => onnodeaction(node, 'revoke')}
+                      aria-label={$t('admin_revoke', { name: node.name })}
+                    >
+                      <span>{$t('revoke')}</span>
+                    </button>
+                  </div>
                 {/if}
               </div>
 
-              <p class="path"><strong>{$t('identifier')}</strong> <code>{node.id}</code></p>
-              {#if node.baseUrl}
-                <p class="path"><strong>{$t('internal_url_core_node')}</strong> <code>{node.baseUrl}</code></p>
-              {/if}
-              {#if node.publicUrl}
-                <p class="path"><strong>{$t('direct_public_url')}</strong> <code>{node.publicUrl}</code></p>
-              {/if}
+              <dl class="node-specs">
+                <div class="spec-item">
+                  <dt>{$t('identifier')}</dt>
+                  <dd><code>{node.id}</code></dd>
+                </div>
+                <div class="spec-item">
+                  <dt>{$t('key')}</dt>
+                  <dd><code>{node.keyId}</code></dd>
+                </div>
+                <div class="spec-item">
+                  <dt>{$t('last_activity')}</dt>
+                  <dd>{formatTimestamp(node.lastSeenAt)}</dd>
+                </div>
+                {#if node.baseUrl}
+                  <div class="spec-item">
+                    <dt>{$t('internal_url_core_node')}</dt>
+                    <dd><code>{node.baseUrl}</code></dd>
+                  </div>
+                {/if}
+                {#if node.publicUrl}
+                  <div class="spec-item">
+                    <dt>{$t('direct_public_url')}</dt>
+                    <dd><code>{node.publicUrl}</code></dd>
+                  </div>
+                {/if}
+              </dl>
 
-              <p class="node-meta">
-                <strong>{$t('last_activity')}</strong> {formatTimestamp(node.lastSeenAt)} ·
-                <strong>{$t('key')}</strong> <code>{node.keyId}</code>
-              </p>
+              <div class="node-tags-row">
+                {#if node.roots.length > 0}
+                  <div class="tag-group">
+                    <span class="tag-group-label">{$t('media_folders')}</span>
+                    <div class="tag-list">
+                      {#each node.roots as root (root)}
+                        <span class="tag-pill mono">{root}</span>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+                <div class="tag-group">
+                  <span class="tag-group-label">{$t('attached_libraries')}</span>
+                  <div class="tag-list">
+                    {#if node.libraries.length}
+                      {#each node.libraries as lib (lib.id)}
+                        <span class="tag-pill">{lib.name} <small>({lib.kind})</small></span>
+                      {/each}
+                    {:else}
+                      <span class="tag-pill muted-pill">{$t('no_attached_libraries')}</span>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            </article>
+          {/each}
+        </div>
+      {/if}
+    </section>
 
-              {#if node.roots.length > 0}
-                <p class="path"><strong>{$t('media_folders')}</strong> {node.roots.join(', ')}</p>
-              {/if}
+    <!-- Legacy Inbound Pairing (Collapsible) -->
+    <details class="card legacy-panel">
+      <summary class="legacy-summary" id="node-legacy-form">
+        <span class="legacy-summary-title">
+          <Icon name="shield" size={16} />
+          <span>{$t('direct_pairing_legacy')}</span>
+        </span>
+        <Icon name="chevron" size={16} />
+      </summary>
 
-              <p class="node-meta">
-                <strong>{$t('attached_libraries')}</strong>
-                {node.libraries.length ? node.libraries.map(l => `${l.name} (${l.kind})`).join(', ') : 'Aucune'}
-              </p>
+      <div class="legacy-body">
+        <p class="muted">
+          {$t('for_nodes_with_an_open_port')} <strong>{$t('add_node')}</strong> {$t('at_the_top')}
+        </p>
+
+        <form onsubmit={onpair}>
+          <fieldset disabled={pairing}>
+            <div class="legacy-form-grid">
+              <div>
+                <label for="pair-node-name">{$t('node_name')}</label>
+                <input
+                  id="pair-node-name"
+                  bind:value={pairName}
+                  required
+                  maxlength="100"
+                  placeholder={$t('e_g_films_nas_node')}
+                  autocomplete="off"
+                />
+              </div>
+
+              <div>
+                <label for="pair-node-token">{$t('bootstrap_token')}</label>
+                <input
+                  id="pair-node-token"
+                  type="password"
+                  bind:value={pairToken}
+                  required
+                  autocomplete="off"
+                />
+              </div>
+
+              <div>
+                <label for="pair-node-base-url">{$t('internal_node_url')}</label>
+                <input
+                  id="pair-node-base-url"
+                  bind:value={pairBaseUrl}
+                  required
+                  placeholder="http://aether-node:3101"
+                  autocomplete="off"
+                />
+              </div>
+
+              <div>
+                <label for="pair-node-public-url">{$t('public_stream_url')}</label>
+                <input
+                  id="pair-node-public-url"
+                  bind:value={pairPublicUrl}
+                  placeholder="https://node.example.com:3101"
+                  autocomplete="off"
+                />
+              </div>
             </div>
 
-            {#if node.kind === 'remote'}
-              <div class="item-actions-vertical">
-                {#if node.status !== 'revoked'}
-                  <button
-                    class="action-btn"
-                    disabled={!!nodeActionBusy}
-                    onclick={() => onnodeaction(node, 'reconnect')}
-                    aria-label={$t('admin_reconnect', { name: node.name })}
-                  >
-                    <Icon name="refresh" size={12} />
-                    <span>{$t('reconnect')}</span>
-                  </button>
-                  <button
-                    class="action-btn"
-                    disabled={!!nodeActionBusy}
-                    onclick={() => onnodeaction(node, 'rotate-secret')}
-                    aria-label={$t('renew_the_secret_of', { name: node.name })}
-                  >
-                    <Icon name="shield" size={12} />
-                    <span>{$t('renew_secret')}</span>
-                  </button>
-                  <button
-                    class="action-btn danger-btn"
-                    disabled={!!nodeActionBusy}
-                    onclick={() => onnodeaction(node, 'revoke')}
-                    aria-label={$t('admin_revoke', { name: node.name })}
-                  >
-                    <span>{$t('revoke')}</span>
-                  </button>
-                {/if}
-              </div>
-            {/if}
-          </article>
-        {/each}
+            <div class="actions">
+              <button class="primary" type="submit">
+                {pairing ? $t('pairing_in_progress') : $t('pair_live')}
+              </button>
+            </div>
+          </fieldset>
+        </form>
       </div>
-    </section>
-
-    <!-- Legacy Inbound Pairing (Collapsible / Backward-Compatible) -->
-    <section class="card" aria-labelledby="node-legacy-form">
-      <div class="card-header">
-        <h3 id="node-legacy-form">{$t('direct_pairing_legacy')}</h3>
-        <Icon name="shield" size={16} />
-      </div>
-
-      <p class="muted">
-        {$t('for_nodes_with_an_open_port')} <strong>{$t('add_node')}</strong> {$t('at_the_top')}
-      </p>
-
-      <form onsubmit={onpair}>
-        <fieldset disabled={pairing}>
-          <label for="pair-node-name">{$t('node_name')}</label>
-          <input
-            id="pair-node-name"
-            bind:value={pairName}
-            required
-            maxlength="100"
-            placeholder={$t('e_g_films_nas_node')}
-            autocomplete="off"
-          />
-
-          <label for="pair-node-base-url">{$t('internal_node_url')}</label>
-          <input
-            id="pair-node-base-url"
-            bind:value={pairBaseUrl}
-            required
-            placeholder="http://aether-node:3101"
-            autocomplete="off"
-          />
-
-          <label for="pair-node-public-url">{$t('public_stream_url')}</label>
-          <input
-            id="pair-node-public-url"
-            bind:value={pairPublicUrl}
-            placeholder="https://node.example.com:3101"
-            autocomplete="off"
-          />
-
-          <label for="pair-node-token">{$t('bootstrap_token')}</label>
-          <input
-            id="pair-node-token"
-            type="password"
-            bind:value={pairToken}
-            required
-            autocomplete="off"
-          />
-
-          <div class="actions">
-            <button class="primary" type="submit">
-              {pairing ? $t('pairing_in_progress') : $t('pair_live')}
-            </button>
-          </div>
-        </fieldset>
-      </form>
-    </section>
+    </details>
   </div>
 </section>
 
@@ -394,10 +468,18 @@
   .section-title { margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
   .section-subtitle { margin: 4px 0 0; font-size: 14px; line-height: 1.5; color: var(--mu); }
 
-  .columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr); gap: 20px; align-items: start; }
+  .nodes-layout { display: grid; gap: 20px; }
+
+  /* Résumé */
+  .nodes-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .summary-tile { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; background: var(--color-surface); border: 1px solid var(--color-line-subtle); border-radius: var(--r-md); }
+  .summary-label { font-size: 12px; font-weight: 600; color: var(--mu); }
+  .summary-value { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--tx); }
+  .summary-value.ok { color: var(--ok); }
+  .summary-value.warn { color: var(--warn); }
 
   /* Panneaux */
-  .card { min-width: 0; padding: 24px; background: var(--color-surface); border-radius: var(--r-md); }
+  .card { min-width: 0; padding: 24px; background: var(--color-surface); border: 1px solid var(--color-line-subtle); border-radius: var(--r-md); }
   .card-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; color: var(--mu); }
   .card-header h3 { margin: 0; font-size: 17px; font-weight: 700; color: var(--tx); }
 
@@ -414,19 +496,46 @@
   .version-badge { font-family: var(--font-mono); font-weight: 600; }
   .version-badge.version-unknown { color: var(--mu); }
 
-  /* Liste des nœuds : lignes séparées, pas de carte dans la carte */
-  .items-list { display: grid; }
-  .item-card { display: flex; justify-content: space-between; gap: 20px; min-width: 0; padding: 18px 0; border-top: 1px solid var(--color-line-subtle); }
-  .item-card:first-child { border-top: 0; padding-top: 4px; }
-  .item-content { flex: 1; min-width: 0; }
-  .item-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+  /* Cartes des nœuds */
+  .nodes-list { display: grid; gap: 14px; }
+  .node-card { display: grid; gap: 16px; min-width: 0; padding: 18px 20px; background: var(--pn); border: 1px solid var(--color-line-subtle); border-radius: var(--r-md); }
+  .node-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .node-title-group { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1; }
+  .node-status-icon { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .node-status-icon[data-status='connected'] { background: var(--ok-soft); color: var(--ok); }
+  .node-status-icon[data-status='disconnected'] { background: var(--warn-soft); color: var(--warn); }
+  .node-status-icon[data-status='revoked'] { background: var(--err-soft); color: var(--err); }
+  .node-title-meta { min-width: 0; flex: 1; }
+  .item-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .item-title-row h4 { margin: 0 4px 0 0; font-size: 17px; font-weight: 700; color: var(--tx); }
-  .item-content p { margin: 4px 0; font-size: 13px; line-height: 1.55; color: var(--mu); }
-  .item-content strong { font-weight: 600; color: var(--tx); }
-  .item-content code { font-family: var(--font-mono); font-size: 12px; color: var(--tx); }
-  .path, .node-meta { overflow-wrap: anywhere; }
 
-  .item-actions-vertical { display: flex; flex-direction: column; gap: 8px; flex: none; }
+  .node-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .compact-btn { height: 36px; padding: 0 12px; font-size: 13px; border-radius: var(--r-sm); }
+
+  .node-specs { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 18px; margin: 0; padding: 14px 16px; background: var(--pn-2); border-radius: var(--r-sm); }
+  .spec-item { display: grid; gap: 2px; min-width: 0; }
+  .spec-item dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--mu); }
+  .spec-item dd { margin: 0; font-size: 13px; color: var(--tx); overflow-wrap: anywhere; }
+  .spec-item code { font-family: var(--font-mono); font-size: 12px; color: var(--tx); }
+
+  .node-tags-row { display: grid; gap: 10px; }
+  .tag-group { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .tag-group-label { font-size: 12px; font-weight: 700; color: var(--mu); min-width: 150px; }
+  .tag-list { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .tag-pill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: var(--r-pill); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 600; }
+  .tag-pill.mono { font-family: var(--font-mono); font-size: 11px; }
+  .tag-pill small { color: var(--mu); font-weight: 500; }
+  .tag-pill.muted-pill { color: var(--mu); }
+
+  /* Panneau legacy repliable */
+  .legacy-panel { padding: 0; overflow: hidden; }
+  .legacy-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 24px; cursor: pointer; list-style: none; font-size: 15px; font-weight: 700; color: var(--tx); }
+  .legacy-summary::-webkit-details-marker { display: none; }
+  .legacy-summary-title { display: inline-flex; align-items: center; gap: 10px; color: var(--mu); }
+  .legacy-summary-title span { color: var(--tx); }
+  .legacy-panel[open] .legacy-summary { border-bottom: 1px solid var(--color-line-subtle); }
+  .legacy-body { padding: 20px 24px 24px; }
+  .legacy-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
 
   /* Boutons */
   .action-btn,
@@ -536,15 +645,17 @@
 
   .modal-footer { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; padding: 16px 28px 24px; border-top: 1px solid var(--color-line-subtle); }
 
-  @media (max-width: 1023px) {
-    .columns { grid-template-columns: minmax(0, 1fr); }
+  @media (max-width: 767px) {
+    .legacy-form-grid { grid-template-columns: minmax(0, 1fr); }
   }
 
   @media (max-width: 640px) {
     .card { padding: 16px; }
-    .item-card { flex-direction: column; gap: 12px; }
-    .item-actions-vertical { flex-direction: row; flex-wrap: wrap; }
-    .item-actions-vertical .action-btn { flex: 1 1 140px; }
+    .node-card { padding: 14px; }
+    .node-actions { width: 100%; }
+    .node-actions .action-btn { flex: 1 1 130px; }
+    .legacy-summary { padding: 14px 16px; }
+    .legacy-body { padding: 16px; }
     .add-node-btn { width: 100%; }
     .modal-backdrop { align-items: flex-end; padding: 0; }
     .modal-card { max-height: 92dvh; border-radius: var(--r-xl) var(--r-xl) 0 0; }

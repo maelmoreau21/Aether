@@ -321,7 +321,7 @@
           </button>
           {#if systemRole !== 'administrator'}
             <button type="button" role="tab" class="dsm-tab" class:active={activeTab === 'parental'} onclick={() => activeTab = 'parental'}>
-              <Icon name="shield" size={15} /> {$t('parental_controls')}
+              <Icon name="shield" size={15} /> {$t('parental_control')}
             </button>
           {/if}
         </div>

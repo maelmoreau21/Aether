@@ -2240,12 +2240,14 @@ async fn library_provider_allowlist_controls_admission_and_provenance_priority()
         .execute(store.pool()).await.unwrap();
     emit(&store, "enabled", "media.added", 1, "one", 101).await;
     automation::drain(&store, 101, 64).await.unwrap();
+    // The second provider (999) keeps its rank inside the identification band of the queue,
+    // below scans.
     assert_eq!(
         query_scalar::<_, i64>("SELECT priority FROM durable_tasks")
             .fetch_one(store.pool())
             .await
             .unwrap(),
-        999
+        aether_core::task_engine::pipeline::automation("metadata.search", 999)
     );
     let mut tx = store.pool().begin().await.unwrap();
     automation::apply_missing_metadata(

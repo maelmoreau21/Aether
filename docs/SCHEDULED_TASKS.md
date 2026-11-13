@@ -1,5 +1,39 @@
 > Le moteur persistant décrit dans [DISTRIBUTED_TASKS.md](DISTRIBUTED_TASKS.md) remplace le dispatch globalement sériel historique : leases par Node, reprises bornées, priorités, états persistants et suivi collectif des dossiers. Les routes des plans ci-dessous sont conservées.
 
+# Pipeline d'une bibliothèque, pause et reprise — 13 novembre 2026
+
+Après un scan, chaque bibliothèque suit l'ordre **identification → images → aperçus → intros**
+(`task_engine::pipeline`) :
+
+- **Priorités par phase**, toutes sous les scans (100 planifié, 200 manuel) : identification
+  80–99, images fournisseur 60–79, aperçus 50, intros 21–45 (empreintes 20, génériques 15).
+  La préférence entre fournisseurs reste l'ordre à l'intérieur d'une bande. Avant, la priorité
+  d'un fournisseur (1000 − rang) passait devant le scan : un scan demandé attendait la fin de
+  toute la file d'analyses (« Le Media Node termine une autre tâche… »). Au démarrage, les
+  travaux en file sont reclassés (`normalize_pipeline_priorities`, idempotent).
+- **Verrous** dans la réclamation (`claim_batch`, `claim`) : un aperçu attend que sa bibliothèque
+  n'ait plus d'identification ni d'images en cours ou prêtes ; une tâche d'intros attend en plus
+  les aperçus. La passe d'images (`artwork_collection_jobs`) attend l'identification. Une phase
+  **en pause**, ou un travail reprogrammé plus tard (nouvel essai, média non identifié), ne
+  bloque jamais la suivante : le Node ne reste pas inactif.
+- La passe d'images traite les œuvres à la suite (1 s entre deux, 15 s quand il n'y a rien) au
+  lieu d'une œuvre toutes les 15 s.
+- L'attente d'un scan (`waitingReason=node_busy`) nomme aussi la tâche en file qui le précède
+  quand le Node est libre un instant entre deux leases : le message ne clignote plus.
+
+Planificateur (`/api/v1/admin/tasks`) :
+
+- Nouvelle étape `identify-<bibliothèque>` (tâches `analyze` liées à une opération de
+  métadonnées) ; « Lancer » programme un balayage `metadata.missing`. Les étapes sont listées
+  dans l'ordre du pipeline.
+- `POST /api/v1/admin/tasks/{id}/pause` et `/resume` (session administrateur + CSRF) pour un
+  scan de bibliothèque et ses étapes ; maintenance et sauvegarde restent seulement arrêtables
+  (`409 task_not_pausable`). Rien à mettre en pause : `409 task_not_active` ; rien à reprendre :
+  `409 task_not_paused`. Un travail en cours s'arrête (Node prévenu) et reste `paused`.
+- `state` vaut `paused` quand toutes les exécutions actives sont en pause. Une étape en file
+  retenue par une phase précédente porte `waitingFor` (`identify`, `artwork`, `trickplay`).
+- Les images indiquent les œuvres restantes (`stats.pending`) et un avancement en %.
+
 # Étapes médias de chaque bibliothèque — 9 novembre 2026
 
 Sous l'analyse de chaque bibliothèque de films ou de séries, le planificateur affiche trois

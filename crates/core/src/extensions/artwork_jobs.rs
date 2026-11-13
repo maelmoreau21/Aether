@@ -255,10 +255,21 @@ pub(crate) async fn queue_library_pass(
     tx.commit().await.map_err(db)?;
     Ok(true)
 }
-/// Stop the active image pass of a library. `false` when none is active.
-pub(crate) async fn cancel_library_pass(auth: &AuthState, library: &str) -> Result<bool, Error> {
-    Ok(query("UPDATE artwork_collection_jobs SET status='cancelled',lease_token='',lease_until=0,next_run_at=0,updated_at=? WHERE library_id=? AND status IN ('queued','running','paused')")
-        .bind(now()).bind(library).execute(auth.store.pool()).await.map_err(db)?.rows_affected() > 0)
+/// Pause, resume or stop (`cancel`) the image pass of a library. `false` when nothing changed.
+/// Clearing the lease token fences a work in flight: its result is not written back.
+pub(crate) async fn control_library_pass(
+    auth: &AuthState,
+    library: &str,
+    action: &str,
+) -> Result<bool, Error> {
+    let (status, from) = match action {
+        "pause" => ("paused", "('queued','running')"),
+        "resume" => ("queued", "('paused')"),
+        "cancel" => ("cancelled", "('queued','running','paused')"),
+        _ => return Err(err(StatusCode::BAD_REQUEST, "invalid_action")),
+    };
+    Ok(query(sqlx::AssertSqlSafe(format!("UPDATE artwork_collection_jobs SET status=?,lease_token='',lease_until=0,next_run_at=0,updated_at=? WHERE library_id=? AND status IN {from}")))
+        .bind(status).bind(now()).bind(library).execute(auth.store.pool()).await.map_err(db)?.rows_affected() > 0)
 }
 fn default_work_limit() -> i64 {
     1000
@@ -431,9 +442,11 @@ pub(super) async fn provider_permitted(
     Ok(valid == 1)
 }
 
-pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
+/// Process one work of the next ready pass. `true` when a work (or the end of a pass) was
+/// handled, so the worker can go on without waiting.
+pub(crate) async fn tick(auth: &AuthState) -> Result<bool, Error> {
     let Ok(_worker) = WORKER.try_lock() else {
-        return Ok(());
+        return Ok(false);
     };
     ensure_automatic(auth, false).await?;
     let token = uuid::Uuid::new_v4().to_string();
@@ -441,10 +454,14 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
     let mut tx = crate::database::begin_write_serialized(&mut conn, 0x4152544a4f42)
         .await
         .map_err(db)?;
-    let next: Option<String> = query_scalar("SELECT id FROM artwork_collection_jobs WHERE (status='queued' OR (status='running' AND lease_until<=?)) AND next_run_at<=? ORDER BY updated_at,id LIMIT 1")
-        .bind(now()).bind(now()).fetch_optional(&mut *tx).await.map_err(db)?;
+    // Images follow identification: a pass waits while its library still has works being
+    // identified (paused identification, or a later retry, does not hold it).
+    let own = crate::task_engine::pipeline::identify_pending("j.library_id", "?");
+    let folder = crate::task_engine::pipeline::identify_pending("f.library_id", "?");
+    let next: Option<String> = query_scalar(sqlx::AssertSqlSafe(format!("SELECT j.id FROM artwork_collection_jobs j WHERE (j.status='queued' OR (j.status='running' AND j.lease_until<=?)) AND j.next_run_at<=? AND NOT {own} AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.parent_id=j.library_id AND f.active=1 AND {folder}) ORDER BY j.updated_at,j.id LIMIT 1")))
+        .bind(now()).bind(now()).bind(now()).bind(now()).fetch_optional(&mut *tx).await.map_err(db)?;
     let Some(id) = next else {
-        return Ok(());
+        return Ok(false);
     };
     query("UPDATE artwork_collection_jobs SET status='running',lease_token=?,lease_until=?,updated_at=? WHERE id=?")
         .bind(&token).bind(now()+120).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db)?;
@@ -467,7 +484,7 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
     };
     let Some(work) = work.filter(|_| job.processed < parameters.max_works) else {
         query("UPDATE artwork_collection_jobs SET status='completed',cursor_work=?,lease_until=0,updated_at=? WHERE id=? AND lease_token=? AND status='running'").bind(&cursor).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
-        return Ok(());
+        return Ok(true);
     };
     let result = image_collection::collect_with_context(
         auth,
@@ -506,7 +523,7 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
         .bind(if denied {"paused"} else {"queued"}).bind(if retry||denied {&cursor} else {&work}).bind(i64::from(!retry&&!denied))
         .bind(value["downloaded"].as_i64().unwrap_or(0)).bind(value["duplicates"].as_i64().unwrap_or(0)).bind(value["skipped"].as_i64().unwrap_or(0))
         .bind(i64::from(!error_code.is_empty())+value["errors"].as_array().map_or(0,|v|v.len() as i64)).bind(if retry {job.work_attempts+1} else {0}).bind(error_code)
-        .bind(now()+15).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
+        .bind(now()+if retry {15} else {1}).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
     if let Some(mode) = auto.as_deref()
         && !retry
         && !denied
@@ -514,5 +531,5 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<(), Error> {
     {
         mark_auto_attempt(auth, &work, mode).await?;
     }
-    Ok(())
+    Ok(true)
 }

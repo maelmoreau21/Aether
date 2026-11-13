@@ -21,20 +21,25 @@ use crate::{
 /// One media sub-task of a library.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MediaTask {
+    /// Online identification and metadata of the scanned media (metadata providers).
+    Identify,
+    /// The images of the identified works (one per kind, or the multi-image pool).
+    Artwork,
     /// Trickplay sheets and chapter images.
     Trickplay,
     /// Intros and end credits (chapters, audio fingerprints, picture of a film's end).
     Intros,
-    /// The images of the identified works (one per kind, or the multi-image pool).
-    Artwork,
 }
 
 impl MediaTask {
-    pub const ALL: [Self; 3] = [Self::Trickplay, Self::Intros, Self::Artwork];
+    /// In pipeline order: each phase waits for the previous ones of its library
+    /// (`task_engine::pipeline`).
+    pub const ALL: [Self; 4] = [Self::Identify, Self::Artwork, Self::Trickplay, Self::Intros];
 
     /// Prefix of the public task identifier and value of `library_media_task_runs.task`.
     pub fn key(self) -> &'static str {
         match self {
+            Self::Identify => "identify",
             Self::Trickplay => "trickplay",
             Self::Intros => "intros",
             Self::Artwork => "artwork",
@@ -58,6 +63,9 @@ impl MediaTask {
     /// Durable tasks of this sub-task (`None` for images, which use their own job table).
     fn durable_filter(self) -> Option<&'static str> {
         match self {
+            Self::Identify => Some(
+                "category='analyze' AND id IN (SELECT task_id FROM automation_task_links WHERE operation NOT LIKE 'intro.%' AND operation<>'metadata.images')",
+            ),
             Self::Trickplay => Some("category='trickplay'"),
             Self::Intros => Some(
                 "category='analyze' AND (component IN ('fingerprint','credits') OR id IN (SELECT task_id FROM automation_task_links WHERE operation LIKE 'intro.%'))",
@@ -68,6 +76,7 @@ impl MediaTask {
 
     fn name(self, library: &str) -> String {
         match self {
+            Self::Identify => format!("Identifier les médias de {library}"),
             Self::Trickplay => format!("Générer les aperçus de {library}"),
             Self::Intros => format!("Détecter les intros et génériques de {library}"),
             Self::Artwork => format!("Récupérer les images de {library}"),
@@ -76,6 +85,9 @@ impl MediaTask {
 
     fn description(self) -> &'static str {
         match self {
+            Self::Identify => {
+                "Reconnaît chaque film, série et épisode auprès des fournisseurs de métadonnées (titre, résumé, identifiants). Les images, les aperçus puis les intros suivent une fois l'identification terminée."
+            }
             Self::Trickplay => {
                 "Prépare les vignettes de la barre de lecture (trickplay) et les images de chapitres de chaque vidéo. Les aperçus déjà présents sont conservés, ceux qui manquent sont recréés."
             }
@@ -97,7 +109,7 @@ impl MediaTask {
                     || (options.chapter_images_enabled && options.chapter_images_during_scan)
             }
             Self::Intros => options.intro_detection_enabled,
-            Self::Artwork => true,
+            Self::Identify | Self::Artwork => true,
         }
     }
 
@@ -212,10 +224,8 @@ pub(crate) async fn views(
         .await?;
     let options = LibraryOptions::from_json(options.as_deref().unwrap_or("{}"));
     let mut views = Vec::new();
+    // Every phase is read even for one task: a waiting phase names the earlier one it follows.
     for task in MediaTask::ALL {
-        if only.is_some_and(|only| only != task) {
-            continue;
-        }
         let started: Option<i64> = query_scalar(
             "SELECT started_at FROM library_media_task_runs WHERE library_id=? AND task=?",
         )
@@ -250,9 +260,30 @@ pub(crate) async fn views(
             parent_id: Some(format!("scan-{}", library.id)),
             stats,
             after_scan: Some(task.after_scan(&options)),
+            waiting_for: None,
         });
     }
-    Ok(views)
+    mark_waiting(&mut views);
+    Ok(views
+        .into_iter()
+        .zip(MediaTask::ALL)
+        .filter(|(_, task)| only.is_none_or(|only| only == *task))
+        .map(|(view, _)| view)
+        .collect())
+}
+
+/// A queued phase that an earlier phase of the same library still holds back names that
+/// phase (`waiting_for`), so the scheduler can say why it has not started.
+fn mark_waiting(views: &mut [TaskView]) {
+    let mut ahead: Option<&'static str> = None;
+    for view in views.iter_mut() {
+        if view.state == "queued" {
+            view.waiting_for = ahead;
+        }
+        if ahead.is_none() && matches!(view.state, "queued" | "running") {
+            ahead = Some(view.kind);
+        }
+    }
 }
 
 type ViewState = (
@@ -282,6 +313,7 @@ async fn durable_state(
             .sum()
     };
     let running = count(&["running"]);
+    let paused = count(&["paused"]);
     let pending = count(&["queued", "running", "paused"]);
     let done = count(&["completed"]);
     let failed = count(&["error"]);
@@ -293,14 +325,16 @@ async fn durable_state(
         .max();
     let state = if running > 0 {
         "running"
-    } else if pending > 0 {
+    } else if pending > paused {
         "queued"
+    } else if paused > 0 {
+        "paused"
     } else {
         "idle"
     };
     let total = done + failed + cancelled + pending;
     // Without a recorded start, the history of every past run would count as progress.
-    let progress = (state == "running" && started.is_some() && total > 0)
+    let progress = (matches!(state, "running" | "paused") && started.is_some() && total > 0)
         .then(|| (done + failed + cancelled) * 100 / total);
     let issues: Vec<String> = if failed > 0 {
         query_scalar(sqlx::AssertSqlSafe(format!("SELECT DISTINCT error FROM durable_tasks WHERE {SCOPE} AND {filter} AND status='error' AND error<>'' AND COALESCE(finished_at,updated_at)>=? LIMIT 10")))
@@ -334,23 +368,61 @@ async fn durable_state(
 
 /// State of the image pass of a library (its active job, else its last finished one).
 async fn artwork_state(store: &IdentityStore, library: &str) -> Result<ViewState, sqlx::Error> {
-    type JobRow = (String, i64, i64, i64, String, i64, i64);
-    let job: Option<JobRow> = query_as("SELECT status,processed,downloaded,errors,last_error,created_at,updated_at FROM artwork_collection_jobs WHERE library_id=? ORDER BY CASE WHEN status IN ('queued','running','paused') THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 1")
+    type JobRow = (String, i64, i64, i64, String, i64, i64, String, String);
+    let job: Option<JobRow> = query_as("SELECT status,processed,downloaded,errors,last_error,created_at,updated_at,cursor_work,parameters FROM artwork_collection_jobs WHERE library_id=? ORDER BY CASE WHEN status IN ('queued','running','paused') THEN 0 ELSE 1 END,created_at DESC,id DESC LIMIT 1")
         .bind(library).fetch_optional(store.pool()).await?;
-    let Some((status, processed, downloaded, errors, last_error, created, updated)) = job else {
+    let Some((
+        status,
+        processed,
+        downloaded,
+        errors,
+        last_error,
+        created,
+        updated,
+        cursor,
+        parameters,
+    )) = job
+    else {
         return Ok(("idle", None, None, None, Vec::new()));
     };
     // A pass goes back to `queued` between two works: once one work is done it is running.
     let state = match status.as_str() {
         "running" => "running",
         "queued" if processed > 0 => "running",
-        "queued" | "paused" => "queued",
+        "queued" => "queued",
+        "paused" => "paused",
         _ => "idle",
     };
+    // Works still ahead of the pass cursor (works are taken in id order); an automatic pass
+    // only takes identified works.
+    let pending = if state == "idle" {
+        0
+    } else {
+        let automatic = serde_json::from_str::<serde_json::Value>(&parameters)
+            .ok()
+            .and_then(|value| value.get("auto").map(|auto| !auto.is_null()))
+            .unwrap_or(false);
+        query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "SELECT COUNT(*) FROM inventory_works w WHERE (w.library_id=? OR w.library_id IN \
+             (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND w.id>? {}",
+            if automatic {
+                "AND w.kind IN ('film','series') AND w.external_ids_json NOT IN ('','{}')"
+            } else {
+                ""
+            }
+        )))
+        .bind(library)
+        .bind(library)
+        .bind(&cursor)
+        .fetch_one(store.pool())
+        .await?
+    };
+    let progress = (state != "idle" && processed + pending > 0)
+        .then(|| processed * 100 / (processed + pending));
     let stats = Some(TaskStats {
         done: processed,
         failed: errors,
-        pending: 0,
+        pending,
         images: Some(downloaded),
     });
     let issues = if last_error.is_empty() {
@@ -371,7 +443,7 @@ async fn artwork_state(store: &IdentityStore, library: &str) -> Result<ViewState
         error_kind: None,
         error_scope: None,
     });
-    Ok((state, None, last_run, stats, issues))
+    Ok((state, progress, last_run, stats, issues))
 }
 
 /// Start a run of `task` for `library` on an administrator's request.
@@ -404,6 +476,28 @@ pub(crate) async fn admit(
         }
     }
     match task {
+        MediaTask::Identify => {
+            // A bounded sweep: the automation drain admits one provider task per asset that
+            // still misses its metadata, in the identification band of the queue.
+            let _writer = store.task_writes.lock().await;
+            let mut conn = store.pool().acquire().await.map_err(|e| e.to_string())?;
+            let mut tx = begin_write(&mut conn).await.map_err(|e| e.to_string())?;
+            crate::automation::schedule_library(
+                &mut tx,
+                library,
+                "metadata.missing",
+                &format!("manual:{now}:{}", uuid::Uuid::new_v4()),
+                None,
+                now,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            record_run(&mut tx, library, task, now, "manual", false)
+                .await
+                .map_err(|e| e.to_string())?;
+            commit(tx).await.map_err(|e| e.to_string())?;
+            crate::task_engine::WAKE.notify_one();
+        }
         MediaTask::Trickplay => {
             let _writer = store.task_writes.lock().await;
             let mut conn = store.pool().acquire().await.map_err(|e| e.to_string())?;
@@ -450,27 +544,33 @@ pub(crate) async fn admit(
     Ok(Admission::Queued)
 }
 
-/// Stop the active run of `task` for `library`. `false` when nothing was active.
-pub(crate) async fn cancel(
+/// Pause, resume or stop (`cancel`) the active run of `task` for `library`. `false` when
+/// nothing could change (nothing active, nothing paused to resume).
+pub(crate) async fn control(
     auth: &AuthState,
     task: MediaTask,
     library: &str,
+    action: &str,
     now: i64,
 ) -> Result<bool, String> {
     let Some(filter) = task.durable_filter() else {
-        return crate::extensions::cancel_artwork_pass(auth, library)
+        return crate::extensions::control_artwork_pass(auth, library, action)
             .await
             .map_err(|(status, body)| format!("{status}: {}", body.0));
     };
-    let ids: Vec<String> = query_scalar(sqlx::AssertSqlSafe(format!("SELECT id FROM durable_tasks WHERE {SCOPE} AND {filter} AND status IN ('queued','running','paused')")))
-        .bind(library).bind(library).fetch_all(auth.store.pool()).await.map_err(|e| e.to_string())?;
-    let mut stopped = false;
-    for id in ids {
-        stopped |= crate::task_engine::control(&auth.store, &id, "cancel", now)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    Ok(stopped)
+    let ids: Vec<String> = query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT id FROM durable_tasks WHERE {SCOPE} AND {filter} AND status IN {}",
+        crate::task_engine::control_statuses(action)
+    )))
+    .bind(library)
+    .bind(library)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(|e| e.to_string())?;
+    let changed = crate::task_engine::control_many(&auth.store, &ids, action, now)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(changed > 0)
 }
 
 #[cfg(test)]
@@ -485,6 +585,10 @@ mod tests {
                 Some((task, "lib-1".into()))
             );
         }
+        assert_eq!(
+            MediaTask::parse_id("identify-films"),
+            Some((MediaTask::Identify, "films".into()))
+        );
         assert_eq!(MediaTask::parse_id("trickplay-"), None);
         assert_eq!(MediaTask::parse_id("clean-cache"), None);
         assert_eq!(MediaTask::parse_id("scan-lib"), None);

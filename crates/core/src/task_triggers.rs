@@ -308,7 +308,7 @@ pub struct TaskView {
     pub name: String,
     pub description: String,
     pub category: String,
-    /// `idle`, `queued` or `running`.
+    /// `idle`, `queued`, `running` or `paused` (every active run held by an administrator).
     pub state: &'static str,
     pub progress: Option<i64>,
     pub next_run_at: Option<i64>,
@@ -326,6 +326,10 @@ pub struct TaskView {
     pub stats: Option<TaskStats>,
     /// For a media sub-task: whether it also runs on its own after each scan of its library.
     pub after_scan: Option<bool>,
+    /// For a queued media sub-task: the earlier phase of its library it waits for
+    /// (`identify`, `artwork`, `trickplay`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_for: Option<&'static str>,
 }
 
 /// Counts of a media sub-task run: files (or works) done, failed and still waiting, and for
@@ -395,6 +399,8 @@ pub fn router(auth: AuthState) -> Router {
         .route("/api/v1/admin/tasks/{id}", get(detail))
         .route("/api/v1/admin/tasks/{id}/run", post(run))
         .route("/api/v1/admin/tasks/{id}/cancel", post(cancel))
+        .route("/api/v1/admin/tasks/{id}/pause", post(pause))
+        .route("/api/v1/admin/tasks/{id}/resume", post(resume))
         .route(
             "/api/v1/admin/tasks/{id}/triggers",
             get(list_triggers).post(create_trigger),
@@ -420,13 +426,14 @@ type SystemRow = (
     Option<String>,
 );
 
-/// Display state from the durable runs of a task.
+/// Display state from the durable runs of a task: `paused` only when every active run is.
 fn active_state<'a>(statuses: impl Iterator<Item = &'a str>) -> &'static str {
     let mut state = "idle";
     for status in statuses {
         match status {
             "running" => return "running",
-            "queued" | "paused" => state = "queued",
+            "queued" => state = "queued",
+            "paused" if state == "idle" => state = "paused",
             _ => {}
         }
     }
@@ -536,6 +543,7 @@ async fn collect(
             parent_id: None,
             stats: None,
             after_scan: None,
+            waiting_for: None,
         });
     }
 
@@ -580,6 +588,7 @@ async fn collect(
                 parent_id: None,
                 stats: None,
                 after_scan: None,
+            waiting_for: None,
             });
         }
     }
@@ -756,6 +765,7 @@ async fn scan_view(
             parent_id: None,
             stats: None,
             after_scan: None,
+            waiting_for: None,
         })
     }
 }
@@ -848,38 +858,78 @@ async fn cancel(
     Path(id): Path<String>,
     headers: HeaderMap,
 ) -> Result<StatusCode, ApiError> {
-    authorize(&auth, &headers, true).await?;
-    let (task, _) = find(&auth.store, &id).await?;
+    control(&auth, &id, &headers, "cancel").await
+}
+
+/// Hold a library scan or media sub-task: running work stops where it is (a scan keeps what
+/// it already published) and nothing new of it starts until it is resumed.
+async fn pause(
+    State(auth): State<AuthState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    control(&auth, &id, &headers, "pause").await
+}
+
+async fn resume(
+    State(auth): State<AuthState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, ApiError> {
+    control(&auth, &id, &headers, "resume").await
+}
+
+async fn control(
+    auth: &AuthState,
+    id: &str,
+    headers: &HeaderMap,
+    action: &str,
+) -> Result<StatusCode, ApiError> {
+    authorize(auth, headers, true).await?;
+    let (task, _) = find(&auth.store, id).await?;
+    // Maintenance and backup runs are short and hold resources: they can only be stopped.
+    if action != "cancel" && matches!(task, TaskRef::System(_) | TaskRef::Backup) {
+        return Err(ApiError::coded(StatusCode::CONFLICT, "task_not_pausable"));
+    }
+    let not_active = || {
+        ApiError::coded(
+            StatusCode::CONFLICT,
+            if action == "resume" {
+                "task_not_paused"
+            } else {
+                "task_not_active"
+            },
+        )
+    };
     if let TaskRef::Media(media, library) = &task {
-        return if crate::library_media_tasks::cancel(&auth, *media, library, now())
+        return if crate::library_media_tasks::control(auth, *media, library, action, now())
             .await
             .map_err(internal)?
         {
             Ok(StatusCode::NO_CONTENT)
         } else {
-            Err(ApiError::coded(StatusCode::CONFLICT, "task_not_active"))
+            Err(not_active())
         };
     }
+    let statuses = crate::task_engine::control_statuses(action);
     let ids: Vec<String> = match &task {
         TaskRef::Media(..) => Ok(Vec::new()),
-        TaskRef::System(target) => query_scalar("SELECT id FROM durable_tasks WHERE category='system' AND target_id=? AND status IN ('queued','running','paused')")
+        TaskRef::System(target) => query_scalar(sqlx::AssertSqlSafe(format!("SELECT id FROM durable_tasks WHERE category='system' AND target_id=? AND status IN {statuses}")))
             .bind(target).fetch_all(auth.store.pool()).await,
-        TaskRef::Backup => query_scalar("SELECT id FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','running','paused')")
+        TaskRef::Backup => query_scalar(sqlx::AssertSqlSafe(format!("SELECT id FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN {statuses}")))
             .fetch_all(auth.store.pool()).await,
-        TaskRef::Scan(library) => query_scalar("SELECT id FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN ('queued','running','paused')")
+        TaskRef::Scan(library) => query_scalar(sqlx::AssertSqlSafe(format!("SELECT id FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN {statuses}")))
             .bind(library).bind(library).fetch_all(auth.store.pool()).await,
     }
     .map_err(internal)?;
-    let mut stopped = false;
-    for id in ids {
-        stopped |= crate::task_engine::control(&auth.store, &id, "cancel", now())
-            .await
-            .map_err(internal)?;
-    }
-    if stopped {
+    if crate::task_engine::control_many(&auth.store, &ids, action, now())
+        .await
+        .map_err(internal)?
+        > 0
+    {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(ApiError::coded(StatusCode::CONFLICT, "task_not_active"))
+        Err(not_active())
     }
 }
 
@@ -1018,7 +1068,9 @@ mod tests {
     #[test]
     fn display_state_prefers_the_running_run() {
         assert_eq!(active_state(["queued", "running"].into_iter()), "running");
-        assert_eq!(active_state(["paused"].into_iter()), "queued");
+        assert_eq!(active_state(["paused"].into_iter()), "paused");
+        assert_eq!(active_state(["paused", "queued"].into_iter()), "queued");
+        assert_eq!(active_state(["queued", "paused"].into_iter()), "queued");
         assert_eq!(active_state(std::iter::empty()), "idle");
     }
 

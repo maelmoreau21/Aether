@@ -21,6 +21,119 @@ pub static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 // capacity checks together until their leases are committed.
 pub(crate) const TASK_ADMISSION_LOCK: i64 = 0x4d45444941544153;
 
+/// Library pipeline after a scan: identify every work, then fetch its images, then build the
+/// previews, then detect intros and credits. Each phase owns a band of queue priorities below
+/// scans (100 scheduled, 200 manual), so a scan is never starved by background work and the
+/// claim order follows the pipeline. Provider preference keeps its order inside a band.
+pub mod pipeline {
+    pub const IDENTIFY: (i64, i64) = (80, 99);
+    pub const IMAGES: (i64, i64) = (60, 79);
+    pub const TRICKPLAY: i64 = 50;
+    pub const INTROS: (i64, i64) = (21, 45);
+
+    /// Maps a provider priority (0..=1000, 1000 = preferred) into `band`.
+    pub fn band(priority: i64, (low, high): (i64, i64)) -> i64 {
+        high - (1000 - priority.clamp(0, 1000)).min(high - low)
+    }
+
+    /// Queue priority of an automation task from its operation and provider priority.
+    pub fn automation(operation: &str, priority: i64) -> i64 {
+        if operation.starts_with("intro.") {
+            band(priority, INTROS)
+        } else if operation == "metadata.images" {
+            band(priority, IMAGES)
+        } else {
+            band(priority, IDENTIFY)
+        }
+    }
+
+    /// Identification tasks of the library `{library}` that are running or ready now (a task
+    /// paused by an administrator, or waiting for a later retry, does not hold the next phase).
+    pub fn identify_pending(library: &str, now: &str) -> String {
+        format!(
+            "EXISTS(SELECT 1 FROM durable_tasks u JOIN automation_task_links k ON k.task_id=u.id \
+             WHERE u.library_id={library} AND u.category='analyze' \
+             AND k.operation NOT LIKE 'intro.%' AND k.operation<>'metadata.images' \
+             AND (u.status='running' OR (u.status='queued' AND u.available_at<={now})))"
+        )
+    }
+
+    /// Image work of `{library}` running or ready now: provider image tasks and the image
+    /// pass of the library (or of the library its folder belongs to).
+    pub fn images_pending(library: &str, now: &str) -> String {
+        format!(
+            "(EXISTS(SELECT 1 FROM durable_tasks u JOIN automation_task_links k ON k.task_id=u.id \
+             WHERE u.library_id={library} AND u.category='analyze' AND k.operation='metadata.images' \
+             AND (u.status='running' OR (u.status='queued' AND u.available_at<={now}))) \
+             OR EXISTS(SELECT 1 FROM artwork_collection_jobs a WHERE a.status IN ('queued','running') \
+             AND (a.library_id={library} OR a.library_id IN (SELECT f.parent_id FROM library_folders f \
+             WHERE f.library_id={library} AND f.active=1))))"
+        )
+    }
+
+    /// Previews of `{library}` running or ready now.
+    pub fn trickplay_pending(library: &str, now: &str) -> String {
+        format!(
+            "EXISTS(SELECT 1 FROM durable_tasks u WHERE u.library_id={library} \
+             AND u.category='trickplay' AND (u.status='running' \
+             OR (u.status='queued' AND u.available_at<={now})))"
+        )
+    }
+
+    /// Claim condition for the candidate `j`: a phase waits for the earlier phases of its
+    /// library. Two `?` placeholders are bound to `now`.
+    pub fn claim_gate() -> String {
+        let intro = "(j.category='analyze' AND (j.component IN ('fingerprint','credits') \
+            OR j.id IN (SELECT task_id FROM automation_task_links WHERE operation LIKE 'intro.%')))";
+        format!(
+            "(j.category NOT IN ('trickplay','analyze') OR (j.category='trickplay' AND NOT {id} \
+             AND NOT {img}) OR (j.category='analyze' AND NOT {intro}) OR ({intro} AND NOT {id} \
+             AND NOT {img} AND NOT {trick}))",
+            id = identify_pending("j.library_id", "?1"),
+            img = images_pending("j.library_id", "?1"),
+            trick = trickplay_pending("j.library_id", "?1"),
+        )
+        .replace("?1", "?")
+    }
+}
+
+/// Moves queued work written before the pipeline bands into them (idempotent).
+pub async fn normalize_pipeline_priorities(store: &IdentityStore) -> Result<(), sqlx::Error> {
+    let (identify_low, identify_high) = pipeline::IDENTIFY;
+    let (images_low, images_high) = pipeline::IMAGES;
+    let (intros_low, intros_high) = pipeline::INTROS;
+    let linked = "status IN ('queued','paused') AND category='analyze' AND id IN \
+        (SELECT task_id FROM automation_task_links WHERE operation";
+    for (operation, low, high) in [
+        (
+            " NOT LIKE 'intro.%' AND operation<>'metadata.images')",
+            identify_low,
+            identify_high,
+        ),
+        ("='metadata.images')", images_low, images_high),
+        (" LIKE 'intro.%')", intros_low, intros_high),
+    ] {
+        query(sqlx::AssertSqlSafe(format!(
+            "UPDATE durable_tasks SET priority=? WHERE {linked}{operation} \
+             AND (priority<? OR priority>?)"
+        )))
+        .bind(high)
+        .bind(low)
+        .bind(high)
+        .execute(store.pool())
+        .await?;
+    }
+    query(
+        "UPDATE durable_tasks SET priority=? WHERE category='trickplay' \
+         AND status IN ('queued','paused') AND priority<>?",
+    )
+    .bind(pipeline::TRICKPLAY)
+    .bind(pipeline::TRICKPLAY)
+    .execute(store.pool())
+    .await?;
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
@@ -424,7 +537,12 @@ pub async fn claim_batch(
             AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
             FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
             FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
-            ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id \
+            AND ",
+    );
+    let gate = pipeline::claim_gate();
+    sql.push_str(&gate);
+    sql.push_str(
+        " ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id \
             FROM ready \
             WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id \
             AND busy.lease_until IS NOT NULL AND (busy.category<>'system' \
@@ -443,9 +561,11 @@ pub async fn claim_batch(
     for node in nodes {
         mutation = mutation.bind(node);
     }
+    mutation = mutation.bind(now).bind(now.saturating_sub(45));
+    for _ in 0..gate.matches('?').count() {
+        mutation = mutation.bind(now);
+    }
     let claimed = mutation
-        .bind(now)
-        .bind(now.saturating_sub(45))
         .bind(now.saturating_add(lease_seconds))
         .bind(now)
         .bind(now)
@@ -472,7 +592,8 @@ async fn claim_in_transaction(
     if active >= node_limit {
         return Ok(None);
     }
-    let id:Option<String>=query_scalar("SELECT j.id \
+    let gate = pipeline::claim_gate();
+    let mut candidate = query_scalar::<sqlx::Any, String>(sqlx::AssertSqlSafe(format!("SELECT j.id \
             FROM durable_tasks j \
             JOIN libraries l ON l.id=j.library_id \
             JOIN media_nodes n ON n.id=j.node_id \
@@ -490,8 +611,12 @@ async fn claim_in_transaction(
             AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
             FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
             FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
-            ORDER BY j.priority DESC,j.created_at,j.id \
-            LIMIT 1").bind(node_id).bind(now).bind(now.saturating_sub(45)).fetch_optional(&mut **tx).await?;
+            AND {gate} ORDER BY j.priority DESC,j.created_at,j.id \
+            LIMIT 1"))).bind(node_id).bind(now).bind(now.saturating_sub(45));
+    for _ in 0..gate.matches('?').count() {
+        candidate = candidate.bind(now);
+    }
+    let id: Option<String> = candidate.fetch_optional(&mut **tx).await?;
     let Some(id) = id else { return Ok(None) };
     query("UPDATE durable_tasks \
             SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 \
@@ -759,6 +884,61 @@ pub async fn control(
     Ok(changed)
 }
 
+/// Statuses an administrator action applies to (SQL list).
+pub fn control_statuses(action: &str) -> &'static str {
+    match action {
+        "pause" => "('queued','running')",
+        "resume" => "('paused')",
+        _ => "('queued','running','paused')",
+    }
+}
+
+/// `control` over many tasks at once (a whole library phase): one statement per 500 tasks
+/// instead of one per task. Returns how many tasks changed.
+pub async fn control_many(
+    store: &IdentityStore,
+    ids: &[String],
+    action: &str,
+    now: i64,
+) -> Result<u64, sqlx::Error> {
+    let set = match action {
+        "pause" => "status='paused',updated_at=?",
+        "cancel" => {
+            "status='cancelled',finished_at=CASE WHEN lease_until IS NULL THEN ? ELSE NULL END,updated_at=?"
+        }
+        "resume" => "status='queued',updated_at=?",
+        _ => return Ok(0),
+    };
+    let guard = if action == "resume" {
+        " AND lease_until IS NULL AND failure_count<max_attempts"
+    } else {
+        ""
+    };
+    let statuses = control_statuses(action);
+    let _effects = EFFECT_GATE.lock().await;
+    let _writer = store.task_writes.lock().await;
+    let mut changed = 0;
+    for chunk in ids.chunks(500) {
+        let placeholders = vec!["?"; chunk.len()].join(",");
+        let mut mutation = query(sqlx::AssertSqlSafe(format!(
+            "UPDATE durable_tasks SET {set} WHERE status IN {statuses}{guard} \
+             AND id IN ({placeholders})"
+        )))
+        .bind(now);
+        if action == "cancel" {
+            mutation = mutation.bind(now);
+        }
+        for id in chunk {
+            mutation = mutation.bind(id);
+        }
+        changed += mutation.execute(store.pool()).await?.rows_affected();
+    }
+    if changed > 0 {
+        WAKE.notify_one();
+    }
+    Ok(changed)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Input {
@@ -949,5 +1129,98 @@ async fn action(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(StatusCode::CONFLICT)
+    }
+}
+
+#[cfg(test)]
+mod pipeline_tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_bands_stay_below_scans_and_in_phase_order() {
+        use pipeline::automation;
+        assert_eq!(automation("metadata.search", 1000), 99);
+        assert_eq!(automation("metadata.search", 999), 98);
+        assert_eq!(automation("metadata.search", 100), 80);
+        assert_eq!(automation("metadata.images", 1000), 79);
+        assert_eq!(automation("metadata.images", 0), 60);
+        assert_eq!(automation("intro.detect", 1000), 45);
+        assert!(automation("intro.parse_chapters", 0) > 20);
+        assert!(pipeline::TRICKPLAY < pipeline::IMAGES.0 && pipeline::TRICKPLAY > 45);
+        assert!(
+            pipeline::IDENTIFY.1 < 100,
+            "scheduled scans (100) run first"
+        );
+    }
+
+    async fn task(store: &IdentityStore, id: &str, category: &str, component: &str, priority: i64) {
+        query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,component,priority,created_at,updated_at,available_at) VALUES(?,'films','test',?,'local',?,?,?,1,1,1)")
+            .bind(id).bind(id).bind(category).bind(component).bind(priority)
+            .execute(store.pool()).await.unwrap();
+    }
+
+    async fn release(store: &IdentityStore, id: &str, status: &str) {
+        query("UPDATE durable_tasks SET status=?,lease_until=NULL WHERE id=?")
+            .bind(status)
+            .bind(id)
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    async fn next(store: &IdentityStore) -> Option<String> {
+        claim(store, "local", 100, 60, 1)
+            .await
+            .unwrap()
+            .map(|job| job.id)
+    }
+
+    #[tokio::test]
+    async fn each_phase_waits_for_the_earlier_phases_of_its_library() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
+            .execute(store.pool()).await.unwrap();
+        query("INSERT INTO users(id,role) VALUES('admin','administrator')")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO automation_events(id,event_key,kind,library_id,asset_id,fingerprint,payload_json,created_at) VALUES('e','e','media.added','films','a','f','{}',1)")
+            .execute(store.pool()).await.unwrap();
+        // Written in reverse order: priority, not age, decides.
+        task(&store, "intro", "analyze", "fingerprint", 20).await;
+        task(&store, "preview", "trickplay", "", pipeline::TRICKPLAY).await;
+        task(&store, "identify", "analyze", "", pipeline::IDENTIFY.1).await;
+        query("INSERT INTO automation_task_links(task_id,event_id,extension_id,operation,fingerprint,generation,provider) VALUES('identify','e','tmdb','metadata.search','f','1','tmdb')")
+            .execute(store.pool()).await.unwrap();
+
+        assert_eq!(next(&store).await.as_deref(), Some("identify"));
+        // Identification in progress or ready holds the previews and the intros.
+        release(&store, "identify", "queued").await;
+        query("UPDATE durable_tasks SET available_at=1000 WHERE id='identify'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        // A later retry does not hold the next phases, nor does an image pass once it ends.
+        query("INSERT INTO artwork_collection_jobs(id,library_id,owner,parameters,created_at,updated_at) VALUES('art','films','admin','{}',1,1)")
+            .execute(store.pool()).await.unwrap();
+        assert_eq!(next(&store).await, None, "the image pass runs first");
+        query("UPDATE artwork_collection_jobs SET status='paused'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(next(&store).await.as_deref(), Some("preview"));
+        release(&store, "preview", "queued").await;
+        query("UPDATE durable_tasks SET available_at=1 WHERE id='identify'")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        release(&store, "identify", "paused").await;
+        // A paused phase never blocks the next ones.
+        assert_eq!(next(&store).await.as_deref(), Some("preview"));
+        release(&store, "preview", "completed").await;
+        assert_eq!(next(&store).await.as_deref(), Some("intro"));
     }
 }

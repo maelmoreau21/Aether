@@ -222,18 +222,27 @@ impl Scheduler {
         let artwork_auth = auth.clone();
         let artwork_jobs = jobs.clone();
         let artwork = tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(15));
+            if crate::task_engine::normalize_pipeline_priorities(&artwork_auth.store)
+                .await
+                .is_err()
+            {
+                eprintln!("Queued library work keeps its previous order until it runs");
+            }
             loop {
-                interval.tick().await;
                 if artwork_jobs.is_cancelled() {
                     break;
                 }
-                if crate::extensions::artwork_collection_tick(&artwork_auth)
-                    .await
-                    .is_err()
-                {
-                    eprintln!("Artwork collection pass deferred; progress remains persisted");
-                }
+                // A pass works through its library one work after another; the 15 s pause
+                // only applies when there is nothing to do.
+                let pause = match crate::extensions::artwork_collection_tick(&artwork_auth).await {
+                    Ok(true) => Duration::from_secs(1),
+                    Ok(false) => Duration::from_secs(15),
+                    Err(_) => {
+                        eprintln!("Artwork collection pass deferred; progress remains persisted");
+                        Duration::from_secs(15)
+                    }
+                };
+                tokio::time::sleep(pause).await;
             }
         });
         let worker_auth = auth.clone();

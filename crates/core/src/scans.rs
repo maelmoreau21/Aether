@@ -189,9 +189,13 @@ async fn waiting_reason(
             "SELECT j.node_id,COALESCE(n.status,'revoked'),j.available_at,j.error,CAST(CASE \
                 WHEN EXISTS(SELECT 1 FROM automation_dependencies d JOIN durable_tasks p \
                 ON p.id=d.prerequisite_id WHERE d.task_id=j.id AND p.status!='completed') THEN 1 \
-                ELSE 0 END AS BIGINT),(SELECT b.category FROM durable_tasks b \
+                ELSE 0 END AS BIGINT),COALESCE((SELECT b.category FROM durable_tasks b \
                 WHERE b.node_id=j.node_id AND b.lease_until IS NOT NULL AND b.id!=j.id \
-                ORDER BY b.started_at LIMIT 1) \
+                ORDER BY b.started_at LIMIT 1),(SELECT b.category FROM durable_tasks b \
+                WHERE b.node_id=j.node_id AND b.status='queued' AND b.lease_until IS NULL \
+                AND b.available_at<=? AND b.id!=j.id AND (b.priority>j.priority \
+                OR (b.priority=j.priority AND b.created_at<j.created_at)) \
+                ORDER BY b.priority DESC,b.created_at,b.id LIMIT 1)) \
                 FROM durable_tasks j \
                 LEFT \
                 JOIN media_nodes n ON n.id=j.node_id \
@@ -201,6 +205,7 @@ async fn waiting_reason(
                 ORDER BY j.created_at,j.id \
                 LIMIT 1",
         )
+        .bind(now)
         .bind(library)
         .bind(library)
         .fetch_optional(&store.pool)
@@ -758,6 +763,28 @@ mod tests {
             .execute(pool)
             .await
             .unwrap();
+        // Between two leases the node is briefly idle: the queued work that outranks the
+        // scan still explains the wait, instead of flickering to "dispatching".
+        crate::database::query(
+            "INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,\
+                priority,created_at,updated_at,available_at) \
+                VALUES('next','films','admin','next','nas','analyze',999,0,0,0)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            waiting_reason(&store, "films", 100).await.unwrap(),
+            Some(("node_busy".into(), Some("analyze".into())))
+        );
+        crate::database::query("DELETE FROM durable_tasks WHERE id='next'")
+            .execute(pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            waiting_reason(&store, "films", 100).await.unwrap(),
+            Some(("dispatching".into(), None))
+        );
         crate::database::query(
             "UPDATE durable_tasks SET available_at=500,error='node timeout' WHERE id='scan'",
         )

@@ -29,14 +29,15 @@ export interface TaskStats {
   images: number | null;
 }
 /** Media sub-tasks of a library: shown under its scan, run by hand or after each scan. */
-export type MediaTaskKind = 'trickplay' | 'intros' | 'artwork';
+export type MediaTaskKind = 'identify' | 'artwork' | 'trickplay' | 'intros';
 export interface ScheduledTask {
   id: string;
   kind: 'system' | 'scan' | 'backup' | MediaTaskKind;
   name: string;
   description: string;
   category: string;
-  state: 'idle' | 'queued' | 'running';
+  /** `paused`: every active run of the task is held by an administrator. */
+  state: 'idle' | 'queued' | 'running' | 'paused';
   progress: number | null;
   nextRunAt: number | null;
   lastRun: TaskLastRun | null;
@@ -51,6 +52,8 @@ export interface ScheduledTask {
   stats?: TaskStats | null;
   /** For a media sub-task: whether it also runs on its own after each library scan. */
   afterScan?: boolean | null;
+  /** For a queued media sub-task: the earlier phase of its library it waits for. */
+  waitingFor?: 'identify' | 'artwork' | 'trickplay' | null;
 }
 export interface TriggerDraft {
   type: TriggerType;
@@ -126,11 +129,23 @@ export function agoLabel(timestamp: number, now: number, t: Translate): string {
 export type SummaryTone = 'ok' | 'error' | 'warning' | 'muted' | 'active';
 
 /** One-line status of a task row, Jellyfin style. */
-export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 'lastRun'>, now: number, t: Translate): { text: string; tone: SummaryTone } {
+const phaseKeys: Record<NonNullable<ScheduledTask['waitingFor']>, TranslationKey> = {
+  identify: 'sched_phase_identify',
+  artwork: 'sched_phase_artwork',
+  trickplay: 'sched_phase_trickplay'
+};
+
+export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 'lastRun' | 'waitingFor'>, now: number, t: Translate): { text: string; tone: SummaryTone } {
   if (task.state === 'running') {
     return { text: task.progress !== null && task.progress > 0 ? t('sched_running_progress', { progress: task.progress }) : t('sched_running'), tone: 'active' };
   }
-  if (task.state === 'queued') return { text: t('sched_queued'), tone: 'active' };
+  if (task.state === 'paused') {
+    return { text: task.progress !== null && task.progress > 0 ? t('sched_paused_progress', { progress: task.progress }) : t('sched_paused'), tone: 'warning' };
+  }
+  if (task.state === 'queued') {
+    const phase = task.waitingFor ? phaseKeys[task.waitingFor] : undefined;
+    return { text: phase ? t('sched_waiting_for', { phase: t(phase) }) : t('sched_queued'), tone: 'active' };
+  }
   const run = task.lastRun;
   if (!run) return { text: t('sched_never'), tone: 'muted' };
   const when = run.end ?? run.start;
@@ -147,10 +162,11 @@ export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 
   return { text: t('sched_last_run_short', { ago }), tone: 'ok' };
 }
 
-export type TaskStatus = 'running' | 'failed' | 'warning' | 'ok' | 'never';
+export type TaskStatus = 'running' | 'paused' | 'failed' | 'warning' | 'ok' | 'never';
 
 /** Status of a task at a glance: drives the row icon and the "failed" filter. */
 export function taskStatus(task: Pick<ScheduledTask, 'state' | 'lastRun'>): TaskStatus {
+  if (task.state === 'paused') return 'paused';
   if (task.state !== 'idle') return 'running';
   const outcome = task.lastRun?.outcome;
   if (!outcome || !(task.lastRun?.end ?? task.lastRun?.start)) return 'never';
@@ -193,10 +209,16 @@ export function categoryLabel(category: string, t: Translate): string {
 }
 
 const mediaNameKeys: Record<MediaTaskKind, TranslationKey> = {
+  identify: 'sched_identify_name',
   trickplay: 'sched_trickplay_name',
   intros: 'sched_intros_name',
   artwork: 'sched_artwork_name'
 };
+
+/** Library scans and their steps can be paused; maintenance and backups only stopped. */
+export function isPausable(task: Pick<ScheduledTask, 'kind'>): boolean {
+  return task.kind === 'scan' || task.kind in mediaNameKeys;
+}
 
 export function isMediaTask(task: Pick<ScheduledTask, 'kind'>): task is Pick<ScheduledTask, 'kind'> & { kind: MediaTaskKind } {
   return task.kind in mediaNameKeys;
@@ -217,7 +239,7 @@ export function statsLabel(task: Pick<ScheduledTask, 'kind' | 'stats'>, t: Trans
     ? [t('sched_stats_works', { count: stats.done }), t('sched_stats_images', { count: stats.images ?? 0 })]
     : [t('sched_stats_done', { count: stats.done })];
   if (stats.failed) parts.push(t('sched_stats_failed', { count: stats.failed }));
-  if (stats.pending) parts.push(t('sched_stats_pending', { count: stats.pending }));
+  if (stats.pending) parts.push(t(task.kind === 'artwork' ? 'sched_stats_remaining' : 'sched_stats_pending', { count: stats.pending }));
   return parts.join(' · ');
 }
 

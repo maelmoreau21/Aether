@@ -38,6 +38,11 @@ describe('scheduled task summaries', () => {
     expect(lastRunSummary({ state: 'running', progress: 42, lastRun: null }, now, fr)).toEqual({ text: 'En cours : 42 %', tone: 'active' });
     expect(lastRunSummary({ state: 'queued', progress: null, lastRun: run({}) }, now, fr).tone).toBe('active');
   });
+  it('says which earlier phase a step waits for, and when it is paused', () => {
+    expect(lastRunSummary({ state: 'queued', progress: null, lastRun: null, waitingFor: 'identify' }, now, fr).text).toBe('En attente : identification d’abord');
+    expect(lastRunSummary({ state: 'paused', progress: 30, lastRun: null }, now, fr)).toEqual({ text: 'En pause : 30 %', tone: 'warning' });
+    expect(taskStatus({ state: 'paused', lastRun: null })).toBe('paused');
+  });
   it('classifies the status of a row and summarises its schedule', () => {
     expect(taskStatus({ state: 'idle', lastRun: run({}) })).toBe('ok');
     expect(taskStatus({ state: 'idle', lastRun: run({ outcome: 'failed' }) })).toBe('failed');

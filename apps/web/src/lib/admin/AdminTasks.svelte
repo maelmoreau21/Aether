@@ -8,7 +8,7 @@
   import { t, fmt } from '../i18n';
   import {
     type ScheduledTask, type TaskTrigger, type TriggerDraft, type TriggerType,
-    agoLabel, categoryLabel, categoryOrder, clockLabel, dayLabel, durationLabel, intervalLabel, intervalOptions, isMediaTask,
+    agoLabel, categoryLabel, categoryOrder, clockLabel, dayLabel, durationLabel, intervalLabel, intervalOptions, isMediaTask, isPausable,
     lastRunSummary, nestTasks, scheduleSummary, statsLabel, taskName, taskStatus, timeSlots, triggerLabel, triggerPayload, weekdays
   } from './task-schedule';
 
@@ -54,12 +54,13 @@
   const outcomeKeys: Record<string, 'sched_outcome_succeeded' | 'sched_outcome_failed' | 'sched_outcome_interrupted' | 'sched_outcome_cancelled'> = {
     succeeded: 'sched_outcome_succeeded', failed: 'sched_outcome_failed', interrupted: 'sched_outcome_interrupted', cancelled: 'sched_outcome_cancelled'
   };
-  const statusIcons = { running: 'refresh', failed: 'alert', warning: 'warning', ok: 'check', never: 'clock' } as const;
+  const statusIcons = { running: 'refresh', paused: 'pause', failed: 'alert', warning: 'warning', ok: 'check', never: 'clock' } as const;
 
   function nameOf(task: ScheduledTask) { return taskName(task, task.libraryId ? libraryNames[task.libraryId] : undefined, $t); }
   function taskHref(id?: string) { return resolve(`admin/libraries/#tasks-section${id ? `?task=${encodeURIComponent(id)}` : ''}`); }
   function date(value: number) { return $fmt.dateTime(value); }
   function running(task: ScheduledTask) { return task.state !== 'idle' || (task.kind === 'scan' && task.libraryId !== null && pending.includes(task.libraryId)); }
+  function rowStatus(task: ScheduledTask) { return task.state === 'paused' ? 'paused' : running(task) ? 'running' : taskStatus(task); }
   function message(cause: unknown) { return cause instanceof Error ? cause.message : $t('sched_action_failed'); }
   /** Short, single-line state for the list; the full message stays in the detail view. */
   function rowState(task: ScheduledTask): string {
@@ -124,13 +125,15 @@
     }
   }
 
-  async function stop(task: ScheduledTask) {
+  const controlNotices = { cancel: 'sched_task_stopped', pause: 'sched_task_paused', resume: 'sched_task_resumed' } as const;
+  /** Stop, pause or resume every active run of a task. */
+  async function control(task: ScheduledTask, action: keyof typeof controlNotices) {
     if (busy[task.id]) return;
     error = ''; notice = '';
     busy[task.id] = true;
     try {
-      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/cancel`, { method: 'POST' });
-      notice = $t('sched_task_stopped', { name: nameOf(task) });
+      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/${action}`, { method: 'POST' });
+      notice = $t(controlNotices[action], { name: nameOf(task) });
       await refresh();
     } catch (cause) {
       error = message(cause);
@@ -179,8 +182,18 @@
 </script>
 
 {#snippet action(task: ScheduledTask, labelled: boolean)}
+  <span class="actions">
   {#if running(task)}
-    <button class="action" class:labelled aria-label={$t('sched_stop', { name: nameOf(task) })} title={$t('sched_stop', { name: nameOf(task) })} disabled={busy[task.id] || task.state === 'idle'} onclick={() => void stop(task)}>
+    {#if isPausable(task) && task.state === 'paused'}
+      <button class="action" class:labelled aria-label={$t('sched_resume', { name: nameOf(task) })} title={$t('sched_resume', { name: nameOf(task) })} disabled={busy[task.id]} onclick={() => void control(task, 'resume')}>
+        <Icon name="play" size={18} /><span>{$t('sched_resume_short')}</span>
+      </button>
+    {:else if isPausable(task)}
+      <button class="action" class:labelled aria-label={$t('sched_pause', { name: nameOf(task) })} title={$t('sched_pause', { name: nameOf(task) })} disabled={busy[task.id] || task.state === 'idle'} onclick={() => void control(task, 'pause')}>
+        <Icon name="pause" size={18} /><span>{$t('sched_pause_short')}</span>
+      </button>
+    {/if}
+    <button class="action" class:labelled class:secondary={labelled && isPausable(task)} aria-label={$t('sched_stop', { name: nameOf(task) })} title={$t('sched_stop', { name: nameOf(task) })} disabled={busy[task.id] || task.state === 'idle'} onclick={() => void control(task, 'cancel')}>
       <Icon name="close" size={18} /><span>{$t('sched_stop_short')}</span>
     </button>
   {:else}
@@ -188,10 +201,11 @@
       <Icon name="play" size={18} /><span>{$t('sched_run_short')}</span>
     </button>
   {/if}
+  </span>
 {/snippet}
 
 {#snippet taskRow(task: ScheduledTask)}
-  {@const status = running(task) ? 'running' : taskStatus(task)}
+  {@const status = rowStatus(task)}
   {@const sub = isMediaTask(task)}
   {@const stats = statsLabel(task, $t)}
   <div class="task-row" class:subtask={sub}>
@@ -204,7 +218,7 @@
         {#if stats}<span class="schedule">{stats}</span>{/if}
         <span class="schedule">{sub ? $t(task.afterScan ? 'sched_after_scan' : 'sched_manual_only') : scheduleSummary(task.triggers, $t)}</span>
       </span>
-      {#if task.state === 'running' && task.progress !== null}
+      {#if (task.state === 'running' || task.state === 'paused') && task.progress !== null}
         <span class="progress" role="progressbar" aria-label={rowState(task)} aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${Math.max(task.progress, 2)}%`}></span></span>
       {/if}
     </a>
@@ -223,7 +237,7 @@
     <a class="back" href={taskHref()}><Icon name="back" size={20} /><span>{$t('sched_back')}</span></a>
     {#if selected}
       {@const task = selected}
-      {@const status = running(task) ? 'running' : taskStatus(task)}
+      {@const status = rowStatus(task)}
       {@const summary = lastRunSummary(task, now, $t)}
       <header class="detail-header">
         <div class="detail-title">
@@ -279,7 +293,7 @@
           <header class="card-header"><h3 id="last-run-heading">{$t('sched_last_execution')}</h3></header>
           {#if running(task)}
             <p class="status" data-tone={summary.tone}>{summary.text}</p>
-            {#if task.progress !== null && task.state === 'running'}<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${task.progress}%`}></span></div>{/if}
+            {#if task.progress !== null && (task.state === 'running' || task.state === 'paused')}<div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={task.progress}><span style:width={`${task.progress}%`}></span></div>{/if}
           {:else if task.lastRun}
             {@const run = task.lastRun}
             <dl>
@@ -428,7 +442,8 @@
   .task-meta .schedule::before { content: '·'; margin-right: 12px; color: var(--color-subtle); }
   .state, .detail-state { color: var(--color-muted); }
   .state[data-status='failed'], .detail-state[data-status='failed'] { color: var(--color-danger); }
-  .state[data-status='warning'], .detail-state[data-status='warning'] { color: var(--color-warning); }
+  .state[data-status='warning'], .detail-state[data-status='warning'],
+  .state[data-status='paused'], .detail-state[data-status='paused'] { color: var(--color-warning); }
   .state[data-status='running'], .detail-state[data-status='running'] { color: var(--color-accent); }
   .next { display: grid; flex: none; justify-items: end; gap: 1px; font-size: 13px; color: var(--color-text); font-variant-numeric: tabular-nums; text-align: right; }
   .next small { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-muted); }
@@ -438,7 +453,7 @@
   .status-icon { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: var(--radius-full); background: var(--color-raised); color: var(--color-muted); }
   .status-icon[data-status='ok'] { background: var(--color-success-soft); color: var(--color-success); }
   .status-icon[data-status='failed'] { background: var(--color-danger-soft); color: var(--color-danger); }
-  .status-icon[data-status='warning'] { background: var(--color-warning-soft); color: var(--color-warning); }
+  .status-icon[data-status='warning'], .status-icon[data-status='paused'] { background: var(--color-warning-soft); color: var(--color-warning); }
   .status-icon[data-status='running'] { background: var(--color-accent-soft); color: var(--color-accent); }
   .status-icon[data-status='running'] :global(svg) { animation: spin 1.6s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -460,12 +475,15 @@
   .ghost > span { font-size: 18px; line-height: 1; }
   .primary { border: 0; background: var(--color-accent-solid); color: var(--color-on-accent); font-weight: 600; }
   .primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+  .actions { display: inline-flex; flex: none; align-items: center; gap: 8px; }
   .action { flex: none; width: 40px; padding: 0; border: 0; border-radius: var(--radius-full); color: var(--color-muted); }
   .action > span { display: none; }
   .action:hover:not(:disabled) { background: var(--color-accent-soft); color: var(--color-accent); }
   .action.labelled { width: auto; padding: 8px 18px 8px 14px; border-radius: var(--radius-full); background: var(--color-accent-solid); color: var(--color-on-accent); font-weight: 600; }
   .action.labelled > span { display: inline; }
   .action.labelled:hover:not(:disabled) { background: var(--color-accent-hover); color: var(--color-on-accent); }
+  .action.labelled.secondary { background: transparent; color: var(--color-text); box-shadow: inset 0 0 0 1px var(--color-line-strong); }
+  .action.labelled.secondary:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
   .icon { width: 40px; padding: 0; border: 0; border-radius: var(--radius-full); }
   .icon.danger { color: var(--color-danger); }
   .icon.danger:hover:not(:disabled) { background: var(--color-danger-soft); }

@@ -33,7 +33,12 @@ async fn publication_queues_background_previews_durably_once_per_asset_revision(
     assert_eq!(jobs.len(), 1);
     assert_eq!(
         (&jobs[0].0, &jobs[0].1, jobs[0].2, jobs[0].3),
-        (&"trickplay".into(), &"queued".into(), 1, 320)
+        (
+            &"trickplay".into(),
+            &"queued".into(),
+            crate::task_engine::pipeline::TRICKPLAY,
+            320
+        )
     );
     let asset = jobs[0].4.clone();
     publish(&store, "replay", "1", false).await;
@@ -254,7 +259,7 @@ async fn a_full_rescan_rearms_finished_previews_so_deleted_ones_are_rebuilt() {
 
 #[tokio::test]
 async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
-    use crate::library_media_tasks::{LibraryRow, MediaTask, admit, views};
+    use crate::library_media_tasks::{LibraryRow, MediaTask, admit, control, views};
     use crate::task_scheduler::Admission;
     let temp = tempfile::tempdir().unwrap();
     let store = IdentityStore::open(&temp.path().join("manual.sqlite"))
@@ -304,20 +309,49 @@ async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
         reason: None,
     };
     let listed = views(&store, &row, None, false).await.unwrap();
-    assert_eq!(listed.len(), 3);
-    let previews = &listed[0];
+    // In pipeline order: identify, images, previews, intros.
+    let kinds: Vec<_> = listed.iter().map(|view| view.kind).collect();
+    assert_eq!(kinds, ["identify", "artwork", "trickplay", "intros"]);
+    let previews = &listed[2];
     assert_eq!(previews.id, "trickplay-previews");
     assert_eq!(previews.parent_id.as_deref(), Some("scan-previews"));
     // Neither previews nor chapter images are prepared during scans here: run by hand only.
     assert_eq!(previews.after_scan, Some(false));
-    assert_eq!(listed[2].after_scan, Some(true));
+    assert_eq!(listed[1].after_scan, Some(true));
     assert_eq!(previews.state, "queued");
+    // No earlier phase is active: nothing holds the previews back.
+    assert_eq!(previews.waiting_for, None);
     // The trickplay sheet and the chapter images of the video.
     assert_eq!(previews.stats.as_ref().map(|stats| stats.pending), Some(2));
     // Without an intro extension, only the intro sub-task explains why it cannot run.
     assert!(previews.reason.is_none());
-    assert!(listed[1].reason.is_some());
-    assert!(listed[2].reason.is_none());
+    assert!(listed[3].reason.is_some());
+    assert!(listed[1].reason.is_none());
+    // A pause holds every queued preview; resuming puts them back in the queue.
+    assert!(
+        control(&auth, MediaTask::Trickplay, "previews", "pause", now)
+            .await
+            .unwrap()
+    );
+    let paused = views(&store, &row, Some(MediaTask::Trickplay), false)
+        .await
+        .unwrap();
+    assert_eq!(paused[0].state, "paused");
+    assert!(
+        !control(&auth, MediaTask::Trickplay, "previews", "pause", now)
+            .await
+            .unwrap(),
+        "nothing left to pause"
+    );
+    assert!(
+        control(&auth, MediaTask::Trickplay, "previews", "resume", now)
+            .await
+            .unwrap()
+    );
+    let resumed = views(&store, &row, Some(MediaTask::Trickplay), false)
+        .await
+        .unwrap();
+    assert_eq!(resumed[0].state, "queued");
     query("UPDATE durable_tasks SET status='completed',finished_at=? WHERE category='trickplay'")
         .bind(now)
         .execute(store.pool())

@@ -294,7 +294,7 @@ pub async fn drain(store: &IdentityStore, now: i64, limit: i64) -> Result<u64, s
             let Some(priority) = priority else {
                 continue;
             };
-            c.priority = priority;
+            c.priority = crate::task_engine::pipeline::automation(&c.operation, priority);
             if kind == "scheduled" && marker_plugin {
                 continue;
             }

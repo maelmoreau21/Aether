@@ -241,8 +241,8 @@ pub(crate) async fn queue_previews(
                 }
                 continue;
             }
-            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,1,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE \
-                    SET status='queued',error='',available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL \
+            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,50,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE \
+                    SET status='queued',error='',priority=excluded.priority,available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL \
                     WHERE durable_tasks.error IN \
                     ('library_trickplay_disabled','library_chapter_images_disabled') \
                     AND durable_tasks.lease_until IS NULL")

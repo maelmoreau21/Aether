@@ -10,6 +10,7 @@
   import Icon from '../ui/Icon.svelte';
   import { adminRequest } from './request';
   import { t } from '../i18n';
+  const MAX_LIBRARY_FOLDERS = 256;
   let { libraries, nodes, scans, pending, saving, editing, error, groups = [],
     name = $bindable(), kind = $bindable(), nodeId = $bindable(), root = $bindable(), folders = $bindable(), enabled = $bindable(),
     excludedPatterns = $bindable(''),
@@ -264,11 +265,11 @@
           {/if}
         </div>
         <div id="library-panel-sources" role="tabpanel" aria-labelledby="library-tab-sources" data-editor-panel="sources" hidden={activeSection !== 'sources'} tabindex="0">
-          <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / 32</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
+          <div class="section-heading"><h3>{$t('sources_folders')}</h3><span>{folders.length} / {MAX_LIBRARY_FOLDERS}</span></div><p class="panel-description">{$t('sources_folders_note')}</p>
           <ul class="folders">{#each folders as folder (`${folder.nodeId}:${folder.root}`)}<li><div><strong>{nodes.find(node => node.id === folder.nodeId)?.name ?? folder.nodeId}</strong><span>{folder.root}</span></div><button type="button" aria-label={$t('remove_value', { value: folder.root })} onclick={() => folders = folders.filter(item => item !== folder)}>{$t('remove')}</button></li>{:else}<li class="empty-folders">{$t('no_folder_added')}</li>{/each}</ul>
           <label for="library-node">{$t('folder_server')}</label><select id="library-node" bind:value={nodeId} onchange={onnodechange}><option value="local">{$t('local_node')}</option>{#each activeNodes.filter(node => node.id !== 'local') as node (node.id)}<option value={node.id}>{node.name}</option>{/each}</select>
           <label for="library-root">{$t('folder')}</label><div class="folder-input-row"><input id="library-root" type="text" bind:value={root} placeholder={$t('e_g_media_films_or_c')} autocomplete="off" spellcheck="false" /><button type="button" class="browse-btn" onclick={() => showPathPicker = true}><Icon name="search" size={16} />{$t('browse')}</button></div>
-          <button type="button" class="add-folder-btn" disabled={folders.length >= 32 || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
+          <button type="button" class="add-folder-btn" disabled={folders.length >= MAX_LIBRARY_FOLDERS || !root.trim() || folders.some(folder => folder.nodeId === nodeId && folder.root === root.trim())} onclick={() => { if (root.trim()) { folders = [...folders, { nodeId, root: root.trim() }]; root = ''; formError = ''; } }}><span aria-hidden="true">+</span> {$t('add_folder')}</button>
         </div>
         {#each optionSections as section (section)}
           {#if editorSections.some(item => item.id === section)}

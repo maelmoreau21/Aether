@@ -1,7 +1,7 @@
 # Bibliothèques avec plusieurs dossiers
 
 L'administration utilise le nom « Bibliothèques ». Une bibliothèque, par exemple
-`Films_UHD`, regroupe jusqu'à 32 dossiers, chacun avec son serveur et sa racine
+`Films_UHD`, regroupe jusqu'à 256 dossiers, chacun avec son serveur et sa racine
 autorisée. Le nom, le type, les exclusions, les options et les permissions sont
 communs. L'interface montre les dossiers ajoutés et permet de les retirer.
 L'ajout d'un dossier ne déclenche pas automatiquement un scan.
@@ -54,7 +54,7 @@ la navigation dans ses sous-dossiers n'est pas fournie par ce correctif.
 ```
 
 Session administrateur, Origin et CSRF restent obligatoires. Chaque dossier est
-validé selon les racines de son propre nœud. Liste vide, doublon, plus de 32 dossiers,
+validé selon les racines de son propre nœud. Liste vide, doublon, plus de 256 dossiers,
 nœud révoqué ou racine non autorisée : 400. Modification pendant un scan : 409.
 La configuration et les rattachements sont enregistrés dans une transaction.
 

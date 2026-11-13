@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::path::{Path as DiskPath, PathBuf};
 
+/// Upper bound on folders aggregated by one library (each is validated against its node roots).
+pub(crate) const MAX_LIBRARY_FOLDERS: usize = 256;
+
 #[derive(Clone)]
 struct LibraryState {
     auth: AuthState,
@@ -950,7 +953,7 @@ async fn save(
         }
         folders
     };
-    if folders.is_empty() || folders.len() > 32 {
+    if folders.is_empty() || folders.len() > MAX_LIBRARY_FOLDERS {
         return Err(StatusCode::BAD_REQUEST);
     }
     for folder in &mut folders {

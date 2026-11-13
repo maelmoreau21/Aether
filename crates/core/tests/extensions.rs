@@ -150,6 +150,19 @@ fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
         run(module("(loop br 0) i64.const 0")).unwrap_err(),
         "execution_trapped"
     );
+    // The server log names the exhausted limit; the public code stays the same.
+    assert_eq!(
+        aether_core::extensions::runtime::last_trap().map(|trap| trap.reason),
+        Some("out_of_fuel")
+    );
+    assert_eq!(
+        run(module("unreachable i64.const 0")).unwrap_err(),
+        "execution_trapped"
+    );
+    assert_eq!(
+        aether_core::extensions::runtime::last_trap().map(|trap| trap.reason),
+        Some("guest_abort")
+    );
     assert_eq!(
         run(memory_module(257, false)).unwrap_err(),
         "instantiation_failed"

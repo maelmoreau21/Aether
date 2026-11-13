@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store';
 import { onSessionGenerationChange } from '../auth/session';
-import { request, type CatalogPage } from './api';
+import { CatalogRequestError, request, type CatalogPage } from './api';
 import { languageScope, scopedKey, unscopedKey } from './cache-scope';
 
 // Session-only metadata. Never stores playback credentials or media bytes. Every entry is keyed by
@@ -115,6 +115,23 @@ export function cachedCatalog(rawKey: string): CatalogPage | undefined {
 }
 export function catalogCacheStats() { return { pages: pages.size, jsonBytes: bytes, pending: pending.size }; }
 
+const RETRY_DELAY_MS = 1500;
+
+/** Failures a second request can fix: a timeout, a server error, a network drop. */
+export function isTransientCatalogError(cause: unknown): boolean {
+  if (cause instanceof CatalogRequestError) return cause.kind === 'timeout' || (cause.kind === 'http' && (cause.status ?? 0) >= 500);
+  return cause instanceof TypeError;
+}
+
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(signal.reason); return; }
+    const timer = setTimeout(() => { signal.removeEventListener('abort', stop); resolve(); }, ms);
+    const stop = () => { clearTimeout(timer); reject(signal.reason); };
+    signal.addEventListener('abort', stop, { once: true });
+  });
+}
+
 export function loadCatalog(rawKey: string, url: string): Promise<CatalogPage> {
   const key = scopedKey(rawKey);
   const entry = pages.get(key);
@@ -142,7 +159,14 @@ export function loadCatalog(rawKey: string, url: string): Promise<CatalogPage> {
   }
   const controller = new AbortController();
   const generation = epoch;
-  const promise = request<CatalogPage>(url, controller.signal).then(data => {
+  const fetchPage = () => request<CatalogPage>(url, controller.signal);
+  const promise = fetchPage().catch(async cause => {
+    // A busy server (slow answer, 5xx, dropped connection) gets one more try before a shelf is
+    // reported as unavailable; access and session answers are final.
+    if (controller.signal.aborted || generation !== epoch || !isTransientCatalogError(cause)) throw cause;
+    await abortableDelay(RETRY_DELAY_MS, controller.signal);
+    return fetchPage();
+  }).then(data => {
     if (generation !== epoch || controller.signal.aborted) throw new DOMException('Cache invalidated', 'AbortError');
     const size = new TextEncoder().encode(JSON.stringify(data)).byteLength;
     const old = pages.get(key);

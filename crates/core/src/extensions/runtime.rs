@@ -618,7 +618,7 @@ fn execute_inner(
     }
     let ptr = alloc
         .call(&mut store, input.len() as u32)
-        .map_err(|_| "execution_trapped")?;
+        .map_err(|error| trapped(&error, memory.data(&store).len()))?;
     // A guest built for ABI 1.0 refuses more than MAX_JSON by returning a null buffer.
     if ptr == 0 {
         return Err("input_too_large");
@@ -628,7 +628,7 @@ fn execute_inner(
         .map_err(|_| "invalid_pointer")?;
     let packed = run
         .call(&mut store, (ptr, input.len() as u32))
-        .map_err(|_| "execution_trapped")?;
+        .map_err(|error| trapped(&error, memory.data(&store).len()))?;
     let length = (packed & 0xffff_ffff) as usize;
     if length == 0 || length > MAX_JSON {
         return Err("invalid_output_size");
@@ -643,6 +643,45 @@ fn execute_inner(
         return Err("invalid_output");
     }
     Ok(response)
+}
+
+thread_local! {
+    static LAST_TRAP: std::cell::Cell<Option<Trap>> = const { std::cell::Cell::new(None) };
+}
+
+/// Why the last guest call on this thread trapped. The public error stays
+/// `execution_trapped`; this detail only reaches the server log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Trap {
+    /// `out_of_fuel` (CPU budget), `stack_overflow`, `guest_abort` (a panic, or an
+    /// allocation refused at the memory cap), `memory_out_of_bounds`, `guest_fault`, `host_error`.
+    pub reason: &'static str,
+    /// Linear memory the guest held when it stopped; near the cap means it ran out.
+    pub memory_bytes: usize,
+}
+
+pub fn last_trap() -> Option<Trap> {
+    LAST_TRAP.with(std::cell::Cell::get)
+}
+
+fn trapped(error: &wasmi::Error, memory_bytes: usize) -> &'static str {
+    use wasmi::TrapCode;
+    let reason = match error.as_trap_code() {
+        Some(TrapCode::OutOfFuel) => "out_of_fuel",
+        Some(TrapCode::StackOverflow) => "stack_overflow",
+        Some(TrapCode::UnreachableCodeReached) => "guest_abort",
+        Some(TrapCode::MemoryOutOfBounds) => "memory_out_of_bounds",
+        Some(_) => "guest_fault",
+        None => "host_error",
+    };
+    LAST_TRAP.with(|last| {
+        last.set(Some(Trap {
+            reason,
+            memory_bytes,
+        }))
+    });
+    "execution_trapped"
 }
 
 /// Length prefix bounds allocation before JSON parsing. No guest data is logged.

@@ -178,17 +178,16 @@ impl Scheduler {
                 if application_jobs.is_cancelled() {
                     break;
                 }
-                if crate::acquisition::tick(&application_auth.store)
-                    .await
-                    .is_err()
-                {
-                    eprintln!("Acquisition pass failed; retrying on next tick");
+                if let Err(error) = crate::acquisition::tick(&application_auth.store).await {
+                    eprintln!(
+                        "Acquisition pass failed ({}); retrying on next tick",
+                        api_error(&error)
+                    );
                 }
-                if crate::artwork::migrate_one(&application_auth.store)
-                    .await
-                    .is_err()
-                {
-                    eprintln!("Artwork migration deferred; original references preserved");
+                if let Err(status) = crate::artwork::migrate_one(&application_auth.store).await {
+                    eprintln!(
+                        "Artwork migration deferred ({status}); original references preserved"
+                    );
                 }
             }
         });
@@ -202,19 +201,15 @@ impl Scheduler {
                 if notification_jobs.is_cancelled() {
                     break;
                 }
-                if crate::notifications::tick(&notification_auth.store)
-                    .await
-                    .is_err()
-                {
-                    eprintln!("Notification worker pass failed; retrying on next tick");
+                if let Err(error) = crate::notifications::tick(&notification_auth.store).await {
+                    eprintln!("Notification worker pass failed ({error}); retrying on next tick");
                 }
                 // Every ten minutes: end idle "Watch together" parties, drop old invitations.
                 if ticks.is_multiple_of(40)
-                    && crate::parties::clean_expired_parties(&notification_auth.store)
-                        .await
-                        .is_err()
+                    && let Err(error) =
+                        crate::parties::clean_expired_parties(&notification_auth.store).await
                 {
-                    eprintln!("Watch party expiry pass failed; retrying later");
+                    eprintln!("Watch party expiry pass failed ({error}); retrying later");
                 }
                 ticks = ticks.wrapping_add(1);
             }
@@ -222,11 +217,10 @@ impl Scheduler {
         let artwork_auth = auth.clone();
         let artwork_jobs = jobs.clone();
         let artwork = tokio::spawn(async move {
-            if crate::task_engine::normalize_pipeline_priorities(&artwork_auth.store)
-                .await
-                .is_err()
+            if let Err(error) =
+                crate::task_engine::normalize_pipeline_priorities(&artwork_auth.store).await
             {
-                eprintln!("Queued library work keeps its previous order until it runs");
+                eprintln!("Queued library work keeps its previous order until it runs ({error})");
             }
             loop {
                 if artwork_jobs.is_cancelled() {
@@ -237,8 +231,11 @@ impl Scheduler {
                 let pause = match crate::extensions::artwork_collection_tick(&artwork_auth).await {
                     Ok(true) => Duration::from_secs(1),
                     Ok(false) => Duration::from_secs(15),
-                    Err(_) => {
-                        eprintln!("Artwork collection pass deferred; progress remains persisted");
+                    Err(error) => {
+                        eprintln!(
+                            "Artwork collection pass deferred ({}); progress remains persisted",
+                            api_error(&error)
+                        );
                         Duration::from_secs(15)
                     }
                 };
@@ -253,11 +250,10 @@ impl Scheduler {
                 if worker_jobs.is_cancelled() {
                     break;
                 }
-                if dispatch_once(&worker_auth, &worker_root, &worker_jobs, now())
-                    .await
-                    .is_err()
+                if let Err(error) =
+                    dispatch_once(&worker_auth, &worker_root, &worker_jobs, now()).await
                 {
-                    eprintln!("Task dispatch pass failed; retrying");
+                    eprintln!("Task dispatch pass failed ({error}); retrying");
                 }
                 let delay = if worker_jobs
                     .engine_busy
@@ -286,21 +282,22 @@ impl Scheduler {
                     if jobs.is_cancelled() {
                         break;
                     }
-                    if run_due(&auth, &root, &jobs, now()).await.is_err() {
-                        eprintln!("Scheduled scan tick failed; retrying on next tick");
+                    if let Err(error) = run_due(&auth, &root, &jobs, now()).await {
+                        eprintln!("Scheduled scan tick failed ({error}); retrying on next tick");
                     }
                     cache_ticks += 1;
                     if cache_ticks >= 4 {
                         cache_ticks = 0;
-                        if crate::automation::purge_provider_cache_batch(
+                        if let Err(error) = crate::automation::purge_provider_cache_batch(
                             &auth.store,
                             &mut cache_cursor,
                             now(),
                         )
                         .await
-                        .is_err()
                         {
-                            eprintln!("Provider cache cleanup failed; retrying on next tick");
+                            eprintln!(
+                                "Provider cache cleanup failed ({error}); retrying on next tick"
+                            );
                         }
                     }
                 }
@@ -312,6 +309,14 @@ impl Scheduler {
         )
     }
 }
+/// Short log form of an HTTP-shaped internal error: status and its stable code.
+fn api_error((status, body): &(axum::http::StatusCode, axum::Json<serde_json::Value>)) -> String {
+    match body.0.get("error").and_then(serde_json::Value::as_str) {
+        Some(code) => format!("{status} {code}"),
+        None => status.to_string(),
+    }
+}
+
 async fn reconcile(auth: &AuthState) -> Result<(), sqlx::Error> {
     // Aggregate the durable request, including every physical folder. A transient
     // scan_jobs error is not the outcome of a task waiting for its controlled retry.

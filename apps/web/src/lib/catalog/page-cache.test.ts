@@ -64,7 +64,8 @@ describe('session catalogue SWR cache', () => {
     vi.useFakeTimers(); const fetcher=vi.fn().mockResolvedValueOnce(Response.json(page())).mockRejectedValue(new TypeError('offline')); vi.stubGlobal('fetch',fetcher);
     await loadCatalog('home','/api/v1/catalog'); vi.advanceTimersByTime(31000);
     const refresh=loadCatalog('home','/api/v1/catalog'); expect(cachedCatalog('home')).toBeDefined();
-    await expect(refresh).rejects.toThrow('offline'); expect(cachedCatalog('home')).toBeDefined();
+    const rejected=expect(refresh).rejects.toThrow('offline'); await vi.advanceTimersByTimeAsync(1500);
+    await rejected; expect(fetcher).toHaveBeenCalledTimes(3); expect(cachedCatalog('home')).toBeDefined();
   });
   it('separates query keys and invalidates a library and aggregate pages only', async () => {
     vi.stubGlobal('fetch',vi.fn().mockImplementation(()=>Promise.resolve(Response.json(page()))));
@@ -154,5 +155,21 @@ describe('catalogue cache isolation', () => {
     expect(cachedCatalog(key)).toBeUndefined();
     session.set(null);
     locale.set('fr');
+  });
+  it('tries a busy server once more but never retries an access answer', async () => {
+    vi.useFakeTimers();
+    const url = '/api/v1/catalog?kind=series';
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+      .mockResolvedValueOnce(Response.json(page('ok')));
+    vi.stubGlobal('fetch', fetcher);
+    const loading = loadCatalog(url, url);
+    await vi.advanceTimersByTimeAsync(1500);
+    expect((await loading).items[0].id).toBe('ok');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    const denied = '/api/v1/catalog?kind=film';
+    fetcher.mockResolvedValueOnce(new Response('{}', { status: 403 }));
+    await expect(loadCatalog(denied, denied)).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(3);
   });
 });

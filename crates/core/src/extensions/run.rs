@@ -508,7 +508,16 @@ pub(super) async fn invoke_worker_context(
                     Some("invalid_module" | "instantiation_failed") => "extension_module_invalid",
                     _ => "extension_failed",
                 };
-                eprintln!("Extension '{id}' failed: {code}");
+                // The trap detail names the exhausted limit (CPU, stack, memory) or a guest panic.
+                match frame["trap"]["reason"].as_str() {
+                    Some(reason) => eprintln!(
+                        "Extension '{id}' failed: {code} during {requested_operation} ({reason}, {} KiB of guest memory)",
+                        frame["trap"]["memoryBytes"].as_u64().unwrap_or(0) / 1024
+                    ),
+                    None => {
+                        eprintln!("Extension '{id}' failed: {code} during {requested_operation}")
+                    }
+                }
                 return Err(err(StatusCode::UNPROCESSABLE_ENTITY, code));
             }
             if kind == "provider_retry" {

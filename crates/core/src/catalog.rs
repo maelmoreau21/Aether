@@ -334,7 +334,10 @@ pub async fn list(
         .await
         {
             Ok(value) => Json(value).into_response(),
-            Err(_) => error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
+            Err(cause) => {
+                eprintln!("Catalogue page failed: {cause}");
+                error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable")
+            }
         };
     }
     let mut items: Vec<_> = works(available(&inventory))

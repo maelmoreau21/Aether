@@ -1,5 +1,5 @@
 fn main() {
-    use aether_core::extensions::runtime::{execute_brokered, read_frame, write_frame};
+    use aether_core::extensions::runtime::{execute_brokered, last_trap, read_frame, write_frame};
     // Release the initial input lock before guest host-calls read broker replies.
     let invocation = {
         let input = std::io::stdin();
@@ -21,7 +21,7 @@ fn main() {
         Err(code) => {
             let _ = write_frame(
                 &mut std::io::stdout().lock(),
-                &serde_json::json!({"kind":"failed","error":code}),
+                &serde_json::json!({"kind":"failed","error":code,"trap":last_trap()}),
             );
             std::process::exit(1);
         }

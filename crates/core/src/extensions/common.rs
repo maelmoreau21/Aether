@@ -32,7 +32,8 @@ pub(super) fn err(status: StatusCode, code: &str) -> Error {
     (status, Json(json!({"error": code})))
 }
 
-pub(super) fn db(_: sqlx::Error) -> Error {
+pub(super) fn db(cause: sqlx::Error) -> Error {
+    eprintln!("Extension store error: {cause}");
     err(StatusCode::INTERNAL_SERVER_ERROR, "database_error")
 }
 

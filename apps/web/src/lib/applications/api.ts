@@ -39,7 +39,8 @@ const errors: Readonly<Record<string, string>> = translatedLabels({
   remote_unavailable: 'err_remote_unavailable', connection_unavailable: 'err_connection_unavailable', not_found: 'err_not_found',
   invalid_reject_reason: 'err_invalid_reject_reason', empty_selection: 'err_empty_selection', invalid_request_selection: 'err_empty_selection', invalid_priority: 'err_invalid_priority',
   request_permission_denied: 'err_request_permission', request_period_quota_exceeded: 'err_request_period_quota',
-  invalid_request_policy: 'err_invalid_policy', policy_target_is_profile: 'err_policy_profile', group_not_found: 'err_not_found', user_not_found: 'err_not_found'
+  invalid_request_policy: 'err_invalid_policy', policy_target_is_profile: 'err_policy_profile', group_not_found: 'err_not_found', user_not_found: 'err_not_found',
+  invalid_quality_profile: 'err_invalid_quality_profile'
 });
 export function errorMessage(code: string | null | undefined, status?: number): string {
   if (code && code in errors) return errors[code];
@@ -87,10 +88,12 @@ export interface SearchResult {
   /** What the caller's rights say: may request it, and whether it is approved without an administrator. */
   canRequest?: boolean; autoApprove?: boolean;
 }
-export interface RequestSelection { seasons?: number[]; episodes?: { season: number; episode: number }[]; albumIds?: string[]; monitorFuture?: boolean; serverId?: string }
+export interface QualityProfile { id: number; name: string }
+export interface RequestSelection { seasons?: number[]; episodes?: { season: number; episode: number }[]; albumIds?: string[]; monitorFuture?: boolean; serverId?: string; qualityProfileId?: number }
 export interface RequestEvent { status?: string; action?: string; createdAt: number; message?: string; code?: string | null; actorLabel?: string | null }
-export interface MediaRequest extends SearchResult { id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; own?: boolean; workId?: string | null; error?: string; errorCode?: string | null; selection?: RequestSelection; events?: RequestEvent[]; authorLabel?: string | null; sourceStatus?: string | null }
-export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; rootFolder: string; qualityProfileId: number; metadataProfileId?: number; isDefault: boolean; enabled: boolean }
+export interface DownloadProgress { percent: number; totalBytes: number; remainingBytes: number; status: string; timeleft?: string | null; items: number }
+export interface MediaRequest extends SearchResult { id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; own?: boolean; workId?: string | null; error?: string; errorCode?: string | null; selection?: RequestSelection; progress?: DownloadProgress | null; events?: RequestEvent[]; authorLabel?: string | null; sourceStatus?: string | null }
+export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; rootFolder: string; qualityProfileId: number; qualityProfiles?: QualityProfile[]; metadataProfileId?: number; isDefault: boolean; enabled: boolean }
 export interface ReportContext { engine?: string; errorCode?: string; audioTrackId?: string; subtitleTrackId?: string }
 export interface ReportInput { category: string; description: string; workId?: string; trackId?: string; assetId?: string; positionSeconds?: number; endSeconds?: number; context?: ReportContext }
 export interface ReportSubject { kind: string; title: string; year?: number | null; artist?: string; album?: string; workId?: string; trackId?: string; image?: string }
@@ -159,10 +162,11 @@ export function workHref(kind: string | undefined, workId: string): `films/?work
   return null;
 }
 /** Strict admission body accepted by `POST /requests`: discovery metadata never enters it. */
-export type RequestPayload = Pick<SearchResult, 'kind' | 'title' | 'externalId' | 'externalProvider' | 'serverId'> & Required<Omit<RequestSelection, 'serverId'>>;
+export type RequestPayload = Pick<SearchResult, 'kind' | 'title' | 'externalId' | 'externalProvider' | 'serverId'> & Required<Omit<RequestSelection, 'serverId' | 'qualityProfileId'>> & { qualityProfileId?: number };
 export function requestPayload(result: SearchResult, selection: RequestSelection): RequestPayload {
   return { kind: result.kind, title: result.title, externalId: result.externalId, externalProvider: result.externalProvider,
     ...(selection.serverId || result.serverId ? { serverId: selection.serverId || result.serverId } : {}),
+    ...(selection.qualityProfileId ? { qualityProfileId: selection.qualityProfileId } : {}),
     seasons: selection.seasons ?? [], episodes: selection.episodes ?? [], albumIds: selection.albumIds ?? [], monitorFuture: selection.monitorFuture ?? false };
 }
 export function dateLabel(value: number | string | undefined): string {

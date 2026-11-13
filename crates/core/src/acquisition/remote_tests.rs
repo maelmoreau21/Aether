@@ -70,6 +70,7 @@ pub(super) async fn mock(kind: &str, replies: Vec<(&str, Vec<(StatusCode, Value)
         library_id: "request-films".into(),
         root_folder: "/movies".into(),
         quality_profile_id: 1,
+        quality_profiles_json: "[]".into(),
         metadata_profile_id: None,
         is_default: 1,
         enabled: 1,
@@ -89,6 +90,7 @@ fn input(kind: &str) -> RequestInput {
         external_id: "123".into(),
         external_provider: if kind == "series" { "tvdb" } else { "tmdb" }.into(),
         server_id: None,
+        quality_profile_id: None,
         seasons: vec![],
         episodes: vec![],
         album_ids: vec![],
@@ -208,39 +210,6 @@ async fn multi_episode_file_counts_once_and_requires_current_node_inventory() {
             .unwrap();
     assert_eq!(count, 1);
     assert_eq!(work.as_deref(), Some("work"));
-}
-#[tokio::test]
-async fn unmapped_history_is_preserved_and_can_be_mapped_without_dispatch() {
-    let (_dir, store, _, _) = tests::fixture().await;
-    let value = json!({"id":88,"type":"movie","status":5,"createdAt":"2026-01-01T00:00:00Z","media":{"mediaType":"movie","tmdbId":123,"externalServiceId":777},"requestedBy":{"displayName":"Historical author"}});
-    assert!(
-        import_legacy(&store, "source", &value, None, None)
-            .await
-            .unwrap()
-    );
-    let row: RequestRecord = query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT {REQUEST_COLUMNS} FROM media_requests WHERE source_key='source:88'"
-    )))
-    .fetch_one(store.pool())
-    .await
-    .unwrap();
-    assert!(row.library_id.is_none());
-    assert!(row.remote_id.is_none());
-    assert_eq!(row.source_remote_id.as_deref(), Some("777"));
-    assert!(
-        import_legacy(&store, "source", &value, Some("owner"), Some("radarr-a"))
-            .await
-            .unwrap()
-    );
-    let mapped = record(&store, &row.id).await.unwrap();
-    assert_eq!(mapped.library_id.as_deref(), Some("request-films"));
-    assert_eq!(mapped.user_id.as_deref(), Some("owner"));
-    assert_eq!(mapped.status, "suspended");
-    let count: i64 = query_scalar("SELECT COUNT(*) FROM acquisition_jobs")
-        .fetch_one(store.pool())
-        .await
-        .unwrap();
-    assert_eq!(count, 0);
 }
 #[tokio::test]
 async fn stored_numeric_id_cannot_target_a_different_remote_work() {

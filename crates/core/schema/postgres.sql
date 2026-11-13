@@ -355,7 +355,15 @@ CREATE TABLE user_groups (
     id text NOT NULL,
     name text NOT NULL,
     is_default integer DEFAULT 0 NOT NULL,
+    allow_media_download integer,
     CONSTRAINT user_groups_name_check CHECK (((length(name) >= 1) AND (length(name) <= 80)))
+);
+CREATE TABLE group_parental_policies (
+    group_id text PRIMARY KEY REFERENCES user_groups(id) ON DELETE CASCADE,
+    maximum_age integer NOT NULL,
+    allow_unrated integer NOT NULL,
+    blocked_tags_json text NOT NULL,
+    access_schedule_json text NOT NULL
 );
 
 
@@ -2848,6 +2856,7 @@ CREATE TABLE acquisition_servers (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('radarr','sonarr','lidarr')),
  base_url TEXT NOT NULL, api_key TEXT NOT NULL, allowed_ips_json TEXT NOT NULL,
  library_id TEXT NOT NULL REFERENCES libraries(id), root_folder TEXT NOT NULL, quality_profile_id BIGINT NOT NULL,
+ quality_profiles_json TEXT NOT NULL DEFAULT '[]',
  metadata_profile_id BIGINT, is_default BIGINT NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)), enabled BIGINT NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), generation TEXT NOT NULL
 );
 CREATE TABLE media_requests (
@@ -2855,7 +2864,7 @@ CREATE TABLE media_requests (
  library_id TEXT REFERENCES libraries(id), kind TEXT NOT NULL, title TEXT NOT NULL, external_id TEXT NOT NULL, external_provider TEXT NOT NULL,
  input_json TEXT NOT NULL, status TEXT NOT NULL, error_code TEXT, remote_id TEXT, work_id TEXT,
  created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL, imported BIGINT NOT NULL DEFAULT 0 CHECK(imported IN (0,1)),
- source_key TEXT UNIQUE, author_label TEXT, source_status TEXT, source_remote_id TEXT
+ source_key TEXT UNIQUE, author_label TEXT, source_status TEXT, source_remote_id TEXT, progress_json TEXT
 );
 CREATE INDEX media_requests_owner ON media_requests(user_id,created_at);
 CREATE INDEX media_requests_identity ON media_requests(server_id,kind,external_id,status);

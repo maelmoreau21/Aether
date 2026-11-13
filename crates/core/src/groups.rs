@@ -68,6 +68,10 @@ pub fn router(auth: AuthState) -> Router {
             "/api/v1/admin/groups/{id}",
             axum::routing::put(update).delete(remove),
         )
+        .route(
+            "/api/v1/admin/groups/{id}/parental",
+            get(get_parental).put(save_parental).delete(delete_parental),
+        )
         .layer(DefaultBodyLimit::max(32768))
         .with_state(auth)
 }
@@ -122,6 +126,9 @@ struct Input {
     /// Media types allowed to members; omitted keeps the current rule.
     #[serde(default)]
     allowed_kinds: Option<Vec<String>>,
+    /// Original-download permission for members (null = inherit, omitted = keep).
+    #[serde(default)]
+    allow_media_download: Option<Value>,
 }
 async fn list(
     State(auth): State<AuthState>,
@@ -129,8 +136,8 @@ async fn list(
 ) -> Result<Json<Value>, StatusCode> {
     administrator(&auth, &headers, false).await?;
     let mut tx = auth.store.pool.begin().await.map_err(database)?;
-    let rows: Vec<(String, String, crate::database::DbBool)> =
-        query_as("SELECT id,name,is_default FROM user_groups ORDER BY name,id")
+    let rows: Vec<(String, String, crate::database::DbBool, Option<i64>)> =
+        query_as("SELECT id,name,is_default,allow_media_download FROM user_groups ORDER BY name,id")
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
@@ -149,9 +156,9 @@ async fn list(
             .fetch_all(&mut *tx)
             .await
             .map_err(database)?;
-    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default)|{
+    let values: Vec<_>=rows.into_iter().map(|(id,name,is_default,allow_dl)|{
         let allowed: Vec<_> = crate::user_media_policy::MEDIA_KINDS.iter().filter(|kind| !denials.iter().any(|(group, denied)| group == &id && denied == *kind)).collect();
-        json!({"id":id,"name":name,"isDefault":bool::from(is_default),"systemRole":system_role(&id),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"allowedKinds":allowed })
+        json!({"id":id,"name":name,"isDefault":bool::from(is_default),"systemRole":system_role(&id),"userIds":members.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"libraryIds":libraries.iter().filter(|r|r.0==id).map(|r|&r.1).collect::<Vec<_>>(),"allowedKinds":allowed,"allowMediaDownload":allow_dl.map(|v|v!=0) })
     }).collect();
     tx.commit().await.map_err(database)?;
     Ok(Json(json!({"groups":values})))
@@ -197,6 +204,12 @@ async fn save(
         .as_deref()
         .map(crate::user_media_policy::denied_kinds)
         .transpose()?;
+    let download_setting = match input.allow_media_download {
+        None => None,
+        Some(Value::Null) => Some(None),
+        Some(Value::Bool(b)) => Some(Some(i64::from(b))),
+        Some(_) => return Err(StatusCode::BAD_REQUEST),
+    };
     let mut conn = auth.store.pool.acquire().await.map_err(database)?;
     let mut tx = crate::database::begin_write(&mut conn)
         .await
@@ -235,13 +248,24 @@ async fn save(
         if count >= 500 {
             return Err(StatusCode::CONFLICT);
         }
-        query("INSERT INTO user_groups(id,name,is_default) VALUES(?,?,?)")
-            .bind(id)
-            .bind(name)
-            .bind(i64::from(input.is_default))
-            .execute(&mut *tx)
-            .await
-            .map_err(database)?;
+        if let Some(dl) = download_setting {
+            query("INSERT INTO user_groups(id,name,is_default,allow_media_download) VALUES(?,?,?,?)")
+                .bind(id)
+                .bind(name)
+                .bind(i64::from(input.is_default))
+                .bind(dl)
+                .execute(&mut *tx)
+                .await
+                .map_err(database)?;
+        } else {
+            query("INSERT INTO user_groups(id,name,is_default) VALUES(?,?,?)")
+                .bind(id)
+                .bind(name)
+                .bind(i64::from(input.is_default))
+                .execute(&mut *tx)
+                .await
+                .map_err(database)?;
+        }
     } else {
         if query("UPDATE user_groups SET name=?,is_default=? WHERE id=?")
             .bind(name)
@@ -254,6 +278,14 @@ async fn save(
             != 1
         {
             return Err(StatusCode::NOT_FOUND);
+        }
+        if let Some(dl) = download_setting {
+            query("UPDATE user_groups SET allow_media_download=? WHERE id=?")
+                .bind(dl)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .map_err(database)?;
         }
         query("DELETE FROM user_group_members WHERE group_id=?")
             .bind(id)
@@ -303,6 +335,17 @@ async fn save(
         .execute(&mut *tx)
         .await
         .map_err(database)?;
+    let group_parental: Option<(i64, i64, String, String)> = query_as(
+        "SELECT maximum_age,allow_unrated,blocked_tags_json,access_schedule_json FROM group_parental_policies WHERE group_id=?",
+    )
+    .bind(id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(database)?;
+    if let Some((max_age, allow_unrated, tags_json, schedule_json)) = group_parental {
+        apply_parental_to_members(&mut tx, id, max_age, allow_unrated, &tags_json, &schedule_json)
+            .await?;
+    }
     tx.commit().await.map_err(database)?;
     Ok(())
 }
@@ -330,5 +373,194 @@ async fn remove(
         return Err(StatusCode::NOT_FOUND);
     }
     tx.commit().await.map_err(database)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ParentalAccessWindow {
+    day: i64,
+    start_minute: i64,
+    end_minute: i64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GroupParentalInput {
+    maximum_age: i64,
+    allow_unrated: bool,
+    #[serde(default)]
+    blocked_tags: Vec<String>,
+    #[serde(default)]
+    access_schedule: Vec<ParentalAccessWindow>,
+}
+async fn apply_parental_to_members(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    group_id: &str,
+    maximum_age: i64,
+    allow_unrated: i64,
+    tags_json: &str,
+    schedule_json: &str,
+) -> Result<(), StatusCode> {
+    let member_ids: Vec<String> = query_scalar(
+        "SELECT u.id FROM effective_user_group_members m JOIN users u ON u.id=m.user_id WHERE m.group_id=? AND u.role!='administrator'",
+    )
+    .bind(group_id)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(database)?;
+    let tags: Vec<String> = serde_json::from_str(tags_json).unwrap_or_default();
+    for uid in member_ids {
+        query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated,blocked_tags_json,access_schedule_json) VALUES(?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET maximum_age=excluded.maximum_age,allow_unrated=excluded.allow_unrated,blocked_tags_json=excluded.blocked_tags_json,access_schedule_json=excluded.access_schedule_json")
+            .bind(&uid)
+            .bind(maximum_age)
+            .bind(allow_unrated)
+            .bind(tags_json)
+            .bind(schedule_json)
+            .execute(&mut **tx)
+            .await
+            .map_err(database)?;
+        query("DELETE FROM parental_blocked_tags WHERE user_id=?")
+            .bind(&uid)
+            .execute(&mut **tx)
+            .await
+            .map_err(database)?;
+        for tag in &tags {
+            query("INSERT INTO parental_blocked_tags(user_id,tag_json) VALUES(?,?) ON CONFLICT DO NOTHING")
+                .bind(&uid)
+                .bind(json!(tag).to_string())
+                .execute(&mut **tx)
+                .await
+                .map_err(database)?;
+        }
+    }
+    Ok(())
+}
+async fn get_parental(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, StatusCode> {
+    administrator(&auth, &headers, false).await?;
+    let row: Option<(i64, i64, String, String)> = query_as(
+        "SELECT maximum_age,allow_unrated,blocked_tags_json,access_schedule_json FROM group_parental_policies WHERE group_id=?",
+    )
+    .bind(&id)
+    .fetch_optional(&auth.store.pool)
+    .await
+    .map_err(database)?;
+    Ok(Json(
+        row.map(|(age, unrated, tags, schedule)| {
+            json!({
+                "maximumAge": age,
+                "allowUnrated": unrated != 0,
+                "blockedTags": serde_json::from_str::<Value>(&tags).unwrap_or(Value::Null),
+                "accessSchedule": serde_json::from_str::<Value>(&schedule).unwrap_or(Value::Null)
+            })
+        })
+        .unwrap_or(Value::Null),
+    ))
+}
+async fn save_parental(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(input): Json<GroupParentalInput>,
+) -> Result<StatusCode, StatusCode> {
+    let actor = administrator(&auth, &headers, true).await?;
+    if !(0..=21).contains(&input.maximum_age)
+        || input.blocked_tags.len() > 64
+        || input
+            .blocked_tags
+            .iter()
+            .any(|v| v.trim().is_empty() || v.len() > 100 || v.chars().any(char::is_control))
+        || input.access_schedule.len() > 56
+        || input.access_schedule.iter().any(|w| {
+            !(0..=6).contains(&w.day)
+                || !(0..1440).contains(&w.start_minute)
+                || !(1..=1440).contains(&w.end_minute)
+                || w.start_minute >= w.end_minute
+        })
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let tags: Vec<String> = input
+        .blocked_tags
+        .iter()
+        .map(|v| v.trim().to_lowercase())
+        .collect();
+    let tags_json = json!(tags).to_string();
+    let schedule_json = json!(
+        input
+            .access_schedule
+            .iter()
+            .map(|w| json!({"day": w.day, "startMinute": w.start_minute, "endMinute": w.end_minute}))
+            .collect::<Vec<_>>()
+    )
+    .to_string();
+    let mut conn = auth.store.pool.acquire().await.map_err(database)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(database)?;
+    recheck_administrator(&mut tx, &actor).await?;
+    let exists: i64 = query_scalar("SELECT count(*) FROM user_groups WHERE id=?")
+        .bind(&id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(database)?;
+    if exists != 1 {
+        return Err(StatusCode::NOT_FOUND);
+    }
+    let allow_unrated = i64::from(input.allow_unrated);
+    query("INSERT INTO group_parental_policies(group_id,maximum_age,allow_unrated,blocked_tags_json,access_schedule_json) VALUES(?,?,?,?,?) ON CONFLICT(group_id) DO UPDATE SET maximum_age=excluded.maximum_age,allow_unrated=excluded.allow_unrated,blocked_tags_json=excluded.blocked_tags_json,access_schedule_json=excluded.access_schedule_json")
+        .bind(&id)
+        .bind(input.maximum_age)
+        .bind(allow_unrated)
+        .bind(&tags_json)
+        .bind(&schedule_json)
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    apply_parental_to_members(&mut tx, &id, input.maximum_age, allow_unrated, &tags_json, &schedule_json).await?;
+    tx.commit().await.map_err(database)?;
+    crate::inventory::invalidate_catalogue_cache();
+    Ok(StatusCode::NO_CONTENT)
+}
+async fn delete_parental(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<StatusCode, StatusCode> {
+    let actor = administrator(&auth, &headers, true).await?;
+    let mut conn = auth.store.pool.acquire().await.map_err(database)?;
+    let mut tx = crate::database::begin_write(&mut conn)
+        .await
+        .map_err(database)?;
+    recheck_administrator(&mut tx, &actor).await?;
+    query("DELETE FROM group_parental_policies WHERE group_id=?")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(database)?;
+    let member_ids: Vec<String> = query_scalar(
+        "SELECT u.id FROM effective_user_group_members m JOIN users u ON u.id=m.user_id WHERE m.group_id=? AND u.role!='administrator'",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(database)?;
+    for uid in member_ids {
+        query("DELETE FROM parental_policies WHERE user_id=?")
+            .bind(&uid)
+            .execute(&mut *tx)
+            .await
+            .map_err(database)?;
+        query("DELETE FROM parental_blocked_tags WHERE user_id=?")
+            .bind(&uid)
+            .execute(&mut *tx)
+            .await
+            .map_err(database)?;
+    }
+    tx.commit().await.map_err(database)?;
+    crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }

@@ -94,7 +94,7 @@ pub async fn can_download(store: &IdentityStore, user: &str) -> Result<bool, Sta
     }
     user_flag(store, user).await
 }
-/// The user's own permission, as the administrator edits it.
+/// The user's own permission, falling back to group rules when not explicitly set.
 async fn user_flag(store: &IdentityStore, user: &str) -> Result<bool, StatusCode> {
     let flag: Option<i64> =
         query_scalar("SELECT allow_media_download FROM user_media_policies WHERE user_id=?")
@@ -102,7 +102,23 @@ async fn user_flag(store: &IdentityStore, user: &str) -> Result<bool, StatusCode
             .fetch_optional(&store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(flag.unwrap_or(1) == 1)
+    if let Some(flag) = flag {
+        return Ok(flag == 1);
+    }
+    let group_flags: Vec<i64> = query_scalar(
+        "SELECT allow_media_download FROM user_groups \
+            WHERE allow_media_download IS NOT NULL \
+            AND (is_default=1 OR id IN (SELECT group_id FROM effective_user_group_members WHERE user_id=?))",
+    )
+    .bind(user)
+    .fetch_all(&store.pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if group_flags.is_empty() {
+        Ok(true)
+    } else {
+        Ok(!group_flags.contains(&0))
+    }
 }
 async fn own(
     State(auth): State<AuthState>,

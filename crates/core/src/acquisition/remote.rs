@@ -311,8 +311,9 @@ pub async fn ensure(
         object.remove("_singleRecordingId");
         object.remove("_singleReleaseId");
     }
+    let quality_profile_id = input.quality_profile_id.unwrap_or(server.quality_profile_id);
     body["rootFolderPath"] = json!(server.root_folder);
-    body["qualityProfileId"] = json!(server.quality_profile_id);
+    body["qualityProfileId"] = json!(quality_profile_id);
     body["monitored"] = json!(!single);
     if single {
         body["anyReleaseOk"] = json!(false);
@@ -346,7 +347,7 @@ pub async fn ensure(
         "album" => {
             let mut artist = body["artist"].clone();
             artist["rootFolderPath"] = json!(server.root_folder);
-            artist["qualityProfileId"] = json!(server.quality_profile_id);
+            artist["qualityProfileId"] = json!(quality_profile_id);
             artist["metadataProfileId"] = json!(server.metadata_profile_id);
             artist["monitored"] = json!(true);
             artist["monitorNewItems"] = json!("none");
@@ -548,10 +549,74 @@ pub async fn search_missing(server: &Server, input: &RequestInput, id: &str) -> 
     }
     Ok(())
 }
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DownloadProgress {
+    pub percent: f64,
+    pub total_bytes: u64,
+    pub remaining_bytes: u64,
+    pub status: String,
+    pub timeleft: Option<String>,
+    pub items: usize,
+}
 pub struct Progress {
     pub paths: Vec<String>,
     pub expected: usize,
     pub imported: bool,
+    pub download: Option<DownloadProgress>,
+}
+async fn queue_progress(server: &Server, kind: &str, id: &str) -> Option<DownloadProgress> {
+    let param = match kind {
+        "film" => ("movieId", id.to_owned()),
+        "series" => ("seriesId", id.to_owned()),
+        "artist" => ("artistId", id.to_owned()),
+        "album" => ("albumIds", id.to_owned()),
+        _ => return None,
+    };
+    let value = server
+        .call("GET", "queue/details", &[param], None)
+        .await
+        .ok()?;
+    let items = value.as_array()?;
+    if items.is_empty() {
+        return None;
+    }
+    let mut total_bytes: u64 = 0;
+    let mut remaining_bytes: u64 = 0;
+    let mut status = String::new();
+    let mut timeleft = None;
+    for item in items {
+        let size = item["size"].as_f64().unwrap_or(0.0).max(0.0) as u64;
+        let left = item["sizeleft"].as_f64().unwrap_or(0.0).max(0.0) as u64;
+        total_bytes = total_bytes.saturating_add(size);
+        remaining_bytes = remaining_bytes.saturating_add(left);
+        if status.is_empty() {
+            status = item["trackedDownloadState"]
+                .as_str()
+                .or_else(|| item["status"].as_str())
+                .unwrap_or("downloading")
+                .to_owned();
+        }
+        if timeleft.is_none()
+            && let Some(t) = item["timeleft"].as_str().filter(|s| !s.trim().is_empty())
+        {
+            timeleft = Some(t.to_owned());
+        }
+    }
+    let percent = if total_bytes > 0 {
+        let done = total_bytes.saturating_sub(remaining_bytes) as f64;
+        ((done / total_bytes as f64) * 1000.0).round() / 10.0
+    } else {
+        0.0
+    };
+    Some(DownloadProgress {
+        percent: percent.clamp(0.0, 100.0),
+        total_bytes,
+        remaining_bytes,
+        status: if status.is_empty() { "downloading".into() } else { status },
+        timeleft,
+        items: items.len(),
+    })
 }
 fn paths_from(value: &Value) -> Vec<String> {
     value
@@ -577,10 +642,17 @@ pub async fn progress(server: &Server, input: &RequestInput, id: &str) -> Result
                 .as_str()
                 .map(|s| vec![s.into()])
                 .unwrap_or_default();
+            let imported = movie["hasFile"] == true;
+            let download = if imported {
+                None
+            } else {
+                queue_progress(server, "film", id).await
+            };
             Ok(Progress {
                 paths,
                 expected: 1,
-                imported: movie["hasFile"] == true,
+                imported,
+                download,
             })
         }
         "series" => {
@@ -621,10 +693,16 @@ pub async fn progress(server: &Server, input: &RequestInput, id: &str) -> Result
             } else {
                 selected.len()
             };
+            let download = if imported {
+                None
+            } else {
+                queue_progress(server, "series", id).await
+            };
             Ok(Progress {
                 paths,
                 expected: expected.max(1),
                 imported,
+                download,
             })
         }
         "album" => {
@@ -636,10 +714,17 @@ pub async fn progress(server: &Server, input: &RequestInput, id: &str) -> Result
                 .await?;
             let expected = album["statistics"]["trackCount"].as_u64().unwrap_or(0) as usize;
             let paths = paths_from(&files);
+            let imported = expected > 0 && paths.len() >= expected;
+            let download = if imported {
+                None
+            } else {
+                queue_progress(server, "album", id).await
+            };
             Ok(Progress {
-                imported: expected > 0 && paths.len() >= expected,
+                imported,
                 expected: expected.max(1),
                 paths,
+                download,
             })
         }
         "artist" => {
@@ -671,10 +756,17 @@ pub async fn progress(server: &Server, input: &RequestInput, id: &str) -> Result
                 paths.extend(paths_from(&files));
                 expected += album["statistics"]["trackCount"].as_u64().unwrap_or(0) as usize;
             }
+            let imported = expected > 0 && paths.len() >= expected;
+            let download = if imported {
+                None
+            } else {
+                queue_progress(server, "artist", id).await
+            };
             Ok(Progress {
-                imported: expected > 0 && paths.len() >= expected,
+                imported,
                 expected: expected.max(1),
                 paths,
+                download,
             })
         }
         _ => Err(err(StatusCode::UNPROCESSABLE_ENTITY, "track_not_supported")),

@@ -5,14 +5,14 @@
   import {
     applicationRequest, dateLabel, errorMessage, features, groupCount, kindLabels, loadFeatures, parseSelection,
     rejectReasonLabels, rejectReasons, requestGroups, requestPayload, requestStep, requestSteps, seasonRanges,
-    statusLabels, statusTone, workHref, loadMyPolicy, posterUrl, type MediaRequest, type RequestGroup, type RequestKind, type RequestSelection,
+    statusLabels, statusTone, workHref, loadMyPolicy, posterUrl, type MediaRequest, type QualityProfile, type RequestGroup, type RequestKind, type RequestSelection,
     type SearchResult, type MyPolicy
   } from './api';
   import './applications.css';
   import { t } from '../i18n';
 
   let { embedded = false }: { embedded?: boolean } = $props();
-  type Destination = { id: string; name: string; kind: string; isDefault?: boolean };
+  type Destination = { id: string; name: string; kind: string; isDefault?: boolean; qualityProfileId?: number; qualityProfiles?: QualityProfile[] };
 
   let loading = $state(true);
   let busy = $state(false);
@@ -37,6 +37,7 @@
   let seasonsText = $state('');
   let episodesText = $state('');
   let monitorFuture = $state(false);
+  let selectedQualityProfileId = $state<number>(0);
 
   // List
   let requests = $state<MediaRequest[]>([]);
@@ -58,6 +59,21 @@
   const currentGrant = $derived(myPolicy?.classes?.[currentClass]);
   const service = (value: string | undefined) => value === 'film' ? 'radarr' : value === 'series' ? 'sonarr' : 'lidarr';
   const destinationsFor = (value: string | undefined) => destinations.filter(server => server.kind === service(value));
+  const selectedDestination = $derived.by(() => {
+    if (!selected) return undefined;
+    const list = destinationsFor(selected.kind);
+    const id = selected.serverId || serverId;
+    return (id ? list.find(d => d.id === id) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
+  });
+  const availableQualityProfiles = $derived.by(() => {
+    const dest = selectedDestination;
+    if (!dest?.qualityProfiles?.length) return [];
+    const list = [...dest.qualityProfiles];
+    if (dest.qualityProfileId && !list.some(p => p.id === dest.qualityProfileId)) {
+      list.unshift({ id: dest.qualityProfileId, name: `#${dest.qualityProfileId}` });
+    }
+    return list;
+  });
   const pendingIds = $derived(requests.filter(item => item.status === 'pending').map(item => item.id));
   const allPicked = $derived(pendingIds.length > 0 && pendingIds.every(id => picked.includes(id)));
   const groupLabels: Record<RequestGroup, string> = $derived({
@@ -106,6 +122,12 @@
       } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
       finally { loading = false; }
     })();
+    const timer = setInterval(() => {
+      if (!busy && requests.some(r => ['approved', 'submitted', 'acquiring', 'imported', 'partial'].includes(r.status))) {
+        void refresh().catch(() => {});
+      }
+    }, 15000);
+    return () => clearInterval(timer);
   });
 
   function setKind(value: RequestKind) {
@@ -136,16 +158,21 @@
   async function choose(result: SearchResult) {
     selected = result; seriesScope = 'all'; chosenSeasons = []; seasonsText = ''; episodesText = '';
     monitorFuture = result.kind === 'artist'; message = '';
+    const list = destinationsFor(result.kind);
+    const id = result.serverId || serverId;
+    const dest = (id ? list.find(d => d.id === id) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
+    selectedQualityProfileId = dest?.qualityProfileId ?? 0;
     await tick();
     dialog?.showModal();
   }
   function closeDialog() { if (dialog?.open) dialog.close(); }
   function selection(): RequestSelection {
-    if (selected?.kind !== 'series') return { monitorFuture: selected?.kind === 'artist' ? monitorFuture : false };
-    if (seriesScope === 'all') return { seasons: [], episodes: [], monitorFuture };
+    const qualityProfileId = selectedQualityProfileId > 0 ? selectedQualityProfileId : undefined;
+    if (selected?.kind !== 'series') return { monitorFuture: selected?.kind === 'artist' ? monitorFuture : false, qualityProfileId };
+    if (seriesScope === 'all') return { seasons: [], episodes: [], monitorFuture, qualityProfileId };
     const typed = parseSelection(selected.seasons?.length ? '' : seasonsText, episodesText);
     const seasons = [...new Set([...chosenSeasons, ...typed.seasons])].sort((a, b) => a - b);
-    return { seasons, episodes: typed.episodes.filter(item => !seasons.includes(item.season)), monitorFuture };
+    return { seasons, episodes: typed.episodes.filter(item => !seasons.includes(item.season)), monitorFuture, qualityProfileId };
   }
   const summary = $derived.by(() => {
     if (!selected) return '';
@@ -394,6 +421,17 @@
                 {#each requestSteps as value, index (value)}<li class:done={index <= step} aria-current={index === step ? 'step' : undefined}>{stepLabels[value]}</li>{/each}
               </ol>
             {/if}
+            {#if item.progress && item.status !== 'available'}
+              <div class="download-progress" aria-label={$t('rq_progress')}>
+                <div class="download-progress-meta">
+                  <span>{item.progress.percent.toFixed(1)}% · {item.progress.status}</span>
+                  {#if item.progress.timeleft}<span>{item.progress.timeleft}</span>{/if}
+                </div>
+                <div class="download-progress-track" role="progressbar" aria-valuenow={item.progress.percent} aria-valuemin={0} aria-valuemax={100}>
+                  <div class="download-progress-fill" style={`width: ${Math.min(100, Math.max(0, item.progress.percent))}%`}></div>
+                </div>
+              </div>
+            {/if}
             <div class="row actions">
               <button disabled={busy} aria-expanded={detail?.id === item.id} onclick={() => show(item.id)}>{detail?.id === item.id ? $t('hide') : $t('view_tracking')}</button>
               {#if item.workId}
@@ -469,6 +507,18 @@
         </p>
       {/if}
       {#if selected.inLibrary}<p class="feedback">{$t('rq_dialog_in_library')}</p>{/if}
+      {#if availableQualityProfiles.length > 1}
+        <label>
+          <span>{$t('quality_profile')}</span>
+          <select bind:value={selectedQualityProfileId}>
+            {#each availableQualityProfiles as profile (profile.id)}
+              <option value={profile.id}>
+                {profile.name}{profile.id === selectedDestination?.qualityProfileId ? ` (${$t('quality_profile_default_badge')})` : ''}
+              </option>
+            {/each}
+          </select>
+        </label>
+      {/if}
       {#if selected.kind === 'series'}
         <fieldset class="stack">
           <legend>{$t('rq_seasons_legend')}</legend>
@@ -509,3 +559,30 @@
     </form>
   {/if}
 </dialog>
+
+<style>
+  .download-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    margin-top: 0.35rem;
+  }
+  .download-progress-meta {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    opacity: 0.85;
+  }
+  .download-progress-track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--border-subtle, rgba(255, 255, 255, 0.12));
+    overflow: hidden;
+  }
+  .download-progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--accent, #5ea2ff);
+    transition: width 0.3s ease;
+  }
+</style>

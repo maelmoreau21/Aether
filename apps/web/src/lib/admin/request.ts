@@ -105,4 +105,4 @@ export async function adminRequest<T>(path: string, init: RequestInit = {}): Pro
   return response.status === 204 ? undefined as T : response.json() as Promise<T>;
 }
 
-export interface UserGroup { id: string; name: string; isDefault?: boolean; systemRole?: 'user' | 'administrator' | null; userIds: string[]; libraryIds: string[]; allowedKinds?: string[] }
+export interface UserGroup { id: string; name: string; isDefault?: boolean; systemRole?: 'user' | 'administrator' | null; userIds: string[]; libraryIds: string[]; allowedKinds?: string[]; allowMediaDownload?: boolean | null }

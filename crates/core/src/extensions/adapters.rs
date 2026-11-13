@@ -14,22 +14,8 @@ pub(super) struct WorkContext {
     pub(super) manual_json: Option<String>,
 }
 pub(super) fn authorize_operation(manifest: &Manifest, operation: &str) -> Result<(), Error> {
-    let permission = match operation {
-        "metadata.propose" | "metadata.search" | "metadata.details" | "lyrics.get" => {
-            "metadata.read"
-        }
-        "metadata.images" => "images",
-        "subtitles.search" | "subtitles.download" => "subtitles",
-        "avatars.list" | "avatars.generate" => "avatars",
-        "requests.validate" | "requests.plan" => "requests",
-        "reports.validate" | "reports.classify" => "reports",
-        "intro.detect"
-        | "markers.detect"
-        | "intro.match_fingerprints"
-        | "intro.parse_chapters"
-        | "markers.get" => "playback.markers",
-        _ => return Err(err(StatusCode::BAD_REQUEST, "unsupported_operation")),
-    };
+    let permission = super::permissions::permission_for_operation(operation)
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "unsupported_operation"))?;
     if !manifest.permissions.iter().any(|p| p == permission) {
         return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
     }

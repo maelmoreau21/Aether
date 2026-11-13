@@ -95,8 +95,15 @@ async fn bootstrap_status(State(state): State<AuthState>) -> Response {
         .unwrap_or(false);
     let local_enabled = is_local_login_enabled();
     let http_bootstrap_enabled = !is_http_bootstrap_disabled();
+    let has_libraries: i64 = crate::database::query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM libraries l WHERE NOT EXISTS(SELECT 1 FROM deleted_libraries d WHERE d.library_id=l.id)) AS INTEGER)",
+    )
+    .fetch_one(&state.store.pool)
+    .await
+    .unwrap_or(0);
     Json(serde_json::json!({
         "needsBootstrap": closed == 0 && !oidc_admin_configured,
+        "hasLibraries": has_libraries != 0,
         "localLoginEnabled": local_enabled,
         "oidcAdminConfigured": oidc_admin_configured,
         "httpBootstrapEnabled": http_bootstrap_enabled

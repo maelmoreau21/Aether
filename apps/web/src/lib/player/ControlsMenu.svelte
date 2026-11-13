@@ -5,6 +5,7 @@
   import { SPEEDS, aspectRatioLabel, nextAspectRatio, speedOptionLabel, speedSettingLabel } from './controls-format';
   import { focusMenuItem, menuItems, nextMenuIndex } from './menu-navigation';
   import { LADDER, type QualityChoice } from './transcode';
+  import { detectClientTranscodeCapabilities } from './client-transcode';
   import { AUDIO_ENHANCEMENTS, type AudioEnhancement } from './audio-enhancement';
   import { SLEEP_MINUTES, sleepLabel } from './sleep-timer';
   import { t } from '../i18n';
@@ -30,8 +31,9 @@
   const videoTracks = $derived((source?.tracks?.some(track => track.codec_type === 'video') ? source.tracks : media.sources[0]?.tracks)?.filter(track => track.codec_type === 'video') ?? []);
 
   const sourceHeight = $derived(media.transcode?.height ?? videoTracks[0]?.height ?? 0);
+  const canVideoTranscode = $derived(Boolean(media.transcode && (media.transcode.video !== false || detectClientTranscodeCapabilities().video)));
   // Heights above the original are never offered: transcoding only ever scales down.
-  const qualityHeights = $derived(media.transcode && media.transcode.video !== false ? LADDER.map(item => item.height).filter(height => height < Math.max(sourceHeight, 361)) : []);
+  const qualityHeights = $derived(canVideoTranscode ? LADDER.map(item => item.height).filter(height => height < Math.max(sourceHeight, 361)) : []);
   const qualityOptions = $derived<QualityChoice[]>(['auto', 'original', ...qualityHeights as QualityChoice[]]);
   const enhancementLabel = (value: AudioEnhancement) => value === 'night' ? $t('night_mode') : value === 'normalize' ? $t('volume_levelling') : $t('none');
   const bitrateLabel = (kbps: number) => kbps === 0 ? $t('bitrate_unlimited') : $t('bitrate_mbps', { value: kbps / 1000 });
@@ -42,7 +44,7 @@
     ...(selectableAudio.length > 1 ? [{ id: 'audio', label: $t('audio') }] : []),
     { id: 'subtitles', label: $t('subtitles') },
     { id: 'video', label: $t('version') },
-    ...(media.transcode && media.transcode.video !== false ? [{ id: 'quality', label: $t('quality') }] : []),
+    ...(canVideoTranscode ? [{ id: 'quality', label: $t('quality') }] : []),
     { id: 'speed', label: $t('speed') },
     { id: 'settings', label: $t('player_settings') }
   ]) as { id: Exclude<Menu, null>; label: string }[]);

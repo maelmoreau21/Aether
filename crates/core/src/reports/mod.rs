@@ -474,11 +474,6 @@ async fn create(
     let library = resource(&auth.store, &actor, &input).await?;
     let payload =
         serde_json::to_value(&input).map_err(|_| err(StatusCode::BAD_REQUEST, "invalid_report"))?;
-    let result =
-        applications::invoke(&auth.store, "reports", "reports.validate", payload.clone()).await?;
-    if result["valid"] != true {
-        return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_report"));
-    }
     // Triage is advisory: a busy or older extension leaves the neutral priority.
     let classified = applications::invoke(&auth.store, "reports", "reports.classify", payload)
         .await

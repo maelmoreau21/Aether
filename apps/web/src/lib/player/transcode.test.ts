@@ -75,6 +75,15 @@ describe('fallback transcoding plan', () => {
     expect(copied.flags & FLAG_NIGHT).toBe(0);
     expect(copied.mime).toBe('video/mp4; codecs="avc1.640029,ec-3"');
     expect(planTranscode(noAudio, second, 'audio', options, sdr)).toBeUndefined();
+
+    // Even when server transcoding is off, a capable browser can transcode client-side.
+    const withClient: Environment = { ...sdr, clientTranscode: { video: true, audio: true } };
+    const clientVideo = planTranscode(noVideo, original, 'quality', { ...options, quality: 1080 }, withClient)!;
+    expect(clientVideo.mode).toBe('client');
+    expect(clientVideo.height).toBe(1080);
+    const clientAudio = planTranscode(noAudio, second, 'audio', options, withClient)!;
+    expect(clientAudio.mode).toBe('client');
+    expect(clientAudio.mime).toContain('mp4a.40.2');
   });
 
   it('fits the ladder to the source height and every ceiling', () => {

@@ -71,9 +71,13 @@ pub struct Settings {
     pub log_level: crate::server_log::Level,
     #[serde(default = "default_log_retention")]
     pub log_retention_days: u32,
-    /// "Watch together": when off, every party route refuses and the web hides its entry points.
-    #[serde(default = "default_true")]
+    /// "Watch together" (SyncPlay): off by default for a simple standalone setup; when off,
+    /// every party route refuses and the web hides its entry points.
+    #[serde(default)]
     pub watch_together_enabled: bool,
+    /// Distributed cluster / remote Media Nodes capability: off by default for single-container setups.
+    #[serde(default)]
+    pub cluster_enabled: bool,
     /// Server video transcoding (re-encoded picture, reduced quality, tone mapping, burnt
     /// subtitles). Off by default: the picture is played as stored and the Core refuses every
     /// encode of it until an administrator turns this on. Settings saved before the
@@ -81,8 +85,9 @@ pub struct Settings {
     #[serde(default, alias = "transcodingEnabled")]
     pub video_transcoding_enabled: bool,
     /// Server audio transcoding (AAC conversion, downmix, normalisation, night mode).
-    /// When off, the Core refuses every audio encode; copied audio stays allowed.
-    #[serde(default = "default_true")]
+    /// Off by default: copied audio stays allowed, and the Core refuses every audio
+    /// encode until an administrator turns this on.
+    #[serde(default)]
     pub audio_transcoding_enabled: bool,
     /// HDR to SDR conversion while transcoding (heavy on the Node's CPU or GPU).
     #[serde(default = "default_true")]
@@ -189,6 +194,7 @@ struct SettingsInput {
     log_level: Option<crate::server_log::Level>,
     log_retention_days: Option<u32>,
     watch_together_enabled: Option<bool>,
+    cluster_enabled: Option<bool>,
     video_transcoding_enabled: Option<bool>,
     audio_transcoding_enabled: Option<bool>,
     tone_mapping_enabled: Option<bool>,
@@ -227,9 +233,10 @@ impl Default for Settings {
             cors_hosts: Vec::new(),
             log_level: crate::server_log::Level::Info,
             log_retention_days: default_log_retention(),
-            watch_together_enabled: true,
+            watch_together_enabled: false,
+            cluster_enabled: false,
             video_transcoding_enabled: false,
-            audio_transcoding_enabled: true,
+            audio_transcoding_enabled: false,
             tone_mapping_enabled: true,
             subtitle_burn_in_enabled: true,
             max_transcode_kbps: 0,
@@ -431,6 +438,9 @@ async fn write(
         watch_together_enabled: input
             .watch_together_enabled
             .unwrap_or(previous.watch_together_enabled),
+        cluster_enabled: input
+            .cluster_enabled
+            .unwrap_or(previous.cluster_enabled),
         video_transcoding_enabled: input
             .video_transcoding_enabled
             .unwrap_or(previous.video_transcoding_enabled),
@@ -637,8 +647,9 @@ mod tests {
         assert_eq!(parsed.trickplay_max_cache_mb, 5120);
         assert!(parsed.chapter_images_enabled && parsed.intro_detection_enabled);
         assert_eq!(parsed.marker_min_confidence, 80);
-        assert!(parsed.watch_together_enabled);
-        assert!(!parsed.video_transcoding_enabled && parsed.audio_transcoding_enabled);
+        assert!(!parsed.watch_together_enabled);
+        assert!(!parsed.cluster_enabled);
+        assert!(!parsed.video_transcoding_enabled && !parsed.audio_transcoding_enabled);
         assert_eq!(
             parsed.media_defaults(),
             crate::library_options::GlobalMediaDefaults::default()

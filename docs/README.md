@@ -8,7 +8,7 @@ Point d'entrée thématique de `docs/`. Les documents datés peuvent décrire un
 | --- | --- |
 | [`../AGENTS.md`](../AGENTS.md) | Invariants et méthode de contribution des agents ; pas de mission par défaut |
 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md) | Composants et frontières |
-| [`../.ai/MEMORY.md`](../.ai/MEMORY.md) | Index historique des décisions ; archives : [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md) |
+| [`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md) | Archive historique des décisions |
 | [`archive/SPECIFICATION.md`](archive/SPECIFICATION.md) | Périmètre historique du premier démonstrateur P0/P1 |
 | [`MEDIA_FORMATS.md`](MEDIA_FORMATS.md) | Modèle des pistes et formats |
 | [`STREAMING_COMPATIBILITY.md`](STREAMING_COMPATIBILITY.md) | Preuves de lecture observées |
@@ -22,9 +22,7 @@ Point d'entrée thématique de `docs/`. Les documents datés peuvent décrire un
 - [`../README.md`](../README.md) : présentation, installation rapide, fonctionnalités.
 - [`INSTALLATION_LOCALE.md`](INSTALLATION_LOCALE.md) : installer Aether sur un PC Windows.
 - [`LOCAL_ADMIN.md`](LOCAL_ADMIN.md) : SQLite et premier administrateur local.
-- [`../.ai/DEV_STATE.md`](../.ai/DEV_STATE.md) : journal historique ; vérifier le commit courant avant d'en déduire l'état.
-- [`AI_WORKFLOW.md`](AI_WORKFLOW.md) : méthode actuelle pour Claude Code, Codex et autres agents (périmètre, worktrees, validation, clôture).
-- [`../.ai/ORIGINAL_REQUEST.md`](../.ai/ORIGINAL_REQUEST.md) et [`../.ai/PROMPT_DEMARRAGE_IA.md`](../.ai/PROMPT_DEMARRAGE_IA.md) : archives de la demande initiale et du premier prompt, **à ne pas relancer automatiquement**.
+- [`AI_WORKFLOW.md`](AI_WORKFLOW.md) : méthode de contribution (périmètre, worktrees, validation, clôture).
 - [`PRODUCT_FEATURES.md`](PRODUCT_FEATURES.md) : fonctions produit livrées. [`archive/PRODUCT_BACKLOG_2026_10_20.md`](archive/PRODUCT_BACKLOG_2026_10_20.md) : demandes historiques du 20 octobre 2026, closes depuis.
 - [`JELLYFIN_FUNCTIONAL_GAPS.md`](JELLYFIN_FUNCTIONAL_GAPS.md) : comparaison fonctionnelle Jellyfin / Aether.
 - [`../CONTRIBUTING.md`](../CONTRIBUTING.md) et [`../CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) : contribution et conduite.
@@ -97,7 +95,7 @@ Rapports datés, missions et expériences terminées, conservés pour l'historiq
 
 | Dossier | Contenu |
 | --- | --- |
-| [`archive/`](archive/) | Anciennes entrées de [`.ai/MEMORY.md`](archive/MEMORY_2026-11-03.md) |
+| [`archive/`](archive/) | Anciennes notes et décisions ([`archive/MEMORY_2026-11-03.md`](archive/MEMORY_2026-11-03.md)) |
 | `archive/missions/` | Missions datées du 3 novembre 2026 (`MISSION_*`) et mission streaming 3.2 |
 | `archive/audits/` | Audits ponctuels : couverture backlog, sortie P1, extensions, lecteur |
 | `archive/ci/` | Bilans CI/Docker datés (lot A01, trois P0, multi-arch, résultats Docker P2) |

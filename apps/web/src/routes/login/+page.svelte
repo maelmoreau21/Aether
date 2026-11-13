@@ -254,6 +254,10 @@
       .then(r => r.ok ? r.json() : { needsBootstrap: false })
       .then(data => {
         needsBootstrap = data.needsBootstrap === true;
+        if (needsBootstrap) {
+          void goto(resolve('setup/'), { replaceState: true });
+          return;
+        }
         if (typeof data.localLoginEnabled === 'boolean') {
           localLoginEnabled = data.localLoginEnabled;
         }

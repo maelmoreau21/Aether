@@ -26,20 +26,6 @@ pub(super) struct InstallPackage {
     pub(super) approved_access: AccessApproval,
 }
 
-/// Initial library scope of a fresh install. Metadata providers and the native
-/// application surfaces (reports, requests) apply to every library: the caller's
-/// own library permissions still decide what each user may reach. Without this,
-/// an application extension starts with an empty scope and refuses every call
-/// with `library_permission_denied`.
-fn default_all_libraries(permissions: &[String]) -> bool {
-    permissions.iter().any(|permission| {
-        matches!(
-            permission.as_str(),
-            "metadata.read" | "reports" | "requests"
-        )
-    })
-}
-
 pub(super) async fn install(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -425,7 +411,9 @@ pub(super) async fn install_with_key(
         .bind(&key_id)
         .bind(bytes)
         .bind(uuid::Uuid::new_v4().to_string())
-        .bind(i64::from(default_all_libraries(&package.manifest.permissions)))
+        .bind(i64::from(super::permissions::default_all_libraries(
+            &package.manifest.permissions,
+        )))
         .execute(&mut *tx)
         .await
         .map_err(|_| err(StatusCode::CONFLICT, "extension_exists"))?;

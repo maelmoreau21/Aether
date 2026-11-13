@@ -1,0 +1,39 @@
+# Aether — Configuration Docker Compose standard (autonome, 1 conteneur)
+# Pour les architectures distribuées / multi-machines (expérimental), voir compose.distributed.yaml.
+
+services:
+  aether:
+    image: ${AETHER_IMAGE_PREFIX:-ghcr.io/maelmoreau21}/aether:${AETHER_TAG:-latest}
+    container_name: aether
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    ports:
+      # Lié à localhost par défaut ; exposez via un reverse proxy HTTPS et définissez MEDIA_PUBLIC_URL.
+      - "127.0.0.1:3000:3000"
+    environment:
+      - MEDIA_PORT=3000
+      - MEDIA_BIND_ADDR=0.0.0.0
+      - MEDIA_PUBLIC_URL=${MEDIA_PUBLIC_URL:-http://127.0.0.1:3000}
+      - MEDIA_DB_PATH=/data/core.sqlite3
+      - MEDIA_PLUGINS_PATH=/data/plugins
+      - MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache
+      - MEDIA_DB_ENGINE=sqlite
+    volumes:
+      - aether_data:/data
+      - ${MEDIA_LIBRARY_DIR:-./media}:/media:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:3000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  aether_data:
+    name: aether_data

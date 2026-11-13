@@ -64,8 +64,7 @@ Détails : [BACKUP_BUNDLE.md](BACKUP_BUNDLE.md), [BACKUP_RESTORE.md](BACKUP_REST
 - HLS par copie pour les lecteurs natifs ([HLS.md](HLS.md)).
 - Images Docker multi-architecture `amd64` et `arm64`.
 - Le schéma 1.0 est le point de départ : il n'y a pas de chaîne de migrations ([MIGRATIONS.md](MIGRATIONS.md)).
-  Une base créée par une bêta antérieure est refusée explicitement : la recréer (sauvegarde puis restauration),
-  une rétrogradation n'est pas prise en charge.
+  Une base créée par une bêta antérieure est refusée explicitement et **ne peut pas** être convertie par sauvegarde/restauration (`media-restore` restaure la base telle quelle sans transformer son schéma). Il faut effectuer une **installation propre** sur une nouvelle base 1.0 : les fichiers médias restent intacts, mais les comptes, réglages et progressions de l'ancienne bêta ne sont pas récupérés. Une rétrogradation n'est pas prise en charge.
 
 ## Garantie d'API
 

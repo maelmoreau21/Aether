@@ -27,21 +27,9 @@ pub fn validate_package(package: &Package, public_key: &[u8]) -> Result<(), &'st
         || m.permissions.is_empty()
         || m.http_hosts.len() > 16
         || m.http_hosts.iter().any(|host| !http_host(host))
-        || m.permissions.iter().any(|p| {
-            ![
-                "metadata.read",
-                "metadata.write",
-                "avatars",
-                "images",
-                "providers",
-                "storage.private",
-                "playback.markers",
-                "subtitles",
-                "requests",
-                "reports",
-            ]
-            .contains(&p.as_str())
-        })
+        || m.permissions
+            .iter()
+            .any(|p| !super::permissions::is_allowed(p))
     {
         return Err("invalid_manifest");
     }

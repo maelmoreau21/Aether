@@ -288,3 +288,127 @@ async fn restore_assets_cli_rejects_partial_extension_sync() {
         }
     }
 }
+
+#[tokio::test]
+async fn cli_recover_restore_and_restore_assets_e2e() {
+    let temp = tempfile::tempdir().unwrap();
+    let server_a = temp.path().join("server_a");
+    let server_b = temp.path().join("server_b");
+    let media_root = temp.path().join("media");
+    tokio::fs::create_dir_all(&server_a).await.unwrap();
+    tokio::fs::create_dir_all(&server_b).await.unwrap();
+    tokio::fs::create_dir_all(&media_root).await.unwrap();
+
+    let db_a = server_a.join("core.sqlite3");
+    let store_a = IdentityStore::open(&db_a).await.unwrap();
+    store_a
+        .bootstrap(
+            "admin-cli",
+            Zeroizing::new("master-password-for-aether-1234".into()),
+        )
+        .await
+        .unwrap();
+    let asset_bytes = b"CLI_E2E_VERIFIED_ASSET_BYTES";
+    let meta = store_a
+        .assets()
+        .put_bytes(asset_bytes, "image/png")
+        .await
+        .unwrap();
+
+    let key = generate_key();
+    let package = create_package(&key, "cli-e2e-plugin", "1.0.0", valid_wasm());
+    sqlx::query(
+        "INSERT INTO extension_publishers(id, public_key, active) VALUES (?, 'fixture', 1)",
+    )
+    .bind(&package.publisher_id)
+    .execute(store_a.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO extensions(id, publisher_id, package_json, enabled, generation) VALUES (?, ?, ?, 1, 'gen-1')",
+    )
+    .bind(&package.manifest.id)
+    .bind(&package.publisher_id)
+    .bind(serde_json::to_string(&package).unwrap())
+    .execute(store_a.pool())
+    .await
+    .unwrap();
+
+    let snapshot_db = temp.path().join("db-snapshot.tmp");
+    aether_core::backup::backup_database(&db_a, &snapshot_db, None)
+        .await
+        .unwrap();
+    let asset_source = store_a.assets().export_source().await.unwrap();
+    let backup_archive = temp.path().join("cli-e2e.media-backup");
+    create_with_assets(
+        &snapshot_db,
+        BTreeMap::from([("MEDIA_MODE".into(), "standalone".into())]),
+        &backup_archive,
+        "sqlite",
+        Some(asset_source),
+        Protection::Encrypted(backup_key()),
+    )
+    .await
+    .unwrap();
+    store_a.close().await;
+
+    let extracted_dir = temp.path().join("extracted-cli");
+    let recover = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-recover"))
+        .arg(&backup_archive)
+        .arg(&extracted_dir)
+        .env(
+            "MEDIA_BACKUP_KEY",
+            "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12",
+        )
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "media-recover failed: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    let db_b = server_b.join("core.sqlite3");
+    let restore = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-restore"))
+        .arg(extracted_dir.join("database.sqlite3"))
+        .arg(&db_b)
+        .env("MEDIA_DB_ENGINE", "sqlite")
+        .env("MEDIA_LIBRARY_ROOT", &media_root)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        restore.status.success(),
+        "media-restore failed: {}",
+        String::from_utf8_lossy(&restore.stderr)
+    );
+
+    let assets_b = server_b.join("assets");
+    let plugins_b = server_b.join("plugins");
+    let restore_assets = tokio::process::Command::new(env!("CARGO_BIN_EXE_media-restore-assets"))
+        .arg(&extracted_dir)
+        .env("MEDIA_DB_ENGINE", "sqlite")
+        .env("MEDIA_DB_PATH", &db_b)
+        .env_remove("MEDIA_DB_URL")
+        .env("MEDIA_LIBRARY_ROOT", &media_root)
+        .env("MEDIA_ASSETS_PATH", &assets_b)
+        .env("MEDIA_PLUGINS_PATH", &plugins_b)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        restore_assets.status.success(),
+        "media-restore-assets failed: {}",
+        String::from_utf8_lossy(&restore_assets.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&restore_assets.stdout).contains("extension storage is healthy")
+    );
+
+    let store_b = IdentityStore::open(&db_b).await.unwrap();
+    let (_, read_bytes) = store_b.assets().read_all(&meta.sha256).await.unwrap();
+    assert_eq!(read_bytes, asset_bytes);
+    assert_eq!(wasm(&store_b, &package).await.unwrap(), package.wasm);
+    store_b.close().await;
+}

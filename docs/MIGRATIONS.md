@@ -1,14 +1,12 @@
-# Schéma de base de données
+# Schéma de base de données et migrations (`crates/core/migrations`)
 
-Aether n'a **pas de chaîne de migrations**. Le schéma courant est décrit une seule fois,
-par moteur, et appliqué à une base vide par `initialize_fresh_schema`
-(`crates/core/src/database.rs`) :
+Le schéma initial v1.0 est figé dans deux migrations de référence, une par moteur, et installé sur une base vide par `initialize_fresh_schema` / `upgrade_schema_with_steps` (`crates/core/src/database.rs`) :
 
 | Fichier | Rôle |
 |---|---|
-| `crates/core/schema/sqlite.sql` | tables, index, vues et trigger SQLite |
-| `crates/core/schema/postgres.sql` | les mêmes objets pour PostgreSQL (colonnes `BIGINT`, pas de trigger : la disponibilité des fichiers est maintenue en Rust) |
-| `crates/core/schema/derived.sql` | vues (et index de performance) partagés par les deux moteurs, sans aucune donnée : réappliqués à chaque démarrage, voir ci-dessous |
+| `crates/core/migrations/0001_initial_v1.sql` | schéma initial v1.0 figé pour SQLite (`crates/core/schema/sqlite.sql`) |
+| `crates/core/migrations/postgres/0001_initial_v1.sql` | schéma initial v1.0 figé pour PostgreSQL (`crates/core/schema/postgres.sql`) |
+| `crates/core/schema/derived.sql` | vues (et index de performance) partagés par les deux moteurs, sans aucune donnée : réappliqués à chaque démarrage |
 | `crates/core/schema/seed.sql` | lignes présentes dans toute base neuve (réglages singleton, tâches système, déclencheurs par défaut), identique pour les deux moteurs |
 
 ## Démarrage
@@ -42,17 +40,9 @@ connexion au lieu d'être replanifiées à chaque appel. Le banc
 `crates/core/tests/postgres_catalogue_bench.rs` (ignoré par défaut) mesure accueil, fiches
 et lecteur sur 30 000 films, 1 000 séries et 10 000 comptes.
 
-## Modifier le schéma
+## Modifier le schéma (v1.0+)
 
-Pendant la bêta, on **édite directement** `sqlite.sql` et `postgres.sql` (et `seed.sql`
-si une ligne initiale change), en gardant les deux moteurs alignés. Les bases créées
-avant le changement sont recréées : sauvegarde, nouvelle base, restauration des données
-utiles par les outils `backup` / `restore`. Il n'y a ni `ALTER TABLE` de rattrapage, ni
-journal, ni étape rejouée au démarrage.
-
-Après la version 1.0, un changement de schéma incompatible devra relever
-`SCHEMA_VERSION` (constante de `initialize_fresh_schema` et `CHECK` de la table
-`schema_version`) et fournir une procédure de reprise explicite ; elle sera décrite ici.
+Les fichiers `0001_initial_v1.sql` sont **figés** pour la sortie v1.0 : toute évolution ultérieure du schéma doit ajouter une étape `MigrationStep` séquentielle (`v1 -> v2 -> ...`) dans `crates/core/src/database.rs` (testée en SQLite et PostgreSQL via `upgrade_schema_with_steps` sans perte de données et de manière idempotente), et relever `CURRENT_SCHEMA_VERSION`.
 
 ## Tests
 

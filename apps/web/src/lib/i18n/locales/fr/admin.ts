@@ -996,4 +996,7 @@ export const admin = {
   artwork_job_completed: "Terminée",
   artwork_job_cancelled: "Annulée",
   artwork_job_failed: "Échec",
+  advanced_capabilities_heading: "Modules avancés",
+  advanced_capabilities_note: "Pour une installation simple en un seul conteneur, ces modules restent désactivés par défaut. Activez-les uniquement si vous utilisez plusieurs machines.",
+  enable_cluster_nodes: "Activer les Media Nodes distribués (Cluster)",
 } as const;

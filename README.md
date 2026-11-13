@@ -67,56 +67,45 @@ Il couvre le premier administrateur, le démarrage et l’installation des exten
 - Un dossier de films ou de séries accessible en lecture par le conteneur.
 - Pour l'accès depuis un autre appareil : un **reverse proxy HTTPS** (Traefik, Caddy, Nginx ou Synology DSM).
 
-### 1. Récupérer le dépôt
+### 1. Déploiement ultra-simple en 30 secondes (`compose.yaml`)
+
+Pour 95 % des utilisateurs (un seul conteneur, base SQLite intégrée, zéro configuration distribuée), utilisez le fichier standard [`compose.yaml`](compose.yaml) :
+
+```yaml
+services:
+  aether:
+    image: ghcr.io/maelmoreau21/aether:latest
+    container_name: aether
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - MEDIA_PUBLIC_URL=http://127.0.0.1:3000
+    volumes:
+      - aether_data:/data
+      - /chemin/vers/mes/medias:/media:ro
+
+volumes:
+  aether_data:
+```
+
+Lancez ensuite :
 
 ```bash
-git clone https://github.com/maelmoreau21/Aether.git
-cd Aether
-cp .env.example .env
+docker compose -f compose.yaml up -d
 ```
 
-Sur Windows PowerShell, remplacez `cp` par `Copy-Item .env.example .env` si nécessaire.
+> Pour construire depuis les sources ou personnaliser les limites matérielles (Synology DSM, cache de préparation), utilisez `docker-compose.yml` (`cp .env.example .env && docker compose up -d --build`). Les fichiers `compose.distributed.yaml`, `compose.multi-machine.example.yaml` et `compose.postgres-multimachine.example.yaml` sont réservés aux déploiements multi-machines avancés.
 
-### 2. Configurer les médias
+### 2. Assistant de premier démarrage (`/setup`)
 
-Dans `.env`, renseignez au minimum le chemin réel de votre médiathèque :
+Ouvrez **[http://127.0.0.1:3000/app/setup/](http://127.0.0.1:3000/app/setup/)** depuis la machine qui héberge Docker (ou récupérez le jeton d’initialisation dans les journaux `docker compose logs aether`, ou créez le compte en CLI via `docker compose exec -it aether media-bootstrap`) :
 
-```dotenv
-MEDIA_LIBRARY_DIR=/chemin/vers/mes/medias
-MEDIA_PUBLIC_URL=http://127.0.0.1:3000
-MEDIA_DB_ENGINE=sqlite
-```
+1. Créez votre premier compte administrateur (**Aether ne possède aucun compte ni mot de passe par défaut**).
+2. Ajoutez votre première médiathèque (`/media`) et cliquez sur **Tester les permissions de lecture** pour vérifier l’accès au dossier.
+3. L’analyse initiale démarre automatiquement et vous accédez directement à votre catalogue.
 
-`MEDIA_LIBRARY_DIR` est monté sur `/media` en **lecture seule**. L'URL HTTP locale convient uniquement à une utilisation depuis la machine hôte elle-même.
-
-### 3. Démarrer Aether
-
-Si les images `ghcr.io/maelmoreau21/aether` sont accessibles dans le registre :
-
-```bash
-docker compose pull
-docker compose up -d --no-build
-```
-
-Alternative pour construire les images depuis le code source :
-
-```bash
-docker compose up -d --build
-```
-
-> La disponibilité et la visibilité publique des images GHCR dépendent de la publication réussie du workflow GitHub Actions ; rendre le dépôt GitHub public ne rend pas automatiquement ses packages publics.
-
-### 4. Créer le premier administrateur
-
-```bash
-docker compose exec -it aether media-bootstrap
-```
-
-Définissez un mot de passe lors de l'amorçage interactif. **Aether ne possède aucun compte ni mot de passe par défaut.**
-
-Ouvrez ensuite **[http://127.0.0.1:3000/app/login/](http://127.0.0.1:3000/app/login/)** depuis la machine qui héberge Docker. Ajoutez vos bibliothèques depuis l'administration, puis lancez un scan.
-
-Pour les procédures détaillées, consultez le [guide Docker](docs/DEPLOYMENT_DOCKER.md) ou le [guide Synology](docs/DEPLOYMENT_SYNOLOGY.md).
+Pour les procédures détaillées (reverse proxy HTTPS, Synology DSM, PostgreSQL), consultez le [guide Docker](docs/DEPLOYMENT_DOCKER.md) ou le [guide Synology](docs/DEPLOYMENT_SYNOLOGY.md).
 
 ## Architecture
 

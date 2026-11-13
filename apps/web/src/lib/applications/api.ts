@@ -7,11 +7,12 @@ export const kindLabels: Readonly<Record<RequestKind, string>> = translatedLabel
 export const statusLabels: Readonly<Record<string, string>> = translatedLabels({ pending: 'awaiting_approval', approved: 'approved', queued: 'to_send', submitted: 'sent', downloading: 'being_acquired', acquiring: 'being_acquired', processing: 'being_acquired', imported: 'imported', available: 'available_in_your_library', partially_available: 'partially_available', partial: 'partially_available', suspended: 'suspended_after_import', rejected: 'rejected', failed: 'applications_failed', cancelled: 'sched_outcome_cancelled', open: 'applications_open', in_progress: 'stats_kpi_active', resolved: 'resolved', closed: 'closed_without_a_fix' });
 export const categoryLabels: Readonly<Record<string, string>> = translatedLabels({ video: 'applications_video', audio: 'audio', subtitles: 'report_category_subtitles', metadata: 'metadata', missing: 'report_category_missing', other: 'report_category_other' });
 
-export interface Features { requests: boolean; reports: boolean }
-export const features = writable<Features>({ requests: false, reports: false });
+export interface Features { requests: boolean; reports: boolean; cluster?: boolean; syncplay?: boolean }
+export const defaultFeatures: Readonly<Features> = Object.freeze({ requests: false, reports: false, cluster: false, syncplay: false });
+export const features = writable<Features>({ ...defaultFeatures });
 let pending: Promise<Features> | undefined;
 let loadedAt = 0;
-onSessionGenerationChange(() => { features.set({ requests: false, reports: false }); pending = undefined; loadedAt = 0; });
+onSessionGenerationChange(() => { features.set({ ...defaultFeatures }); pending = undefined; loadedAt = 0; });
 
 const errors: Readonly<Record<string, string>> = translatedLabels({
   extension_disabled: 'err_extension_unavailable', extension_unavailable: 'err_extension_unavailable', feature_unavailable: 'err_extension_unavailable',

@@ -194,6 +194,7 @@ COPY --from=rust-builder --chmod=0755 /build/target/release/media-restore /usr/l
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-recover /usr/local/bin/media-recover
 COPY --from=rust-builder --chmod=0755 /build/target/release/media-extension-worker /usr/local/bin/media-extension-worker
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
+COPY --chown=aether:aether assets/avatars/ /app/assets/avatars/
 
 ENV MEDIA_MODE=distributed \
     MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \
@@ -321,6 +322,7 @@ RUN ln -s /usr/local/bin/aether-core /usr/local/bin/media-poc \
     && ln -s /usr/local/bin/aether-core /usr/local/bin/aether
 
 COPY --from=web-builder --chown=aether:aether /app/apps/web/build /app/apps/web/build
+COPY --chown=aether:aether assets/avatars/ /app/assets/avatars/
 
 ENV MEDIA_PORT=3000 \
     MEDIA_PREPARATION_CACHE_DIR=/data/preparation-cache \

@@ -8,23 +8,23 @@
     serverName: string; welcomeMessage: string;
     videoTranscodingEnabled?: boolean; audioTranscodingEnabled?: boolean;
     toneMappingEnabled?: boolean; subtitleBurnInEnabled?: boolean; maxTranscodeKbps?: number;
-    remoteControlEnabled?: boolean; downloadsEnabled?: boolean; watchTogetherEnabled?: boolean;
+    remoteControlEnabled?: boolean; downloadsEnabled?: boolean; watchTogetherEnabled?: boolean; clusterEnabled?: boolean;
   }
-  let video = $state(true), audio = $state(true), toneMapping = $state(true), burnIn = $state(true);
-  let maxMbps = $state(0), remote = $state(true), downloads = $state(true), watchTogether = $state(true);
+  let video = $state(false), audio = $state(false), toneMapping = $state(true), burnIn = $state(true);
+  let maxMbps = $state(0), remote = $state(true), downloads = $state(true), watchTogether = $state(false);
   let base = $state<Pick<PlaybackSettings, 'serverName' | 'welcomeMessage'>>({ serverName: '', welcomeMessage: '' });
   let loading = $state(true), saving = $state(false), error = $state(''), notice = $state('');
 
   function apply(data: PlaybackSettings) {
     base = { serverName: data.serverName, welcomeMessage: data.welcomeMessage };
     video = data.videoTranscodingEnabled ?? false;
-    audio = data.audioTranscodingEnabled ?? true;
+    audio = data.audioTranscodingEnabled ?? false;
     toneMapping = data.toneMappingEnabled ?? true;
     burnIn = data.subtitleBurnInEnabled ?? true;
     maxMbps = (data.maxTranscodeKbps ?? 0) / 1000;
     remote = data.remoteControlEnabled ?? true;
     downloads = data.downloadsEnabled ?? true;
-    watchTogether = data.watchTogetherEnabled ?? true;
+    watchTogether = data.watchTogetherEnabled ?? false;
   }
   async function load() {
     loading = true; error = ''; notice = '';

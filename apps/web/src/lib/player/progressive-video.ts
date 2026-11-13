@@ -2,6 +2,7 @@ import {bufferedAhead} from './startup-buffer';
 import {mp4TimelineOffset} from './mp4-timeline';
 import {Mp4Fragments,mp4Timescale,mp4RandomAccess} from './mp4-fragments';
 import {EncodedVideoBuffer} from './encoded-video-buffer';
+import {PlaybackFailure, type PlaybackFailureKind} from './diagnostics';
 
 import { tr } from '../i18n';
 function isMobileDevice() {
@@ -30,14 +31,17 @@ export class ProgressiveVideo {
   private failed?: Error;
   /** What the Node reported about the stream (fallback transcoding). */
   headers: { encoder?: string; tonemap?: string } = {};
-  constructor(private video: HTMLVideoElement,private prefix: string,private duration: number,private mime: string,private onError: (message: string)=>void) {
+  constructor(private video: HTMLVideoElement,private prefix: string,private duration: number,private mime: string,private onError: (message: string, kind?: PlaybackFailureKind)=>void) {
     void this.failure.catch(()=>{});
     this.opened = new Promise<void>((resolve,reject)=>{
       this.rejectOpen=reject;
       this.source.addEventListener('sourceopen',()=>{
         if(this.closed)return;
         try {this.buffer=this.source.addSourceBuffer(this.mime);this.source.duration=this.duration;resolve();}
-        catch(error){reject(error);}
+        catch(error){
+          const message=error instanceof Error?error.message:String(error);
+          reject(new PlaybackFailure('codec',message));
+        }
       },{once:true});
     });
     void this.opened.catch(()=>{});
@@ -67,7 +71,7 @@ export class ProgressiveVideo {
     const buffer=this.buffer;
     return new Promise<void>((resolve,reject)=>{
       const finish=(error?:Error)=>{buffer.removeEventListener('updateend',done);buffer.removeEventListener('error',fail);buffer.removeEventListener('abort',fail);signal.removeEventListener('abort',abort);if(error)reject(error);else resolve();};
-      const done=()=>finish(),fail=()=>finish(new Error(tr('av1_fragment_rejected_by_the_browser'))),abort=()=>finish(new Error(tr('video_playback_cancelled')));
+      const done=()=>finish(),fail=()=>finish(new PlaybackFailure('codec',tr('av1_fragment_rejected_by_the_browser'))),abort=()=>finish(new Error(tr('video_playback_cancelled')));
       buffer.addEventListener('updateend',done,{once:true});buffer.addEventListener('error',fail,{once:true});buffer.addEventListener('abort',fail,{once:true});signal.addEventListener('abort',abort,{once:true});
     });
   }
@@ -142,6 +146,7 @@ export class ProgressiveVideo {
             const cut = Math.max(0, this.video.currentTime - marginSeconds);
             if (this.buffer!.buffered.start(0) < cut) {
               this.buffer!.remove(0, cut);await this.idle(signal);
+              if(current())raps=raps.filter(rap=>rap.time>cut);
             }
           }
         };
@@ -182,7 +187,7 @@ export class ProgressiveVideo {
       }finally{if(!complete||!current())await reader.cancel().catch(()=>{});reader.releaseLock();}
     };
     void run().catch(error=>{
-      if(!current())return;const failure=error instanceof Error?error:new Error(String(error));this.failed=failure;this.rejectFailure(failure);controller.abort();if(this.active)this.onError(failure.message);
+      if(!current())return;const failure=error instanceof Error?error:new Error(String(error));this.failed=failure;this.rejectFailure(failure);controller.abort();if(this.active)this.onError(failure.message, failure instanceof PlaybackFailure ? failure.kind : undefined);
     });
     try { await Promise.race([first,this.failure]); }
     finally { signal.removeEventListener('abort',cancelled); }

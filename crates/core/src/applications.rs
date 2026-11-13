@@ -181,11 +181,7 @@ pub async fn invoke(
     operation: &str,
     input: Value,
 ) -> Result<Value, Error> {
-    if !matches!(
-        (cap, operation),
-        ("requests", "requests.validate" | "requests.plan")
-            | ("reports", "reports.validate" | "reports.classify")
-    ) {
+    if !crate::extensions::permissions::is_application_operation(cap, operation) {
         return Err(err(StatusCode::BAD_REQUEST, "unsupported_operation"));
     }
     let (package, generation) = package(store, cap).await?;

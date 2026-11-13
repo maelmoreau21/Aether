@@ -237,3 +237,13 @@ Aether applique les exigences du standard **OWASP ASVS 5.0.0 Niveau 2** pour les
    - Système de fichiers racine en lecture seule (`read_only: true`) avec `tmpfs` non exécutable (`/tmp:rw,noexec,nosuid,size=64m`).
    - Limites de ressources explicites sur CPU (`cpus: 2.0`), mémoire (`memory: 1G`) et processus (`pids: 200`).
 
+## Dérogations temporaires d'audit de dépendances
+
+### `RUSTSEC-2026-0459` (`libsqlite3-sys` `0.37.0` via `sqlx` `0.9.0`)
+
+- **Avis** : fuite de mémoire potentielle dans SQLite `< 3.54.0` lors de l'ouverture d'un fichier SQLite et d'un journal WAL spécialement forgés.
+- **Blocage amont** : `crates/core/Cargo.toml` utilise déjà la dernière version publiée de `sqlx` (`0.9.0`, feature `sqlite-bundled`), dont le sous-paquet `sqlx-sqlite 0.9.0` borne sa dépendance à `libsqlite3-sys >=0.30.1, <0.38.0`. Une montée vers `libsqlite3-sys >= 0.39.0` n'est donc pas possible sans nouvelle version amont de `sqlx`.
+- **Atténuation** : l'exploitation suppose qu'un attaquant puisse déposer un fichier `.sqlite3` et un `.wal` forgés à l'emplacement exact où le Core ouvre sa base interne. En fonctionnement normal, le chemin de la base SQLite d'Aether est interne, non contrôlé par les utilisateurs et protégé par les permissions du conteneur/système.
+- **Action de suivi** : la CI exécute `cargo audit --ignore RUSTSEC-2026-0459` (`.github/workflows/ci.yml`). Dès qu'une version de `sqlx` accepte `libsqlite3-sys >= 0.39.0` (embarquant SQLite `>= 3.54.0`), mettre à jour `sqlx` et retirer `--ignore RUSTSEC-2026-0459` de la CI.
+
+

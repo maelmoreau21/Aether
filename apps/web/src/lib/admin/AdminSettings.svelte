@@ -14,6 +14,7 @@
   let introAnalysisPercent = $state(25), introAnalysisMaxMinutes = $state(10);
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
+  let clusterEnabled = $state(false);
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   let clearingFingerprints = $state(false);
@@ -44,6 +45,7 @@
           chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number; introAnalysisPercent?: number; introAnalysisMaxMinutes?: number;
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
+          clusterEnabled?: boolean;
         }>('/api/v1/admin/settings');
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
@@ -66,6 +68,7 @@
         minResumeDurationSeconds = data.minResumeDurationSeconds ?? 0;
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
         corsHosts = (data.corsHosts ?? []).join(', ');
+        clusterEnabled = data.clusterEnabled === true;
       }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
@@ -85,6 +88,7 @@
           chapterImagesEnabled, introDetectionEnabled, markerMinConfidence, introAnalysisPercent, introAnalysisMaxMinutes,
           minResumePct, maxResumePct, minResumeDurationSeconds,
           activityLogRetentionDays,
+          clusterEnabled,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
         })
       });
@@ -96,6 +100,7 @@
           chapterImagesEnabled?: boolean; introDetectionEnabled?: boolean; markerMinConfidence?: number; introAnalysisPercent?: number; introAnalysisMaxMinutes?: number;
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
+        clusterEnabled?: boolean;
       }>('/api/v1/admin/settings');
       blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
       name = saved.serverName;
@@ -118,6 +123,7 @@
       minResumeDurationSeconds = saved.minResumeDurationSeconds ?? 0;
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
       corsHosts = (saved.corsHosts ?? []).join(', ');
+      clusterEnabled = saved.clusterEnabled === true;
       serverPresentation.set(saved);
       notice = $t('settings_saved');
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('operation_failed'); }
@@ -197,6 +203,13 @@
           <label>{$t('log_retention')}<input type="number" min="1" max="3650" step="1" required bind:value={activityLogRetentionDays} /></label>
           <label>{$t('allowed_cors')}<input bind:value={corsHosts} placeholder={$t('https_app_example_com_http_localhost')} /></label>
         </div>
+      </fieldset>
+    </details>
+    <details class="adv">
+      <summary>{$t('advanced_capabilities_heading')}</summary>
+      <fieldset class="settings-fieldset">
+        <p>{$t('advanced_capabilities_note')}</p>
+        <label class="policy-toggle"><input type="checkbox" bind:checked={clusterEnabled} />{$t('enable_cluster_nodes')}</label>
       </fieldset>
     </details>
     <div class="actions"><button type="submit">{saving ? $t('loading') : $t('save')}</button></div>

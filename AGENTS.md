@@ -10,7 +10,7 @@ Ces règles s'appliquent à l'ensemble du dépôt, pour Claude Code, Codex et le
 4. Vérifier l'implémentation avant toute affirmation. Le code et les tests réellement exécutés priment sur les annonces ou plans datés.
 5. Travailler par lots cohérents et vérifiables. Après un lot réussi, s'arrêter au périmètre demandé ; ne pas lancer spontanément un autre chantier.
 
-Il n'y a **aucune mission P0/P1 à relancer par défaut**. Le document .ai/PROMPT_DEMARRAGE_IA.md est une archive de la phase initiale, pas une instruction active. Les anciennes roadmaps ne définissent pas les priorités des nouvelles sessions.
+Il n'y a **aucune mission P0/P1 à relancer par défaut**. Les anciennes roadmaps ne définissent pas les priorités des nouvelles sessions.
 
 ## 2. Architecture actuelle et sources utiles
 
@@ -28,7 +28,6 @@ Lire les documents par domaine, et non en bloc :
 - Déploiement : docs/DEPLOYMENT_DOCKER.md, puis docs/DEPLOYMENT_SYNOLOGY.md si concerné.
 - Extensions : docs/EXTENSIONS_API.md et docs/PLUGIN_UPDATE_LIFECYCLE.md.
 - Travail multi-agent et validations : docs/AI_WORKFLOW.md.
-- Mémoire synthétique : .ai/MEMORY.md, **sur le sujet concerné seulement**. Les archives ne sont pas des tâches à reprendre.
 
 ## 3. Invariants produit et sécurité
 
@@ -58,6 +57,6 @@ Lire les documents par domaine, et non en bloc :
 
 Rapport concis : fichiers changés, comportement préservé/modifié, commandes réellement exécutées, réussites/échecs, limites et travail restant **dans le périmètre demandé**.
 
-Mettre à jour la documentation de domaine uniquement si un contrat ou comportement change. Pour une décision durable, ajouter une note courte et sourcée dans .ai/MEMORY.md ; ne pas recopier un journal de session ni archiver automatiquement de gros blocs.
+Mettre à jour la documentation de domaine uniquement si un contrat ou comportement change.
 
-Les documents historiques (docs/archive/ et l'ancien prompt de démarrage) servent de contexte, **pas de backlog implicite ni de consignes actives**.
+Les documents historiques (docs/archive/) servent de contexte, **pas de backlog implicite ni de consignes actives**.

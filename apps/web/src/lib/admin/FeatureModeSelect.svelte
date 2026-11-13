@@ -4,9 +4,10 @@
 
   // Three-state choice of a feature that also has a server-wide setting: follow the server,
   // force it on, or force it off. "Follow the server" shows what the server currently does.
-  let { value = $bindable(), label, hint = '', serverOn, id, badge = null }: {
+  // Advanced modules default to disabled (`serverOn = false`, `value = 'disabled'`) out-of-the-box.
+  let { value = $bindable('disabled'), label, hint = '', serverOn = false, id, badge = null }: {
     value: FeatureMode; label: string; hint?: string; id: string;
-    /** What the server-wide setting is right now (undefined while it loads). */
+    /** What the server-wide setting is right now (defaults to false for advanced capabilities). */
     serverOn?: boolean;
     /** Optional state of what makes the feature work (e.g. the detection extension). */
     badge?: { tone: 'ok' | 'warn'; text: string } | null;

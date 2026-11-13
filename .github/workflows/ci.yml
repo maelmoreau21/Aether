@@ -309,6 +309,11 @@ jobs:
       - name: Installer cargo-audit
         run: cargo install cargo-audit --locked
 
+      # RUSTSEC-2026-0459 (libsqlite3-sys 0.37.0, SQLite < 3.54.0 memory leak on
+      # specially crafted DB/WAL files) : sqlx 0.9.0 / sqlx-sqlite 0.9.0 borne
+      # libsqlite3-sys à < 0.38.0 (impossible de monter à >= 0.39.0 sans mise à
+      # jour amont de sqlx). Risque atténué car la base SQLite est interne et non
+      # fournie par des clients. Voir docs/SECURITY.md pour le suivi.
       - name: Audit de sécurité des dépendances RustSec
         run: cargo audit --ignore RUSTSEC-2026-0459
 
@@ -405,6 +410,10 @@ jobs:
           rm -rf build
           npm run build
           test -f build/index.html
+
+      - name: Exécuter les tests UI Playwright (E2E)
+        working-directory: apps/web
+        run: npm run test:e2e
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures

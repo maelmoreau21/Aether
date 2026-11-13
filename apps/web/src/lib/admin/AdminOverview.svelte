@@ -6,6 +6,7 @@
   import type { Work } from '../catalog/api';
   import { selectArtwork } from '../catalog/artwork-selection';
   import { session } from '../auth/session';
+  import { clusterEnabled } from '../config/presentation';
   import ClientIcon from '../ui/ClientIcon.svelte';
   import Icon from '../ui/Icon.svelte';
   import { clientInfo, clock } from '../ui/client-info';
@@ -75,11 +76,13 @@
       <div class="stat-body"><small>{$t('admin_group_server')}</small><strong>{coreHealth?.status==='ok'?'Actif':coreHealth?$t('to_check'):'—'}</strong></div>
       <span class="dot" class:ok={coreHealth?.status==='ok'} class:warn={coreHealth && coreHealth.status!=='ok'}></span>
     </a>
+    {#if $clusterEnabled}
     <a class="stat stat-link" href="#nodes-section">
       <span class="stat-icon" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}><Icon name="globe" size={18} /></span>
       <div class="stat-body"><small>{$t('nodes')}</small><strong>{nodesError?'—':`${connected} / ${nodes.length}`}</strong></div>
       <span class="dot" class:ok={!nodesError&&offline===0&&nodes.length>0} class:warn={offline>0}></span>
     </a>
+    {/if}
     <a class="stat stat-link" href="#activity-heading">
       <span class="stat-icon" class:ok={playing.length>0}><Icon name="play" size={18} /></span>
       <div class="stat-body"><small>{$t('stats_kpi_plays')}</small><strong>{activityError||!updated?'—':playing.length}</strong></div>

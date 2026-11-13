@@ -641,6 +641,10 @@ fn public_routes(mode: &'static str, web_dist: std::path::PathBuf) -> Router {
                 get(|| async { axum::response::Redirect::temporary("/app/") }),
             )
             .route(
+                "/setup",
+                get(|| async { axum::response::Redirect::temporary("/app/setup/") }),
+            )
+            .route(
                 "/favicon.ico",
                 get(|| async { axum::response::Redirect::temporary("/app/favicon.svg") }),
             )

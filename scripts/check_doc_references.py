@@ -16,12 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ACTIVE_DOCS = (
     "README.md",
     "AGENTS.md",
-    "CLAUDE.md",
     "docs/README.md",
     "docs/AI_WORKFLOW.md",
-    ".ai/PROMPT_DEMARRAGE_IA.md",
-    ".claude/skills/aether-halo/SKILL.md",
-    ".cursor/rules/aether-halo.mdc",
 )
 # Markdown links (including image links); an optional <...> supports encoded spaces.
 LINK = re.compile(r"\]\((?:<([^>]+)>|([^\s)]+))")

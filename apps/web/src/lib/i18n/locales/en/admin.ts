@@ -998,4 +998,7 @@ export const admin: Readonly<Record<keyof typeof source, string>> = {
   artwork_job_completed: "Completed",
   artwork_job_cancelled: "Cancelled",
   artwork_job_failed: "Failed",
+  advanced_capabilities_heading: "Advanced modules",
+  advanced_capabilities_note: "For a simple single-container setup, these modules remain disabled by default. Enable them only when using multiple machines.",
+  enable_cluster_nodes: "Enable distributed Media Nodes (Cluster)",
 };

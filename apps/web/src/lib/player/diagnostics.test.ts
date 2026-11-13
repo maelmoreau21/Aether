@@ -81,6 +81,11 @@ describe('URL probe', () => {
     const failure = await probeFailure('/m', { fetcher: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')) });
     expect(failure?.kind).toBe('network');
   });
+  it('skips probing revoked or MSE blob URLs so codec verdicts are preserved', async () => {
+    const fetcher = vi.fn();
+    await expect(probeFailure('blob:https://aether.local/1234', { fetcher })).resolves.toBeUndefined();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it('is bounded and silent when the caller cancels', async () => {
     vi.useFakeTimers();
     const hang = vi.fn((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))));

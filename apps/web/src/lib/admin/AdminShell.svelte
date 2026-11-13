@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, type Snippet } from 'svelte';
   import { resolve } from '$app/paths';
-  import { serverPresentation } from '../config/presentation';
+  import { serverPresentation, clusterEnabled } from '../config/presentation';
   import { DEFAULT_NAME } from '../config/brand';
   import ProfileMenu from '../ui/ProfileMenu.svelte';
   import Icon from '../ui/Icon.svelte';
@@ -142,7 +142,7 @@
     {#each adminNavigation as group (group.label)}
       <div class="sidebar-group"><p class="group-label">{$t(group.labelKey)}</p>
         {#each group.links as link (link.hash)}
-          {#if !link.extensionId || ($extensionPins.includes(link.extensionId) && (link.extensionId === 'media-requests' ? $features.requests : $features.reports))}
+          {#if (!link.extensionId || ($extensionPins.includes(link.extensionId) && (link.extensionId === 'media-requests' ? $features.requests : $features.reports))) && (link.hash !== '#nodes-section' || $clusterEnabled)}
           {@const active = currentEntry?.hash === link.hash}
           <a class="sidebar-nav-item" class:active href={resolve(`admin/libraries/#${link.hash.slice(1)}`)} aria-current={active ? 'page' : undefined} title={place === 'side' && collapsed ? adminDestinationLabel(link, $t) : undefined} onclick={event => choose(event, link.hash)}>
             <Icon name={link.icon} size={18} /><span>{adminDestinationLabel(link, $t)}</span>

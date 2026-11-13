@@ -34,7 +34,7 @@ struct Backups {
 
 const KEY_REQUIRED: (&str, &str) = (
     "backup_key_required",
-    "Aucune clé de sauvegarde valide n’est configurée. Définissez MEDIA_BACKUP_KEY_FILE (64 caractères hexadécimaux, par ex. `openssl rand -hex 32`) puis redémarrez Core.",
+    "Aucune clé de sauvegarde valide n’est configurée. Définissez MEDIA_BACKUP_KEY (64 caractères hexadécimaux, par ex. `openssl rand -hex 32`) ou MEDIA_BACKUP_KEY_FILE (chemin vers un fichier contenant cette clé), puis redémarrez Core.",
 );
 
 #[derive(Serialize)]

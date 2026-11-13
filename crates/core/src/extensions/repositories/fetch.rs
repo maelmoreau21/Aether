@@ -146,23 +146,19 @@ pub(super) async fn fetch_asset(raw: &str, maximum: usize) -> Result<Vec<u8>, Er
     // github.com (web pages and releases/download) can hang or answer 504 on some
     // networks while api.github.com and the asset CDN stay reachable. Both routes end
     // on the same CDN object and the checksum and signature still decide trust, so the
-    // API goes first (one retry), then the direct link, all inside the 70 s the admin
-    // page waits for an answer.
-    let deadline = Instant::now() + Duration::from_secs(58);
+    // API goes first (one bounded attempt), then the direct link, staying well inside
+    // standard 60 s reverse-proxy timeouts and the 70 s admin request budget.
+    let deadline = Instant::now() + Duration::from_secs(40);
     let left = || deadline.saturating_duration_since(Instant::now());
-    for attempt in 1..=2 {
-        if left() < Duration::from_secs(8) {
-            break;
-        }
-        match github_api_asset(&owner, &repository, &tag, &name, maximum, left()).await {
-            Ok(bytes) => return Ok(bytes),
-            Err(failure) => eprintln!(
-                "GitHub API release download failed ({owner}/{repository} {tag}/{name}, attempt {attempt}): {}",
-                error_code(&failure)
-            ),
-        }
+    let api_budget = left().min(Duration::from_secs(15));
+    match github_api_asset(&owner, &repository, &tag, &name, maximum, api_budget).await {
+        Ok(bytes) => return Ok(bytes),
+        Err(failure) => eprintln!(
+            "GitHub API release download failed ({owner}/{repository} {tag}/{name}): {}",
+            error_code(&failure)
+        ),
     }
-    let timeout = left().max(Duration::from_secs(5));
+    let timeout = left().max(Duration::from_secs(10));
     download(raw, maximum, "*/*", timeout)
         .await
         .inspect_err(|failure| {

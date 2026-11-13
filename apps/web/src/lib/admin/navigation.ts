@@ -34,7 +34,7 @@ export const adminNavigation: { label: string; labelKey: LabelKey; links: AdminE
     { hash: '#avatars-section', label: 'Avatars', labelKey: 'admin_avatars_tab', icon: 'image' }
   ] },
   { label: 'Accès', labelKey: 'admin_group_access', links: [
-    { hash: '#users-section', label: 'Utilisateurs', labelKey: 'admin_nav_users', icon: 'users' },
+    { hash: '#users-section', label: 'Utilisateurs', labelKey: 'admin_nav_users', icon: 'profile' },
     { hash: '#groups-section', label: 'Groupes et permissions', labelKey: 'admin_groups', icon: 'users' }
   ] },
   { label: 'Extensions', labelKey: 'admin_group_extensions', links: [

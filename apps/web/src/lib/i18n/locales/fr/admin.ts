@@ -468,7 +468,6 @@ export const admin = {
   for_nodes_with_an_open_port: 'Pour les nœuds disposant d\'un port ouvert et accessible directement par le Core. Pour les machines derrière un NAT, utilisez le bouton',
   at_the_top: 'en haut.',
   e_g_films_nas_node: 'Ex. Node NAS Films',
-  the_essentials_of_your_server: 'L’essentiel de votre serveur.',
   nodes: 'Nœuds',
   admin_indexing: 'Indexations',
   with_files_rejected_in_the_last: '{count} bibliothèque(s) avec des fichiers refusés au dernier scan.',

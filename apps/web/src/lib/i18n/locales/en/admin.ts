@@ -470,7 +470,6 @@ export const admin: Readonly<Record<keyof typeof source, string>> = {
   for_nodes_with_an_open_port: 'For nodes with an open port directly reachable by the Core. For machines behind a NAT, use the button',
   at_the_top: 'at the top.',
   e_g_films_nas_node: 'E.g. Films NAS Node',
-  the_essentials_of_your_server: 'The essentials of your server.',
   nodes: 'Nodes',
   admin_indexing: 'Indexing',
   with_files_rejected_in_the_last: '{count} {count#library|libraries} with files rejected in the last scan.',

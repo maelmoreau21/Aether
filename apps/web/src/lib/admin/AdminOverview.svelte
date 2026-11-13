@@ -64,9 +64,8 @@
   const ago=(seconds:number)=>{const delta=Math.max(0,Math.floor(Date.now()/1000-seconds));return delta<60?$t('sched_ago_now'):`il y a ${Math.floor(delta/60)} min`;};
 </script>
 
-<section id="overview" aria-labelledby="overview-heading" class="overview">
+<section id="overview" aria-label={$t('admin_nav_overview')} class="overview">
   <header class="page-head">
-    <div><h2 id="overview-heading">{$t('admin_nav_overview')}</h2><p>{$t('the_essentials_of_your_server')}</p></div>
     <button class="ghost" disabled={loading} onclick={()=>void refresh()}>{$t('refresh')}</button>
   </header>
 
@@ -206,9 +205,7 @@
 
 <style>
   .overview { display: grid; gap: 24px; min-width: 0; font-family: var(--font); color: var(--tx); }
-  .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
-  h2 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; }
-  .page-head p { margin: 4px 0 0; font-size: 14px; color: var(--mu); }
+  .page-head { display: flex; align-items: center; justify-content: flex-end; gap: 12px 16px; flex-wrap: wrap; }
   h3 { margin: 0; font-size: 16px; font-weight: 600; }
   small { font-size: 12px; color: var(--mu); }
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }

@@ -6,10 +6,15 @@ import { tr } from '../i18n';
 export async function adminRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const current = get(session);
   if (current?.user.role !== 'administrator') throw new Error(tr('administrator_access_required'));
-  const response = await fetch(path, {
-    ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(path.includes('/avatar-packs') ? 310000 : path.includes('/extensions/') ? 70000 : 30000),
-    headers: { ...(init.body instanceof FormData ? {} : {'content-type':'application/json'}), 'x-csrf-token': current.csrfToken, ...init.headers }
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      ...init, credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(path.includes('/avatar-packs') ? 310000 : path.includes('/extensions/') ? 70000 : 30000),
+      headers: { ...(init.body instanceof FormData ? {} : {'content-type':'application/json'}), 'x-csrf-token': current.csrfToken, ...init.headers }
+    });
+  } catch {
+    throw new Error(tr('operation_not_possible_check_your_connection'));
+  }
   if (!response.ok) {
     const detail = await response.json().catch(() => null) as { error?: string; pluginError?: string; code?: string; message?: string } | null;
     if (path.startsWith('/api/v1/admin/backups') && detail?.code?.startsWith('backup_') && typeof detail.message === 'string') {

@@ -1040,7 +1040,7 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let raw_token = "perm_test_session_token_value";
+        let raw_token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         db_query(
             "INSERT INTO sessions(token_hash, user_id, created_at, last_seen_at, expires_at, device_label) \
              VALUES (?, ?, unixepoch(), unixepoch(), unixepoch() + 86400, 'test')",
@@ -1178,6 +1178,7 @@ mod tests {
 
     #[tokio::test]
     async fn raw_sqlite_mutations_invalidate_permissions_and_parental_immediately() {
+        let _cache_guard = CACHE_TEST_LOCK.lock().await;
         let (_dir, store, router, user_id, _admin_id, cookie) = setup_test_env(2).await;
 
         // Warm cache for poster img-0 and catalog work-0.
@@ -1262,6 +1263,7 @@ mod tests {
 
     #[tokio::test]
     async fn role_promotion_and_library_admin_exclusion_invalidate_immediately() {
+        let _cache_guard = CACHE_TEST_LOCK.lock().await;
         let (_dir, store, router, user_id, admin_id, cookie) = setup_test_env(1).await;
 
         // Deny direct permission and promote user directly to administrator.

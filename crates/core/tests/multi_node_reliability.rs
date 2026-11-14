@@ -354,7 +354,12 @@ impl Cluster {
                 serde_json::to_vec(&json!({
                     "name": format!("Films {idx}"), "kind": "films", "nodeId": node_id,
                     "root": root, "enabled": true,
-                    "userIds": [if idx == 0 { "user-alice" } else { "user-bob" }]
+                    "userIds": [if idx == 0 { "user-alice" } else { "user-bob" }],
+                    "options": {
+                        "trickplayDuringScan": false,
+                        "chapterImagesDuringScan": false,
+                        "realtimeMonitoring": false
+                    }
                 }))
                 .unwrap(),
             )

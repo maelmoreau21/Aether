@@ -2181,7 +2181,7 @@ mod tests {
 
         query(
             "INSERT INTO work_translations(work_id,locale,language,source,priority,\
-             title,updated_at) VALUES(?,'fr','fr','manual',100,'Un FR',1)",
+             title,updated_at) VALUES(?,'fr','fr','manual',100,'Alpha FR',1)",
         )
         .bind(&works[0].0)
         .execute(&store.pool)
@@ -2247,7 +2247,7 @@ mod tests {
         assert_eq!(items.len(), 3);
         assert_eq!(items[2]["id"], works[2].0);
         let fr_title = &items.iter().find(|v| v["id"] == works[0].0).unwrap()["title"];
-        assert_eq!(fr_title, "Un FR");
+        assert_eq!(fr_title, "Alpha FR");
 
         // Different locale must NOT reuse French decorated works.
         let en_filter = CatalogueFilter {

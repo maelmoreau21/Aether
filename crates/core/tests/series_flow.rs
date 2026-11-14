@@ -91,7 +91,8 @@ async fn create_library(
             "nodeId": "local",
             "root": root.to_string_lossy(),
             "enabled": true,
-            "userIds": user_ids
+            "userIds": user_ids,
+            "options": { "fetchThumb": true }
         }),
         None,
     )

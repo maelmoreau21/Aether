@@ -65,12 +65,12 @@ fn memory_module(initial: u32, grow: bool) -> Vec<u8> {
         .map(|b| format!("\\{b:02x}"))
         .collect::<String>();
     let growth = if grow {
-        "i32.const 256 memory.grow i32.const -1 i32.eq if unreachable end"
+        "i32.const 1024 memory.grow i32.const -1 i32.eq if unreachable end"
     } else {
         ""
     };
     wat::parse_str(format!(
-        r#"(module (memory (export "memory") {initial} 512) (data (i32.const 4096) "{data}")
+        r#"(module (memory (export "memory") {initial} 2048) (data (i32.const 4096) "{data}")
       (func (export "media_alloc") (param i32) (result i32) i32.const 1024)
       (func (export "media_run") (param i32 i32) (result i64) {growth} i64.const {}))"#,
         (4096u64 << 32) | result.len() as u64

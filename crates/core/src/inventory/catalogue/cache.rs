@@ -105,9 +105,7 @@ impl<V> LruBucket<V> {
                 .entries
                 .get(&candidate)
                 .is_some_and(|entry| entry.last_accessed == seq);
-            if is_live
-                && let Some(removed) = self.entries.remove(&candidate)
-            {
+            if is_live && let Some(removed) = self.entries.remove(&candidate) {
                 self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
                 return true;
             }
@@ -265,7 +263,8 @@ impl BoundedCatalogueCache {
             key.push_str(&prefix);
             key.push_str(work_id);
             let size = estimate_json_bytes(item);
-            self.decorated_works.insert(key, state_fp, item.clone(), size);
+            self.decorated_works
+                .insert(key, state_fp, item.clone(), size);
         }
     }
 
@@ -321,7 +320,8 @@ impl BoundedCatalogueCache {
         fast_avail: bool,
     ) {
         let size = estimate_strings_bytes(&valid_libs) + 16;
-        self.valid_libs.insert(key, state_fp, (valid_libs, fast_avail), size);
+        self.valid_libs
+            .insert(key, state_fp, (valid_libs, fast_avail), size);
     }
 
     pub(super) fn get_meta_flags(

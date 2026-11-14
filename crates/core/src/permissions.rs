@@ -558,11 +558,16 @@ pub async fn permission_fingerprint(store: &IdentityStore) -> Result<i64, sqlx::
 }
 
 async fn permission_fingerprint_coalesced(store: &IdentityStore) -> Result<i64, StatusCode> {
-    coalesced(store.cache_scope, &FP_FLIGHTS, store.cache_scope, || async {
-        permission_fingerprint(store)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-    })
+    coalesced(
+        store.cache_scope,
+        &FP_FLIGHTS,
+        store.cache_scope,
+        || async {
+            permission_fingerprint(store)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        },
+    )
     .await
 }
 
@@ -815,18 +820,17 @@ async fn resolve_resource_decision(
                         _ => "",
                     };
                     let ok = if fixture_lib.is_empty() {
-                        let direct_ok = match crate::inventory::resource_library(store, "work", id)
-                            .await
-                        {
-                            Ok(Some(library)) => visible.visible.iter().any(|v| v == &library),
-                            Ok(None) => false,
-                            Err(_) => {
-                                return Err((
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    "inventory_unavailable",
-                                ));
-                            }
-                        };
+                        let direct_ok =
+                            match crate::inventory::resource_library(store, "work", id).await {
+                                Ok(Some(library)) => visible.visible.iter().any(|v| v == &library),
+                                Ok(None) => false,
+                                Err(_) => {
+                                    return Err((
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                        "inventory_unavailable",
+                                    ));
+                                }
+                            };
                         if direct_ok {
                             true
                         } else {
@@ -1145,9 +1149,12 @@ mod tests {
         assert_eq!(after_fp.coalesced_waiters - before.coalesced_waiters, 39);
 
         // Concurrent cold burst of 40 distinct poster image requests.
+        let mut paths = Vec::with_capacity(40);
+        for i in 0..40 {
+            paths.push(format!("/api/v1/assets/img-{i}/image"));
+        }
         let cold_stats_before = scope_permissions_cache_stats(store.cache_scope);
-        let img_url = |i: usize| format!("/api/v1/assets/img-{i}/image");
-        let cold_futs = (0..40).map(|i| get_status(&router, &img_url(i), &cookie));
+        let cold_futs = paths.iter().map(|p| get_status(&router, p, &cookie));
         let cold_statuses = join_all(cold_futs).await;
         assert!(cold_statuses.into_iter().all(|s| s == StatusCode::OK));
         let cold_stats_after = scope_permissions_cache_stats(store.cache_scope);
@@ -1159,7 +1166,7 @@ mod tests {
 
         // Warm pass over all 40 posters: ZERO visible_libs or resource_auth SQL queries.
         let warm_before = scope_permissions_cache_stats(store.cache_scope);
-        let warm_futs = (0..40).map(|i| get_status(&router, &img_url(i), &cookie));
+        let warm_futs = paths.iter().map(|p| get_status(&router, p, &cookie));
         let warm_statuses = join_all(warm_futs).await;
         assert!(warm_statuses.into_iter().all(|s| s == StatusCode::OK));
         let warm_after = scope_permissions_cache_stats(store.cache_scope);

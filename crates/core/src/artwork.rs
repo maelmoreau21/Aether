@@ -72,8 +72,12 @@ fn evict_artwork_sha(cache_scope: u64, work: &str, id: &str, width: u32) {
 
 fn invalidate_artwork_cache(cache_scope: u64, work: &str) {
     let mut cache = ARTWORK_SHA_CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    cache.entries.retain(|(s, w, _, _), _| *s != cache_scope || w != work);
-    cache.order.retain(|(s, w, _, _)| *s != cache_scope || w != work);
+    cache
+        .entries
+        .retain(|(s, w, _, _), _| *s != cache_scope || w != work);
+    cache
+        .order
+        .retain(|(s, w, _, _)| *s != cache_scope || w != work);
 }
 pub(crate) const ROLES: &[&str] = &[
     "poster",

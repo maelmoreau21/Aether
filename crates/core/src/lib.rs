@@ -942,11 +942,7 @@ fn strip_h3_forbidden_hop_by_hop_headers(headers: &mut axum::http::HeaderMap) {
     }
 }
 
-fn finalize_http3_headers(
-    res: &mut Response,
-    is_https_req: bool,
-    alt_svc_policy: &AltSvcPolicy,
-) {
+fn finalize_http3_headers(res: &mut Response, is_https_req: bool, alt_svc_policy: &AltSvcPolicy) {
     if res.status() != StatusCode::SWITCHING_PROTOCOLS {
         strip_h3_forbidden_hop_by_hop_headers(res.headers_mut());
     }
@@ -1389,12 +1385,8 @@ mod tests {
         use tower::ServiceExt as _;
 
         let inner = Router::new().route("/ping", get(|| async { "pong" }));
-        let app = local_security_with_store(
-            inner,
-            "https://media.example.com".into(),
-            None,
-            Vec::new(),
-        );
+        let app =
+            local_security_with_store(inner, "https://media.example.com".into(), None, Vec::new());
 
         // HTTP/2 & HTTP/3 `:authority` only (no Host header).
         let req = Request::builder()
@@ -1478,12 +1470,8 @@ mod tests {
                 res
             }),
         );
-        let app = local_security_with_store(
-            inner,
-            "http://127.0.0.1:3000".into(),
-            None,
-            Vec::new(),
-        );
+        let app =
+            local_security_with_store(inner, "http://127.0.0.1:3000".into(), None, Vec::new());
 
         // Plain HTTP behind trusted reverse proxy signalling HTTPS triggers Alt-Svc & strips hop-by-hop headers.
         let mut proxied_https = Request::builder()

@@ -1047,14 +1047,9 @@ pub async fn catalogue_page(
     }
 
     // 1 & 2. Pre-filter visible libraries and inspect fast availability/source divergence (cached per inv_fp).
-    let (valid_libs, fast_avail) = resolve_valid_libs_and_fast_avail(
-        store,
-        visible,
-        target_kind,
-        fps.inv_fp,
-        use_aux_cache,
-    )
-    .await?;
+    let (valid_libs, fast_avail) =
+        resolve_valid_libs_and_fast_avail(store, visible, target_kind, fps.inv_fp, use_aux_cache)
+            .await?;
 
     if valid_libs.is_empty() {
         let response = json!({

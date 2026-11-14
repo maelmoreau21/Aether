@@ -861,8 +861,6 @@ export const catalog = {
   screenplay: 'Scénario',
   detail_sections: 'Sections de la fiche',
   detail_tab_details: 'Détails',
-  detail_read_more: 'Lire la suite',
-  detail_read_less: 'Réduire',
   detail_resume_episode: 'Reprendre S{season} · É{episode}',
   detail_resume_episode_label: 'Reprendre {title}, saison {season}, épisode {episode}',
   detail_quality: 'Qualité',

@@ -689,12 +689,12 @@ pub async fn catalogue_page(
         })
         .flatten();
     let (has_groups_val, has_parental_val, has_sort_lang_val): (i64, i64, i64) = sqlx::query_as(
-        &crate::database::normalize_sql(
+        sqlx::AssertSqlSafe(crate::database::normalize_sql(
             "SELECT \
                CASE WHEN EXISTS(SELECT 1 FROM media_group_members) THEN 1 ELSE 0 END, \
                CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) THEN 1 ELSE 0 END, \
                CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
-        ),
+        )),
     )
     .bind(filter.user_id.as_deref())
     .bind(filter.user_id.as_deref())

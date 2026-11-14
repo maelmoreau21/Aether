@@ -863,8 +863,6 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   screenplay: 'Screenplay',
   detail_sections: 'Title sections',
   detail_tab_details: 'Details',
-  detail_read_more: 'Read more',
-  detail_read_less: 'Show less',
   detail_resume_episode: 'Resume S{season} · E{episode}',
   detail_resume_episode_label: 'Resume {title}, season {season}, episode {episode}',
   detail_quality: 'Quality',

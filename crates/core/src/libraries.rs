@@ -1013,13 +1013,12 @@ async fn save(
         .await
         .map_err(database)?;
         if active != 0 {
-            let current: Option<(String, String, String)> = crate::database::query_as(
-                "SELECT kind,node_id,root FROM libraries WHERE id=?",
-            )
-            .bind(&id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(database)?;
+            let current: Option<(String, String, String)> =
+                crate::database::query_as("SELECT kind,node_id,root FROM libraries WHERE id=?")
+                    .bind(&id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(database)?;
             let Some((current_kind, current_node, current_root)) = current else {
                 return Err(StatusCode::NOT_FOUND);
             };

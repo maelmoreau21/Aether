@@ -2,11 +2,120 @@
 
 use super::decode;
 use super::playback::{audio_operational_id, native_opus_track_id, playback_library_options};
-use crate::database::{query, query_scalar};
+use crate::database::{query, query_as, query_scalar};
 use crate::identity::IdentityStore;
 use serde_json::{Value, json};
 use sqlx::Row;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
+
+const IMAGE_META_CACHE_CAP: usize = 4096;
+static IMAGE_META_EPOCH: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone)]
+struct CachedImageMeta {
+    state_fp: (i64, i64, i64, u64),
+    node_id: String,
+    library_id: String,
+    root_snapshot: String,
+    relative_path: String,
+    mime: String,
+    size: u64,
+    modified_ns: String,
+}
+
+#[derive(Default)]
+struct ImageMetaCache {
+    entries: HashMap<(u64, String), CachedImageMeta>,
+    order: VecDeque<(u64, String)>,
+}
+
+static IMAGE_META_CACHE: LazyLock<Mutex<ImageMetaCache>> =
+    LazyLock::new(|| Mutex::new(ImageMetaCache::default()));
+
+async fn image_state_fingerprint(store: &IdentityStore) -> Option<(i64, i64, i64, u64)> {
+    let row: (i64, i64, i64) = query_as(
+        "SELECT \
+         CAST(COALESCE((SELECT gen FROM inventory_cache_generation WHERE id = 1), 0) AS BIGINT), \
+         (SELECT COUNT(*) FROM media_nodes), \
+         (SELECT COUNT(CASE WHEN status != 'revoked' THEN 1 END) FROM media_nodes)",
+    )
+    .fetch_one(&store.pool)
+    .await
+    .ok()?;
+    Some((row.0, row.1, row.2, IMAGE_META_EPOCH.load(Ordering::Relaxed)))
+}
+
+fn cached_image_meta(
+    cache_scope: u64,
+    image_id: &str,
+    state_fp: (i64, i64, i64, u64),
+) -> Option<CachedImageMeta> {
+    let key = (cache_scope, image_id.to_owned());
+    let cache = IMAGE_META_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let entry = cache.entries.get(&key)?;
+    (entry.state_fp == state_fp).then(|| entry.clone())
+}
+
+fn store_image_meta(cache_scope: u64, image_id: &str, meta: CachedImageMeta) {
+    let key = (cache_scope, image_id.to_owned());
+    let mut cache = IMAGE_META_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if !cache.entries.contains_key(&key) {
+        while cache.entries.len() >= IMAGE_META_CACHE_CAP {
+            let Some(oldest) = cache.order.pop_front() else {
+                break;
+            };
+            cache.entries.remove(&oldest);
+        }
+        cache.order.push_back(key.clone());
+    }
+    cache.entries.insert(key, meta);
+}
+
+fn invalidate_image_meta(cache_scope: u64, image_id: &str) {
+    IMAGE_META_EPOCH.fetch_add(1, Ordering::Relaxed);
+    let key = (cache_scope, image_id.to_owned());
+    let mut cache = IMAGE_META_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.entries.remove(&key);
+}
+
+fn expected_image_etag(modified_ns: &str, size: u64, preview_width: Option<u32>) -> String {
+    match preview_width {
+        Some(width) => format!("\"preview-v1-{modified_ns}-{size:x}-{width}\""),
+        None => format!("\"{modified_ns}-{size:x}\""),
+    }
+}
+
+fn if_none_match_matches(headers: &axum::http::HeaderMap, etag: &str) -> bool {
+    headers
+        .get(axum::http::header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|condition| {
+            condition.split(',').any(|candidate| {
+                let candidate = candidate.trim();
+                candidate == "*" || candidate.strip_prefix("W/").unwrap_or(candidate) == etag
+            })
+        })
+}
+
+/// Returns the `Cache-Control` header value for a sidecar refreshed inline after
+/// `ImageChangedRescanRequired`: preserve 1-year `immutable` caching only if `?v=`
+/// already matches the updated `(modified_ns, size_bytes)`, otherwise force revalidation.
+fn refreshed_image_cache_control(
+    version_token: Option<&str>,
+    modified_ns: &str,
+    size_bytes: u64,
+) -> Option<&'static str> {
+    let requested = version_token?;
+    let current = format!("{modified_ns}-{size_bytes}");
+    Some(if requested == current {
+        "private, max-age=31536000, immutable"
+    } else {
+        "private, no-cache"
+    })
+}
 
 pub async fn prepared(
     store: &IdentityStore,
@@ -694,30 +803,86 @@ pub async fn image(
         ids::{ImageId, LibraryId, NodeId},
         inventory::{ReadGrant, ReadTarget},
     };
-    if media_node::image_preview_width(request.uri().query()).is_err() {
-        return crate::error(StatusCode::BAD_REQUEST, "invalid_image_width");
-    }
-    let row = query(
-        "SELECT i.*,l.root,l.node_id \
-         FROM inventory_images i \
-         JOIN libraries l ON l.id=i.library_id \
-         JOIN media_nodes n ON n.id=l.node_id \
-         WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
-    )
-    .bind(image_id)
-    .fetch_optional(&store.pool)
-    .await;
-    let row = match row {
-        Ok(Some(row)) => row,
-        Ok(None) => {
-            return crate::error(StatusCode::NOT_FOUND, NodeErrorCode::UnknownImage.as_str());
-        }
-        Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
+    let preview_width = match media_node::image_preview_width(request.uri().query()) {
+        Ok(width) => width,
+        Err(_) => return crate::error(StatusCode::BAD_REQUEST, "invalid_image_width"),
     };
-    let node_id_str: String = row.get("node_id");
-    if node_id_str != "local" {
+    let state_fp = image_state_fingerprint(store).await;
+    let cached = state_fp.and_then(|fp| cached_image_meta(store.cache_scope, image_id, fp));
+    let meta = if let Some(meta) = cached {
+        meta
+    } else {
+        let row = query(
+            "SELECT i.*,l.root,l.node_id \
+             FROM inventory_images i \
+             JOIN libraries l ON l.id=i.library_id \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE i.id=? AND i.available=1 AND i.root_snapshot=l.root AND l.enabled=1 AND l.kind IN ('films', 'series') AND n.status != 'revoked'",
+        )
+        .bind(image_id)
+        .fetch_optional(&store.pool)
+        .await;
+        let row = match row {
+            Ok(Some(row)) => row,
+            Ok(None) => {
+                return crate::error(StatusCode::NOT_FOUND, NodeErrorCode::UnknownImage.as_str());
+            }
+            Err(_) => return crate::error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_error"),
+        };
+        let meta = CachedImageMeta {
+            state_fp: state_fp.unwrap_or((0, 0, 0, 0)),
+            node_id: row.get("node_id"),
+            library_id: row.get("library_id"),
+            root_snapshot: row.get("root"),
+            relative_path: row.get("relative_path"),
+            mime: row.get("mime"),
+            size: row.get::<i64, _>("size") as u64,
+            modified_ns: row.get("modified_ns"),
+        };
         drop(row);
-        let Some(rec) = crate::nodes::load_node(store, &node_id_str)
+        if state_fp.is_some() {
+            store_image_meta(store.cache_scope, image_id, meta.clone());
+        }
+        meta
+    };
+    // Catalogue URLs carry `?v=<modified>-<size>`: a changed image gets a new address, so a
+    // versioned one can stay in the browser instead of being revalidated on every visit
+    // (dozens of conditional requests slowed the posters of the home page down).
+    let version_token =
+        url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
+            .find_map(|(name, value)| (name == "v" && !value.is_empty()).then(|| value.into_owned()));
+    let versioned = version_token.is_some();
+    let expected_etag = expected_image_etag(&meta.modified_ns, meta.size, preview_width);
+    if matches!(
+        *request.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD
+    ) && !request.headers().contains_key(axum::http::header::RANGE)
+        && if_none_match_matches(request.headers(), &expected_etag)
+    {
+        let cache_control = if versioned {
+            "private, max-age=31536000, immutable"
+        } else {
+            "private, no-cache"
+        };
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = StatusCode::NOT_MODIFIED;
+        if let Ok(etag_val) = axum::http::HeaderValue::from_str(&expected_etag) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::ETAG, etag_val);
+        }
+        response.headers_mut().insert(
+            axum::http::header::X_CONTENT_TYPE_OPTIONS,
+            axum::http::HeaderValue::from_static("nosniff"),
+        );
+        response.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static(cache_control),
+        );
+        return response;
+    }
+    if meta.node_id != "local" {
+        let Some(rec) = crate::nodes::load_node(store, &meta.node_id)
             .await
             .ok()
             .flatten()
@@ -734,21 +899,15 @@ pub async fn image(
     let mut grant = ReadGrant {
         target: ReadTarget::Image {
             id: ImageId::from(image_id),
-            expected_size: row.get::<i64, _>("size") as u64,
-            expected_modified_ns: row.get("modified_ns"),
+            expected_size: meta.size,
+            expected_modified_ns: meta.modified_ns,
         },
-        library_id: LibraryId::from(row.get::<String, _>("library_id")),
-        node_id: NodeId::from(node_id_str),
-        root_snapshot: row.get("root"),
-        relative_path: row.get("relative_path"),
-        mime: row.get("mime"),
+        library_id: LibraryId::from(meta.library_id),
+        node_id: NodeId::from(meta.node_id),
+        root_snapshot: meta.root_snapshot,
+        relative_path: meta.relative_path,
+        mime: meta.mime,
     };
-    drop(row);
-    // Catalogue URLs carry `?v=<modified>-<size>`: a changed image gets a new address, so a
-    // versioned one can stay in the browser instead of being revalidated on every visit
-    // (dozens of conditional requests slowed the posters of the home page down).
-    let versioned = url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
-        .any(|(name, value)| name == "v" && !value.is_empty());
     match crate::node::LocalNode.serve_grant(&grant, &request).await {
         Ok(res) => {
             let (mut parts, body) = res.into_parts();
@@ -773,16 +932,31 @@ pub async fn image(
                     .bind(image.size_bytes as i64).bind(&image.modified_ns).bind(image.mime)
                     .bind(image_id).bind(&grant.root_snapshot).bind(&grant.relative_path)
                     .execute(&store.pool).await.ok()?;
+                invalidate_image_meta(store.cache_scope, image_id);
+                super::invalidate_catalogue_cache();
                 grant.target = ReadTarget::Image {
                     id: ImageId::from(image_id), expected_size: image.size_bytes,
-                    expected_modified_ns: image.modified_ns,
+                    expected_modified_ns: image.modified_ns.clone(),
                 };
                 grant.mime = image.mime.to_owned();
-                crate::node::LocalNode.serve_grant(&grant, &request).await.ok()
+                let res = crate::node::LocalNode.serve_grant(&grant, &request).await.ok()?;
+                Some((res, image.modified_ns, image.size_bytes))
             }.await;
             match refreshed {
-                Some(res) => {
-                    let (parts, body) = res.into_parts();
+                Some((res, modified_ns, size_bytes)) => {
+                    let (mut parts, body) = res.into_parts();
+                    if matches!(parts.status, StatusCode::OK | StatusCode::NOT_MODIFIED)
+                        && let Some(cache_control) = refreshed_image_cache_control(
+                            version_token.as_deref(),
+                            &modified_ns,
+                            size_bytes,
+                        )
+                    {
+                        parts.headers.insert(
+                            axum::http::header::CACHE_CONTROL,
+                            axum::http::HeaderValue::from_static(cache_control),
+                        );
+                    }
                     Response::from_parts(parts, Body::new(body))
                 }
                 None => crate::error(
@@ -989,5 +1163,59 @@ mod transcode_tests {
             Some("dolby_vision_8")
         );
         assert_eq!(video_dynamic_range(&probe.streams[5]), None);
+    }
+
+    #[test]
+    fn image_etag_and_if_none_match_match_node_contract() {
+        let preview_etag = expected_image_etag("12345", 256, Some(320));
+        assert_eq!(preview_etag, "\"preview-v1-12345-100-320\"");
+        let original_etag = expected_image_etag("12345", 256, None);
+        assert_eq!(original_etag, "\"12345-100\"");
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::IF_NONE_MATCH,
+            "W/\"preview-v1-12345-100-320\"".parse().unwrap(),
+        );
+        assert!(if_none_match_matches(&headers, &preview_etag));
+        assert!(!if_none_match_matches(&headers, &original_etag));
+    }
+
+    #[test]
+    fn image_meta_cache_invalidates_on_fingerprint_or_epoch_change() {
+        let scope = 8_800_001u64;
+        let fp1 = (10, 1, 1, 1);
+        let fp2 = (11, 1, 1, 1);
+        store_image_meta(
+            scope,
+            "img-1",
+            CachedImageMeta {
+                state_fp: fp1,
+                node_id: "local".into(),
+                library_id: "lib-1".into(),
+                root_snapshot: "/media".into(),
+                relative_path: "poster.jpg".into(),
+                mime: "image/jpeg".into(),
+                size: 4096,
+                modified_ns: "12345".into(),
+            },
+        );
+        assert!(cached_image_meta(scope, "img-1", fp1).is_some());
+        assert!(cached_image_meta(scope, "img-1", fp2).is_none());
+        invalidate_image_meta(scope, "img-1");
+        assert!(cached_image_meta(scope, "img-1", fp1).is_none());
+    }
+
+    #[test]
+    fn refreshed_image_cache_control_guards_stale_version_tokens() {
+        assert_eq!(refreshed_image_cache_control(None, "200", 60), None);
+        assert_eq!(
+            refreshed_image_cache_control(Some("100-50"), "200", 60),
+            Some("private, no-cache")
+        );
+        assert_eq!(
+            refreshed_image_cache_control(Some("200-60"), "200", 60),
+            Some("private, max-age=31536000, immutable")
+        );
     }
 }

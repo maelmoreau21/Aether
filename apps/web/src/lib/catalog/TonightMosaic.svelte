@@ -1,9 +1,35 @@
+<script module lang="ts">
+  import { imagePreviewUrl } from './image-url';
+
+  export function mosaicTileCandidates(
+    artwork: { poster?: string | null; landscape?: string | null; backdrop?: string | null },
+    feature: boolean
+  ): string[] {
+    const wide = artwork.landscape || artwork.backdrop;
+    if (feature) {
+      return [
+        ...new Set(
+          [
+            imagePreviewUrl(wide, 1280),
+            wide ?? '',
+            artwork.poster ? imagePreviewUrl(artwork.poster, 1280) : '',
+            artwork.poster ?? ''
+          ].filter(Boolean)
+        )
+      ];
+    }
+    const posterOrWide = artwork.poster || wide;
+    return [
+      ...new Set([imagePreviewUrl(posterOrWide, 640), posterOrWide ?? ''].filter(Boolean))
+    ];
+  }
+</script>
+
 <script lang="ts">
   import { session } from '../auth/session';
   import { locale, t } from '../i18n';
   import { type Work, localizedTitle } from './api';
   import { selectArtwork } from './artwork-selection';
-  import { imagePreviewUrl } from './image-url';
   import { arrangeTonight, mosaicLayout } from './tonight';
   import { fitArtwork } from '../ui/fit-artwork';
 
@@ -16,14 +42,11 @@
   const gridClass = $derived(layout ? `rows-${layout.grids.desktop.featureRows} cols-${layout.grids.desktop.columns} tablet-cols-${layout.grids.tablet.columns} phone-cols-${layout.grids.phone.columns}` : '');
   let failedImages = $state<string[]>([]);
 
-  // Vedette 16:9 : landscape.jpg puis backdrop (pleine résolution si disponible) ; affiches 2:3 : l'affiche. Un repli d'un autre
+  // Vedette 16:9 : aperçu optimisé 1280 en priorité, repli sur l'original ; affiches 2:3 en 640. Un repli d'un autre
   // format est affiché sans recadrage abusif par fitArtwork (image entière sur fond flouté).
   function tileImage(work: Work, feature: boolean): string {
     const artwork = selectArtwork(work, $session);
-    const wide = artwork.landscape || artwork.backdrop;
-    return feature
-      ? (wide || imagePreviewUrl(artwork.poster, 1280))
-      : imagePreviewUrl(artwork.poster || artwork.landscape || artwork.backdrop, 640);
+    return mosaicTileCandidates(artwork, feature).find(url => !failedImages.includes(url)) ?? '';
   }
 </script>
 
@@ -38,7 +61,7 @@
         {@const work = ordered[index]}
         {@const feature = tile.shape === 'feature'}
         {@const image = tileImage(work, feature)}
-        {@const hasImage = Boolean(image) && !failedImages.includes(image)}
+        {@const hasImage = Boolean(image)}
         <li
           class="cell {tile.shape}"
           class:hide-desktop={tile.hidden.desktop}
@@ -48,7 +71,7 @@
           <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- detailUrl() returns a resolved URL. -->
           <a class="tile" class:has-image={hasImage} href={detailUrl(work)}>
             {#if hasImage}
-              <img src={image} alt="" width={feature ? 1280 : 640} height={feature ? 720 : 960} loading="lazy" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => (failedImages = [...failedImages, image])} />
+              <img src={image} alt="" width={feature ? 1280 : 640} height={feature ? 720 : 960} loading={feature || index < 4 ? 'eager' : 'lazy'} fetchpriority={feature ? 'high' : 'auto'} decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => (failedImages = [...failedImages, image])} />
               <span class="shade" aria-hidden="true"></span>
             {/if}
             <span class="kind">{work.kind === 'series' ? 'Série' : 'Film'}</span>

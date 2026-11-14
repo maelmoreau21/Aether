@@ -1,10 +1,43 @@
+<script module lang="ts">
+  import type { Work } from './api';
+  import { shuffleWithSeed, type DiscoverSpec } from './discover';
+
+  export type DiscoverShelf = { key: string; title: string; items: Work[] };
+  export type DiscoverBatchOutcome =
+    | { kind: 'shelf'; shelf: DiscoverShelf; consumed: number }
+    | { kind: 'empty'; consumed: number }
+    | { kind: 'error'; error: unknown; consumed: number };
+
+  /** Résout un lot parallèle de specs en conservant l'ordre du plan et les erreurs éventuelles. */
+  export function resolveShelfBatch(
+    batch: { spec: DiscoverSpec; result: PromiseSettledResult<{ items?: Work[] }> }[],
+    seen: ReadonlySet<string>,
+    seed: string,
+    minShelf: number
+  ): DiscoverBatchOutcome {
+    for (let index = 0; index < batch.length; index++) {
+      const { spec, result } = batch[index];
+      if (result.status === 'rejected') {
+        return { kind: 'error', error: result.reason, consumed: index };
+      }
+      const fresh = shuffleWithSeed(
+        (result.value.items ?? []).filter(item => item.id && !seen.has(item.id)),
+        `${seed}:${spec.key}`
+      );
+      if (fresh.length >= minShelf) {
+        return { kind: 'shelf', shelf: { key: spec.key, title: spec.title, items: fresh }, consumed: index + 1 };
+      }
+    }
+    return { kind: 'empty', consumed: batch.length };
+  }
+</script>
+
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { type Work } from './api';
   import { loadCatalog } from './page-cache';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
-  import { buildDiscoverPlan, shelfSeed, shuffleWithSeed, type DiscoverSpec } from './discover';
+  import { buildDiscoverPlan, shelfSeed } from './discover';
   import { t } from '../i18n';
 
   // Fil sans fin de l'accueil : des rangées thématiques chargées au fil du défilement,
@@ -25,9 +58,10 @@
   const SHELF_SIZE = 24;
   const GRID_PAGE = 30;
   const MIN_SHELF = 4;
+  const BATCH_SIZE = 2;
+  const PREFETCH_MARGIN_PX = 1600;
 
-  type Shelf = { key: string; title: string; items: Work[] };
-  let shelves = $state<Shelf[]>([]);
+  let shelves = $state<DiscoverShelf[]>([]);
   let gridItems = $state<Work[]>([]);
   let gridOffset = 0;
   let gridDone = $state(false);
@@ -49,16 +83,26 @@
   const resetKey = $derived(`${kind ?? ''}|${library}|${films.length + series.length > 0 ? 1 : 0}`);
   $effect(() => {
     void resetKey;
-    untrack(() => {
+    const cancelPrefetch = untrack(() => {
       controller?.abort();
       generation++;
+      const current = generation;
       shelves = []; gridItems = []; gridOffset = 0; gridDone = false; failed = false; loading = false;
-       
       seen = new Set(exclude);
       plan = buildDiscoverPlan([...films, ...series], seed).filter(spec => !kind || spec.kind === kind);
       planIndex = 0;
-      if (sentinel && isNearViewport(sentinel)) queueMicrotask(() => void loadMore());
+      if (sentinel && isNearViewport(sentinel)) {
+        queueMicrotask(() => void loadMore());
+        return undefined;
+      }
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        const id = window.requestIdleCallback(() => prefetchNext(current));
+        return () => window.cancelIdleCallback(id);
+      }
+      const timer = setTimeout(() => prefetchNext(current), 0);
+      return () => clearTimeout(timer);
     });
+    return () => cancelPrefetch?.();
   });
 
   $effect(() => {
@@ -67,6 +111,21 @@
 
   function catalogUrl(params: Record<string, string>) {
     return `/api/v1/catalog?${new URLSearchParams({ ...(library ? { library } : {}), q: '', count: 'false', ...params })}`;
+  }
+
+  function specUrl(spec: DiscoverSpec) {
+    return catalogUrl({
+      kind: spec.kind,
+      sort: spec.sort,
+      offset: '0',
+      limit: String(SHELF_SIZE),
+      ...(spec.genre ? { genre: spec.genre } : {}),
+      ...(spec.sort === 'random' ? { seed: String(shelfSeed(seed, spec.key)) } : {})
+    });
+  }
+
+  function gridPageUrl(offsetValue: number) {
+    return catalogUrl({ ...(kind ? { kind } : {}), sort: 'added-desc', offset: String(offsetValue), limit: String(GRID_PAGE) });
   }
 
   function fetchFeedPage(url: string, signal: AbortSignal): Promise<{ items: Work[] }> {
@@ -81,35 +140,51 @@
     });
   }
 
+  /** Pré-charge le prochain lot de rangées (ou la page de grille suivante) en arrière-plan. */
+  function prefetchNext(expectedGeneration = generation) {
+    if (expectedGeneration !== generation || gridDone || failed) return;
+    if (planIndex < plan.length) {
+      const upcoming = plan.slice(planIndex, planIndex + BATCH_SIZE);
+      for (const spec of upcoming) {
+        const url = specUrl(spec);
+        void loadCatalog(url, url).catch(() => {});
+      }
+    } else {
+      const url = gridPageUrl(gridOffset);
+      void loadCatalog(url, url).catch(() => {});
+    }
+  }
+
   async function loadNextShelf(signal: AbortSignal): Promise<boolean> {
-    // Quelques tentatives : une rangée trop courte après déduplication est sautée.
-    for (let attempts = 0; attempts < 4 && planIndex < plan.length; attempts++) {
-      const spec = plan[planIndex++];
-      const result = await fetchFeedPage(catalogUrl({
-        kind: spec.kind,
-        sort: spec.sort,
-        offset: '0',
-        limit: String(SHELF_SIZE),
-        ...(spec.genre ? { genre: spec.genre } : {}),
-        ...(spec.sort === 'random' ? { seed: String(shelfSeed(seed, spec.key)) } : {})
-      }), signal);
+    // Jusqu'à 2 lots parallèles de 2 rangées (4 candidates max) pour sauter les rangées vides sans cascade.
+    for (let round = 0; round < 2 && planIndex < plan.length; round++) {
+      const slice = plan.slice(planIndex, planIndex + BATCH_SIZE);
+      const settled = await Promise.allSettled(slice.map(spec => fetchFeedPage(specUrl(spec), signal)));
       if (signal.aborted) return true;
-      const fresh = shuffleWithSeed((result.items ?? []).filter(item => item.id && !seen.has(item.id)), `${seed}:${spec.key}`);
-      if (fresh.length < MIN_SHELF) continue;
-      for (const item of fresh) seen.add(item.id);
-      shelves = [...shelves, { key: spec.key, title: spec.title, items: fresh }];
-      return true;
+      const outcome = resolveShelfBatch(
+        slice.map((spec, index) => ({ spec, result: settled[index] })),
+        seen,
+        seed,
+        MIN_SHELF
+      );
+      planIndex += outcome.consumed;
+      if (outcome.kind === 'error') throw outcome.error;
+      if (outcome.kind === 'shelf') {
+        for (const item of outcome.shelf.items) seen.add(item.id);
+        shelves = [...shelves, outcome.shelf];
+        return true;
+      }
     }
     return planIndex < plan.length;
   }
 
   async function loadGridPage(signal: AbortSignal) {
-    const result = await fetchFeedPage(catalogUrl({ ...(kind ? { kind } : {}), sort: 'added-desc', offset: String(gridOffset), limit: String(GRID_PAGE) }), signal);
+    const result = await fetchFeedPage(gridPageUrl(gridOffset), signal);
     if (signal.aborted) return;
     const items = result.items ?? [];
     gridOffset += items.length;
     if (items.length < GRID_PAGE) gridDone = true;
-     
+
     const known = new Set(gridItems.map(item => item.id));
     // Jamais deux fois la même œuvre sur la page : ni celles du haut, ni celles des rangées.
     const fresh = items.filter(item => item.id && !known.has(item.id) && !seen.has(item.id));
@@ -131,19 +206,22 @@
     } finally {
       if (current === generation) loading = false;
     }
-    // Si le bas de page est encore visible (grand écran), on continue.
-    if (current === generation && !failed && sentinel && isNearViewport(sentinel)) queueMicrotask(() => void loadMore());
+    // Si le bas de page est encore proche (grand écran), on enchaîne, sinon on pré-charge l'étape suivante.
+    if (current === generation && !failed && !gridDone) {
+      if (sentinel && isNearViewport(sentinel)) queueMicrotask(() => void loadMore());
+      else prefetchNext(current);
+    }
   }
 
   function isNearViewport(node: HTMLElement) {
-    return node.getBoundingClientRect().top < window.innerHeight + 400;
+    return node.getBoundingClientRect().top < window.innerHeight + PREFETCH_MARGIN_PX;
   }
 
   onMount(() => {
     if (!sentinel) return;
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) void loadMore();
-    }, { rootMargin: '400px 0px' });
+    }, { rootMargin: `${PREFETCH_MARGIN_PX}px 0px` });
     observer.observe(sentinel);
     return () => { observer.disconnect(); controller?.abort(); };
   });
@@ -153,7 +231,7 @@
   {#each shelves as shelf (shelf.key)}
     <div class="feed-item">
       <MediaShelf title={shelf.title}>
-        {#each shelf.items as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+        {#each shelf.items as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={index < 4} />{/each}
       </MediaShelf>
     </div>
   {/each}

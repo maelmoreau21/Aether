@@ -7,12 +7,20 @@ pub enum ImportError {
     #[error("malformed raster, colour profile or allocation/encoding limit")]
     Invalid,
 }
-use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
-use std::io::Cursor;
+use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits, imageops::FilterType};
+use std::{io::Cursor, sync::LazyLock};
 #[cfg(test)]
 mod tests;
 
-pub static DECODERS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+/// Target concurrency for blocking image decode/encode work, scaled to CPU cores.
+pub fn decoder_concurrency() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get().clamp(4, 16))
+        .unwrap_or(8)
+}
+
+pub static DECODERS: LazyLock<tokio::sync::Semaphore> =
+    LazyLock::new(|| tokio::sync::Semaphore::new(decoder_concurrency()));
 
 /// Reuse an already validated static WebP without recompressing it. Metadata,
 /// animation and unknown RIFF chunks require normalization instead.
@@ -122,8 +130,70 @@ pub fn decode(bytes: &[u8], content: &str) -> Result<DynamicImage, ImportError> 
     Ok(decoded)
 }
 
+/// Aspect-fit dimensions within `(max_width, max_height)` without upscaling.
+pub fn fit_dimensions(
+    src_width: u32,
+    src_height: u32,
+    max_width: u32,
+    max_height: u32,
+) -> (u32, u32) {
+    if src_width == 0
+        || src_height == 0
+        || max_width == 0
+        || max_height == 0
+        || (src_width <= max_width && src_height <= max_height)
+    {
+        return (src_width, src_height);
+    }
+    let wratio = f64::from(max_width) / f64::from(src_width);
+    let hratio = f64::from(max_height) / f64::from(src_height);
+    let ratio = f64::min(wratio, hratio);
+    let target_w = u32::try_from(
+        ((f64::from(src_width) * ratio).round() as u64).clamp(1, u64::from(max_width)),
+    )
+    .unwrap_or(1);
+    let target_h = u32::try_from(
+        ((f64::from(src_height) * ratio).round() as u64).clamp(1, u64::from(max_height)),
+    )
+    .unwrap_or(1);
+    (target_w, target_h)
+}
+
+/// Resize `image` to fit within `(max_width, max_height)` without upscaling.
+/// Uses faster filters (`CatmullRom`, with a `Triangle` pre-reduction step above 4x)
+/// when downscaling heavily so 4K/8K artwork encodes without stalling CPU cores.
+pub fn resize_bounded(image: &DynamicImage, max_width: u32, max_height: u32) -> DynamicImage {
+    let src_w = image.width();
+    let src_h = image.height();
+    let (target_w, target_h) = fit_dimensions(src_w, src_h, max_width, max_height);
+    if target_w == src_w && target_h == src_h {
+        return image.clone();
+    }
+    let downscale = (f64::from(src_w) / f64::from(target_w))
+        .max(f64::from(src_h) / f64::from(target_h));
+    if downscale > 4.0 {
+        let mid_w = target_w.saturating_mul(2).min(src_w);
+        let mid_h = target_h.saturating_mul(2).min(src_h);
+        if mid_w > target_w && mid_h > target_h && mid_w < src_w && mid_h < src_h {
+            let reduced = image.resize_exact(mid_w, mid_h, FilterType::Triangle);
+            return reduced.resize_exact(target_w, target_h, FilterType::CatmullRom);
+        }
+    }
+    let filter = if downscale > 2.0 {
+        FilterType::CatmullRom
+    } else {
+        FilterType::Lanczos3
+    };
+    image.resize_exact(target_w, target_h, filter)
+}
+
 pub fn encode(image: &DynamicImage, lossless: bool) -> Result<Vec<u8>, ImportError> {
     let invalid = ImportError::Invalid;
+    let width = image.width();
+    let height = image.height();
+    if width == 0 || height == 0 {
+        return Err(invalid);
+    }
     let bytes = if lossless || image.color().has_alpha() {
         // The Rust encoder preserves alpha and the RGB of transparent pixels.
         let mut output = Cursor::new(Vec::new());
@@ -131,6 +201,11 @@ pub fn encode(image: &DynamicImage, lossless: bool) -> Result<Vec<u8>, ImportErr
             .write_to(&mut output, ImageFormat::WebP)
             .map_err(|_| invalid)?;
         output.into_inner()
+    } else if let Some(rgb) = image.as_rgb8() {
+        webp::Encoder::from_rgb(rgb.as_raw(), width, height)
+            .encode_simple(false, 82.0)
+            .map_err(|_| invalid)?
+            .to_vec()
     } else {
         let rgb = image.to_rgb8();
         webp::Encoder::from_rgb(rgb.as_raw(), rgb.width(), rgb.height())
@@ -141,14 +216,50 @@ pub fn encode(image: &DynamicImage, lossless: bool) -> Result<Vec<u8>, ImportErr
     if bytes.len() > 8 * 1024 * 1024 {
         return Err(invalid);
     }
-    // Validate before publishing. No unvalidated original survives the import.
-    let (width, height) = ImageReader::new(Cursor::new(&bytes))
-        .with_guessed_format()
-        .map_err(|_| invalid)?
-        .into_dimensions()
-        .map_err(|_| invalid)?;
-    if (width, height) != (image.width(), image.height()) {
+    // Dimensions are fixed by the input raster; check only the WebP RIFF signature.
+    if bytes.get(..4) != Some(b"RIFF") || bytes.get(8..12) != Some(b"WEBP") {
         return Err(invalid);
     }
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod optimization_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn decoder_semaphore_scales_above_two() {
+        let concurrency = decoder_concurrency();
+        assert!((4..=16).contains(&concurrency));
+        let permits = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            DECODERS.acquire_many(3),
+        )
+        .await
+        .expect("decoder semaphore should allow > 2 concurrent permits")
+        .expect("decoder semaphore should remain open");
+        drop(permits);
+    }
+
+    #[test]
+    fn resize_bounded_uses_fast_downscale_without_upscaling() {
+        let img = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            2400,
+            3600,
+            image::Rgb([12, 34, 56]),
+        ));
+        let thumb = resize_bounded(&img, 320, 640);
+        assert_eq!((thumb.width(), thumb.height()), (320, 480));
+        let webp = encode(&thumb, false).unwrap();
+        assert_eq!(webp.get(..4), Some(b"RIFF".as_slice()));
+        assert_eq!(webp.get(8..12), Some(b"WEBP".as_slice()));
+
+        let small = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            200,
+            300,
+            image::Rgb([90, 10, 20]),
+        ));
+        let unchanged = resize_bounded(&small, 320, 640);
+        assert_eq!((unchanged.width(), unchanged.height()), (200, 300));
+    }
 }

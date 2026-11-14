@@ -85,7 +85,10 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::get,
 };
-use std::sync::Arc;
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicBool, Ordering},
+};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 fn media_routes(inventory: node::Inventory) -> Router {
@@ -709,30 +712,335 @@ fn csp_origin_string(raw: &str) -> Option<String> {
     Some(format!(" {scheme}://{host}{port}"))
 }
 
+const ALT_SVC_HEADER: axum::http::HeaderName = axum::http::HeaderName::from_static("alt-svc");
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AltSvcPolicy {
+    Disabled,
+    Always(HeaderValue),
+    WhenHttps(HeaderValue),
+}
+
+fn is_https_url(raw: &str) -> bool {
+    raw.trim()
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+}
+
+fn default_h3_alt_svc(public_url: &str) -> HeaderValue {
+    let port = public_url
+        .parse::<axum::http::Uri>()
+        .ok()
+        .and_then(|uri| {
+            let https = uri
+                .scheme_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case("https"));
+            https.then(|| uri.port_u16().unwrap_or(443))
+        })
+        .unwrap_or(443);
+    let value = format!("h3=\":{port}\"; ma=86400");
+    HeaderValue::from_str(&value)
+        .unwrap_or_else(|_| HeaderValue::from_static("h3=\":443\"; ma=86400"))
+}
+
+fn resolve_alt_svc_policy(
+    configured: Option<&str>,
+    origin: &str,
+    media_public_url: Option<&str>,
+) -> AltSvcPolicy {
+    if let Some(raw) = configured {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("off") {
+            return AltSvcPolicy::Disabled;
+        }
+        return match HeaderValue::from_str(trimmed) {
+            Ok(val) => AltSvcPolicy::Always(val),
+            Err(_) => AltSvcPolicy::Disabled,
+        };
+    }
+    if is_https_url(origin) {
+        return AltSvcPolicy::Always(default_h3_alt_svc(origin));
+    }
+    if let Some(public_url) = media_public_url.filter(|v| is_https_url(v)) {
+        return AltSvcPolicy::Always(default_h3_alt_svc(public_url));
+    }
+    AltSvcPolicy::WhenHttps(HeaderValue::from_static("h3=\":443\"; ma=86400"))
+}
+
+fn normalize_authority(raw: &str, default_https: bool) -> &str {
+    if default_https {
+        raw.strip_suffix(":443").unwrap_or(raw)
+    } else {
+        raw.strip_suffix(":80").unwrap_or(raw)
+    }
+}
+
+fn authority_matches(candidate: Option<&str>, expected: Option<&str>, default_https: bool) -> bool {
+    match (candidate, expected) {
+        (Some(cand), Some(exp)) => normalize_authority(cand, default_https)
+            .eq_ignore_ascii_case(normalize_authority(exp, default_https)),
+        _ => false,
+    }
+}
+
+fn origin_matches_primary(origin_header: &str, primary_origin: &str) -> bool {
+    if origin_header == primary_origin {
+        return true;
+    }
+    let Ok(cand) = origin_header.parse::<axum::http::Uri>() else {
+        return false;
+    };
+    let Ok(exp) = primary_origin.parse::<axum::http::Uri>() else {
+        return false;
+    };
+    let (Some(cs), Some(es)) = (cand.scheme_str(), exp.scheme_str()) else {
+        return false;
+    };
+    if !cs.eq_ignore_ascii_case(es) {
+        return false;
+    }
+    let default_https = es.eq_ignore_ascii_case("https");
+    authority_matches(
+        cand.authority().map(|a| a.as_str()),
+        exp.authority().map(|a| a.as_str()),
+        default_https,
+    )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TrustedProxyCidr {
+    network: std::net::IpAddr,
+    prefix: u8,
+}
+
+impl TrustedProxyCidr {
+    fn parse(raw: &str) -> Option<Self> {
+        let (address, prefix) = match raw.split_once('/') {
+            Some((address, prefix)) => (address, Some(prefix.parse::<u8>().ok()?)),
+            None => (raw, None),
+        };
+        let network = address.trim().parse::<std::net::IpAddr>().ok()?.to_canonical();
+        let max = if network.is_ipv4() { 32 } else { 128 };
+        let prefix = prefix.unwrap_or(max);
+        (prefix <= max).then_some(Self { network, prefix })
+    }
+
+    fn contains(&self, ip: std::net::IpAddr) -> bool {
+        match (self.network, ip.to_canonical()) {
+            (std::net::IpAddr::V4(network), std::net::IpAddr::V4(ip)) => {
+                let mask = u32::MAX
+                    .checked_shl(32 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                u32::from(network) & mask == u32::from(ip) & mask
+            }
+            (std::net::IpAddr::V6(network), std::net::IpAddr::V6(ip)) => {
+                let mask = u128::MAX
+                    .checked_shl(128 - u32::from(self.prefix))
+                    .unwrap_or(0);
+                u128::from(network) & mask == u128::from(ip) & mask
+            }
+            _ => false,
+        }
+    }
+}
+
+const DEFAULT_TRUSTED_PROXY_CIDRS: [&str; 7] = [
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+    "fe80::/10",
+];
+
+fn trusted_proxy_cidrs_from(raw: Option<&str>) -> Vec<TrustedProxyCidr> {
+    let Some(raw) = raw.map(str::trim) else {
+        return DEFAULT_TRUSTED_PROXY_CIDRS
+            .iter()
+            .filter_map(|c| TrustedProxyCidr::parse(c))
+            .collect();
+    };
+    if raw.is_empty() || raw.eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    raw.split(',')
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .filter_map(TrustedProxyCidr::parse)
+        .collect()
+}
+
+static TRUSTED_PROXY_CIDRS: std::sync::LazyLock<Vec<TrustedProxyCidr>> =
+    std::sync::LazyLock::new(|| {
+        trusted_proxy_cidrs_from(std::env::var("MEDIA_TRUSTED_PROXIES").ok().as_deref())
+    });
+
+fn request_is_https(
+    headers: &axum::http::HeaderMap,
+    uri: &axum::http::Uri,
+    peer_ip: Option<std::net::IpAddr>,
+) -> bool {
+    request_is_https_with_trusted(headers, uri, peer_ip, &TRUSTED_PROXY_CIDRS)
+}
+
+fn request_is_https_with_trusted(
+    headers: &axum::http::HeaderMap,
+    uri: &axum::http::Uri,
+    peer_ip: Option<std::net::IpAddr>,
+    trusted: &[TrustedProxyCidr],
+) -> bool {
+    if uri
+        .scheme_str()
+        .is_some_and(|s| s.eq_ignore_ascii_case("https"))
+    {
+        return true;
+    }
+    // Only honour forwarded proto headers from a known trusted TCP proxy peer; direct
+    // untrusted clients (or requests without peer identity) cannot trigger `Alt-Svc`.
+    let Some(peer) = peer_ip else {
+        return false;
+    };
+    if !trusted.iter().any(|cidr| cidr.contains(peer)) {
+        return false;
+    }
+    if let Some(proto) = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        && proto.trim().eq_ignore_ascii_case("https")
+    {
+        return true;
+    }
+    if let Some(forwarded) = headers.get("forwarded").and_then(|v| v.to_str().ok()) {
+        for element in forwarded.split(',') {
+            for param in element.split(';') {
+                if let Some((key, val)) = param.trim().split_once('=')
+                    && key.trim().eq_ignore_ascii_case("proto")
+                    && val.trim().trim_matches('"').eq_ignore_ascii_case("https")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn strip_h3_forbidden_hop_by_hop_headers(headers: &mut axum::http::HeaderMap) {
+    // RFC 9114 §4.2 forbids connection-specific headers in HTTP/3 (and RFC 9113 in HTTP/2).
+    const FORBIDDEN: [&str; 5] = [
+        "connection",
+        "keep-alive",
+        "proxy-connection",
+        "transfer-encoding",
+        "upgrade",
+    ];
+    for name in FORBIDDEN {
+        headers.remove(name);
+    }
+}
+
+fn finalize_http3_headers(
+    res: &mut Response,
+    is_https_req: bool,
+    alt_svc_policy: &AltSvcPolicy,
+) {
+    if res.status() != StatusCode::SWITCHING_PROTOCOLS {
+        strip_h3_forbidden_hop_by_hop_headers(res.headers_mut());
+    }
+    if is_https_req
+        && let AltSvcPolicy::WhenHttps(val) = alt_svc_policy
+        && !res.headers().contains_key("alt-svc")
+    {
+        res.headers_mut().insert(ALT_SVC_HEADER, val.clone());
+    }
+}
+
+struct CachedCsp {
+    cors_hosts: Vec<String>,
+    node_origins: Vec<String>,
+    header: Option<HeaderValue>,
+}
+
+fn build_csp_header(extra_origins: &str) -> Option<HeaderValue> {
+    let csp = format!(
+        "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; manifest-src 'self'; font-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    );
+    HeaderValue::from_str(&csp).ok()
+}
+
 pub fn local_security_with_store(
     router: Router,
     origin: String,
     store: Option<identity::IdentityStore>,
     allowed_origins: Vec<String>,
 ) -> Router {
-    let host = origin
-        .parse::<axum::http::Uri>()
-        .ok()
+    let origin_uri = origin.parse::<axum::http::Uri>().ok();
+    let origin_is_https = origin_uri
+        .as_ref()
+        .and_then(|uri| uri.scheme_str())
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https"));
+    let host = origin_uri
+        .as_ref()
         .and_then(|uri| uri.authority().map(|value| value.as_str().to_owned()));
-    let internal_host = std::env::var("MEDIA_CORE_INTERNAL_URL")
+    let internal_uri = std::env::var("MEDIA_CORE_INTERNAL_URL")
         .ok()
-        .and_then(|u| u.parse::<axum::http::Uri>().ok())
+        .and_then(|u| u.parse::<axum::http::Uri>().ok());
+    let internal_is_https = internal_uri
+        .as_ref()
+        .and_then(|uri| uri.scheme_str())
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https"));
+    let internal_host = internal_uri
+        .as_ref()
         .and_then(|uri| uri.authority().map(|value| value.as_str().to_owned()));
-    router
+    let configured_alt_svc = std::env::var("MEDIA_ALT_SVC").ok();
+    let public_url_env = std::env::var("MEDIA_PUBLIC_URL").ok();
+    let alt_svc_policy = resolve_alt_svc_policy(
+        configured_alt_svc.as_deref(),
+        &origin,
+        public_url_env.as_deref(),
+    );
+    let mut base_extra_origins = String::new();
+    for ao in &allowed_origins {
+        if let Some(origin_str) = csp_origin_string(ao)
+            && !base_extra_origins.contains(&origin_str)
+        {
+            base_extra_origins.push_str(&origin_str);
+        }
+    }
+    let base_csp = build_csp_header(&base_extra_origins);
+    let csp_cache = Arc::new(RwLock::new(CachedCsp {
+        cors_hosts: Vec::new(),
+        node_origins: Vec::new(),
+        header: base_csp.clone(),
+    }));
+    let node_registry_warmed = Arc::new(AtomicBool::new(false));
+    let layer_alt_svc = match &alt_svc_policy {
+        AltSvcPolicy::Always(val) => Some(val.clone()),
+        _ => None,
+    };
+    let router = router
         .layer(middleware::from_fn(move |req: Request, next: Next| {
             let host = host.clone();
             let internal_host = internal_host.clone();
             let origin = origin.clone();
             let store = store.clone();
             let allowed_origins = allowed_origins.clone();
+            let alt_svc_policy = alt_svc_policy.clone();
+            let base_extra_origins = base_extra_origins.clone();
+            let base_csp = base_csp.clone();
+            let csp_cache = csp_cache.clone();
+            let node_registry_warmed = node_registry_warmed.clone();
             async move {
                 let req_path = req.uri().path();
                 let method = req.method();
+                let peer_ip = req
+                    .extensions()
+                    .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+                    .map(|info| info.0.ip());
+                let is_https_req =
+                    origin_is_https || request_is_https(req.headers(), req.uri(), peer_ip);
 
                 let is_internal = req_path.starts_with("/internal/v1/");
                 let has_internal_proto = req
@@ -740,10 +1048,25 @@ pub fn local_security_with_store(
                     .get(media_contracts::protocol::HDR_PROTOCOL)
                     .and_then(|v| v.to_str().ok())
                     == Some(media_contracts::protocol::PROTOCOL_VERSION);
-                let req_host = req.headers().get(header::HOST).and_then(|h| h.to_str().ok());
-                let host_ok = req_host == host.as_deref()
-                    || (is_internal && has_internal_proto)
-                    || (is_internal && internal_host.as_deref().is_some_and(|ih| req_host == Some(ih)));
+                let host_header = req.headers().get(header::HOST).and_then(|h| h.to_str().ok());
+                let uri_authority = req.uri().authority().map(|a| a.as_str());
+                // Support HTTP/2 and HTTP/3 `:authority` when `Host` is omitted, while
+                // rejecting conflicting `Host` vs `:authority` smuggling.
+                let authority_matches_request = match (host_header, uri_authority) {
+                    (Some(h), Some(a)) => {
+                        authority_matches(Some(h), Some(a), origin_is_https)
+                            || (is_internal && authority_matches(Some(h), Some(a), internal_is_https))
+                    }
+                    _ => true,
+                };
+                let req_host = host_header.or(uri_authority);
+                let host_ok = authority_matches_request
+                    && (authority_matches(req_host, host.as_deref(), origin_is_https)
+                        || (is_internal && has_internal_proto)
+                        || (is_internal
+                            && internal_host
+                                .as_deref()
+                                .is_some_and(|ih| authority_matches(req_host, Some(ih), internal_is_https))));
 
                 // 0. HLS capability URLs are opened by cast receivers on another origin
                 // (Chromecast's page, AirPlay). They carry their own authorization and no
@@ -763,6 +1086,7 @@ pub fn local_security_with_store(
                     };
                     res.headers_mut().insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
                     res.headers_mut().insert(header::ACCESS_CONTROL_EXPOSE_HEADERS, HeaderValue::from_static("content-length, content-range"));
+                    finalize_http3_headers(&mut res, is_https_req, &alt_svc_policy);
                     return res;
                 }
 
@@ -799,7 +1123,9 @@ pub fn local_security_with_store(
                     .get(header::ORIGIN)
                     .and_then(|h| h.to_str().ok())
                     .map(|s| s.to_owned());
-                let is_primary_origin = origin_header.as_deref() == Some(origin.as_str());
+                let is_primary_origin = origin_header
+                    .as_deref()
+                    .is_some_and(|cand| origin_matches_primary(cand, &origin));
                 let (is_explicit_cors_allowed, is_wildcard_cors_allowed) = store
                     .as_ref()
                     .and_then(|s| s.cors_origins.read().ok())
@@ -864,6 +1190,7 @@ pub fn local_security_with_store(
                         header::ACCESS_CONTROL_MAX_AGE,
                         HeaderValue::from_static("86400"),
                     );
+                    finalize_http3_headers(&mut res, is_https_req, &alt_svc_policy);
                     return res;
                 }
 
@@ -892,17 +1219,33 @@ pub fn local_security_with_store(
                         HeaderValue::from_static("content-range, content-length, etag"),
                     );
                 }
-                let mut extra_origins = String::new();
-                for ao in &allowed_origins {
-                    if let Some(origin_str) = csp_origin_string(ao)
-                        && !extra_origins.contains(&origin_str)
+                let csp_header = if let Some(store) = &store {
+                    if !node_registry_warmed.load(Ordering::Acquire)
+                        && nodes::ensure_node_registry_warm(store).await.is_ok()
                     {
-                        extra_origins.push_str(&origin_str);
+                        node_registry_warmed.store(true, Ordering::Release);
                     }
-                }
-                if let Some(store) = &store {
-                    if let Ok(hosts) = store.cors_origins.read() {
-                        for host in hosts.iter() {
+                    let node_origins = store.node_registry.connected_public_origins();
+                    let (cached_hit, cors_hosts) = match store.cors_origins.read() {
+                        Ok(hosts) => {
+                            let hit = csp_cache.read().ok().and_then(|guard| {
+                                (guard.cors_hosts.as_slice() == hosts.as_slice()
+                                    && guard.node_origins.as_slice() == node_origins.as_slice())
+                                .then(|| guard.header.clone())
+                            });
+                            if let Some(cached) = hit {
+                                (Some(cached), Vec::new())
+                            } else {
+                                (None, hosts.clone())
+                            }
+                        }
+                        Err(_) => (None, Vec::new()),
+                    };
+                    if let Some(cached) = cached_hit {
+                        cached
+                    } else {
+                        let mut extra_origins = base_extra_origins.clone();
+                        for host in &cors_hosts {
                             if host != "*"
                                 && let Some(origin_str) = csp_origin_string(host)
                                 && !extra_origins.contains(&origin_str)
@@ -910,22 +1253,28 @@ pub fn local_security_with_store(
                                 extra_origins.push_str(&origin_str);
                             }
                         }
-                    }
-                    let _ = nodes::ensure_node_registry_warm(store).await;
-                    for origin_url in store.node_registry.connected_public_origins() {
-                        if let Some(origin_str) = csp_origin_string(&origin_url)
-                            && !extra_origins.contains(&origin_str)
-                        {
-                            extra_origins.push_str(&origin_str);
+                        for origin_url in &node_origins {
+                            if let Some(origin_str) = csp_origin_string(origin_url)
+                                && !extra_origins.contains(&origin_str)
+                            {
+                                extra_origins.push_str(&origin_str);
+                            }
                         }
+                        let computed = build_csp_header(&extra_origins);
+                        if let Ok(mut guard) = csp_cache.write() {
+                            guard.cors_hosts = cors_hosts;
+                            guard.node_origins = node_origins;
+                            guard.header = computed.clone();
+                        }
+                        computed
                     }
-                }
-                let csp = format!(
-                    "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; manifest-src 'self'; font-src 'self'; img-src 'self' data:{extra_origins}; media-src 'self' blob:{extra_origins}; connect-src 'self'{extra_origins}; style-src 'self'; style-src-attr 'unsafe-hashes' 'sha256-S8qMpvofolR8Mpjy4kQvEm7m1q8clzU4dfDH0AmvZjo='; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-                );
-                if let Ok(val) = HeaderValue::from_str(&csp) {
+                } else {
+                    base_csp.clone()
+                };
+                if let Some(val) = csp_header {
                     res.headers_mut().insert(header::CONTENT_SECURITY_POLICY, val);
                 }
+                finalize_http3_headers(&mut res, is_https_req, &alt_svc_policy);
                 res
             }
         }))
@@ -937,7 +1286,15 @@ pub fn local_security_with_store(
             HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
         ))
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
-        .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../experiments/bench.js")) }))
+        .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../experiments/bench.js")) }));
+    if let Some(alt_svc) = layer_alt_svc {
+        router.layer(SetResponseHeaderLayer::if_not_present(
+            ALT_SVC_HEADER,
+            alt_svc,
+        ))
+    } else {
+        router
+    }
 }
 
 pub fn error(status: StatusCode, code: &'static str) -> Response {
@@ -1018,6 +1375,259 @@ mod tests {
         );
         assert_eq!(csp_origin_string("https://"), None);
         assert_eq!(csp_origin_string("http://evil.com/path"), None);
+    }
+
+    #[tokio::test]
+    async fn local_security_accepts_http3_authority_without_host_and_blocks_conflicts() {
+        use axum::body::Body;
+        use tower::ServiceExt as _;
+
+        let inner = Router::new().route("/ping", get(|| async { "pong" }));
+        let app = local_security_with_store(
+            inner,
+            "https://media.example.com".into(),
+            None,
+            Vec::new(),
+        );
+
+        // HTTP/2 & HTTP/3 `:authority` only (no Host header).
+        let req = Request::builder()
+            .uri("https://media.example.com/ping")
+            .header(header::ORIGIN, "https://media.example.com:443")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get("alt-svc").and_then(|v| v.to_str().ok()),
+            Some("h3=\":443\"; ma=86400")
+        );
+
+        // Mismatched Host vs `:authority` smuggling attempt must be rejected.
+        let conflict = Request::builder()
+            .uri("https://media.example.com/ping")
+            .header(header::HOST, "evil.attacker.com")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(conflict).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+        // Neither Host nor `:authority` must be rejected.
+        let missing = Request::builder().uri("/ping").body(Body::empty()).unwrap();
+        let res = app.oneshot(missing).await.unwrap();
+        assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[tokio::test]
+    async fn local_security_alt_svc_and_strips_http3_hop_by_hop_headers() {
+        use axum::body::Body;
+        use tower::ServiceExt as _;
+
+        assert_eq!(
+            resolve_alt_svc_policy(Some("off"), "https://media.example.com", None),
+            AltSvcPolicy::Disabled
+        );
+        assert_eq!(
+            resolve_alt_svc_policy(Some(""), "https://media.example.com", None),
+            AltSvcPolicy::Disabled
+        );
+        assert_eq!(
+            resolve_alt_svc_policy(None, "https://media.example.com:8443", None),
+            AltSvcPolicy::Always(HeaderValue::from_static("h3=\":8443\"; ma=86400"))
+        );
+        assert_eq!(
+            resolve_alt_svc_policy(
+                None,
+                "http://127.0.0.1:3000",
+                Some("https://edge.example.com:9443")
+            ),
+            AltSvcPolicy::Always(HeaderValue::from_static("h3=\":9443\"; ma=86400"))
+        );
+
+        let inner = Router::new().route(
+            "/hop",
+            get(|| async {
+                let mut res = Response::new(Body::empty());
+                let headers = res.headers_mut();
+                headers.insert(
+                    axum::http::HeaderName::from_static("connection"),
+                    HeaderValue::from_static("keep-alive"),
+                );
+                headers.insert(
+                    axum::http::HeaderName::from_static("keep-alive"),
+                    HeaderValue::from_static("timeout=5"),
+                );
+                headers.insert(
+                    axum::http::HeaderName::from_static("proxy-connection"),
+                    HeaderValue::from_static("keep-alive"),
+                );
+                headers.insert(
+                    axum::http::HeaderName::from_static("transfer-encoding"),
+                    HeaderValue::from_static("chunked"),
+                );
+                headers.insert(
+                    axum::http::HeaderName::from_static("upgrade"),
+                    HeaderValue::from_static("h2c"),
+                );
+                res
+            }),
+        );
+        let app = local_security_with_store(
+            inner,
+            "http://127.0.0.1:3000".into(),
+            None,
+            Vec::new(),
+        );
+
+        // Plain HTTP behind trusted reverse proxy signalling HTTPS triggers Alt-Svc & strips hop-by-hop headers.
+        let mut proxied_https = Request::builder()
+            .uri("/hop")
+            .header(header::HOST, "127.0.0.1:3000")
+            .header("x-forwarded-proto", "https")
+            .body(Body::empty())
+            .unwrap();
+        proxied_https
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [127, 0, 0, 1],
+                44321,
+            ))));
+        let res = app.clone().oneshot(proxied_https).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(
+            res.headers().get("alt-svc").and_then(|v| v.to_str().ok()),
+            Some("h3=\":443\"; ma=86400")
+        );
+        for forbidden in [
+            "connection",
+            "keep-alive",
+            "proxy-connection",
+            "transfer-encoding",
+            "upgrade",
+        ] {
+            assert!(!res.headers().contains_key(forbidden), "{forbidden} leaked");
+        }
+
+        // Untrusted TCP peer or missing ConnectInfo cannot spoof x-forwarded-proto/forwarded to emit Alt-Svc.
+        let mut untrusted_https = Request::builder()
+            .uri("/hop")
+            .header(header::HOST, "127.0.0.1:3000")
+            .header("x-forwarded-proto", "https")
+            .header("forwarded", "proto=https")
+            .body(Body::empty())
+            .unwrap();
+        untrusted_https
+            .extensions_mut()
+            .insert(axum::extract::ConnectInfo(std::net::SocketAddr::from((
+                [203, 0, 113, 9],
+                44321,
+            ))));
+        let res = app.clone().oneshot(untrusted_https).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key("alt-svc"));
+
+        let missing_peer_https = Request::builder()
+            .uri("/hop")
+            .header(header::HOST, "127.0.0.1:3000")
+            .header("x-forwarded-proto", "https")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.clone().oneshot(missing_peer_https).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key("alt-svc"));
+
+        // Plain HTTP without HTTPS proxy proto does not advertise h3 unless explicitly configured.
+        let plain_http = Request::builder()
+            .uri("/hop")
+            .header(header::HOST, "127.0.0.1:3000")
+            .body(Body::empty())
+            .unwrap();
+        let res = app.oneshot(plain_http).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(!res.headers().contains_key("alt-svc"));
+
+        // MEDIA_TRUSTED_PROXIES=none rejects forwarded proto even from loopback; https:// URI still passes.
+        let no_proxies = trusted_proxy_cidrs_from(Some("none"));
+        let mut hdrs = axum::http::HeaderMap::new();
+        hdrs.insert("x-forwarded-proto", "https".parse().unwrap());
+        let http_uri: axum::http::Uri = "/hop".parse().unwrap();
+        assert!(!request_is_https_with_trusted(
+            &hdrs,
+            &http_uri,
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+            &no_proxies,
+        ));
+        let https_uri: axum::http::Uri = "https://127.0.0.1:3000/hop".parse().unwrap();
+        assert!(request_is_https_with_trusted(
+            &hdrs,
+            &https_uri,
+            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 9))),
+            &no_proxies,
+        ));
+    }
+
+    #[tokio::test]
+    async fn local_security_caches_csp_and_reflects_cors_changes() {
+        use axum::body::Body;
+        use tower::ServiceExt as _;
+
+        let temp = tempfile::tempdir().unwrap();
+        let store = identity::IdentityStore::open(&temp.path().join("csp.sqlite"))
+            .await
+            .unwrap();
+        let inner = Router::new().route("/ping", get(|| async { "pong" }));
+        let app = local_security_with_store(
+            inner,
+            "http://127.0.0.1:3000".into(),
+            Some(store.clone()),
+            vec!["https://static.example.com".into()],
+        );
+
+        let req1 = Request::builder()
+            .uri("/ping")
+            .header(header::HOST, "127.0.0.1:3000")
+            .body(Body::empty())
+            .unwrap();
+        let res1 = app.clone().oneshot(req1).await.unwrap();
+        assert_eq!(res1.status(), StatusCode::OK);
+        let csp1 = res1
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap()
+            .to_owned();
+        assert!(csp1.contains("https://static.example.com"));
+
+        // Second request hits cached CSP HeaderValue identically.
+        let req2 = Request::builder()
+            .uri("/ping")
+            .header(header::HOST, "127.0.0.1:3000")
+            .body(Body::empty())
+            .unwrap();
+        let res2 = app.clone().oneshot(req2).await.unwrap();
+        assert_eq!(
+            res2.headers().get(header::CONTENT_SECURITY_POLICY).and_then(|v| v.to_str().ok()),
+            Some(csp1.as_str())
+        );
+
+        // Updating store.cors_origins invalidates the cached CSP header immediately.
+        {
+            let mut guard = store.cors_origins.write().unwrap();
+            guard.push("https://cdn.example.com:8443".into());
+        }
+        let req3 = Request::builder()
+            .uri("/ping")
+            .header(header::HOST, "127.0.0.1:3000")
+            .body(Body::empty())
+            .unwrap();
+        let res3 = app.oneshot(req3).await.unwrap();
+        let csp3 = res3
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap();
+        assert!(csp3.contains("https://static.example.com"));
+        assert!(csp3.contains("https://cdn.example.com:8443"));
     }
 }
 

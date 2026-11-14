@@ -6,6 +6,7 @@
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import type { Work } from './api';
+  import { loadCatalog } from './page-cache';
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
@@ -253,6 +254,31 @@
       requestingBusy = false;
     }
   }
+
+  function prefetchPage(targetOffset: number) {
+    if (targetOffset < 0 || targetOffset === offset) return;
+    const filters = Object.fromEntries(
+      ['genre', 'year', 'quality', 'codec', 'language'].flatMap(key => {
+        const value = page.url.searchParams.get(key);
+        return value ? [[key, value]] : [];
+      })
+    );
+    const currentLibrary = page.url.searchParams.get('library') ?? '';
+    const kinds = section === 'films' ? ['film'] : section === 'series' ? ['series'] : ['film', 'series'];
+    for (const kind of kinds) {
+      const url = `/api/v1/catalog?${new URLSearchParams({
+        ...filters,
+        ...(currentLibrary ? { library: currentLibrary } : {}),
+        kind,
+        q: query,
+        sort,
+        offset: String(targetOffset),
+        limit: '24',
+        count: 'false'
+      })}`;
+      void loadCatalog(url, url).catch(() => {});
+    }
+  }
 </script>
 
 <div class="catalog-grid-view">
@@ -435,7 +461,7 @@
 
       <div class="media-grid">
         {#each filteredFilms as work, index (work.id)}
-          <Poster {work} href={detailUrl(work)} eager={index < 8} />
+          <Poster {work} href={detailUrl(work)} eager={index < 12} />
         {:else}
           <div class="empty-media-box">
             <Icon name="film" size={32} />
@@ -460,7 +486,7 @@
 
       <div class="media-grid">
         {#each filteredSeries as work, index (work.id)}
-          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length === 0 && index < 8} />
+          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length < 12 && index < 12 - filteredFilms.length} />
         {:else}
           <div class="empty-media-box">
             <Icon name="tv" size={32} />
@@ -484,14 +510,18 @@
   {#if offset > 0 || films.length || series.length}
     <nav class="pagination" aria-label={$t('catalogue_pages')}>
       {#if offset > 0}
+        {@const previousOffset = Math.max(0, offset - 24)}
         <a
           class="page-nav-btn"
+          onpointerenter={() => prefetchPage(previousOffset)}
+          onfocus={() => prefetchPage(previousOffset)}
+          onpointerdown={() => prefetchPage(previousOffset)}
           href={resolve(
             `${section === 'films' ? 'films/' : section === 'series' ? 'series/' : 'search/'}?${new URLSearchParams({
               ...Object.fromEntries(page.url.searchParams),
               q: query,
               sort,
-              offset: String(Math.max(0, offset - 24))
+              offset: String(previousOffset)
             })}`
           )}
         >
@@ -502,14 +532,18 @@
         {$t('admin_page', { value: Math.floor(offset / 24) + 1 })}{#if paginationTotal !== null} {$t('page_of_total', { total: Math.max(1, Math.ceil(paginationTotal / 24)) })}{/if}
       </span>
       {#if hasNext || (paginationTotal !== null && paginationTotal > offset + 24)}
+        {@const nextOffset = offset + 24}
         <a
           class="page-nav-btn"
+          onpointerenter={() => prefetchPage(nextOffset)}
+          onfocus={() => prefetchPage(nextOffset)}
+          onpointerdown={() => prefetchPage(nextOffset)}
           href={resolve(
             `${section === 'films' ? 'films/' : section === 'series' ? 'series/' : 'search/'}?${new URLSearchParams({
               ...Object.fromEntries(page.url.searchParams),
               q: query,
               sort,
-              offset: String(offset + 24)
+              offset: String(nextOffset)
             })}`
           )}
         >

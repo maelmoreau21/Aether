@@ -1,3 +1,17 @@
+<script module lang="ts">
+  /** Détermine synchronement l'état d'affichage (instantané si déjà connu/en cache). */
+  export function resolvePosterPresentation(
+    imageUrl: string,
+    loadedUrl: string,
+    instantUrl: string,
+    isCachedAtUrlChange: boolean
+  ): { loaded: boolean; instant: boolean } {
+    if (!imageUrl) return { loaded: false, instant: false };
+    const instant = isCachedAtUrlChange || instantUrl === imageUrl;
+    return { loaded: instant || loadedUrl === imageUrl, instant };
+  }
+</script>
+
 <script lang="ts">
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
@@ -36,16 +50,33 @@
   const posterUrl = $derived(wide ? landscapeUrl : artwork.poster);
   const previewUrl = $derived(imagePreviewUrl(posterUrl, showMetadata ? 320 : 640));
   const imageUrl = $derived([previewUrl, posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
+  let imgElement = $state<HTMLImageElement | null>(null);
   let loadedUrl = $state('');
+  let instantUrl = $state('');
+  // Calculé uniquement lorsque `imageUrl` change : affiche immédiatement sans attendre onload/$effect.
+  const cachedAtUrlChange = $derived(Boolean(imageUrl) && isImageLoaded(imageUrl));
+  const posterVisual = $derived(
+    resolvePosterPresentation(imageUrl, loadedUrl, instantUrl, cachedAtUrlChange)
+  );
 
   $effect(() => {
-    if (imageUrl && isImageLoaded(imageUrl)) {
-      loadedUrl = imageUrl;
+    const url = imageUrl;
+    if (!url) return;
+    if (isImageLoaded(url)) {
+      if (loadedUrl !== url) loadedUrl = url;
+      if (instantUrl !== url) instantUrl = url;
+      return;
+    }
+    if (imgElement && imgElement.complete && imgElement.naturalWidth > 0) {
+      instantUrl = url;
+      loadedUrl = url;
+      markImageLoaded(url);
     }
   });
 
   function checkLoaded(node: HTMLImageElement) {
     if (node.complete && node.naturalWidth > 0 && imageUrl) {
+      instantUrl = imageUrl;
       loadedUrl = imageUrl;
       markImageLoaded(imageUrl);
     }
@@ -145,8 +176,10 @@
   <div class="poster">
     {#if imageUrl}
       <img
+        bind:this={imgElement}
         class="poster-image"
-        class:loaded={loadedUrl === imageUrl}
+        class:loaded={posterVisual.loaded}
+        class:is-instant={posterVisual.instant}
         src={imageUrl}
         alt=""
         width="400"
@@ -509,6 +542,10 @@
 
   .poster img.loaded {
     opacity: 1;
+  }
+
+  .poster img.is-instant {
+    transition: none;
   }
 
   .card-shell {

@@ -19,8 +19,66 @@ pub(crate) use migration::migrate_one;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Execute;
+use std::collections::{HashMap, VecDeque};
 #[cfg(test)]
 use std::io::Cursor;
+use std::sync::{LazyLock, Mutex};
+
+const ARTWORK_SHA_CACHE_CAP: usize = 4096;
+type ArtworkShaKey = (u64, String, String, u32);
+
+#[derive(Default)]
+struct ArtworkShaCache {
+    entries: HashMap<ArtworkShaKey, String>,
+    order: VecDeque<ArtworkShaKey>,
+}
+
+static ARTWORK_SHA_CACHE: LazyLock<Mutex<ArtworkShaCache>> =
+    LazyLock::new(|| Mutex::new(ArtworkShaCache::default()));
+
+fn cached_artwork_sha(cache_scope: u64, work: &str, id: &str, width: u32) -> Option<String> {
+    let key = (cache_scope, work.to_owned(), id.to_owned(), width);
+    ARTWORK_SHA_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entries
+        .get(&key)
+        .cloned()
+}
+
+fn store_artwork_sha(cache_scope: u64, work: String, id: String, width: u32, sha256: String) {
+    let key = (cache_scope, work, id, width);
+    let mut cache = ARTWORK_SHA_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if !cache.entries.contains_key(&key) {
+        while cache.entries.len() >= ARTWORK_SHA_CACHE_CAP {
+            let Some(oldest) = cache.order.pop_front() else {
+                break;
+            };
+            cache.entries.remove(&oldest);
+        }
+        cache.order.push_back(key.clone());
+    }
+    cache.entries.insert(key, sha256);
+}
+
+fn evict_artwork_sha(cache_scope: u64, work: &str, id: &str, width: u32) {
+    let key = (cache_scope, work.to_owned(), id.to_owned(), width);
+    ARTWORK_SHA_CACHE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entries
+        .remove(&key);
+}
+
+fn invalidate_artwork_cache(cache_scope: u64, work: &str) {
+    let mut cache = ARTWORK_SHA_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache
+        .entries
+        .retain(|(scope, cached_work, _, _), _| *scope != cache_scope || cached_work != work);
+    cache
+        .order
+        .retain(|(scope, cached_work, _, _)| *scope != cache_scope || cached_work != work);
+}
 pub(crate) const ROLES: &[&str] = &[
     "poster",
     "thumb",
@@ -321,6 +379,7 @@ async fn pin(
     query("INSERT INTO artwork_annotations(work_id,image_id,kind,pinned) VALUES(?,?,?,?) ON CONFLICT(work_id,image_id) DO UPDATE SET pinned=excluded.pinned")
         .bind(&work).bind(&id).bind(&image.kind).bind(i64::from(input.pinned)).execute(&mut *tx).await.map_err(db)?;
     tx.commit().await.map_err(db)?;
+    invalidate_artwork_cache(auth.store.cache_scope, &work);
     crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
@@ -438,25 +497,27 @@ async fn read(
     if ![0, 320, 640, 1280].contains(&width) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    // Check existence/ownership before returning 304; a deleted image cannot be revived by a validator.
-    let exists: i64 =
-        query_scalar("SELECT COUNT(*) FROM work_image_entries WHERE id=? AND work_id=?")
-            .bind(&id)
-            .bind(&work)
-            .fetch_one(&auth.store.pool)
+    if let Some(sha256) = cached_artwork_sha(auth.store.cache_scope, &work, &id, width) {
+        if let Ok(response) = auth
+            .store
+            .assets
+            .response_after_authorization(&sha256, &headers)
             .await
-            .map_err(db)?;
-    if exists == 0 {
-        return Err(StatusCode::NOT_FOUND);
+        {
+            return Ok(response);
+        }
+        evict_artwork_sha(auth.store.cache_scope, &work, &id, width);
     }
+    // Single joined lookup validates both entry ownership and width data in one query.
     let sha256: String = query_scalar("SELECT d.sha256 FROM work_image_data d JOIN work_image_entries e ON e.id=d.image_id WHERE e.work_id=? AND e.id=? AND d.width=?")
-        .bind(work)
-        .bind(id)
+        .bind(&work)
+        .bind(&id)
         .bind(i64::from(width))
         .fetch_optional(&auth.store.pool)
         .await
         .map_err(db)?
         .ok_or(StatusCode::NOT_FOUND)?;
+    store_artwork_sha(auth.store.cache_scope, work, id, width, sha256.clone());
     auth.store
         .assets
         .response_after_authorization(&sha256, &headers)
@@ -734,7 +795,10 @@ fn normalize_kind(bytes: Bytes, content: &str, kind: &str) -> Result<Encoded, St
         } else if image.width() <= width {
             source.clone().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         } else {
-            crate::image_import::encode(&image.thumbnail(width, 4096), lossless)?
+            crate::image_import::encode(
+                &media_node::image_encoding::resize_bounded(&image, width, 4096),
+                lossless,
+            )?
         };
         variants.push((i64::from(width), "image/webp", bytes));
     }
@@ -1045,6 +1109,7 @@ pub(crate) async fn upload_internal(
         .bind(&work).bind(&id).bind(&kind).bind(&source_sha256).bind(crate::image_import::ENCODING)
         .execute(&mut *tx).await.map_err(db)?;
     tx.commit().await.map_err(db)?;
+    invalidate_artwork_cache(store.cache_scope, &work);
     crate::inventory::invalidate_catalogue_cache();
     Ok((
         StatusCode::CREATED,
@@ -1098,6 +1163,7 @@ async fn remove(
         .await
         .map_err(db)?;
     tx.commit().await.map_err(db)?;
+    invalidate_artwork_cache(auth.store.cache_scope, &work);
     crate::inventory::invalidate_catalogue_cache();
     Ok(StatusCode::NO_CONTENT)
 }
@@ -1443,5 +1509,25 @@ mod tests {
         let decoded = image::load_from_memory(&preview.2).unwrap();
         assert_eq!((decoded.width(), decoded.height()), (320, 480));
         assert!(normalize(Bytes::from_static(b"invalid"), "image/png").is_err());
+    }
+
+    #[test]
+    fn artwork_sha_cache_isolates_scopes_and_evicts_on_invalidate() {
+        let scope_a = 9_900_001u64;
+        let scope_b = 9_900_002u64;
+        store_artwork_sha(scope_a, "work-1".into(), "img-1".into(), 320, "sha-a-320".into());
+        store_artwork_sha(scope_a, "work-1".into(), "img-1".into(), 640, "sha-a-640".into());
+        store_artwork_sha(scope_a, "work-2".into(), "img-1".into(), 320, "sha-w2-320".into());
+        store_artwork_sha(scope_b, "work-1".into(), "img-1".into(), 320, "sha-b-320".into());
+
+        assert_eq!(cached_artwork_sha(scope_a, "work-1", "img-1", 320).as_deref(), Some("sha-a-320"));
+        invalidate_artwork_cache(scope_a, "work-1");
+        assert_eq!(cached_artwork_sha(scope_a, "work-1", "img-1", 320), None);
+        assert_eq!(cached_artwork_sha(scope_a, "work-1", "img-1", 640), None);
+        assert_eq!(cached_artwork_sha(scope_a, "work-2", "img-1", 320).as_deref(), Some("sha-w2-320"));
+        assert_eq!(cached_artwork_sha(scope_b, "work-1", "img-1", 320).as_deref(), Some("sha-b-320"));
+
+        invalidate_artwork_cache(scope_a, "work-2");
+        invalidate_artwork_cache(scope_b, "work-1");
     }
 }

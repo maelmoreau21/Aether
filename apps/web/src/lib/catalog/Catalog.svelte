@@ -6,7 +6,7 @@
   import { ensurePreferences, savePreferences } from '../preferences';
   import { page } from '$app/state';
   import { goto, beforeNavigate, afterNavigate } from '$app/navigation';
-  import { cachedCatalog, loadCatalog, invalidateCatalog, catalogRevision, saveCatalogScroll, catalogScroll } from './page-cache';
+  import { cachedCatalog, isCatalogFresh, loadCatalog, invalidateCatalog, catalogRevision, saveCatalogScroll, catalogScroll } from './page-cache';
   import { resolve } from '$app/paths';
   import { DEFAULT_NAME, fetchBrandName } from '../config/brand';
   import type ImmersivePlayer from '../player/ImmersivePlayer.svelte';
@@ -460,11 +460,16 @@
       return { kind, url, key: url };
     });
     let cachedKinds = 0;
-    if (!id) for (const {kind, key} of requests) {
-      const cached = cachedCatalog(key);
-      if (!cached) continue;
+    const pendingRequests: { kind: string; key: string; url: string }[] = [];
+    if (!id) for (const item of requests) {
+      const cached = cachedCatalog(item.key);
+      if (!cached) {
+        pendingRequests.push(item);
+        continue;
+      }
       cachedKinds++;
-      if (kind === 'film') { films = cached.items; totalFilms = cached.total; moreFilms = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
+      if (!isCatalogFresh(item.key)) pendingRequests.push(item);
+      if (item.kind === 'film') { films = cached.items; totalFilms = cached.total; moreFilms = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
       else { series = cached.items; totalSeries = cached.total; moreSeries = cached.hasMore ?? (cached.total ?? 0) > start + 24; }
     }
     if (cachedKinds === 0) {
@@ -514,37 +519,39 @@
             media = allEpisodeIds.map(eid => getCachedMedia(eid)).filter((m): m is Media => m !== undefined);
           }
         } else {
-          pendingCatalogKinds = kinds.length;
-          let completedKinds = 0;
-          const results = await Promise.allSettled(
-            requests.map(async ({kind, key, url}) => {
-              try {
-                let result: CatalogPage;
-                try { result = await loadCatalog(key, url); }
-                catch (cause) {
-                  // A shared request can be cancelled under us (another shelf got a 403, the cache was
-                  // invalidated): that is not this page's answer. Ask once more for our own.
-                  if (!isAbortError(cause) || controller.signal.aborted || effectSessionGen !== getSessionGeneration()) throw cause;
-                  result = await loadCatalog(key, url);
-                }
-                if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
-                if (kind === 'film') {
-                  films = result.items;
-                  totalFilms = result.total;
-                  moreFilms = result.hasMore ?? (result.total ?? 0) > start + 24;
-                } else {
-                  series = result.items;
-                  totalSeries = result.total;
-                  moreSeries = result.hasMore ?? (result.total ?? 0) > start + 24;
-                }
-                completedKinds += 1;
-                // Render the ready shelf and start its images immediately.
-                busy = false;
-              } finally {
-                if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) pendingCatalogKinds -= 1;
-              }
-            })
-          );
+          pendingCatalogKinds = pendingRequests.length;
+          let completedKinds = cachedKinds;
+          const results = pendingRequests.length
+            ? await Promise.allSettled(
+                pendingRequests.map(async ({kind, key, url}) => {
+                  try {
+                    let result: CatalogPage;
+                    try { result = await loadCatalog(key, url); }
+                    catch (cause) {
+                      // A shared request can be cancelled under us (another shelf got a 403, the cache was
+                      // invalidated): that is not this page's answer. Ask once more for our own.
+                      if (!isAbortError(cause) || controller.signal.aborted || effectSessionGen !== getSessionGeneration()) throw cause;
+                      result = await loadCatalog(key, url);
+                    }
+                    if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
+                    if (kind === 'film') {
+                      films = result.items;
+                      totalFilms = result.total;
+                      moreFilms = result.hasMore ?? (result.total ?? 0) > start + 24;
+                    } else {
+                      series = result.items;
+                      totalSeries = result.total;
+                      moreSeries = result.hasMore ?? (result.total ?? 0) > start + 24;
+                    }
+                    completedKinds += 1;
+                    // Render the ready shelf and start its images immediately.
+                    busy = false;
+                  } finally {
+                    if (!controller.signal.aborted && effectSessionGen === getSessionGeneration()) pendingCatalogKinds -= 1;
+                  }
+                })
+              )
+            : [];
           if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
           void loadPlayer().catch(() => {});
           const failures = results.flatMap(result => result.status === 'rejected' ? [result.reason as unknown] : []);

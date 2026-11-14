@@ -3,8 +3,9 @@
   import '../app.css';
   import '../lib/styles/halo.css';
   import '../lib/styles/tokens.css';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { loadServerPresentation } from '../lib/config/presentation';
+  import { fetchBrandName } from '../lib/config/brand';
   import { initTheme, setTheme } from '../lib/theme';
   import { detectLocale, setLocale, t } from '../lib/i18n';
   import { hydratePreferences, preferenceSyncError, preferenceState } from '../lib/preferences';
@@ -13,7 +14,7 @@
   import { goto } from '$app/navigation';
   import { asset, resolve } from '$app/paths';
   import { readSession } from '../lib/auth/session';
-  import { preloadCatalog } from '../lib/catalog/page-cache';
+  import { catalogRouteScope, commitStartupPreload, discardStartupPreload, preloadStartupCatalog } from '../lib/catalog/page-cache';
   import MusicPlayer from '../lib/music/MusicPlayer.svelte';
   import RemotePanel from '../lib/remote/RemotePanel.svelte';
   import { normalizeDeviceCode, PENDING_DEVICE_CODE } from '../lib/auth/quick-connect';
@@ -51,11 +52,17 @@
     let cancelled = false;
     verified = false; error = '';
     if (isDownloads) { verified=true; return; }
+    const startupScope = !loginPage && !setupPage && !connectPage && !accountsPage
+      ? untrack(() => catalogRouteScope(page.route?.id ?? null, page.url.pathname, page.url.searchParams))
+      : null;
+    const startupTicket = startupScope ? preloadStartupCatalog(startupScope) : null;
+    if (startupScope) void fetchBrandName().catch(() => {});
     readSession().then(async current => {
-      if (cancelled) return;
+      if (cancelled) { discardStartupPreload(startupTicket); return; }
       // Signed out on a shared device: the accounts set aside are offered there.
-      if (!current && accountsPage) { verified = true; return; }
+      if (!current && accountsPage) { discardStartupPreload(startupTicket); verified = true; return; }
       if (!current && !loginPage && !setupPage) {
+        discardStartupPreload(startupTicket);
         if (connectPage) {
           const code = normalizeDeviceCode(window.location.hash.slice(1));
           if (code) sessionStorage.setItem(PENDING_DEVICE_CODE, code);
@@ -68,12 +75,14 @@
         void goto(resolve(bootstrap?.needsBootstrap ? 'setup/' : 'login/'), { replaceState: true }); return;
       }
       if (current && !connectPage && !setupPage && normalizeDeviceCode(sessionStorage.getItem(PENDING_DEVICE_CODE) ?? '')) {
+        discardStartupPreload(startupTicket);
         void goto(resolve('connect/'), { replaceState: true }); return;
       }
-      if (current && loginPage) { void goto(resolve('/'), { replaceState: true }); return; }
+      if (current && loginPage) { discardStartupPreload(startupTicket); void goto(resolve('/'), { replaceState: true }); return; }
       // Several accounts on this device and none chosen since the app opened: the active
       // one is set aside, so coming back to it asks for its PIN like the others.
       if (current && !accountsPage && !connectPage && !setupPage && shouldAskWhoIsWatching()) {
+        discardStartupPreload(startupTicket);
         await parkAccount(current.csrfToken).catch(() => undefined);
         if (!cancelled) window.location.replace(resolve('accounts/'));
         return;
@@ -81,8 +90,8 @@
       if (current) {
         const generation = getSessionGeneration();
         const loadingPreferences = hydratePreferences();
-        // Catalogue requests and navigation can start while optional settings load.
-        preloadCatalog('home');
+        // Promote speculative startup requests before child components mount so they hit memory cache immediately.
+        commitStartupPreload(startupTicket);
         verified = true;
         void loadServerPresentation();
         void loadingPreferences.then(saved => {
@@ -94,8 +103,11 @@
         });
       }
       verified = true;
-    }).catch(cause => { if (!cancelled) error = cause instanceof Error ? cause.message : $t('the_server_is_unavailable_try_again'); });
-    return () => { cancelled = true; };
+    }).catch(cause => {
+      discardStartupPreload(startupTicket);
+      if (!cancelled) error = cause instanceof Error ? cause.message : $t('the_server_is_unavailable_try_again');
+    });
+    return () => { cancelled = true; discardStartupPreload(startupTicket); };
   });
 </script>
 {#if verified}

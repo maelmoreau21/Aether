@@ -1,19 +1,34 @@
+<script module lang="ts">
+  import type { Work } from './api';
+
+  /** Prioritise les œuvres notées >= 7, et complète avec >= 6 si moins de 8 atteignent 7. */
+  export function selectTopRatedSample(items: Work[]): Work[] {
+    const sevenPlus = items.filter(work => (work.rating ?? 0) >= 7);
+    if (sevenPlus.length >= 8) return sevenPlus;
+    const seen = new Set(sevenPlus.map(work => work.id));
+    const sixToSeven = items.filter(work => {
+      const rating = work.rating ?? 0;
+      return rating >= 6 && rating < 7 && !seen.has(work.id);
+    });
+    return [...sevenPlus, ...sixToSeven];
+  }
+</script>
+
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { resolve } from '$app/paths';
   import { preferenceState, DEFAULT_HOME_SECTIONS } from '../preferences';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
-  import { type Work } from './api';
-  import { loadCatalog } from './page-cache';
+  import { cachedCatalog, homeSampleUrls, isCatalogFresh, loadCatalog, takeHomeVisitSeed } from './page-cache';
   import HeroBanner from '../ui/HeroBanner.svelte';
-  import { newHeroSeed, pickHero } from './hero-picks';
+  import { pickHero } from './hero-picks';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
   import ContinueWatching from './ContinueWatching.svelte';
   import RecommendationShelf from './RecommendationShelf.svelte';
   import TonightMosaic from './TonightMosaic.svelte';
   import { pickTonight, pickTonightFrom } from './tonight';
-  import { shelfSeed } from './discover';
   import DiscoverFeed from './DiscoverFeed.svelte';
   import { page } from '$app/state';
   import { t } from '../i18n';
@@ -33,7 +48,7 @@
   const hasArt = (work: Work) => { const artwork = selectArtwork(work, $session); return Boolean(artwork.poster || artwork.landscape || artwork.backdrop); };
   // À l'affiche : quatre œuvres avec une grande image, tirées au hasard à chaque visite de l'accueil
   // (graine fixe pendant la visite pour ne pas remélanger quand les listes se mettent à jour).
-  const heroSeed = newHeroSeed();
+  const heroSeed = takeHomeVisitSeed(untrack(() => page.url.searchParams.get('library') ?? ''));
   const heroCandidates = $derived(pickHero(films, series, hasWideArt, heroSeed));
   const activeFeatured = $derived(heroCandidates[0] ?? featured ?? allWorks[0] ?? null);
   const showHero = $derived(sections.includes('hero'));
@@ -43,23 +58,29 @@
   // `null` pendant le chargement ; en cas d'échec, repli sur les ajouts récents déjà chargés.
   type Samples = { tonight: Work[] | null; rated: Work[] | null };
   let samples = $state<Samples | null>(null);
-  $effect(() => {
-    const scope = library;
+  $effect.pre(() => {
+    const scope = library || undefined;
+    const urls = homeSampleUrls(heroSeed, scope);
+    const cachedTonight = cachedCatalog(urls.tonight);
+    const cachedRated = cachedCatalog(urls.rated);
+    if (cachedTonight || cachedRated) {
+      samples = {
+        tonight: cachedTonight?.items ?? null,
+        rated: cachedRated ? selectTopRatedSample(cachedRated.items ?? []) : null
+      };
+    } else {
+      samples = null;
+    }
+    if (isCatalogFresh(urls.tonight) && isCatalogFresh(urls.rated)) return;
     const controller = new AbortController();
-    samples = null;
     void loadSamples(scope, controller.signal);
     return () => controller.abort();
   });
-  async function loadSamples(scope: string, signal: AbortSignal) {
-    const sample = (key: string, params: Record<string, string>) => {
-      const url = `/api/v1/catalog?${new URLSearchParams({
-        ...(scope ? { library: scope } : {}), q: '', count: 'false', sort: 'random', offset: '0', seed: String(shelfSeed(String(heroSeed), key)), ...params
-      })}`;
-      return loadCatalog(url, url).then(result => result.items ?? []);
-    };
+  async function loadSamples(scope: string | undefined, signal: AbortSignal) {
+    const urls = homeSampleUrls(heroSeed, scope);
     const [tonightSample, ratedSample] = await Promise.allSettled([
-      sample('tonight', { unwatched: 'true', limit: '24' }),
-      sample('rated', { minRating: '7', limit: '20' }).then(found => found.length >= 8 ? found : sample('rated', { minRating: '6', limit: '20' }))
+      loadCatalog(urls.tonight, urls.tonight).then(result => result.items ?? []),
+      loadCatalog(urls.rated, urls.rated).then(result => selectTopRatedSample(result.items ?? []))
     ]);
     if (signal.aborted) return;
     samples = {
@@ -95,21 +116,21 @@
       <TonightMosaic works={tonight} {detailUrl} />
     {:else if section === 'films' && films.length}
       <MediaShelf title={$t('recently_added_movies')} viewAllHref={resolve('films/?sort=added-desc')}>
-        {#each films.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+        {#each films.slice(0, 16) as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={index < 8} />{/each}
       </MediaShelf>
     {:else if section === 'series' && series.length}
       <MediaShelf title={$t('recently_added_series')} viewAllHref={resolve('series/?sort=added-desc')}>
-        {#each series.slice(0, 16) as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+        {#each series.slice(0, 16) as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={index < 8} />{/each}
       </MediaShelf>
     {:else if section === 'rated' && topRated.length >= 4}
       <MediaShelf title={$t('top_rated_library')}>
-        {#each topRated as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
+        {#each topRated as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={sections.indexOf('rated') <= 2 && index < 8} />{/each}
       </MediaShelf>
     {/if}
     {#if section === 'tonight'}<RecommendationShelf />{/if}
   {/each}
   {#if sections.length && !sections.includes('tonight')}<RecommendationShelf />{/if}
-  {#if allWorks.length && catalogReady && samples !== null}
+  {#if allWorks.length && catalogReady}
     <DiscoverFeed {films} {series} exclude={shownAbove} {library} {detailUrl} />
   {/if}
   {#if $preferenceState.homeSections?.length === 0}

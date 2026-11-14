@@ -1,3 +1,28 @@
+<script module lang="ts">
+  import { imagePreviewUrl } from '../catalog/image-url';
+
+  export function heroArtworkCandidates(artwork: {
+    backdrop?: string | null;
+    landscape?: string | null;
+    poster?: string | null;
+  }): string[] {
+    if (!artwork.backdrop && !artwork.landscape && artwork.poster) {
+      return [...new Set([imagePreviewUrl(artwork.poster, 1280), artwork.poster].filter(Boolean) as string[])];
+    }
+    return [
+      ...new Set(
+        [
+          imagePreviewUrl(artwork.backdrop, 1280),
+          imagePreviewUrl(artwork.landscape, 1280),
+          artwork.backdrop,
+          artwork.landscape,
+          artwork.poster ? imagePreviewUrl(artwork.poster, 1280) : ''
+        ].filter(Boolean) as string[]
+      )
+    ];
+  }
+</script>
+
 <script lang="ts">
   import { session } from '../auth/session';
   import { selectArtwork } from '../catalog/artwork-selection';
@@ -5,7 +30,6 @@
   import { type Work, localizedTitle, localizedPlot } from '../catalog/api';
   import { locale, t } from '../i18n';
   import Icon from './Icon.svelte';
-  import { imagePreviewUrl } from '../catalog/image-url';
   import { history } from '../catalog/watch-state';
   import { isResumable } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
@@ -28,19 +52,10 @@
   const active = $derived(list.find(work => work.id === activeId) ?? list[0] ?? null);
   const switcher = $derived(list.length > 1);
 
-  // backdrop.jpg first, landscape.jpg as a wide fallback. Pleine résolution avec repli.
+  // backdrop.jpg preview first, landscape.jpg preview as fallback, raw originals only as last resort.
   // Sans image large, l'affiche floutée sert de fond d'ambiance (jamais rognée en net).
   function heroCandidates(work: Work): string[] {
-    const artwork = selectArtwork(work, $session);
-    if (!artwork.backdrop && !artwork.landscape && artwork.poster) {
-      return [imagePreviewUrl(artwork.poster, 1280), artwork.poster];
-    }
-    return [
-      artwork.backdrop,
-      artwork.landscape,
-      imagePreviewUrl(artwork.backdrop || artwork.landscape, 1280),
-      artwork.poster ? imagePreviewUrl(artwork.poster, 1280) : ''
-    ].filter(Boolean) as string[];
+    return heroArtworkCandidates(selectArtwork(work, $session));
   }
   function heroImage(work: Work): string {
     return heroCandidates(work).find(usable) ?? '';
@@ -48,7 +63,7 @@
   function isAmbient(work: Work): boolean {
     const artwork = selectArtwork(work, $session);
     const chosen = heroImage(work);
-    return Boolean(artwork.poster && chosen.includes('poster'))
+    return Boolean(artwork.poster && (chosen.includes('poster') || chosen === imagePreviewUrl(artwork.poster, 1280)))
       || (!artwork.backdrop && !artwork.landscape && Boolean(artwork.poster));
   }
   // Vignettes du sélecteur : landscape.jpg, puis backdrop.
@@ -130,17 +145,18 @@
     >
       {#each list as work, index (work.id)}
         {@const url = heroImage(work)}
+        {@const isActive = work.id === active?.id}
         {#if usable(url)}
           <img
             class="backdrop"
-            class:on={work.id === active?.id}
+            class:on={isActive}
             class:ambient={isAmbient(work)}
             src={url}
             alt=""
             width="1280"
             height="720"
-            loading={index === 0 ? 'eager' : 'lazy'}
-            fetchpriority={index === 0 ? 'high' : 'low'}
+            loading={isActive || index === 0 ? 'eager' : 'lazy'}
+            fetchpriority={isActive ? 'high' : 'low'}
             decoding="async"
             use:sampleTint={url}
             use:fitArtwork={{ adapt: false }}
@@ -213,7 +229,7 @@
           onkeydown={event => onTabKeydown(event, index)}
         >
           {#if usable(thumb)}
-            <img src={thumb} alt="" width="640" height="360" loading="lazy" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => fail(thumb)} />
+            <img src={thumb} alt="" width="640" height="360" loading="eager" fetchpriority="low" decoding="async" use:fitArtwork={{ adapt: false }} onerror={() => fail(thumb)} />
             <span class="qi-shade" aria-hidden="true"></span>
           {/if}
           <span class="qi-title">{localizedTitle(work, $locale)}</span>

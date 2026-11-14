@@ -1,5 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cachedCatalog, catalogCacheStats, invalidateCatalog, invalidateLatestCatalog, loadCatalog, preloadCatalog } from './page-cache';
+import {
+  cachedCatalog,
+  catalogCacheStats,
+  catalogRouteScope,
+  commitStartupPreload,
+  discardStartupPreload,
+  homeSampleUrls,
+  invalidateCatalog,
+  invalidateLatestCatalog,
+  isCatalogFresh,
+  loadCatalog,
+  preloadCatalog,
+  preloadStartupCatalog,
+  takeHomeVisitSeed
+} from './page-cache';
 import { session } from '../auth/session';
 import { locale } from '../i18n';
 import { preferenceState } from '../preferences';
@@ -171,5 +185,86 @@ describe('catalogue cache isolation', () => {
     fetcher.mockResolvedValueOnce(new Response('{}', { status: 403 }));
     await expect(loadCatalog(denied, denied)).rejects.toThrow();
     expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it('starts home catalog and sample requests speculatively before auth and promotes them once verified', async () => {
+    session.set(null);
+    locale.set('fr');
+    preferenceState.set({});
+    const fetcher = vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(Response.json(page(new URL(url, 'http://local').searchParams.get('kind') ?? 'sample')))
+    );
+    vi.stubGlobal('fetch', fetcher);
+
+    const scope = catalogRouteScope('/', '/', new URLSearchParams());
+    expect(scope).toEqual({ section: 'home' });
+
+    const ticket = preloadStartupCatalog(scope!);
+    // Tous les appels partent immédiatement dès t=0 (latest film, latest series, tonight, rated).
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('minRating=6') && String(url).includes('limit=24'))).toBe(true);
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('minRating=7'))).toBe(false);
+
+    // Tant que la session n'est pas confirmée, rien n'est exposé sous anonymous.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const latestFilm = `/api/v1/catalog?${new URLSearchParams({ scope: 'latest', kind: 'film', q: '', sort: 'added-desc', offset: '0', limit: '24', count: 'false' })}`;
+    expect(cachedCatalog(latestFilm)).toBeUndefined();
+
+    // Une fois la session confirmée, les réponses déjà reçues sont promues synchronement dans le cache lecteur.
+    session.set(user('ana'));
+    commitStartupPreload(ticket);
+    expect(cachedCatalog(latestFilm)?.items[0].id).toBe('film');
+    expect(isCatalogFresh(latestFilm)).toBe(true);
+
+    const visitSeed = takeHomeVisitSeed();
+    const sampleUrls = homeSampleUrls(visitSeed);
+    expect(cachedCatalog(sampleUrls.tonight)).toBeDefined();
+    expect(cachedCatalog(sampleUrls.rated)).toBeDefined();
+    expect((await loadCatalog(latestFilm, latestFilm)).items[0].id).toBe('film');
+    expect(fetcher).toHaveBeenCalledTimes(4);
+
+    // Scénario 2 : si readSession() répond AVANT les requêtes catalogue encore en vol,
+    // loadCatalog partage le même vol sans aucun doublon réseau.
+    session.set(null);
+    let resolveInFlight!: (res: Response) => void;
+    const delayedFetcher = vi.fn().mockImplementation(
+      () => new Promise<Response>(resolve => (resolveInFlight = resolve))
+    );
+    vi.stubGlobal('fetch', delayedFetcher);
+    const filmScope = catalogRouteScope('/films', '/films/', new URLSearchParams());
+    const delayedTicket = preloadStartupCatalog(filmScope!);
+    expect(delayedFetcher).toHaveBeenCalledTimes(1);
+
+    session.set(user('ana'));
+    commitStartupPreload(delayedTicket);
+    const filmsUrl = `/api/v1/catalog?${new URLSearchParams({ kind: 'film', q: '', sort: 'title-asc', offset: '0', limit: '24', count: 'false' })}`;
+    const loading = loadCatalog(filmsUrl, filmsUrl);
+    resolveInFlight(Response.json(page('in-flight-film')));
+    expect((await loading).items[0].id).toBe('in-flight-film');
+    expect(delayedFetcher).toHaveBeenCalledTimes(1);
+
+    session.set(null);
+  });
+
+  it('aborts and discards speculative startup fetches when authentication fails or redirects', async () => {
+    session.set(null);
+    const signals: AbortSignal[] = [];
+    const fetcher = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.signal) signals.push(init.signal);
+      return new Promise<Response>(() => {});
+    });
+    vi.stubGlobal('fetch', fetcher);
+
+    const scope = catalogRouteScope('/films', '/films/', new URLSearchParams('sort=added-desc'));
+    expect(scope?.section).toBe('films');
+    const ticket = preloadStartupCatalog(scope!);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(signals[0]?.aborted).toBe(false);
+
+    discardStartupPreload(ticket);
+    expect(signals[0]?.aborted).toBe(true);
+
+    // Detail URL (?work=...) must not launch list preloads.
+    expect(catalogRouteScope('/films', '/films/', new URLSearchParams('work=abc'))).toBeNull();
   });
 });

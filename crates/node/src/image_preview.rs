@@ -8,10 +8,10 @@ use bytes::Bytes;
 use http::{HeaderMap, Method, Response, StatusCode, header};
 use http_body_util::{BodyExt, Full};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     io::{self, Read, Seek, SeekFrom},
     path::PathBuf,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex, Weak},
 };
 
 const CACHE_BYTES: usize = 64 * 1024 * 1024;
@@ -34,6 +34,33 @@ struct Cache {
     bytes: usize,
 }
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| Mutex::new(Cache::default()));
+type InFlightSlot = Arc<tokio::sync::Mutex<Option<Result<Preview, io::ErrorKind>>>>;
+type WeakInFlightSlot = Weak<tokio::sync::Mutex<Option<Result<Preview, io::ErrorKind>>>>;
+static IN_FLIGHT: LazyLock<Mutex<HashMap<Key, WeakInFlightSlot>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn acquire_in_flight(key: &Key) -> InFlightSlot {
+    let mut map = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(existing) = map.get(key).and_then(Weak::upgrade) {
+        return existing;
+    }
+    if map.len() >= 64 {
+        map.retain(|_, weak| weak.strong_count() > 0);
+    }
+    let slot = Arc::new(tokio::sync::Mutex::new(None));
+    map.insert(key.clone(), Arc::downgrade(&slot));
+    slot
+}
+
+fn clear_in_flight(key: &Key, slot: &InFlightSlot) {
+    let mut map = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(existing) = map.get(key)
+        && std::ptr::eq(existing.as_ptr(), Arc::as_ptr(slot))
+    {
+        map.remove(key);
+    }
+}
+
 fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid image preview")
 }
@@ -81,12 +108,70 @@ fn encode(image: &image::DynamicImage) -> io::Result<(Vec<u8>, &'static str)> {
     Ok((encoded, "image/webp"))
 }
 
-fn disk_cache_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("MEDIA_IMAGE_CACHE_DIR") {
-        PathBuf::from(dir)
-    } else {
-        std::env::temp_dir().join("media-image-cache")
+static VERIFIED_CACHE_DIRS: LazyLock<Mutex<HashSet<PathBuf>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
+
+fn dir_writable(base: &std::path::Path, cache_dir: &std::path::Path) -> bool {
+    let Ok(meta) = std::fs::metadata(base) else {
+        return false;
+    };
+    if !meta.is_dir() || meta.permissions().readonly() {
+        return false;
     }
+    if VERIFIED_CACHE_DIRS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains(cache_dir)
+    {
+        return true;
+    }
+    if std::fs::create_dir_all(cache_dir).is_err() {
+        return false;
+    }
+    // Probe actual effective-UID write access once (mode bits alone miss root-owned 0755 dirs).
+    let probe = cache_dir.join(format!(".write-probe-{}", uuid::Uuid::new_v4().simple()));
+    let writable = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+    {
+        Ok(file) => {
+            drop(file);
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    };
+    if writable {
+        VERIFIED_CACHE_DIRS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(cache_dir.to_path_buf());
+    }
+    writable
+}
+
+fn disk_cache_dir() -> PathBuf {
+    if let Some(dir) =
+        std::env::var_os("MEDIA_IMAGE_CACHE_DIR").filter(|value| !value.is_empty())
+    {
+        return PathBuf::from(dir);
+    }
+    if let Some(media_data) = std::env::var_os("MEDIA_DATA_DIR")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        let dir = media_data.join("cache/images");
+        if dir_writable(&media_data, &dir) {
+            return dir;
+        }
+    }
+    let default_data = crate::default_data_dir();
+    let dir = crate::data_subdir("MEDIA_IMAGE_CACHE_DIR", "cache/images");
+    if dir_writable(&default_data, &dir) {
+        return dir;
+    }
+    std::env::temp_dir().join("media-image-cache")
 }
 
 fn disk_cache_path(key: &Key) -> PathBuf {
@@ -199,8 +284,24 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     if let Some(value) = cached(&key) {
         return Ok(value);
     }
+    let slot = acquire_in_flight(&key);
+    let mut guard = slot.lock().await;
+    opened.verify_unchanged_sync()?;
+    if let Some(cached_outcome) = guard.as_ref() {
+        return match cached_outcome {
+            Ok(preview) => Ok(preview.clone()),
+            Err(kind) => Err(io::Error::new(*kind, "invalid image preview")),
+        };
+    }
+    if let Some(value) = cached(&key) {
+        clear_in_flight(&key, &slot);
+        *guard = Some(Ok(value.clone()));
+        return Ok(value);
+    }
     if let Some(disk_value) = disk_cached(&key).await {
-        remember(key, disk_value.clone());
+        remember(key.clone(), disk_value.clone());
+        clear_in_flight(&key, &slot);
+        *guard = Some(Ok(disk_value.clone()));
         return Ok(disk_value);
     }
     // Share the decoder budget with scans and original-image validation. The
@@ -210,15 +311,8 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
         .await
         .map_err(|_| invalid())?;
     opened.verify_unchanged_sync()?;
-    if let Some(value) = cached(&key) {
-        return Ok(value);
-    }
-    if let Some(disk_value) = disk_cached(&key).await {
-        remember(key, disk_value.clone());
-        return Ok(disk_value);
-    }
     let mut source = opened.try_clone()?;
-    let result = tokio::task::spawn_blocking(move || {
+    let blocking_result = tokio::task::spawn_blocking(move || {
         let _permit = permit;
         source.verify_unchanged_sync()?;
         let extension = source
@@ -240,7 +334,7 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
         let (source_mime, image) = images::decode_image(&original, &extension)?;
         let resized = image.width() > width || image.height() > width * 2;
         let mut image = if resized {
-            image.thumbnail(width, width * 2)
+            crate::image_encoding::resize_bounded(&image, width, width * 2)
         } else {
             image
         };
@@ -254,7 +348,7 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
         };
         while encoded.len() > MAX_ENCODED && image.width() > 320 {
             let smaller = (image.width() / 2).max(320);
-            image = image.thumbnail(smaller, smaller * 2);
+            image = crate::image_encoding::resize_bounded(&image, smaller, smaller * 2);
             (encoded, mime) = encode(&image)?;
         }
         if encoded.len() > MAX_ENCODED {
@@ -268,12 +362,24 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
         })
     })
     .await
-    .map_err(|_| invalid())??;
+    .map_err(|_| invalid())?;
+    let result = match blocking_result {
+        Ok(preview) => preview,
+        Err(err) => {
+            clear_in_flight(&key, &slot);
+            *guard = Some(Err(err.kind()));
+            return Err(err);
+        }
+    };
     images::remember_validated_image(key.0.clone(), key.1, key.2.clone(), result.source_mime);
-    let disk_key = key.clone();
+    remember(key.clone(), result.clone());
+    clear_in_flight(&key, &slot);
+    *guard = Some(Ok(result.clone()));
+    let disk_key = key;
     let disk_result = result.clone();
-    let _ = tokio::task::spawn_blocking(move || write_disk_cache(&disk_key, &disk_result)).await;
-    remember(key, result.clone());
+    drop(tokio::task::spawn_blocking(move || {
+        write_disk_cache(&disk_key, &disk_result)
+    }));
     Ok(result)
 }
 
@@ -430,5 +536,46 @@ mod tests {
         );
         assert!(width(Some("width=99999")).is_err());
         assert!(width(Some("width=320&width=640")).is_err());
+    }
+
+    #[tokio::test]
+    async fn singleflight_coalesces_concurrent_generations_and_writes_disk_async() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("concurrent.jpg");
+        image::RgbImage::from_fn(900, 1350, |x, y| {
+            image::Rgb([(x ^ y) as u8, (x * 3) as u8, (y * 5) as u8])
+        })
+        .save(&path)
+        .unwrap();
+        let opened = OpenedFile::open_in_root(root.path(), std::path::Path::new("concurrent.jpg"))
+            .await
+            .unwrap();
+        let key = (
+            opened.canonical_path().to_owned(),
+            opened.size(),
+            opened.modified_ns().to_owned(),
+            640,
+        );
+        let mut set = tokio::task::JoinSet::new();
+        for _ in 0..8 {
+            let clone = opened.try_clone().unwrap();
+            set.spawn(async move { generate(&clone, 640).await.unwrap() });
+        }
+        let mut ptrs: Vec<usize> = Vec::new();
+        while let Some(res) = set.join_next().await {
+            let preview = res.unwrap();
+            ptrs.push(preview.bytes.as_ptr() as usize);
+        }
+        assert!(ptrs.windows(2).all(|w| w[0] == w[1]));
+        // Detached disk cache task finishes asynchronously without stalling HTTP callers.
+        let mut persisted = false;
+        for _ in 0..40 {
+            if disk_cached(&key).await.is_some() {
+                persisted = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(persisted);
     }
 }

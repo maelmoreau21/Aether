@@ -4,7 +4,6 @@ mod cache;
 
 use crate::database::{query, query_scalar};
 use crate::identity::IdentityStore;
-use cache::CATALOGUE_CACHE;
 pub use cache::{
     BoundedCatalogueCache, catalogue_cache_stats, estimate_json_bytes, invalidate_catalogue_cache,
 };
@@ -520,6 +519,442 @@ pub async fn catalogue_filtered(
     .await
 }
 
+#[derive(Default, Clone, Copy)]
+struct StateFingerprints {
+    inv_fp: i64,
+    meta_fp: i64,
+    page_fp: i64,
+}
+
+#[inline]
+fn mix64(mut hash: u64, value: u64) -> u64 {
+    hash ^= value;
+    hash = hash.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    hash ^ (hash >> 30)
+}
+
+#[inline]
+fn mix_str64(mut hash: u64, value: &str) -> u64 {
+    hash = mix64(hash, value.len() as u64);
+    for &byte in value.as_bytes() {
+        hash = mix64(hash, u64::from(byte));
+    }
+    hash
+}
+
+#[inline]
+fn to_positive_fp(hash: u64) -> i64 {
+    ((hash & 0x7fff_ffff_ffff_ffff) | 1) as i64
+}
+
+async fn compute_state_fingerprints(
+    store: &IdentityStore,
+    user_id: Option<&str>,
+    include_progress: bool,
+) -> StateFingerprints {
+    let epoch = cache::catalogue_epoch();
+    let has_user = i64::from(user_id.is_some());
+    let uid = user_id.unwrap_or("");
+    let check_progress = i64::from(include_progress && user_id.is_some());
+    let mut stmt = query(
+        "SELECT
+           CAST(COALESCE((SELECT gen FROM inventory_cache_generation WHERE id = 1), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM libraries),
+           CAST(COALESCE((SELECT SUM(enabled) FROM libraries), 0) AS BIGINT),
+           CAST(COALESCE((SELECT SUM(length(root) + length(node_id) + length(kind) + CASE WHEN COALESCE(options_json, '') LIKE '%adminAccess__false%' THEN 29 ELSE 0 END) FROM libraries), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM media_nodes),
+           CAST(COALESCE((SELECT SUM(CASE status WHEN 'revoked' THEN 7 WHEN 'connected' THEN 1 ELSE 3 END) FROM media_nodes), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM library_folders),
+           CAST(COALESCE((SELECT SUM(active * 17 + length(parent_id)) FROM library_folders), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM work_image_order),
+           CAST(COALESCE((SELECT SUM(position) FROM work_image_order), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM work_image_hidden),
+           (SELECT COUNT(*) FROM artwork_annotations),
+           CAST(COALESCE((SELECT SUM(pinned) FROM artwork_annotations), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM inventory_works),
+           (SELECT COUNT(*) FROM inventory_assets),
+           (SELECT COUNT(*) FROM inventory_images),
+           (SELECT COUNT(*) FROM media_group_members),
+           CAST(COALESCE((SELECT SUM(length(work_id) * 13 + length(group_id) * 17) FROM media_group_members), 0) AS BIGINT),
+           (SELECT COUNT(*) FROM work_translations),
+           CAST(COALESCE((SELECT MAX(updated_at) FROM work_translations), 0) AS BIGINT),
+           CAST(COALESCE((SELECT SUM(length(root_snapshot) + length(library_id)) FROM inventory_sources), 0) AS BIGINT),
+           CASE WHEN ? = 1 THEN (SELECT COUNT(*) FROM parental_policies WHERE user_id = ?) ELSE CAST(0 AS BIGINT) END,
+           CASE WHEN ? = 1 THEN CAST(COALESCE((SELECT SUM(maximum_age * 7 + allow_unrated * 3 + length(blocked_tags_json) * 19) FROM parental_policies WHERE user_id = ?), 0) AS BIGINT) ELSE CAST(0 AS BIGINT) END,
+           CASE WHEN ? = 1 THEN (SELECT COUNT(*) FROM parental_blocked_tags WHERE user_id = ?) ELSE CAST(0 AS BIGINT) END,
+           CASE WHEN ? = 1 THEN CAST(COALESCE((SELECT SUM(length(tag_json)) FROM parental_blocked_tags WHERE user_id = ?), 0) AS BIGINT) ELSE CAST(0 AS BIGINT) END,
+           CASE WHEN ? = 1 THEN CAST(COALESCE((SELECT CASE role WHEN 'administrator' THEN 2 ELSE 1 END FROM users WHERE id = ?), 0) AS BIGINT) ELSE CAST(0 AS BIGINT) END,
+           (SELECT COUNT(*) FROM user_groups),
+           (SELECT COUNT(*) FROM user_group_members),
+           (SELECT COUNT(*) FROM user_group_libraries),
+           (SELECT COUNT(*) FROM account_profiles),
+           (SELECT COUNT(*) FROM user_media_kind_denials),
+           (SELECT COUNT(*) FROM group_media_kind_denials),
+           (SELECT COUNT(*) FROM library_permissions),
+           CASE WHEN ? = 1 THEN COALESCE((SELECT preferences_json FROM user_preferences WHERE user_id = ?), '') ELSE '' END,
+           CASE WHEN ? = 1 THEN COALESCE((SELECT MIN(tag_json) || '|' || MAX(tag_json) FROM parental_blocked_tags WHERE user_id = ?), '') ELSE '' END,
+           pp.cnt,
+           pp.ws,
+           pp.rv,
+           pp.ua,
+           pp.mn,
+           pp.mx
+         FROM (
+           SELECT
+             COUNT(*) AS cnt,
+             CAST(COALESCE(SUM(watched), 0) AS BIGINT) AS ws,
+             CAST(COALESCE(SUM(revision), 0) AS BIGINT) AS rv,
+             CAST(COALESCE(MAX(updated_at), 0) AS BIGINT) AS ua,
+             COALESCE(MIN(CASE WHEN watched = 1 THEN work_id END), '') AS mn,
+             COALESCE(MAX(CASE WHEN watched = 1 THEN work_id END), '') AS mx
+           FROM playback_progress
+           WHERE ? = 1 AND user_id = ?
+         ) pp",
+    );
+    for _ in 0..7 {
+        stmt = stmt.bind(has_user).bind(uid);
+    }
+    stmt = stmt.bind(check_progress).bind(uid);
+    let Ok(Some(row)) = stmt.fetch_optional(&store.pool).await else {
+        return StateFingerprints::default();
+    };
+    let gen = row.try_get::<i64, usize>(0).unwrap_or(0);
+    if gen <= 0 {
+        return StateFingerprints::default();
+    }
+    let mut inv_h = mix64(0xcbf2_9ce4_8422_2325_u64, epoch);
+    for idx in 0..=20 {
+        inv_h = mix64(inv_h, row.try_get::<i64, usize>(idx).unwrap_or(0) as u64);
+    }
+    let mut meta_h = inv_h;
+    for idx in 21..=32 {
+        meta_h = mix64(meta_h, row.try_get::<i64, usize>(idx).unwrap_or(0) as u64);
+    }
+    let prefs_json = row.try_get::<String, usize>(33).unwrap_or_default();
+    let tag_bounds = row.try_get::<String, usize>(34).unwrap_or_default();
+    meta_h = mix_str64(meta_h, &prefs_json);
+    meta_h = mix_str64(meta_h, &tag_bounds);
+    let mut page_h = meta_h;
+    if check_progress == 1 {
+        for idx in 35..=38 {
+            page_h = mix64(page_h, row.try_get::<i64, usize>(idx).unwrap_or(0) as u64);
+        }
+        let min_id = row.try_get::<String, usize>(39).unwrap_or_default();
+        let max_id = row.try_get::<String, usize>(40).unwrap_or_default();
+        page_h = mix_str64(page_h, &min_id);
+        page_h = mix_str64(page_h, &max_id);
+    }
+    StateFingerprints {
+        inv_fp: to_positive_fp(inv_h),
+        meta_fp: to_positive_fp(meta_h),
+        page_fp: to_positive_fp(page_h),
+    }
+}
+
+
+async fn resolve_valid_libs_and_fast_avail(
+    store: &IdentityStore,
+    visible: &[String],
+    target_kind: Option<&str>,
+    inv_fp: i64,
+    use_cache: bool,
+) -> Result<(Vec<String>, bool), sqlx::Error> {
+    let key = format!("vl|{}|{:?}|{:?}", store.cache_scope, target_kind, visible);
+    if use_cache && let Some(cached) = cache::lock_cache().get_valid_libs(&key, inv_fp) {
+        return Ok(cached);
+    }
+
+    let mut lib_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.kind IN ('films','series') ",
+    );
+    match target_kind {
+        Some("film") => {
+            lib_builder.push("AND l.kind='films' ");
+        }
+        Some("series") => {
+            lib_builder.push("AND l.kind='series' ");
+        }
+        _ => {}
+    }
+    lib_builder.push("AND l.id IN (");
+    let mut lib_sep = lib_builder.separated(", ");
+    for lib in visible {
+        lib_sep.push_bind(lib);
+    }
+    lib_sep.push_unseparated(")");
+    let lib_sql = crate::database::normalize_sql(lib_builder.sql().as_str());
+    let lib_args = lib_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let valid_libs: Vec<String> =
+        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(lib_sql), lib_args)
+            .fetch_all(&store.pool)
+            .await?;
+
+    let fast_avail = if valid_libs.is_empty() {
+        false
+    } else {
+        let mut fast_check_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+            "SELECT CAST((CASE WHEN EXISTS(SELECT 1 FROM inventory_works w WHERE w.library_id IN (",
+        );
+        let mut fc_sep = fast_check_builder.separated(", ");
+        for lib in &valid_libs {
+            fc_sep.push_bind(lib);
+        }
+        fc_sep.push_unseparated(
+            ") AND w.has_available_asset = 1) THEN 1 ELSE 0 END) - \
+             2 * (CASE WHEN EXISTS(SELECT 1 FROM libraries l WHERE l.id IN (",
+        );
+        let mut fc_sep2 = fast_check_builder.separated(", ");
+        for lib in &valid_libs {
+            fc_sep2.push_bind(lib);
+        }
+        fc_sep2.push_unseparated(
+            ") AND EXISTS(SELECT 1 FROM inventory_sources s WHERE s.library_id = l.id AND s.root_snapshot != l.root)) THEN 1 ELSE 0 END) AS BIGINT)",
+        );
+        let fc_sql = crate::database::normalize_sql(fast_check_builder.sql().as_str());
+        let fc_args = fast_check_builder
+            .build()
+            .take_arguments()
+            .map_err(sqlx::Error::Encode)?
+            .unwrap_or_default();
+        let fc_val: i64 =
+            sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(fc_sql), fc_args)
+                .fetch_one(&store.pool)
+                .await
+                .unwrap_or(0);
+        fc_val > 0
+    };
+
+    if use_cache {
+        cache::lock_cache().insert_valid_libs(key, inv_fp, valid_libs.clone(), fast_avail);
+    }
+    Ok((valid_libs, fast_avail))
+}
+
+async fn resolve_meta_flags<'a>(
+    store: &IdentityStore,
+    user_id: Option<&str>,
+    requested_sort_lang: Option<&'a str>,
+    meta_fp: i64,
+    use_cache: bool,
+) -> Result<(bool, bool, Option<&'a str>), sqlx::Error> {
+    let key = format!("mf|{}|{:?}|{:?}", store.cache_scope, user_id, requested_sort_lang);
+    if use_cache
+        && let Some((has_groups, has_parental_policy, sort_lang_exists)) =
+            cache::lock_cache().get_meta_flags(&key, meta_fp)
+    {
+        return Ok((
+            has_groups,
+            has_parental_policy,
+            sort_lang_exists.then_some(requested_sort_lang).flatten(),
+        ));
+    }
+
+    let has_user = i64::from(user_id.is_some());
+    let uid = user_id.unwrap_or("");
+    let has_sort_lang = i64::from(requested_sort_lang.is_some());
+    let sort_lang = requested_sort_lang.unwrap_or("");
+    let (has_groups_val, has_parental_val, has_sort_lang_val): (i64, i64, i64) = sqlx::query_as(
+        sqlx::AssertSqlSafe(crate::database::normalize_sql(
+            "SELECT \
+               CAST(CASE WHEN EXISTS(SELECT 1 FROM media_group_members) THEN 1 ELSE 0 END AS BIGINT), \
+               CAST(CASE WHEN ? = 1 AND EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) THEN 1 ELSE 0 END AS BIGINT), \
+               CAST(CASE WHEN ? = 1 AND EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END AS BIGINT)",
+        )),
+    )
+    .bind(has_user)
+    .bind(uid)
+    .bind(has_sort_lang)
+    .bind(sort_lang)
+    .fetch_one(&store.pool)
+    .await?;
+    let has_groups = has_groups_val != 0;
+    let has_parental_policy = has_parental_val != 0;
+    let sort_lang_exists = has_sort_lang_val != 0;
+
+    if use_cache {
+        cache::lock_cache().insert_meta_flags(
+            key,
+            meta_fp,
+            has_groups,
+            has_parental_policy,
+            sort_lang_exists,
+        );
+    }
+    Ok((
+        has_groups,
+        has_parental_policy,
+        sort_lang_exists.then_some(requested_sort_lang).flatten(),
+    ))
+}
+
+async fn resolve_use_fts(store: &IdentityStore, search_clean: &str, use_cache: bool) -> bool {
+    if search_clean.chars().count() < 3 {
+        return false;
+    }
+    if use_cache && let Some(cached) = cache::lock_cache().get_use_fts(store.cache_scope) {
+        return cached;
+    }
+    let is_sqlite = store
+        .pool
+        .acquire()
+        .await
+        .is_ok_and(|conn| conn.backend_name() == "SQLite");
+    let use_fts = if is_sqlite {
+        query_scalar::<_, i64>(
+            "SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END AS BIGINT)",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap_or(0)
+            != 0
+    } else {
+        false
+    };
+    if use_cache {
+        cache::lock_cache().insert_use_fts(store.cache_scope, use_fts);
+    }
+    use_fts
+}
+
+async fn load_and_decorate_works(
+    store: &IdentityStore,
+    work_ids: &[&String],
+    fast_avail: bool,
+    has_groups: bool,
+    locale_chain: &[String],
+) -> Result<Vec<Value>, sqlx::Error> {
+    if work_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
+           CASE WHEN w.kind = 'series' THEN ( \
+             CASE WHEN w.season_count_cached > 0 AND ",
+    );
+    data_builder.push(if fast_avail { "1=1" } else { "1=0" });
+    data_builder.push(
+        " THEN w.season_count_cached ELSE ( \
+             SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_editions e ON e.work_id=ep.work_id \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources src ON src.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=src.id \
+             JOIN libraries l ON l.id=src.library_id \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
+           ) END) ELSE NULL END AS season_count, \
+           CASE WHEN w.kind = 'series' THEN ( \
+             CASE WHEN w.episode_count_cached > 0 AND ",
+    );
+    data_builder.push(if fast_avail { "1=1" } else { "1=0" });
+    data_builder.push(
+        " THEN w.episode_count_cached ELSE ( \
+             SELECT COUNT(DISTINCT ep.id) FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_editions e ON e.work_id=ep.work_id \
+             JOIN inventory_versions v ON v.edition_id=e.id \
+             JOIN inventory_sources src ON src.version_id=v.id \
+             JOIN inventory_assets a ON a.source_id=src.id \
+             JOIN libraries l ON l.id=src.library_id \
+             JOIN media_nodes n ON n.id=l.node_id \
+             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
+           ) END) ELSE NULL END AS episode_count, \
+           CAST(NULL AS TEXT) AS poster_url, CAST(NULL AS TEXT) AS backdrop_url, CAST(NULL AS TEXT) AS logo_url \
+         FROM inventory_works w \
+         JOIN libraries wl ON wl.id=w.library_id \
+         JOIN media_nodes wn ON wn.id=wl.node_id \
+         WHERE w.id IN (",
+    );
+    let mut id_sep = data_builder.separated(", ");
+    for id in work_ids {
+        id_sep.push_bind(*id);
+    }
+    id_sep.push_unseparated(")");
+
+    let data_sql = crate::database::normalize_sql(data_builder.sql().as_str());
+    let arguments = data_builder
+        .build()
+        .take_arguments()
+        .map_err(sqlx::Error::Encode)?
+        .unwrap_or_default();
+    let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
+        .fetch_all(&store.pool)
+        .await?;
+    let mut row_map = HashMap::with_capacity(rows.len());
+    for row in &rows {
+        let wid: String = row.get("id");
+        row_map.insert(wid, work(row));
+    }
+    let mut items: Vec<Value> = work_ids
+        .iter()
+        .filter_map(|id| row_map.remove(*id))
+        .collect();
+    crate::product::decorate_many_with_groups(store, &mut items, has_groups).await?;
+    crate::translations::localize_values(store, &mut items, locale_chain).await?;
+    Ok(items)
+}
+
+struct IdQueryParams<'a> {
+    valid_libs: &'a [String],
+    target_kind: Option<&'a str>,
+    search_clean: &'a str,
+    filter: &'a CatalogueFilter,
+    has_groups: bool,
+    has_parental_policy: bool,
+    fast_avail: bool,
+    use_fts: bool,
+}
+
+fn build_id_query<'a>(
+    params: &IdQueryParams<'a>,
+    rated: bool,
+) -> sqlx::QueryBuilder<'a, sqlx::Any> {
+    let use_fts_index = params.use_fts && params.search_clean.chars().count() >= 3;
+    let mut id_builder = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
+        "SELECT w.id{} FROM inventory_works w{} WHERE w.library_id IN (",
+        if rated {
+            ", CAST(COALESCE(json_extract(w.manual_json,'$.rating'),json_extract(w.editorial_json,'$.rating')) AS TEXT) AS rating"
+        } else {
+            ""
+        },
+        if use_fts_index {
+            " INDEXED BY inventory_works_fts_sort"
+        } else {
+            ""
+        }
+    ));
+    let mut separated = id_builder.separated(", ");
+    for lib in params.valid_libs {
+        separated.push_bind(lib);
+    }
+    separated.push_unseparated(") ");
+
+    push_search_filter(&mut id_builder, params.search_clean, params.use_fts, params.fast_avail);
+    push_availability_filter(&mut id_builder, params.target_kind, params.fast_avail);
+    push_catalogue_filters(
+        &mut id_builder,
+        params.filter,
+        params.has_parental_policy,
+        params.fast_avail,
+    );
+    push_group_filter(
+        &mut id_builder,
+        params.filter,
+        params.valid_libs,
+        params.search_clean,
+        params.has_groups,
+        params.has_parental_policy,
+        params.fast_avail,
+        params.use_fts,
+    );
+    id_builder
+}
+
 /// Bounded shelf queries can omit the full-library count and fetch one lookahead row.
 #[allow(clippy::too_many_arguments)]
 pub async fn catalogue_page(
@@ -564,28 +999,19 @@ pub async fn catalogue_page(
 
     // Key on the database, not on this clone's address: each request owns its own clone.
     let cache_key = format!(
-        "{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}",
+        "page|{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}",
         store.cache_scope, visible, target_kind, search, sort, offset, limit, filter, exact_count
     );
 
-    let state_fp: i64 = query_scalar("SELECT gen FROM inventory_cache_generation WHERE id = 1")
-        .fetch_optional(&store.pool)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(0);
+    let fps =
+        compute_state_fingerprints(store, filter.user_id.as_deref(), filter.hide_watched).await;
 
     let random = sort == "random";
-    // Watched status changes independently of inventory generation. Never reuse
-    // inventory-only cached pages for this account-owned filter. A random page is drawn
-    // afresh from the (cached) eligible pool instead of being cached itself.
-    let pool_cacheable = state_fp > 0 && !filter.bypass_cache && !filter.hide_watched;
+    let has_valid_state = fps.inv_fp > 0 && fps.page_fp > 0;
+    let use_aux_cache = has_valid_state && !filter.bypass_cache;
+    let pool_cacheable = use_aux_cache;
     let cacheable = pool_cacheable && !random;
-    if cacheable
-        && let Some(lock) = CATALOGUE_CACHE.get()
-        && let Ok(mut guard) = lock.lock()
-        && let Some(cached_val) = guard.get(&cache_key, state_fp)
-    {
+    if cacheable && let Some(cached_val) = cache::lock_cache().get(&cache_key, fps.page_fp) {
         return Ok(cached_val);
     }
     let flight = cacheable.then(|| cache::flight_lock(&cache_key));
@@ -594,46 +1020,22 @@ pub async fn catalogue_page(
         None => None,
     };
     // Another request may have filled the page while this one waited.
-    if cacheable
-        && let Some(lock) = CATALOGUE_CACHE.get()
-        && let Ok(mut guard) = lock.lock()
-        && let Some(cached_val) = guard.get(&cache_key, state_fp)
-    {
+    if cacheable && let Some(cached_val) = cache::lock_cache().get(&cache_key, fps.page_fp) {
         return Ok(cached_val);
     }
 
-    // 1. Pre-filter visible libraries to enabled libraries on non-revoked nodes matching target_kind.
-    let mut lib_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT l.id FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.enabled=1 AND n.status!='revoked' AND l.kind IN ('films','series') ",
-    );
-    match target_kind {
-        Some("film") => {
-            lib_builder.push("AND l.kind='films' ");
-        }
-        Some("series") => {
-            lib_builder.push("AND l.kind='series' ");
-        }
-        _ => {}
-    }
-    lib_builder.push("AND l.id IN (");
-    let mut lib_sep = lib_builder.separated(", ");
-    for lib in visible {
-        lib_sep.push_bind(lib);
-    }
-    lib_sep.push_unseparated(")");
-    let lib_sql = crate::database::normalize_sql(lib_builder.sql().as_str());
-    let lib_args = lib_builder
-        .build()
-        .take_arguments()
-        .map_err(sqlx::Error::Encode)?
-        .unwrap_or_default();
-    let valid_libs: Vec<String> =
-        sqlx::query_scalar_with::<sqlx::Any, String, _>(sqlx::AssertSqlSafe(lib_sql), lib_args)
-            .fetch_all(&store.pool)
-            .await?;
+    // 1 & 2. Pre-filter visible libraries and inspect fast availability/source divergence (cached per inv_fp).
+    let (valid_libs, fast_avail) = resolve_valid_libs_and_fast_avail(
+        store,
+        visible,
+        target_kind,
+        fps.inv_fp,
+        use_aux_cache,
+    )
+    .await?;
 
     if valid_libs.is_empty() {
-        return Ok(json!({
+        let response = json!({
             "items": [],
             "total": if exact_count { Some(0usize) } else { None },
             "hasMore": false,
@@ -641,44 +1043,14 @@ pub async fn catalogue_page(
             "limit": limit,
             "mode": "local-library",
             "notice": "Bibliothèques locales indexées"
-        }));
+        });
+        if cacheable {
+            cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+        }
+        return Ok(response);
     }
 
-    // 2. Check if any work in valid_libs has `has_available_asset = 1` (using covering index `inventory_works_lib_avail_sort` in O(1))
-    //    and whether any library root has diverged from its works' sources.
-    let mut fast_check_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT (CASE WHEN EXISTS(SELECT 1 FROM inventory_works w WHERE w.library_id IN (",
-    );
-    let mut fc_sep = fast_check_builder.separated(", ");
-    for lib in &valid_libs {
-        fc_sep.push_bind(lib);
-    }
-    fc_sep.push_unseparated(
-        ") AND w.has_available_asset = 1) THEN 1 ELSE 0 END) - \
-         2 * (CASE WHEN EXISTS(SELECT 1 FROM libraries l WHERE l.id IN (",
-    );
-    let mut fc_sep2 = fast_check_builder.separated(", ");
-    for lib in &valid_libs {
-        fc_sep2.push_bind(lib);
-    }
-    fc_sep2.push_unseparated(
-        ") AND EXISTS(SELECT 1 FROM inventory_sources s WHERE s.library_id = l.id AND s.root_snapshot != l.root)) THEN 1 ELSE 0 END)",
-    );
-    let fc_sql = crate::database::normalize_sql(fast_check_builder.sql().as_str());
-    let fc_args = fast_check_builder
-        .build()
-        .take_arguments()
-        .map_err(sqlx::Error::Encode)?
-        .unwrap_or_default();
-    let fc_val: i64 =
-        sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(fc_sql), fc_args)
-            .fetch_one(&store.pool)
-            .await
-            .unwrap_or(0);
-    let fast_avail = fc_val > 0;
-
-    // 3. Check media groups, parental policies, and whether translations exist for the sort
-    //    language in a single round-trip.
+    // 3. Check media groups, parental policies, and whether translations exist for the sort language.
     let search_clean = search.trim().to_lowercase();
     let requested_sort_lang = (!random)
         .then(|| {
@@ -688,81 +1060,51 @@ pub async fn catalogue_page(
                 .map(|first| crate::metadata_locale::language_of(first))
         })
         .flatten();
-    let (has_groups_val, has_parental_val, has_sort_lang_val): (i64, i64, i64) = sqlx::query_as(
-        sqlx::AssertSqlSafe(crate::database::normalize_sql(
-            "SELECT \
-               CASE WHEN EXISTS(SELECT 1 FROM media_group_members) THEN 1 ELSE 0 END, \
-               CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) THEN 1 ELSE 0 END, \
-               CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
-        )),
+    let (has_groups, has_parental_policy, sort_language) = resolve_meta_flags(
+        store,
+        filter.user_id.as_deref(),
+        requested_sort_lang,
+        fps.meta_fp,
+        use_aux_cache,
     )
-    .bind(filter.user_id.as_deref())
-    .bind(filter.user_id.as_deref())
-    .bind(requested_sort_lang)
-    .bind(requested_sort_lang)
-    .fetch_one(&store.pool)
     .await?;
-    let has_groups = has_groups_val != 0;
-    let has_parental_policy = has_parental_val != 0;
-    let sort_language = (has_sort_lang_val != 0)
-        .then_some(requested_sort_lang)
-        .flatten();
 
-    let use_fts: bool = if search_clean.chars().count() >= 3 {
-        let is_sqlite = store
-            .pool
-            .acquire()
-            .await
-            .is_ok_and(|conn| conn.backend_name() == "SQLite");
-        if is_sqlite {
-            query_scalar::<_, i64>(
-                "SELECT CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END",
-            )
-            .fetch_one(&store.pool)
-            .await
-            .unwrap_or(0)
-                != 0
-        } else {
-            false
-        }
-    } else {
-        false
-    };
+    let use_fts = resolve_use_fts(store, &search_clean, use_aux_cache).await;
     let use_fts_index = use_fts && search_clean.chars().count() >= 3;
 
-    let mut count_builder = sqlx::QueryBuilder::<sqlx::Any>::new(if use_fts_index {
-        "SELECT COUNT(*) FROM inventory_works w INDEXED BY inventory_works_fts_sort WHERE w.library_id IN ("
-    } else {
-        "SELECT COUNT(*) FROM inventory_works w WHERE w.library_id IN ("
-    });
-    let mut separated = count_builder.separated(", ");
-    for lib in &valid_libs {
-        separated.push_bind(lib);
-    }
-    separated.push_unseparated(") ");
-
-    push_search_filter(&mut count_builder, &search_clean, use_fts, fast_avail);
-    push_availability_filter(&mut count_builder, target_kind, fast_avail);
-    push_catalogue_filters(&mut count_builder, filter, has_parental_policy, fast_avail);
-    push_group_filter(
-        &mut count_builder,
-        filter,
-        &valid_libs,
-        &search_clean,
-        has_groups,
-        has_parental_policy,
-        fast_avail,
-        use_fts,
-    );
-
-    let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
-    let arguments = count_builder
-        .build()
-        .take_arguments()
-        .map_err(sqlx::Error::Encode)?
-        .unwrap_or_default();
     // A random page counts its eligible pool itself.
     let total = if exact_count && !random {
+        let mut count_builder = sqlx::QueryBuilder::<sqlx::Any>::new(if use_fts_index {
+            "SELECT COUNT(*) FROM inventory_works w INDEXED BY inventory_works_fts_sort WHERE w.library_id IN ("
+        } else {
+            "SELECT COUNT(*) FROM inventory_works w WHERE w.library_id IN ("
+        });
+        let mut separated = count_builder.separated(", ");
+        for lib in &valid_libs {
+            separated.push_bind(lib);
+        }
+        separated.push_unseparated(") ");
+
+        push_search_filter(&mut count_builder, &search_clean, use_fts, fast_avail);
+        push_availability_filter(&mut count_builder, target_kind, fast_avail);
+        push_catalogue_filters(&mut count_builder, filter, has_parental_policy, fast_avail);
+        push_group_filter(
+            &mut count_builder,
+            filter,
+            &valid_libs,
+            &search_clean,
+            has_groups,
+            has_parental_policy,
+            fast_avail,
+            use_fts,
+        );
+
+        let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
+        let arguments = count_builder
+            .build()
+            .take_arguments()
+            .map_err(sqlx::Error::Encode)?
+            .unwrap_or_default();
         Some(
             sqlx::query_scalar_with::<sqlx::Any, i64, _>(sqlx::AssertSqlSafe(count_sql), arguments)
                 .fetch_one(&store.pool)
@@ -773,55 +1115,30 @@ pub async fn catalogue_page(
     };
 
     if limit == 0 || total.is_some_and(|total| total == 0 || offset >= total) {
-        return Ok(json!({
+        let response = json!({
             "items": [], "total": total, "hasMore": false,
             "offset": offset, "limit": limit,
             "mode": "local-library", "notice": "Bibliothèques locales indexées"
-        }));
+        });
+        if cacheable {
+            cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+        }
+        return Ok(response);
     }
 
     // Phase 1: Select only matching `w.id`s ordered by the sort key using the covering index
     // (no table heap fetch or joins to libraries/media_nodes during pagination scan).
-    // The rating lives in the metadata JSON: read as text and parsed in Rust, so a malformed
-    // value is skipped instead of failing a PostgreSQL cast.
-    let rated = random && filter.min_rating.is_some();
-    let mut id_builder = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
-        "SELECT w.id{} FROM inventory_works w{} WHERE w.library_id IN (",
-        if rated {
-            ", CAST(COALESCE(json_extract(w.manual_json,'$.rating'),json_extract(w.editorial_json,'$.rating')) AS TEXT) AS rating"
-        } else {
-            ""
-        },
-        if use_fts_index {
-            " INDEXED BY inventory_works_fts_sort"
-        } else {
-            ""
-        }
-    ));
-    let mut separated = id_builder.separated(", ");
-    for lib in &valid_libs {
-        separated.push_bind(lib);
-    }
-    separated.push_unseparated(") ");
-
-    push_search_filter(&mut id_builder, &search_clean, use_fts, fast_avail);
-    push_availability_filter(&mut id_builder, target_kind, fast_avail);
-    push_catalogue_filters(&mut id_builder, filter, has_parental_policy, fast_avail);
-    push_group_filter(
-        &mut id_builder,
+    let id_params = IdQueryParams {
+        valid_libs: &valid_libs,
+        target_kind,
+        search_clean: &search_clean,
         filter,
-        &valid_libs,
-        &search_clean,
         has_groups,
         has_parental_policy,
         fast_avail,
         use_fts,
-    );
-
+    };
     let (page_ids, total, has_more) = if random {
-        // Random shelves: the eligible ids (permission, parental and filter checks already in
-        // the SQL) come from one index scan, cached per inventory generation; the page is a
-        // seeded sample of them, so no full-table ORDER BY RANDOM() is ever run.
         let pool_key = pool_cacheable.then(|| {
             let shape = CatalogueFilter {
                 seed: None,
@@ -833,7 +1150,7 @@ pub async fn catalogue_page(
                 store.cache_scope, visible, target_kind, search, shape
             )
         });
-        let pool = random_pool(store, id_builder, filter.min_rating, pool_key, state_fp).await?;
+        let pool = random_pool(store, &id_params, pool_key, fps.page_fp).await?;
         let page_ids: Vec<String> = seeded_sample(
             &pool,
             filter.seed.unwrap_or(0),
@@ -846,6 +1163,7 @@ pub async fn catalogue_page(
         let has_more = offset.saturating_add(limit) < pool.len();
         (page_ids, exact_count.then_some(pool.len()), has_more)
     } else {
+        let mut id_builder = build_id_query(&id_params, false);
         // Titles sort in the reader's own language when translations exist for it; otherwise the
         // library-language title keeps its place and the index-friendly column is used as before.
         let language = sort_language;
@@ -902,7 +1220,7 @@ pub async fn catalogue_page(
     };
     let fetch_ids: Vec<&String> = page_ids.iter().take(limit).collect();
     if fetch_ids.is_empty() {
-        return Ok(json!({
+        let response = json!({
             "items": [],
             "total": total,
             "hasMore": false,
@@ -910,76 +1228,67 @@ pub async fn catalogue_page(
             "limit": limit,
             "mode": "local-library",
             "notice": "Bibliothèques locales indexées"
-        }));
+        });
+        if cacheable {
+            cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+        }
+        return Ok(response);
     }
 
-    // Phase 2: Fetch full work details only for the <= `limit` selected work IDs.
-    let mut data_builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT w.*, COALESCE((SELECT f.parent_id FROM library_folders f WHERE f.library_id=w.library_id AND f.active=1),w.library_id) AS display_library_id, wl.node_id AS node_id, wn.status AS node_status, \
-           CASE WHEN w.kind = 'series' THEN ( \
-             CASE WHEN w.season_count_cached > 0 AND ",
-    );
-    data_builder.push(if fast_avail { "1=1" } else { "1=0" });
-    data_builder.push(
-        " THEN w.season_count_cached ELSE ( \
-             SELECT COUNT(DISTINCT s.id) FROM inventory_seasons s \
-             JOIN inventory_episodes ep ON ep.season_id=s.id \
-             JOIN inventory_editions e ON e.work_id=ep.work_id \
-             JOIN inventory_versions v ON v.edition_id=e.id \
-             JOIN inventory_sources src ON src.version_id=v.id \
-             JOIN inventory_assets a ON a.source_id=src.id \
-             JOIN libraries l ON l.id=src.library_id \
-             JOIN media_nodes n ON n.id=l.node_id \
-             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-           ) END) ELSE NULL END AS season_count, \
-           CASE WHEN w.kind = 'series' THEN ( \
-             CASE WHEN w.episode_count_cached > 0 AND ",
-    );
-    data_builder.push(if fast_avail { "1=1" } else { "1=0" });
-    data_builder.push(
-        " THEN w.episode_count_cached ELSE ( \
-             SELECT COUNT(DISTINCT ep.id) FROM inventory_seasons s \
-             JOIN inventory_episodes ep ON ep.season_id=s.id \
-             JOIN inventory_editions e ON e.work_id=ep.work_id \
-             JOIN inventory_versions v ON v.edition_id=e.id \
-             JOIN inventory_sources src ON src.version_id=v.id \
-             JOIN inventory_assets a ON a.source_id=src.id \
-             JOIN libraries l ON l.id=src.library_id \
-             JOIN media_nodes n ON n.id=l.node_id \
-             WHERE s.series_id=w.id AND a.available=1 AND src.root_snapshot=l.root AND l.kind='series' AND n.status != 'revoked' AND l.enabled=1 \
-           ) END) ELSE NULL END AS episode_count, \
-           CAST(NULL AS TEXT) AS poster_url, CAST(NULL AS TEXT) AS backdrop_url, CAST(NULL AS TEXT) AS logo_url \
-         FROM inventory_works w \
-         JOIN libraries wl ON wl.id=w.library_id \
-         JOIN media_nodes wn ON wn.id=wl.node_id \
-         WHERE w.id IN (",
-    );
-    let mut id_sep = data_builder.separated(", ");
-    for id in &fetch_ids {
-        id_sep.push_bind(*id);
-    }
-    id_sep.push_unseparated(")");
-
-    let data_sql = crate::database::normalize_sql(data_builder.sql().as_str());
-    let arguments = data_builder
-        .build()
-        .take_arguments()
-        .map_err(sqlx::Error::Encode)?
-        .unwrap_or_default();
-    let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
-        .fetch_all(&store.pool)
-        .await?;
-    let mut row_map = std::collections::HashMap::with_capacity(rows.len());
-    for row in &rows {
-        let wid: String = row.get("id");
-        row_map.insert(wid, work(row));
-    }
-    let mut items: Vec<Value> = fetch_ids
+    // Phase 2: Resolve decorated & localized items from the bounded work cache first; only missing
+    // work IDs hit `inventory_works`, `artwork::entries`, `media_group_members`, and `translations`.
+    let locale_key = BoundedCatalogueCache::locale_chain_key(&filter.locale_chain);
+    let cached_slots: Vec<Option<Value>> = if use_aux_cache {
+        cache::lock_cache().get_decorated_works_batch(
+            store.cache_scope,
+            fps.inv_fp,
+            &locale_key,
+            &fetch_ids,
+        )
+    } else {
+        vec![None; fetch_ids.len()]
+    };
+    let miss_ids: Vec<&String> = fetch_ids
         .iter()
-        .filter_map(|id| row_map.remove(*id))
+        .zip(cached_slots.iter())
+        .filter_map(|(id, slot)| slot.is_none().then_some(*id))
         .collect();
-    crate::product::decorate_many_with_groups(store, &mut items, has_groups).await?;
-    crate::translations::localize_values(store, &mut items, &filter.locale_chain).await?;
+    let items: Vec<Value> = if miss_ids.is_empty() {
+        cached_slots.into_iter().flatten().collect()
+    } else {
+        let miss_items = load_and_decorate_works(
+            store,
+            &miss_ids,
+            fast_avail,
+            has_groups,
+            &filter.locale_chain,
+        )
+        .await?;
+        if use_aux_cache && !miss_items.is_empty() {
+            cache::lock_cache().insert_decorated_works_batch(
+                store.cache_scope,
+                fps.inv_fp,
+                &locale_key,
+                &miss_items,
+            );
+        }
+        let mut miss_map: HashMap<String, Value> = miss_items
+            .into_iter()
+            .filter_map(|v| {
+                let id = v.get("id").and_then(Value::as_str)?.to_owned();
+                Some((id, v))
+            })
+            .collect();
+        let mut merged = Vec::with_capacity(fetch_ids.len());
+        for (id, slot) in fetch_ids.iter().zip(cached_slots) {
+            if let Some(val) = slot {
+                merged.push(val);
+            } else if let Some(val) = miss_map.remove(id.as_str()) {
+                merged.push(val);
+            }
+        }
+        merged
+    };
 
     let response = json!({
         "items": items,
@@ -991,42 +1300,49 @@ pub async fn catalogue_page(
         "notice": "Bibliothèques locales indexées"
     });
 
-    if state_fp > 0 && !filter.hide_watched && !filter.bypass_cache {
-        let lock = CATALOGUE_CACHE
-            .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
-        if let Ok(mut guard) = lock.lock() {
-            guard.insert(cache_key, state_fp, response.clone());
-        }
+    if cacheable {
+        cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
     }
 
     Ok(response)
 }
 
-/// Ids eligible for a random page, from cache when the inventory has not changed.
+/// Ids eligible for a random page, from cache when the inventory (and watched state if filtered) has not changed.
 async fn random_pool(
     store: &IdentityStore,
-    mut id_builder: sqlx::QueryBuilder<sqlx::Any>,
-    min_rating: Option<f64>,
+    params: &IdQueryParams<'_>,
     cache_key: Option<String>,
     state_fp: i64,
 ) -> Result<Vec<String>, sqlx::Error> {
     if let Some(key) = &cache_key
-        && let Some(lock) = CATALOGUE_CACHE.get()
-        && let Ok(mut guard) = lock.lock()
-        && let Some(Value::Array(ids)) = guard.get(key, state_fp)
+        && let Some(Value::Array(ids)) = cache::lock_cache().get(key, state_fp)
     {
         return Ok(ids
             .into_iter()
             .filter_map(|id| id.as_str().map(str::to_owned))
             .collect());
     }
+    let flight = cache_key.as_deref().map(cache::flight_lock);
+    let _computing = match &flight {
+        Some(lock) => Some(lock.lock().await),
+        None => None,
+    };
+    if let Some(key) = &cache_key
+        && let Some(Value::Array(ids)) = cache::lock_cache().get(key, state_fp)
+    {
+        return Ok(ids
+            .into_iter()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect());
+    }
+    let mut id_builder = build_id_query(params, params.filter.min_rating.is_some());
     let sql = crate::database::normalize_sql(id_builder.sql().as_str());
     let args = id_builder
         .build()
         .take_arguments()
         .map_err(sqlx::Error::Encode)?
         .unwrap_or_default();
-    let pool: Vec<String> = if let Some(minimum) = min_rating {
+    let pool: Vec<String> = if let Some(minimum) = params.filter.min_rating {
         sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), args)
             .fetch_all(&store.pool)
             .await?
@@ -1046,11 +1362,7 @@ async fn random_pool(
             .await?
     };
     if let Some(key) = cache_key {
-        let lock = CATALOGUE_CACHE
-            .get_or_init(|| std::sync::Mutex::new(BoundedCatalogueCache::from_env()));
-        if let Ok(mut guard) = lock.lock() {
-            guard.insert(key, state_fp, json!(pool));
-        }
+        cache::lock_cache().insert(key, state_fp, json!(pool));
     }
     Ok(pool)
 }
@@ -1622,4 +1934,480 @@ async fn populate_episode_page(
     value["editions"] = json!([]);
     value["episodesPage"] = json!({"season":returned_season,"offset":page.offset,"limit":page.limit,"nextOffset":page.offset + count,"hasMore":has_more});
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::node::scanner::ScannedFile;
+    use std::path::Path;
+
+    fn sample_scanned(name: &str, mpaa: Option<&str>) -> ScannedFile {
+        let probe = if let Some(rating) = mpaa {
+            json!({
+                "streams": [{"index": 0, "codec_type": "video", "codec_name": "av1"}],
+                "format": {"tags": {"mpaa": rating}}
+            })
+        } else {
+            json!({
+                "streams": [{"index": 0, "codec_type": "video", "codec_name": "av1"}],
+                "format": {}
+            })
+        };
+        ScannedFile {
+            relative_path: format!("{name}.mp4"),
+            size: 1024,
+            modified_ns: "1".into(),
+            title: name.into(),
+            identity_key: name.into(),
+            mime: "video/mp4".into(),
+            probe: serde_json::from_value(probe).unwrap(),
+            ..Default::default()
+        }
+    }
+
+    async fn setup_test_store(
+        dir: &Path,
+        db_name: &str,
+        files: Vec<ScannedFile>,
+    ) -> (IdentityStore, Vec<(String, String)>) {
+        let store = IdentityStore::open(&dir.join(db_name)).await.unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO users(id,role) VALUES('u1','user')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        super::super::ingest(
+            &store,
+            "lib",
+            Path::new("/movies"),
+            &super::super::ScanReport {
+                files,
+                complete: true,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let works: Vec<(String, String)> =
+            crate::database::query_as("SELECT id, title FROM inventory_works ORDER BY title")
+                .fetch_all(&store.pool)
+                .await
+                .unwrap();
+        (store, works)
+    }
+
+    #[tokio::test]
+    async fn hide_watched_caches_normal_and_random_and_invalidates_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, works) = setup_test_store(
+            dir.path(),
+            "hide-watched.sqlite",
+            vec![
+                sample_scanned("Alpha", None),
+                sample_scanned("Beta", None),
+                sample_scanned("Gamma", None),
+            ],
+        )
+        .await;
+        let w_alpha = &works[0].0;
+        let visible = vec!["lib".to_owned()];
+
+        query("INSERT INTO playback_progress(user_id,work_id,position_seconds,duration_seconds,watched,revision,updated_at) VALUES('u1',?,100.0,100.0,1,1,10)")
+            .bind(w_alpha)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let filter = CatalogueFilter {
+            user_id: Some("u1".to_owned()),
+            hide_watched: true,
+            seed: Some(42),
+            ..Default::default()
+        };
+
+        // 1. Non-random hide_watched=true page is cached and repeats on the same state_fp.
+        let p1 = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(p1["total"], 2);
+
+        let fps_before = compute_state_fingerprints(&store, Some("u1"), true).await;
+        let expected_page_key = format!(
+            "page|{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}",
+            store.cache_scope,
+            visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            10,
+            filter,
+            true
+        );
+        assert!(
+            cache::lock_cache()
+                .get(&expected_page_key, fps_before.page_fp)
+                .is_some(),
+            "hide_watched=true non-random page must be cached"
+        );
+
+        // 2. Random hide_watched=true caches its eligible pool under fps.page_fp.
+        let r1 = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "random",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r1["total"], 2);
+        let shape = CatalogueFilter {
+            seed: None,
+            locale_chain: Vec::new(),
+            ..filter.clone()
+        };
+        let expected_pool_key = format!(
+            "pool|{}|{:?}|{:?}|{}|{:?}",
+            store.cache_scope,
+            visible,
+            Some("film"),
+            "",
+            shape
+        );
+        assert!(
+            cache::lock_cache()
+                .get(&expected_pool_key, fps_before.page_fp)
+                .is_some(),
+            "hide_watched=true random pool must be cached"
+        );
+
+        // 3. Direct SQLite mutation clearing watched=0 invalidates immediately on next call.
+        query("UPDATE playback_progress SET watched=0 WHERE user_id='u1' AND work_id=?")
+            .bind(w_alpha)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let p2 = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(p2["total"], 3);
+
+        let r2 = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "random",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(r2["total"], 3);
+    }
+
+    #[tokio::test]
+    async fn decorated_work_cache_supports_partial_hits_and_locale_separation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, works) = setup_test_store(
+            dir.path(),
+            "decorated-partial.sqlite",
+            vec![
+                sample_scanned("One", None),
+                sample_scanned("Two", None),
+                sample_scanned("Three", None),
+            ],
+        )
+        .await;
+        let visible = vec!["lib".to_owned()];
+
+        query("INSERT INTO work_translations(work_id,locale,language,source,priority,title,updated_at) VALUES(?,'fr','fr','manual',100,'Un FR',1)")
+            .bind(&works[0].0)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("UPDATE inventory_cache_generation SET gen=gen+1 WHERE id=1")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        // Warm only 2 works (`limit = 2`) for locale ["fr"].
+        let fr_filter = CatalogueFilter {
+            user_id: Some("u1".to_owned()),
+            locale_chain: vec!["fr".to_owned()],
+            ..Default::default()
+        };
+        let first_two = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            2,
+            &fr_filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first_two["items"].as_array().unwrap().len(), 2);
+
+        let fps = compute_state_fingerprints(&store, Some("u1"), false).await;
+        let fr_key = BoundedCatalogueCache::locale_chain_key(&fr_filter.locale_chain);
+        {
+            let mut guard = cache::lock_cache();
+            assert!(
+                guard
+                    .get_decorated_work(store.cache_scope, fps.inv_fp, &fr_key, &works[0].0)
+                    .is_some()
+            );
+            assert!(
+                guard
+                    .get_decorated_work(store.cache_scope, fps.inv_fp, &fr_key, &works[2].0)
+                    .is_none()
+            );
+        }
+
+        // Fetching all 3 works hits the 2 cached works and loads + decorates only the 3rd miss.
+        let all_three = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            3,
+            &fr_filter,
+            true,
+        )
+        .await
+        .unwrap();
+        let items = all_three["items"].as_array().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[2]["id"], works[2].0);
+        assert_eq!(items.iter().find(|v| v["id"] == works[0].0).unwrap()["title"], "Un FR");
+
+        // Different locale must NOT reuse French decorated works.
+        let en_filter = CatalogueFilter {
+            user_id: Some("u1".to_owned()),
+            locale_chain: vec!["en".to_owned()],
+            ..Default::default()
+        };
+        let en_page = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            3,
+            &en_filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            en_page["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|v| v["id"] == works[0].0)
+                .unwrap()["title"],
+            works[0].1
+        );
+    }
+
+    #[tokio::test]
+    async fn parental_policy_mutation_invalidates_catalogue_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        let (store, works) = setup_test_store(
+            dir.path(),
+            "parental-inv.sqlite",
+            vec![sample_scanned("AdultFilm", None)],
+        )
+        .await;
+        query("UPDATE inventory_works SET minimum_age=18 WHERE id=?")
+            .bind(&works[0].0)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let visible = vec!["lib".to_owned()];
+        let filter = CatalogueFilter {
+            user_id: Some("u1".to_owned()),
+            ..Default::default()
+        };
+
+        let before = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(before["total"], 1);
+
+        query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated,blocked_tags_json,access_schedule_json) VALUES('u1',12,0,'[]','[]')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let after = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(after["total"], 0);
+    }
+
+    #[tokio::test]
+    async fn cached_locale_chain_hits_same_state_fp_and_invalidates_on_change() {
+        async fn resolve_cached_locale(
+            store: &IdentityStore,
+            state_fp: i64,
+            user_id: Option<&str>,
+            requested: Option<&str>,
+        ) -> Result<Vec<String>, sqlx::Error> {
+            let uid = user_id.unwrap_or("");
+            if state_fp > 0
+                && let Some(cached) = cache::lock_cache().get_locale_chain(
+                    store.cache_scope,
+                    state_fp,
+                    uid,
+                    requested,
+                )
+            {
+                return Ok(cached);
+            }
+            let chain = crate::translations::locale_chain(store, user_id, requested).await?;
+            if state_fp > 0 {
+                cache::lock_cache().insert_locale_chain(
+                    store.cache_scope,
+                    state_fp,
+                    uid,
+                    requested,
+                    chain.clone(),
+                );
+            }
+            Ok(chain)
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let (store, _) = setup_test_store(dir.path(), "locale-cache.sqlite", vec![]).await;
+        query("INSERT INTO user_preferences(user_id,preferences_json) VALUES('u1',?)")
+            .bind(json!({"metadataLocale": "fr"}).to_string())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let chain1 = resolve_cached_locale(&store, 100, Some("u1"), None)
+            .await
+            .unwrap();
+        assert_eq!(chain1.first().map(String::as_str), Some("fr"));
+
+        // Mutate DB without changing state_fp=100 -> must serve cached value (0 user_preferences reads).
+        query("UPDATE user_preferences SET preferences_json=? WHERE user_id='u1'")
+            .bind(json!({"metadataLocale": "de"}).to_string())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let cached = resolve_cached_locale(&store, 100, Some("u1"), None)
+            .await
+            .unwrap();
+        assert_eq!(cached, chain1);
+
+        // New state_fp=101 -> reads updated user_preferences immediately.
+        let updated = resolve_cached_locale(&store, 101, Some("u1"), None)
+            .await
+            .unwrap();
+        assert_eq!(updated.first().map(String::as_str), Some("de"));
+    }
+
+    #[tokio::test]
+    async fn invalidate_catalogue_cache_bumps_epoch_even_without_db_gen_change() {
+        let _cache_guard = crate::permissions::CACHE_TEST_LOCK.lock().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (store, works) = setup_test_store(
+            dir.path(),
+            "epoch-inv.sqlite",
+            vec![sample_scanned("EpochFilm", None)],
+        )
+        .await;
+        let visible = vec!["lib".to_owned()];
+        let filter = CatalogueFilter::default();
+
+        let first = catalogue_page(
+            &store,
+            &visible,
+            Some("film"),
+            "",
+            "title-asc",
+            0,
+            10,
+            &filter,
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(first["total"], 1);
+        let fp_before = compute_state_fingerprints(&store, None, false).await;
+
+        invalidate_catalogue_cache();
+        let fp_after = compute_state_fingerprints(&store, None, false).await;
+        assert_ne!(fp_before.inv_fp, fp_after.inv_fp);
+        assert_ne!(fp_before.page_fp, fp_after.page_fp);
+        {
+            let mut guard = cache::lock_cache();
+            assert!(
+                guard
+                    .get_decorated_work(store.cache_scope, fp_before.inv_fp, "", &works[0].0)
+                    .is_none()
+            );
+        }
+    }
 }

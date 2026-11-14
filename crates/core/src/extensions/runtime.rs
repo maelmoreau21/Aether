@@ -16,7 +16,7 @@ use wasmi::{
 };
 
 pub const DEFAULT_MAX_HTTP_REQUESTS: usize = 10;
-pub const DEFAULT_MAX_RESPONSE_SIZE: usize = 262_144; // 256 KiB
+pub const DEFAULT_MAX_RESPONSE_SIZE: usize = 2_097_152; // 2 MiB
 pub const DEFAULT_HTTP_TIMEOUT_SECS: u64 = 6;
 // Ten bounded HTTP requests plus compilation/serialization, below the Web request deadline.
 pub const INVOCATION_TIMEOUT_SECS: u64 = 65;
@@ -486,7 +486,7 @@ fn execute_inner(
     }
 
     let limits = StoreLimitsBuilder::new()
-        .memory_size(16 * 1024 * 1024)
+        .memory_size(64 * 1024 * 1024)
         .memories(1)
         .tables(1)
         .table_elements(4096)
@@ -507,9 +507,9 @@ fn execute_inner(
     let mut store = Store::new(&engine, host_state);
     store.limiter(|state| &mut state.limits);
     // JSON byte arrays cross the broker before the guest parses provider data.
-    // Ordinary populated responses exceed two million fuel units. Metadata and
-    // fingerprinting share this finite ceiling; memory and wall-clock caps remain.
-    store.set_fuel(200_000_000).map_err(|_| "runtime_error")?;
+    // Ordinary populated responses exceed two million fuel units, and large
+    // TMDb/TVDB/fanart.tv payloads need headroom for JSON parsing.
+    store.set_fuel(1_000_000_000).map_err(|_| "runtime_error")?;
 
     let mut linker = Linker::new(&engine);
     let _ = linker.func_wrap(

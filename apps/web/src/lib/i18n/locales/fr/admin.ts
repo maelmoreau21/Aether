@@ -885,6 +885,7 @@ export const admin = {
   operation_refused_or_server_unavailable: 'Opération refusée ou serveur indisponible.',
   access_denied_check_your_session_and: 'Accès refusé. Vérifiez votre session et vos droits.',
   configuration_refused_check_the_name_the: 'Configuration refusée. Vérifiez le nom, la racine et les utilisateurs.',
+  library_conflict_scan_in_progress: 'Action impossible pendant qu’un scan est en cours ou en attente sur cette bibliothèque.',
   the_remote_media_node_is_unreachable: 'Le Media Node distant est injoignable ou le jeton d’appairage est invalide.',
   admin_the_server_is_unavailable_try_again: 'Le serveur est indisponible. Réessayez.',
   media_node_status_unavailable_try_again: 'État des Media Nodes indisponible. Réessayez pour vérifier les serveurs.',

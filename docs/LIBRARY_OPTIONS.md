@@ -151,9 +151,9 @@ Les originaux, les dossiers Jellyfin et leurs fichiers annexes restent en lectur
   "fetchPoster": true,
   "fetchBackdrop": true,
   "fetchLogo": true,
-  "fetchThumb": true,
-  "fetchBanner": true,
-  "fetchDisc": true,
+  "fetchThumb": false,
+  "fetchBanner": false,
+  "fetchDisc": false,
   "automaticRefreshIntervalDays": 0
 }
 ```

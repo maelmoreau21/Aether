@@ -66,7 +66,7 @@ export interface LibraryOptions {
 }
 export function defaultLibraryOptions(): LibraryOptions {
   return { preferredMetadataLanguage: 'fr', metadataCountryCode: 'FR', readLocalNfo: true,
-    fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: true, fetchBanner: true, fetchDisc: true,
+    fetchPoster: true, fetchBackdrop: true, fetchLogo: true, fetchThumb: false, fetchBanner: false, fetchDisc: false,
     automaticRefreshIntervalDays: 0, preferEmbeddedTitles: false, embeddedSubtitlePolicy: 'allow_all',
     metadataProviders: [], imageProviders: [], similarItemsProviders: [], segmentProviders: [], subtitleProviders: [],
     onlineRefreshIntervalDays: 30, realtimeMonitoring: true, automaticCollections: true, introDetectionEnabled: true, markerMinConfidence: 80,    saveNfoToMedia: false, saveImagesToMedia: false,

@@ -1013,7 +1013,32 @@ async fn save(
         .await
         .map_err(database)?;
         if active != 0 {
-            return Err(StatusCode::CONFLICT);
+            let current: Option<(String, String, String)> = crate::database::query_as(
+                "SELECT kind,node_id,root FROM libraries WHERE id=?",
+            )
+            .bind(&id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(database)?;
+            let Some((current_kind, current_node, current_root)) = current else {
+                return Err(StatusCode::NOT_FOUND);
+            };
+            let mut current_folders = vec![(current_node, current_root)];
+            let child_folders: Vec<(String, String)> = crate::database::query_as(
+                "SELECT l.node_id,l.root FROM libraries l JOIN library_folders f ON f.library_id=l.id WHERE f.parent_id=? AND f.active=1 ORDER BY l.id",
+            )
+            .bind(&id)
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(database)?;
+            current_folders.extend(child_folders);
+            let requested_folders: Vec<(String, String)> = folders
+                .iter()
+                .map(|f| (f.node_id.clone(), f.root.clone()))
+                .collect();
+            if current_kind != input.kind || current_folders != requested_folders {
+                return Err(StatusCode::CONFLICT);
+            }
         }
     }
     for user in &input.user_ids {

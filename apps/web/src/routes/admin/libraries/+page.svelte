@@ -84,8 +84,11 @@
     });
     if (response.status === 401) throw new Error($t('your_session_has_expired_sign_in'));
     if (response.status === 403) throw new Error($t('access_denied_check_your_session_and'));
-    if (response.status === 400 || response.status === 409) {
+    if (response.status === 400) {
       throw new Error($t('configuration_refused_check_the_name_the'));
+    }
+    if (response.status === 409) {
+      throw new Error($t('library_conflict_scan_in_progress'));
     }
     if (response.status === 502) {
       throw new Error($t('the_remote_media_node_is_unreachable'));

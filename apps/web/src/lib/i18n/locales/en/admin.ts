@@ -887,6 +887,7 @@ export const admin: Readonly<Record<keyof typeof source, string>> = {
   operation_refused_or_server_unavailable: 'Operation refused or server unavailable.',
   access_denied_check_your_session_and: 'Access denied. Check your session and your rights.',
   configuration_refused_check_the_name_the: 'Configuration refused. Check the name, the root and the users.',
+  library_conflict_scan_in_progress: 'Cannot apply this change while a scan is queued or running on this library.',
   the_remote_media_node_is_unreachable: 'The remote Media Node is unreachable or the pairing token is invalid.',
   admin_the_server_is_unavailable_try_again: 'The server is unavailable. Try again.',
   media_node_status_unavailable_try_again: 'Media Node status unavailable. Try again to check the servers.',

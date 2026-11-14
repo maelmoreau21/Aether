@@ -713,7 +713,7 @@ pub async fn catalogue_page(
             .pool
             .acquire()
             .await
-            .is_ok_and(|mut conn| conn.backend_name() == "SQLite");
+            .is_ok_and(|conn| conn.backend_name() == "SQLite");
         if is_sqlite {
             query_scalar::<_, i64>(
                 "SELECT CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END",

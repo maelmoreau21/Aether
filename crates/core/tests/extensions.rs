@@ -164,7 +164,7 @@ fn sandbox_denies_imports_cpu_memory_invalid_pointers_and_output() {
         Some("guest_abort")
     );
     assert_eq!(
-        run(memory_module(257, false)).unwrap_err(),
+        run(memory_module(1025, false)).unwrap_err(),
         "instantiation_failed"
     );
     assert_eq!(

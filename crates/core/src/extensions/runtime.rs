@@ -509,7 +509,7 @@ fn execute_inner(
     // JSON byte arrays cross the broker before the guest parses provider data.
     // Ordinary populated responses exceed two million fuel units, and large
     // TMDb/TVDB/fanart.tv payloads need headroom for JSON parsing.
-    store.set_fuel(1_000_000_000).map_err(|_| "runtime_error")?;
+    store.set_fuel(400_000_000).map_err(|_| "runtime_error")?;
 
     let mut linker = Linker::new(&engine);
     let _ = linker.func_wrap(

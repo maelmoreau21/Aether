@@ -240,15 +240,16 @@ struct ActiveFlight<T, E> {
 }
 
 type FlightMap<K, T, E> = Mutex<HashMap<K, ActiveFlight<T, E>>>;
+type FlightErr = (StatusCode, &'static str);
+type VisibleFlightKey = (VisibleCacheKey, i64);
+type ResourceFlightKey = (ResourceCacheKey, i64);
 
 static FP_FLIGHTS: LazyLock<FlightMap<u64, i64, StatusCode>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
-static VIS_FLIGHTS: LazyLock<
-    FlightMap<(VisibleCacheKey, i64), CachedVisible, (StatusCode, &'static str)>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
-static RES_FLIGHTS: LazyLock<
-    FlightMap<(ResourceCacheKey, i64), CachedDecision, (StatusCode, &'static str)>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static VIS_FLIGHTS: LazyLock<FlightMap<VisibleFlightKey, CachedVisible, FlightErr>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static RES_FLIGHTS: LazyLock<FlightMap<ResourceFlightKey, CachedDecision, FlightErr>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 struct FlightGuard<'a, K: Eq + Hash, T, E> {
     map: &'a FlightMap<K, T, E>,
@@ -446,14 +447,10 @@ fn mix_u64(state: &mut u64, value: u64) {
 #[inline]
 fn mix_bytes(state: &mut u64, bytes: &[u8]) {
     mix_u64(state, bytes.len() as u64);
-    let mut chunks = bytes.chunks_exact(8);
-    for chunk in &mut chunks {
-        let word = u64::from_le_bytes([
-            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
-        ]);
-        mix_u64(state, word);
+    let (chunks, rem) = bytes.as_chunks::<8>();
+    for chunk in chunks {
+        mix_u64(state, u64::from_le_bytes(*chunk));
     }
-    let rem = chunks.remainder();
     if !rem.is_empty() {
         let mut buf = [0u8; 8];
         buf[..rem.len()].copy_from_slice(rem);

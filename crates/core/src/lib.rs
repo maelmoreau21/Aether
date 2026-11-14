@@ -787,24 +787,20 @@ fn origin_matches_primary(origin_header: &str, primary_origin: &str) -> bool {
     if origin_header == primary_origin {
         return true;
     }
-    let Ok(cand) = origin_header.parse::<axum::http::Uri>() else {
+    let Some((cand_scheme, cand_authority)) = origin_header.split_once("://") else {
         return false;
     };
-    let Ok(exp) = primary_origin.parse::<axum::http::Uri>() else {
+    let Some((exp_scheme, exp_authority)) = primary_origin.split_once("://") else {
         return false;
     };
-    let (Some(cs), Some(es)) = (cand.scheme_str(), exp.scheme_str()) else {
-        return false;
-    };
-    if !cs.eq_ignore_ascii_case(es) {
+    if cand_authority.is_empty()
+        || cand_authority.contains(['/', '?', '#'])
+        || !cand_scheme.eq_ignore_ascii_case(exp_scheme)
+    {
         return false;
     }
-    let default_https = es.eq_ignore_ascii_case("https");
-    authority_matches(
-        cand.authority().map(|a| a.as_str()),
-        exp.authority().map(|a| a.as_str()),
-        default_https,
-    )
+    let default_https = exp_scheme.eq_ignore_ascii_case("https");
+    authority_matches(Some(cand_authority), Some(exp_authority), default_https)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

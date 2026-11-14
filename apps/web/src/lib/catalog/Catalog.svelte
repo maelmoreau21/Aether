@@ -674,6 +674,7 @@
       {films}
       {series}
       featured={films[0] ?? series[0] ?? null}
+      catalogReady={pendingCatalogKinds === 0}
       onPlay={handleDirectPlay}
       {detailUrl}
     />

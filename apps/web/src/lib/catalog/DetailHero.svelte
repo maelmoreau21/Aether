@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { type Work, localizedTitle, localizedPlot, localizedTagline } from './api';
+  import { type Work, localizedTitle, localizedTagline } from './api';
   import { locale, t, fmt } from '../i18n';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
@@ -34,16 +34,11 @@
   let failedBackdrops = $state<string[]>([]);
   let failedLogo = $state('');
   let failedClearart = $state('');
-  let expanded = $state(false);
-  $effect(() => { void work.id; expanded = false; });
   const hasBackdrop = $derived(Boolean(backdrop));
   const hasClearart = $derived((!hasBackdrop || ambient) && Boolean(clearart) && failedClearart !== clearart);
   const placeholders = $derived([$t('indexed_local_media'), $t('local_media')]);
   const displayTitle = $derived(localizedTitle(work, $locale));
-  const displayPlot = $derived(localizedPlot(work, $locale));
   const displayTagline = $derived(localizedTagline(work, $locale));
-  const synopsis = $derived(meaningfulText(displayPlot, placeholders) ? displayPlot : $t('detail_no_synopsis'));
-  const longSynopsis = $derived(synopsis.length > 240);
   const formattedRating = $derived(
     work.rating !== null && work.rating !== undefined && Number.isFinite(Number(work.rating))
       ? $fmt.decimal(Number(work.rating), 1)
@@ -107,14 +102,6 @@
         {#if work.available === false}
           <p class="availability" role="status">{$t('this_content_is_temporarily_unavailable_the')}</p>
         {/if}
-        <div class="synopsis-block">
-          <p class="synopsis" class:clamped={longSynopsis && !expanded} id="detail-synopsis">{synopsis}</p>
-          {#if longSynopsis}
-            <button type="button" class="read-more" aria-expanded={expanded} aria-controls="detail-synopsis" onclick={() => (expanded = !expanded)}>
-              {expanded ? $t('detail_read_less') : $t('detail_read_more')}
-            </button>
-          {/if}
-        </div>
         {@render children()}
       </div>
 
@@ -334,45 +321,6 @@
     opacity: 0.85;
   }
 
-  .synopsis-block {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-    max-width: 72ch;
-  }
-
-  .synopsis {
-    margin: 0;
-    font-size: 15px;
-    line-height: 1.6;
-    opacity: 0.92;
-  }
-
-  .synopsis.clamped {
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .read-more {
-    min-height: 32px;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    font-size: 13px;
-    font-weight: 800;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    cursor: pointer;
-  }
-
-  .read-more:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; border-radius: var(--r-xs); }
-
   /* clearart.png : illustration détourée, au-dessus de la fiche rapide */
   .clearart {
     display: block;
@@ -468,7 +416,6 @@
     h1 { font-size: clamp(24px, 7vw, 32px); }
     .title-logo { max-height: 72px; }
     .tagline { display: none; }
-    .synopsis { font-size: 14px; }
     .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; padding: 14px; }
   }
   /* Écran en hauteur (téléphone, tablette tenue droite) : étirée sur tout le bandeau, l'image

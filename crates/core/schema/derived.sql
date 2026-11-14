@@ -35,3 +35,9 @@ SELECT g.library_id,g.user_id FROM granted g JOIN libraries lib ON lib.id=g.libr
 WHERE NOT EXISTS(SELECT 1 FROM user_media_kind_denials x WHERE x.user_id=g.user_id AND x.kind=lib.kind)
 AND NOT EXISTS(SELECT 1 FROM group_media_kind_denials x JOIN effective_user_group_members m ON m.group_id=x.group_id WHERE m.user_id=g.user_id AND x.kind=lib.kind)
 AND NOT EXISTS(SELECT 1 FROM group_media_kind_denials x JOIN user_groups dg ON dg.id=x.group_id WHERE dg.is_default=1 AND x.kind=lib.kind);
+
+-- Catalogue ordering indexes for fast index-only scans on `added-desc` and `year-desc`.
+CREATE INDEX IF NOT EXISTS inventory_works_avail_added_desc
+    ON inventory_works(kind, has_available_asset, added_at DESC, display_title_sort ASC, id ASC);
+CREATE INDEX IF NOT EXISTS inventory_works_avail_year_desc
+    ON inventory_works(kind, has_available_asset, effective_year DESC, display_title_sort ASC, id ASC);

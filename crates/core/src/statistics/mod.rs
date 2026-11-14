@@ -162,7 +162,7 @@ async fn save_settings(
     Json(input): Json<SettingsInput>,
 ) -> Outcome<StatusCode> {
     administrator(&auth, &headers, true).await?;
-    if !(1..=3650).contains(&input.event_retention_days)
+    if !(0..=36500).contains(&input.event_retention_days)
         || !(0..=36500).contains(&input.summary_retention_days)
     {
         return Err(StatusCode::BAD_REQUEST);
@@ -560,8 +560,12 @@ pub async fn maintain(store: &IdentityStore) -> Result<u64, sqlx::Error> {
     let (events,summaries):(i64,i64)=query_as("SELECT event_retention_days,summary_retention_days FROM statistics_settings WHERE singleton=1").fetch_one(&mut *tx).await?;
     query("UPDATE statistics_sessions SET ended_at=updated_at,end_reason='interrupted' WHERE id IN (SELECT id FROM statistics_sessions WHERE ended_at IS NULL AND updated_at<? ORDER BY updated_at LIMIT 500)")
         .bind(epoch-90).execute(&mut *tx).await?;
-    let deleted=query("DELETE FROM statistics_events WHERE (session_id,sequence) IN (SELECT session_id,sequence FROM statistics_events WHERE received_at<? ORDER BY received_at LIMIT 5000)")
-        .bind(epoch-events*86400).execute(&mut *tx).await?.rows_affected();
+    let deleted = if events > 0 {
+        query("DELETE FROM statistics_events WHERE (session_id,sequence) IN (SELECT session_id,sequence FROM statistics_events WHERE received_at<? ORDER BY received_at LIMIT 5000)")
+            .bind(epoch-events*86400).execute(&mut *tx).await?.rows_affected()
+    } else {
+        0
+    };
     if summaries > 0 {
         query("DELETE FROM statistics_sessions WHERE id IN (SELECT id FROM statistics_sessions WHERE ended_at IS NOT NULL AND started_at<? ORDER BY started_at LIMIT 500)")
         .bind(epoch-summaries*86400).execute(&mut *tx).await?;

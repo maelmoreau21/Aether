@@ -840,22 +840,23 @@ async fn postgres18_v1_to_v2_migration_preserves_data_and_is_idempotent() {
         .await
         .unwrap();
 
+    let next_version = aether_core::database::CURRENT_SCHEMA_VERSION + 1;
     let steps = [aether_core::database::MigrationStep {
-        version: 2,
-        name: "0002_test_migration",
+        version: next_version,
+        name: "0003_test_migration",
         sqlite_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
         postgres_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
     }];
-    let version = aether_core::database::upgrade_schema_with_steps(&mut conn, 2, &steps)
+    let version = aether_core::database::upgrade_schema_with_steps(&mut conn, next_version, &steps)
         .await
         .unwrap();
-    assert_eq!(version, 2);
+    assert_eq!(version, next_version);
 
     // Re-running is idempotent and existing data is intact
-    let version_again = aether_core::database::upgrade_schema_with_steps(&mut conn, 2, &steps)
+    let version_again = aether_core::database::upgrade_schema_with_steps(&mut conn, next_version, &steps)
         .await
         .unwrap();
-    assert_eq!(version_again, 2);
+    assert_eq!(version_again, next_version);
     let kept: String = query_scalar("SELECT display_name FROM users WHERE id='u1'")
         .fetch_one(&mut conn)
         .await

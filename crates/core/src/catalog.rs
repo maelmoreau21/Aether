@@ -259,40 +259,40 @@ pub async fn list(
         && (!inventory.is_fixture_bench() || visible.0.iter().any(|id| !id.starts_with("fixture-")))
     {
         let user_id = actor.map(|v| v.0.user.id);
+        let saved_prefs: Option<String> = if let Some(user) = &user_id {
+            match crate::database::query_scalar(
+                "SELECT preferences_json FROM user_preferences WHERE user_id=?",
+            )
+            .bind(user)
+            .fetch_optional(&store.pool)
+            .await
+            {
+                Ok(saved) => saved,
+                Err(_) => {
+                    return error(StatusCode::INTERNAL_SERVER_ERROR, "preferences_unavailable");
+                }
+            }
+        } else {
+            None
+        };
         let hide_watched = if query.unwatched == Some(true) {
             user_id.is_some()
         } else if query.scope.as_deref() == Some("latest") {
-            if let Some(user) = &user_id {
-                let saved: Result<Option<String>, _> = crate::database::query_scalar(
-                    "SELECT preferences_json FROM user_preferences WHERE user_id=?",
-                )
-                .bind(user)
-                .fetch_optional(&store.pool)
-                .await;
-                match saved {
-                    Ok(Some(saved)) => match serde_json::from_str::<serde_json::Value>(&saved) {
-                        Ok(value) => value["hidePlayedInLatest"] == true,
-                        Err(_) => {
-                            return error(
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                "preferences_unavailable",
-                            );
-                        }
-                    },
-                    Ok(None) => false,
+            match saved_prefs.as_deref() {
+                Some(saved) => match serde_json::from_str::<serde_json::Value>(saved) {
+                    Ok(value) => value["hidePlayedInLatest"] == true,
                     Err(_) => {
                         return error(StatusCode::INTERNAL_SERVER_ERROR, "preferences_unavailable");
                     }
-                }
-            } else {
-                false
+                },
+                None => false,
             }
         } else {
             false
         };
-        let locale_chain = match crate::translations::locale_chain(
+        let locale_chain = match crate::translations::locale_chain_with_prefs(
             store,
-            user_id.as_deref(),
+            saved_prefs.as_deref(),
             query.locale.as_deref(),
         )
         .await

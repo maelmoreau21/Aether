@@ -3,7 +3,8 @@
   import { preferenceState, DEFAULT_HOME_SECTIONS } from '../preferences';
   import { session } from '../auth/session';
   import { selectArtwork } from './artwork-selection';
-  import { request, type Work } from './api';
+  import { type Work } from './api';
+  import { loadCatalog } from './page-cache';
   import HeroBanner from '../ui/HeroBanner.svelte';
   import { newHeroSeed, pickHero } from './hero-picks';
   import MediaShelf from '../ui/MediaShelf.svelte';
@@ -17,10 +18,11 @@
   import { page } from '$app/state';
   import { t } from '../i18n';
 
-  let { films = [], series = [], featured = null, onPlay, detailUrl }: {
+  let { films = [], series = [], featured = null, catalogReady = true, onPlay, detailUrl }: {
     films: Work[];
     series: Work[];
     featured?: Work | null;
+    catalogReady?: boolean;
     onPlay: (work: Work) => void;
     detailUrl: (work: Work) => string;
   } = $props();
@@ -49,9 +51,12 @@
     return () => controller.abort();
   });
   async function loadSamples(scope: string, signal: AbortSignal) {
-    const sample = (key: string, params: Record<string, string>) => request<{ items?: Work[] }>(`/api/v1/catalog?${new URLSearchParams({
-      ...(scope ? { library: scope } : {}), q: '', count: 'false', sort: 'random', offset: '0', seed: String(shelfSeed(String(heroSeed), key)), ...params
-    })}`, signal).then(result => result.items ?? []);
+    const sample = (key: string, params: Record<string, string>) => {
+      const url = `/api/v1/catalog?${new URLSearchParams({
+        ...(scope ? { library: scope } : {}), q: '', count: 'false', sort: 'random', offset: '0', seed: String(shelfSeed(String(heroSeed), key)), ...params
+      })}`;
+      return loadCatalog(url, url).then(result => result.items ?? []);
+    };
     const [tonightSample, ratedSample] = await Promise.allSettled([
       sample('tonight', { unwatched: 'true', limit: '24' }),
       sample('rated', { minRating: '7', limit: '20' }).then(found => found.length >= 8 ? found : sample('rated', { minRating: '6', limit: '20' }))
@@ -104,7 +109,7 @@
     {#if section === 'tonight'}<RecommendationShelf />{/if}
   {/each}
   {#if sections.length && !sections.includes('tonight')}<RecommendationShelf />{/if}
-  {#if allWorks.length}
+  {#if allWorks.length && catalogReady && samples !== null}
     <DiscoverFeed {films} {series} exclude={shownAbove} {library} {detailUrl} />
   {/if}
   {#if $preferenceState.homeSections?.length === 0}

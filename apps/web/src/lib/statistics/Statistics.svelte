@@ -30,7 +30,20 @@
   let settingsReady = $state(false), persistedEnabled = $state(false), usersCanView = $state(false);
   let tab = $state<'overview'|'activity'|'content'|'technical'|'history'|'settings'>('overview');
   const tabs = ['overview','activity','content','technical','history','settings'] as const;
-  let enabled = $state(false), eventDays = $state(365), summaryDays = $state(0), dirty = $state(false), eraseConfirmed = $state(false);
+  let enabled = $state(false), eventDays = $state(0), summaryDays = $state(0), dirty = $state(false), eraseConfirmed = $state(false);
+  const RETENTION_PRESETS = [0, 365, 730, 1825] as const;
+  const retentionPreset = $derived(
+    eventDays === summaryDays && (RETENTION_PRESETS as readonly number[]).includes(eventDays)
+      ? String(eventDays)
+      : 'custom'
+  );
+  function applyRetentionPreset(value: string) {
+    if (value === 'custom') return;
+    const days = Number(value);
+    eventDays = days;
+    summaryDays = days;
+    dirty = true;
+  }
   let facets = $state<Statistics['facets']>({ libraries: [], nodes: [], devices: [] });
   let users = $state<Statistics['users']>([]);
   let pending: AbortController | undefined, detailPending: AbortController | undefined, profilePending: AbortController | undefined;
@@ -239,7 +252,19 @@
     <section class="panel settings"><h3>{$st('settings_collection')}</h3><form onsubmit={event => { event.preventDefault(); void save(); }}>
       <label class="check"><input type="checkbox" bind:checked={usersCanView} disabled={saving} onchange={() => dirty = true} /> {$st('users_can_view')}</label>
       <p class="muted">{$st('collection_note')}</p>
-      <div class="filters"><label>{$st('event_days')}<input type="number" min="1" max="3650" bind:value={eventDays} oninput={() => dirty = true} required /></label><label>{$st('summary_days')}<input type="number" min="0" max="36500" bind:value={summaryDays} oninput={() => dirty = true} required /></label></div>
+      <div class="filters">
+        <label>{$st('retention_preset')}
+          <select value={retentionPreset} disabled={saving} onchange={event => applyRetentionPreset((event.currentTarget as HTMLSelectElement).value)}>
+            <option value="0">{$st('retention_unlimited')}</option>
+            <option value="365">{$st('retention_1_year')}</option>
+            <option value="730">{$st('retention_2_years')}</option>
+            <option value="1825">{$st('retention_5_years')}</option>
+            <option value="custom">{$st('retention_custom')}</option>
+          </select>
+        </label>
+        <label>{$st('event_days')}<input type="number" min="0" max="36500" bind:value={eventDays} oninput={() => dirty = true} required /></label>
+        <label>{$st('summary_days')}<input type="number" min="0" max="36500" bind:value={summaryDays} oninput={() => dirty = true} required /></label>
+      </div>
       {#if wrapped}
         <fieldset class="wrapped-settings" disabled={!usersCanView}><legend>{$st('wrapped_settings')}</legend>
           <label class="check"><input type="checkbox" bind:checked={wrapped.visible} onchange={() => wrappedDirty = true} /> {$st('wrapped_visible')}</label>
@@ -259,7 +284,7 @@
     </form></section>
   {/if}
   {#if data && tab==='settings'}
-    <p class="collection-state">{data.enabled ? $st('collection_on') : $st('collection_off')}{#if data.firstEnabledAt} {$st('since', { date: date(data.firstEnabledAt) })}{:else} · {$st('no_history')}{/if}. {$st('retention', { events: data.eventRetentionDays, summaries: data.summaryRetentionDays ? $st('days_count', { count: data.summaryRetentionDays }) : $st('summaries_forever') })}</p>
+    <p class="collection-state">{data.enabled ? $st('collection_on') : $st('collection_off')}{#if data.firstEnabledAt} {$st('since', { date: date(data.firstEnabledAt) })}{:else} · {$st('no_history')}{/if}. {$st('retention', { events: data.eventRetentionDays ? $st('days_count', { count: data.eventRetentionDays }) : $st('summaries_forever'), summaries: data.summaryRetentionDays ? $st('days_count', { count: data.summaryRetentionDays }) : $st('summaries_forever') })}</p>
   {/if}
   {#if tab!=='settings'}
   <div class="toolbar">

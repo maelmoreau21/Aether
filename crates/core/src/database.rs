@@ -178,13 +178,40 @@ pub struct MigrationStep {
     pub postgres_sql: &'static str,
 }
 
-/// Current frozen v1 baseline schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+/// Current persisted schema version.
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+
+/// Sequential migrations applied after the frozen v1 baseline.
+pub const MIGRATIONS: &[MigrationStep] = &[
+    MigrationStep {
+        version: 2,
+        name: "0002_library_media_task_runs_identify",
+        sqlite_sql: "CREATE TABLE library_media_task_runs_new (
+ library_id TEXT NOT NULL,
+ task TEXT NOT NULL CHECK(task IN ('identify','trickplay','intros','artwork')),
+ started_at BIGINT NOT NULL,
+ origin TEXT NOT NULL DEFAULT 'manual' CHECK(origin IN ('manual','scan')),
+ PRIMARY KEY(library_id, task)
+);
+INSERT INTO library_media_task_runs_new(library_id,task,started_at,origin) SELECT library_id,task,started_at,origin FROM library_media_task_runs;
+DROP TABLE library_media_task_runs;
+ALTER TABLE library_media_task_runs_new RENAME TO library_media_task_runs;",
+        postgres_sql: "ALTER TABLE library_media_task_runs DROP CONSTRAINT IF EXISTS library_media_task_runs_task_check;
+ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_check CHECK(task IN ('identify','trickplay','intros','artwork'));",
+    },
+    MigrationStep {
+        version: 3,
+        name: "0003_statistics_retention_unlimited",
+        sqlite_sql: "UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND event_retention_days = 365;",
+        postgres_sql: "ALTER TABLE statistics_settings ALTER COLUMN event_retention_days SET DEFAULT 0;
+UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND event_retention_days = 365;",
+    },
+];
 
 /// Install the frozen v1 schema (`crates/core/migrations/0001_initial_v1.sql`) on an empty
-/// database, or refresh derived views/indexes on an existing v1 database.
+/// database, apply pending migrations, and refresh derived views/indexes.
 pub async fn initialize_fresh_schema(conn: &mut AnyConnection) -> Result<(), sqlx::Error> {
-    upgrade_schema_with_steps(conn, CURRENT_SCHEMA_VERSION, &[]).await?;
+    upgrade_schema_with_steps(conn, CURRENT_SCHEMA_VERSION, MIGRATIONS).await?;
     Ok(())
 }
 
@@ -431,8 +458,14 @@ mod tests {
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
-        // 1. Start at frozen v1
+        // 1. Start at current schema version
         super::initialize_fresh_schema(&mut conn).await.unwrap();
+        super::query(
+            "INSERT INTO library_media_task_runs(library_id,task,started_at,origin) VALUES('lib1','identify',100,'scan')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
         super::query(
             "INSERT INTO users(id,role,display_name) VALUES('u1','administrator','Admin')",
         )
@@ -440,23 +473,24 @@ mod tests {
         .await
         .unwrap();
 
-        // 2. Upgrade v1 -> v2
+        // 2. Upgrade to next version
+        let next_version = super::CURRENT_SCHEMA_VERSION + 1;
         let steps = [super::MigrationStep {
-            version: 2,
-            name: "0002_test_migration",
+            version: next_version,
+            name: "0003_test_migration",
             sqlite_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
             postgres_sql: "ALTER TABLE users ADD COLUMN note TEXT DEFAULT '';",
         }];
-        let version = super::upgrade_schema_with_steps(&mut conn, 2, &steps)
+        let version = super::upgrade_schema_with_steps(&mut conn, next_version, &steps)
             .await
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, next_version);
 
         // 3. Re-running is idempotent and existing data is intact
-        let version_again = super::upgrade_schema_with_steps(&mut conn, 2, &steps)
+        let version_again = super::upgrade_schema_with_steps(&mut conn, next_version, &steps)
             .await
             .unwrap();
-        assert_eq!(version_again, 2);
+        assert_eq!(version_again, next_version);
         let kept: String = super::query_scalar("SELECT display_name FROM users WHERE id='u1'")
             .fetch_one(&mut conn)
             .await

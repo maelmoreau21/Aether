@@ -439,8 +439,13 @@ async fn detail(
         .ok_or(StatusCode::NOT_FOUND)?;
     let session = session(&row, now(), true)?;
     let config = settings(&auth.store).await?;
+    let cutoff = if config.event_retention_days > 0 {
+        now() - config.event_retention_days * 86400
+    } else {
+        0
+    };
     let rows=query("SELECT occurred_at,event_json,sequence FROM statistics_events WHERE session_id=? AND sequence>? AND received_at>=? ORDER BY sequence LIMIT 2001")
-        .bind(&id).bind(page.after).bind(now()-config.event_retention_days*86400).fetch_all(&auth.store.pool).await.map_err(db)?;
+        .bind(&id).bind(page.after).bind(cutoff).fetch_all(&auth.store.pool).await.map_err(db)?;
     let timeline = rows
         .iter()
         .take(2000)

@@ -645,7 +645,7 @@ async fn statistics_sqlite_http_is_private_idempotent_optional_and_durable() {
     contract(store.clone()).await;
     drop(store);
     let reopened = IdentityStore::open(&path).await.unwrap();
-    assert_eq!(settings(&reopened).await.unwrap().event_retention_days, 365);
+    assert_eq!(settings(&reopened).await.unwrap().event_retention_days, 0);
     assert_eq!(settings(&reopened).await.unwrap().enabled, 0);
     assert_eq!(
         query_scalar::<sqlx::Any, i64>(

@@ -677,34 +677,57 @@ pub async fn catalogue_page(
             .unwrap_or(0);
     let fast_avail = fc_val > 0;
 
-    // 3. Check if any media groups or parental policies exist.
-    let has_groups: bool = query_scalar::<_, i64>(
-        "SELECT CASE WHEN EXISTS(SELECT 1 FROM media_group_members) THEN 1 ELSE 0 END",
+    // 3. Check media groups, parental policies, and whether translations exist for the sort
+    //    language in a single round-trip.
+    let search_clean = search.trim().to_lowercase();
+    let requested_sort_lang = (!random)
+        .then(|| {
+            filter
+                .locale_chain
+                .first()
+                .map(|first| crate::metadata_locale::language_of(first))
+        })
+        .flatten();
+    let (has_groups_val, has_parental_val, has_sort_lang_val): (i64, i64, i64) = sqlx::query_as(
+        &crate::database::normalize_sql(
+            "SELECT \
+               CASE WHEN EXISTS(SELECT 1 FROM media_group_members) THEN 1 ELSE 0 END, \
+               CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) THEN 1 ELSE 0 END, \
+               CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
+        ),
     )
+    .bind(filter.user_id.as_deref())
+    .bind(filter.user_id.as_deref())
+    .bind(requested_sort_lang)
+    .bind(requested_sort_lang)
     .fetch_one(&store.pool)
-    .await?
-        != 0;
+    .await?;
+    let has_groups = has_groups_val != 0;
+    let has_parental_policy = has_parental_val != 0;
+    let sort_language = (has_sort_lang_val != 0)
+        .then_some(requested_sort_lang)
+        .flatten();
 
-    let has_parental_policy: bool = if let Some(uid) = &filter.user_id {
-        query_scalar::<_, i64>(
-            "SELECT CASE WHEN EXISTS(SELECT 1 FROM parental_policies WHERE user_id=?) THEN 1 ELSE 0 END",
-        )
-        .bind(uid)
-        .fetch_one(&store.pool)
-        .await?
-            != 0
+    let use_fts: bool = if search_clean.chars().count() >= 3 {
+        let is_sqlite = store
+            .pool
+            .acquire()
+            .await
+            .is_ok_and(|mut conn| conn.backend_name() == "SQLite");
+        if is_sqlite {
+            query_scalar::<_, i64>(
+                "SELECT CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END",
+            )
+            .fetch_one(&store.pool)
+            .await
+            .unwrap_or(0)
+                != 0
+        } else {
+            false
+        }
     } else {
         false
     };
-
-    let use_fts: bool = query_scalar::<_, i64>(
-        "SELECT CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END",
-    )
-    .fetch_one(&store.pool)
-    .await
-    .unwrap_or(0)
-        != 0;
-    let search_clean = search.trim().to_lowercase();
     let use_fts_index = use_fts && search_clean.chars().count() >= 3;
 
     let mut count_builder = sqlx::QueryBuilder::<sqlx::Any>::new(if use_fts_index {
@@ -825,21 +848,6 @@ pub async fn catalogue_page(
     } else {
         // Titles sort in the reader's own language when translations exist for it; otherwise the
         // library-language title keeps its place and the index-friendly column is used as before.
-        let sort_language = match filter.locale_chain.first() {
-            Some(first) => {
-                let language = crate::metadata_locale::language_of(first);
-                let translated = query_scalar::<_, i64>(
-                    "SELECT CASE WHEN EXISTS(SELECT 1 FROM work_translations WHERE language=?) THEN 1 ELSE 0 END",
-                )
-                .bind(language)
-                .fetch_one(&store.pool)
-                .await
-                .unwrap_or(0)
-                    != 0;
-                translated.then_some(language)
-            }
-            None => None,
-        };
         let language = sort_language;
         match sort {
             "title-desc" => {
@@ -848,24 +856,24 @@ pub async fn catalogue_page(
                 id_builder.push(" DESC, w.id DESC ");
             }
             "year-asc" => {
-                id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year ASC, ");
-                push_title_key(&mut id_builder, language);
-                id_builder.push(" ASC, w.id ASC ");
+                id_builder.push(
+                    "ORDER BY w.effective_year IS NULL, w.effective_year ASC, w.display_title_sort ASC, w.id ASC ",
+                );
             }
             "year-desc" => {
-                id_builder.push("ORDER BY w.effective_year IS NULL, w.effective_year DESC, ");
-                push_title_key(&mut id_builder, language);
-                id_builder.push(" ASC, w.id ASC ");
+                id_builder.push(
+                    "ORDER BY w.effective_year DESC, w.display_title_sort ASC, w.id ASC ",
+                );
             }
             "added-desc" => {
-                id_builder.push("ORDER BY w.added_at IS NULL, w.added_at DESC, ");
-                push_title_key(&mut id_builder, language);
-                id_builder.push(" ASC, w.id ASC ");
+                id_builder.push(
+                    "ORDER BY w.added_at DESC, w.display_title_sort ASC, w.id ASC ",
+                );
             }
             "added-asc" => {
-                id_builder.push("ORDER BY w.added_at IS NULL, w.added_at ASC, ");
-                push_title_key(&mut id_builder, language);
-                id_builder.push(" ASC, w.id ASC ");
+                id_builder.push(
+                    "ORDER BY w.added_at IS NULL, w.added_at ASC, w.display_title_sort ASC, w.id ASC ",
+                );
             }
             _ => {
                 id_builder.push("ORDER BY ");
@@ -973,7 +981,7 @@ pub async fn catalogue_page(
         .iter()
         .filter_map(|id| row_map.remove(*id))
         .collect();
-    crate::product::decorate_many(store, &mut items).await?;
+    crate::product::decorate_many_with_groups(store, &mut items, has_groups).await?;
     crate::translations::localize_values(store, &mut items, &filter.locale_chain).await?;
 
     let response = json!({

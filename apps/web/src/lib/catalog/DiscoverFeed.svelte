@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
-  import { request, type Work } from './api';
+  import { type Work } from './api';
+  import { loadCatalog } from './page-cache';
   import MediaShelf from '../ui/MediaShelf.svelte';
   import Poster from './Poster.svelte';
   import { buildDiscoverPlan, shelfSeed, shuffleWithSeed, type DiscoverSpec } from './discover';
@@ -43,8 +44,9 @@
 
   const seed = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 
-  // Recommence le fil seulement si la bibliothèque ou le contenu de départ change vraiment.
-  const resetKey = $derived(`${kind ?? ''}|${exclude.length}|${library}|${films.length}:${films[0]?.id ?? ''}|${series.length}:${series[0]?.id ?? ''}`);
+  // Recommence le fil seulement si la bibliothèque ou le type change vraiment, pas quand les rangées
+  // du haut finissent d'arriver.
+  const resetKey = $derived(`${kind ?? ''}|${library}|${films.length + series.length > 0 ? 1 : 0}`);
   $effect(() => {
     void resetKey;
     untrack(() => {
@@ -59,15 +61,31 @@
     });
   });
 
+  $effect(() => {
+    for (const id of exclude) seen.add(id);
+  });
+
   function catalogUrl(params: Record<string, string>) {
     return `/api/v1/catalog?${new URLSearchParams({ ...(library ? { library } : {}), q: '', count: 'false', ...params })}`;
+  }
+
+  function fetchFeedPage(url: string, signal: AbortSignal): Promise<{ items: Work[] }> {
+    if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    return new Promise((resolve, reject) => {
+      const onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+      signal.addEventListener('abort', onAbort, { once: true });
+      void loadCatalog(url, url).then(
+        data => { signal.removeEventListener('abort', onAbort); resolve(data); },
+        err => { signal.removeEventListener('abort', onAbort); reject(err); }
+      );
+    });
   }
 
   async function loadNextShelf(signal: AbortSignal): Promise<boolean> {
     // Quelques tentatives : une rangée trop courte après déduplication est sautée.
     for (let attempts = 0; attempts < 4 && planIndex < plan.length; attempts++) {
       const spec = plan[planIndex++];
-      const result = await request<{ items: Work[] }>(catalogUrl({
+      const result = await fetchFeedPage(catalogUrl({
         kind: spec.kind,
         sort: spec.sort,
         offset: '0',
@@ -86,7 +104,7 @@
   }
 
   async function loadGridPage(signal: AbortSignal) {
-    const result = await request<{ items: Work[] }>(catalogUrl({ ...(kind ? { kind } : {}), sort: 'added-desc', offset: String(gridOffset), limit: String(GRID_PAGE) }), signal);
+    const result = await fetchFeedPage(catalogUrl({ ...(kind ? { kind } : {}), sort: 'added-desc', offset: String(gridOffset), limit: String(GRID_PAGE) }), signal);
     if (signal.aborted) return;
     const items = result.items ?? [];
     gridOffset += items.length;
@@ -118,14 +136,14 @@
   }
 
   function isNearViewport(node: HTMLElement) {
-    return node.getBoundingClientRect().top < window.innerHeight + 900;
+    return node.getBoundingClientRect().top < window.innerHeight + 400;
   }
 
   onMount(() => {
     if (!sentinel) return;
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) void loadMore();
-    }, { rootMargin: '900px 0px' });
+    }, { rootMargin: '400px 0px' });
     observer.observe(sentinel);
     return () => { observer.disconnect(); controller?.abort(); };
   });

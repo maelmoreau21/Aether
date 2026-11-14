@@ -567,27 +567,38 @@ pub async fn locale_chain(
     user_id: Option<&str>,
     requested: Option<&str>,
 ) -> Result<Vec<String>, sqlx::Error> {
-    let mut preferred: Vec<String> = requested.map(str::to_owned).into_iter().collect();
-    let mut fallbacks: Vec<String> = Vec::new();
-    if let Some(user) = user_id {
-        let saved: Option<String> = crate::database::query_scalar(
+    let saved: Option<String> = if let Some(user) = user_id {
+        crate::database::query_scalar(
             "SELECT preferences_json FROM user_preferences WHERE user_id=?",
         )
         .bind(user)
         .fetch_optional(&store.pool)
-        .await?;
-        if let Some(prefs) = saved.and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
-            for key in ["metadataLocale", "locale"] {
-                if let Some(v) = prefs.get(key).and_then(Value::as_str) {
-                    preferred.push(v.to_owned());
-                }
+        .await?
+    } else {
+        None
+    };
+    locale_chain_with_prefs(store, saved.as_deref(), requested).await
+}
+
+/// Build a caller's locale chain from already-loaded `user_preferences.preferences_json`.
+pub(crate) async fn locale_chain_with_prefs(
+    store: &IdentityStore,
+    saved_prefs: Option<&str>,
+    requested: Option<&str>,
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut preferred: Vec<String> = requested.map(str::to_owned).into_iter().collect();
+    let mut fallbacks: Vec<String> = Vec::new();
+    if let Some(prefs) = saved_prefs.and_then(|s| serde_json::from_str::<Value>(s).ok()) {
+        for key in ["metadataLocale", "locale"] {
+            if let Some(v) = prefs.get(key).and_then(Value::as_str) {
+                preferred.push(v.to_owned());
             }
-            if let Some(list) = prefs
-                .get("metadataFallbackLocales")
-                .and_then(Value::as_array)
-            {
-                fallbacks.extend(list.iter().filter_map(Value::as_str).map(str::to_owned));
-            }
+        }
+        if let Some(list) = prefs
+            .get("metadataFallbackLocales")
+            .and_then(Value::as_array)
+        {
+            fallbacks.extend(list.iter().filter_map(Value::as_str).map(str::to_owned));
         }
     }
     let default = crate::server_settings::load(store)

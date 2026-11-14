@@ -210,6 +210,14 @@ pub async fn decorate(store: &IdentityStore, value: &mut Value) -> Result<(), sq
 }
 
 pub async fn decorate_many(store: &IdentityStore, values: &mut [Value]) -> Result<(), sqlx::Error> {
+    decorate_many_with_groups(store, values, true).await
+}
+
+pub(crate) async fn decorate_many_with_groups(
+    store: &IdentityStore,
+    values: &mut [Value],
+    has_groups: bool,
+) -> Result<(), sqlx::Error> {
     use sqlx::Execute;
     let ids: Vec<String> = values
         .iter()
@@ -219,23 +227,27 @@ pub async fn decorate_many(store: &IdentityStore, values: &mut [Value]) -> Resul
         return Ok(());
     }
     let images = crate::artwork::entries(store, &ids).await?;
-    let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(
-        "SELECT work_id,group_id FROM media_group_members WHERE work_id IN (",
-    );
-    let mut bind = builder.separated(",");
-    for id in &ids {
-        bind.push_bind(id);
-    }
-    bind.push_unseparated(")");
-    let sql = crate::database::normalize_sql(builder.sql().as_str());
-    let args = builder
-        .build()
-        .take_arguments()
-        .map_err(sqlx::Error::Encode)?
-        .unwrap_or_default();
-    let groups: Vec<(String, String)> = sqlx::query_as_with(sqlx::AssertSqlSafe(sql), args)
-        .fetch_all(&store.pool)
-        .await?;
+    let groups: Vec<(String, String)> = if has_groups {
+        let mut builder = sqlx::QueryBuilder::<sqlx::Any>::new(
+            "SELECT work_id,group_id FROM media_group_members WHERE work_id IN (",
+        );
+        let mut bind = builder.separated(",");
+        for id in &ids {
+            bind.push_bind(id);
+        }
+        bind.push_unseparated(")");
+        let sql = crate::database::normalize_sql(builder.sql().as_str());
+        let args = builder
+            .build()
+            .take_arguments()
+            .map_err(sqlx::Error::Encode)?
+            .unwrap_or_default();
+        sqlx::query_as_with(sqlx::AssertSqlSafe(sql), args)
+            .fetch_all(&store.pool)
+            .await?
+    } else {
+        Vec::new()
+    };
     for value in values {
         let id = value["id"].as_str().unwrap_or_default().to_owned();
         value["globalMediaId"] = json!(groups.iter().find(|g| g.0 == id).map(|g| &g.1));

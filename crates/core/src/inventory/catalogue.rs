@@ -618,8 +618,8 @@ async fn compute_state_fingerprints(
     let Ok(Some(row)) = stmt.fetch_optional(&store.pool).await else {
         return StateFingerprints::default();
     };
-    let gen = row.try_get::<i64, usize>(0).unwrap_or(0);
-    if gen <= 0 {
+    let cache_gen = row.try_get::<i64, usize>(0).unwrap_or(0);
+    if cache_gen <= 0 {
         return StateFingerprints::default();
     }
     let mut inv_h = mix64(0xcbf2_9ce4_8422_2325_u64, epoch);
@@ -651,7 +651,6 @@ async fn compute_state_fingerprints(
     }
 }
 
-
 async fn resolve_valid_libs_and_fast_avail(
     store: &IdentityStore,
     visible: &[String],
@@ -660,7 +659,12 @@ async fn resolve_valid_libs_and_fast_avail(
     use_cache: bool,
 ) -> Result<(Vec<String>, bool), sqlx::Error> {
     let key = format!("vl|{}|{:?}|{:?}", store.cache_scope, target_kind, visible);
-    if use_cache && let Some(cached) = cache::lock_cache().get_valid_libs(&key, inv_fp) {
+    let cached = if use_cache {
+        cache::lock_cache().get_valid_libs(&key, inv_fp)
+    } else {
+        None
+    };
+    if let Some(cached) = cached {
         return Ok(cached);
     }
 
@@ -741,11 +745,14 @@ async fn resolve_meta_flags<'a>(
     meta_fp: i64,
     use_cache: bool,
 ) -> Result<(bool, bool, Option<&'a str>), sqlx::Error> {
-    let key = format!("mf|{}|{:?}|{:?}", store.cache_scope, user_id, requested_sort_lang);
-    if use_cache
-        && let Some((has_groups, has_parental_policy, sort_lang_exists)) =
-            cache::lock_cache().get_meta_flags(&key, meta_fp)
-    {
+    let scope = store.cache_scope;
+    let key = format!("mf|{scope}|{user_id:?}|{requested_sort_lang:?}");
+    let cached = if use_cache {
+        cache::lock_cache().get_meta_flags(&key, meta_fp)
+    } else {
+        None
+    };
+    if let Some((has_groups, has_parental_policy, sort_lang_exists)) = cached {
         return Ok((
             has_groups,
             has_parental_policy,
@@ -795,7 +802,12 @@ async fn resolve_use_fts(store: &IdentityStore, search_clean: &str, use_cache: b
     if search_clean.chars().count() < 3 {
         return false;
     }
-    if use_cache && let Some(cached) = cache::lock_cache().get_use_fts(store.cache_scope) {
+    let cached = if use_cache {
+        cache::lock_cache().get_use_fts(store.cache_scope)
+    } else {
+        None
+    };
+    if let Some(cached) = cached {
         return cached;
     }
     let is_sqlite = store
@@ -882,9 +894,10 @@ async fn load_and_decorate_works(
         .take_arguments()
         .map_err(sqlx::Error::Encode)?
         .unwrap_or_default();
-    let rows = sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
-        .fetch_all(&store.pool)
-        .await?;
+    let rows: Vec<sqlx::any::AnyRow> =
+        sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(data_sql), arguments)
+            .fetch_all(&store.pool)
+            .await?;
     let mut row_map = HashMap::with_capacity(rows.len());
     for row in &rows {
         let wid: String = row.get("id");
@@ -910,10 +923,7 @@ struct IdQueryParams<'a> {
     use_fts: bool,
 }
 
-fn build_id_query<'a>(
-    params: &IdQueryParams<'a>,
-    rated: bool,
-) -> sqlx::QueryBuilder<'a, sqlx::Any> {
+fn build_id_query(params: &IdQueryParams<'_>, rated: bool) -> sqlx::QueryBuilder<sqlx::Any> {
     let use_fts_index = params.use_fts && params.search_clean.chars().count() >= 3;
     let mut id_builder = sqlx::QueryBuilder::<sqlx::Any>::new(format!(
         "SELECT w.id{} FROM inventory_works w{} WHERE w.library_id IN (",
@@ -934,7 +944,12 @@ fn build_id_query<'a>(
     }
     separated.push_unseparated(") ");
 
-    push_search_filter(&mut id_builder, params.search_clean, params.use_fts, params.fast_avail);
+    push_search_filter(
+        &mut id_builder,
+        params.search_clean,
+        params.use_fts,
+        params.fast_avail,
+    );
     push_availability_filter(&mut id_builder, params.target_kind, params.fast_avail);
     push_catalogue_filters(
         &mut id_builder,
@@ -1011,7 +1026,14 @@ pub async fn catalogue_page(
     let use_aux_cache = has_valid_state && !filter.bypass_cache;
     let pool_cacheable = use_aux_cache;
     let cacheable = pool_cacheable && !random;
-    if cacheable && let Some(cached_val) = cache::lock_cache().get(&cache_key, fps.page_fp) {
+    let cached_page = |key: &str, fp: i64| {
+        if cacheable {
+            cache::lock_cache().get(key, fp)
+        } else {
+            None
+        }
+    };
+    if let Some(cached_val) = cached_page(&cache_key, fps.page_fp) {
         return Ok(cached_val);
     }
     let flight = cacheable.then(|| cache::flight_lock(&cache_key));
@@ -1020,7 +1042,7 @@ pub async fn catalogue_page(
         None => None,
     };
     // Another request may have filled the page while this one waited.
-    if cacheable && let Some(cached_val) = cache::lock_cache().get(&cache_key, fps.page_fp) {
+    if let Some(cached_val) = cached_page(&cache_key, fps.page_fp) {
         return Ok(cached_val);
     }
 
@@ -1307,6 +1329,18 @@ pub async fn catalogue_page(
     Ok(response)
 }
 
+fn cached_pool(cache_key: Option<&str>, state_fp: i64) -> Option<Vec<String>> {
+    let key = cache_key?;
+    let Some(Value::Array(ids)) = cache::lock_cache().get(key, state_fp) else {
+        return None;
+    };
+    Some(
+        ids.into_iter()
+            .filter_map(|id| id.as_str().map(str::to_owned))
+            .collect(),
+    )
+}
+
 /// Ids eligible for a random page, from cache when the inventory (and watched state if filtered) has not changed.
 async fn random_pool(
     store: &IdentityStore,
@@ -1314,26 +1348,16 @@ async fn random_pool(
     cache_key: Option<String>,
     state_fp: i64,
 ) -> Result<Vec<String>, sqlx::Error> {
-    if let Some(key) = &cache_key
-        && let Some(Value::Array(ids)) = cache::lock_cache().get(key, state_fp)
-    {
-        return Ok(ids
-            .into_iter()
-            .filter_map(|id| id.as_str().map(str::to_owned))
-            .collect());
+    if let Some(ids) = cached_pool(cache_key.as_deref(), state_fp) {
+        return Ok(ids);
     }
     let flight = cache_key.as_deref().map(cache::flight_lock);
     let _computing = match &flight {
         Some(lock) => Some(lock.lock().await),
         None => None,
     };
-    if let Some(key) = &cache_key
-        && let Some(Value::Array(ids)) = cache::lock_cache().get(key, state_fp)
-    {
-        return Ok(ids
-            .into_iter()
-            .filter_map(|id| id.as_str().map(str::to_owned))
-            .collect());
+    if let Some(ids) = cached_pool(cache_key.as_deref(), state_fp) {
+        return Ok(ids);
     }
     let mut id_builder = build_id_query(params, params.filter.min_rating.is_some());
     let sql = crate::database::normalize_sql(id_builder.sql().as_str());
@@ -1343,10 +1367,11 @@ async fn random_pool(
         .map_err(sqlx::Error::Encode)?
         .unwrap_or_default();
     let pool: Vec<String> = if let Some(minimum) = params.filter.min_rating {
-        sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), args)
-            .fetch_all(&store.pool)
-            .await?
-            .iter()
+        let rows: Vec<sqlx::any::AnyRow> =
+            sqlx::query_with::<sqlx::Any, _>(sqlx::AssertSqlSafe(sql), args)
+                .fetch_all(&store.pool)
+                .await?;
+        rows.iter()
             .filter(|row| {
                 row.try_get::<Option<String>, _>("rating")
                     .ok()
@@ -1972,10 +1997,13 @@ mod tests {
         files: Vec<ScannedFile>,
     ) -> (IdentityStore, Vec<(String, String)>) {
         let store = IdentityStore::open(&dir.join(db_name)).await.unwrap();
-        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('lib','Films','films','local','/movies',1)")
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        query(
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled) \
+             VALUES('lib','Films','films','local','/movies',1)",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
         query("INSERT INTO users(id,role) VALUES('u1','user')")
             .execute(&store.pool)
             .await
@@ -2016,11 +2044,14 @@ mod tests {
         let w_alpha = &works[0].0;
         let visible = vec!["lib".to_owned()];
 
-        query("INSERT INTO playback_progress(user_id,work_id,position_seconds,duration_seconds,watched,revision,updated_at) VALUES('u1',?,100.0,100.0,1,1,10)")
-            .bind(w_alpha)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        query(
+            "INSERT INTO playback_progress(user_id,work_id,position_seconds,\
+             duration_seconds,watched,revision,updated_at) VALUES('u1',?,100.0,100.0,1,1,10)",
+        )
+        .bind(w_alpha)
+        .execute(&store.pool)
+        .await
+        .unwrap();
 
         let filter = CatalogueFilter {
             user_id: Some("u1".to_owned()),
@@ -2153,11 +2184,14 @@ mod tests {
         .await;
         let visible = vec!["lib".to_owned()];
 
-        query("INSERT INTO work_translations(work_id,locale,language,source,priority,title,updated_at) VALUES(?,'fr','fr','manual',100,'Un FR',1)")
-            .bind(&works[0].0)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        query(
+            "INSERT INTO work_translations(work_id,locale,language,source,priority,\
+             title,updated_at) VALUES(?,'fr','fr','manual',100,'Un FR',1)",
+        )
+        .bind(&works[0].0)
+        .execute(&store.pool)
+        .await
+        .unwrap();
         query("UPDATE inventory_cache_generation SET gen=gen+1 WHERE id=1")
             .execute(&store.pool)
             .await
@@ -2217,7 +2251,8 @@ mod tests {
         let items = all_three["items"].as_array().unwrap();
         assert_eq!(items.len(), 3);
         assert_eq!(items[2]["id"], works[2].0);
-        assert_eq!(items.iter().find(|v| v["id"] == works[0].0).unwrap()["title"], "Un FR");
+        let fr_title = &items.iter().find(|v| v["id"] == works[0].0).unwrap()["title"];
+        assert_eq!(fr_title, "Un FR");
 
         // Different locale must NOT reuse French decorated works.
         let en_filter = CatalogueFilter {
@@ -2284,10 +2319,13 @@ mod tests {
         .unwrap();
         assert_eq!(before["total"], 1);
 
-        query("INSERT INTO parental_policies(user_id,maximum_age,allow_unrated,blocked_tags_json,access_schedule_json) VALUES('u1',12,0,'[]','[]')")
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        query(
+            "INSERT INTO parental_policies(user_id,maximum_age,allow_unrated,\
+             blocked_tags_json,access_schedule_json) VALUES('u1',12,0,'[]','[]')",
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
 
         let after = catalogue_page(
             &store,
@@ -2314,14 +2352,12 @@ mod tests {
             requested: Option<&str>,
         ) -> Result<Vec<String>, sqlx::Error> {
             let uid = user_id.unwrap_or("");
-            if state_fp > 0
-                && let Some(cached) = cache::lock_cache().get_locale_chain(
-                    store.cache_scope,
-                    state_fp,
-                    uid,
-                    requested,
-                )
-            {
+            let cached = if state_fp > 0 {
+                cache::lock_cache().get_locale_chain(store.cache_scope, state_fp, uid, requested)
+            } else {
+                None
+            };
+            if let Some(cached) = cached {
                 return Ok(cached);
             }
             let chain = crate::translations::locale_chain(store, user_id, requested).await?;

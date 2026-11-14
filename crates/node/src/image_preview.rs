@@ -152,9 +152,7 @@ fn dir_writable(base: &std::path::Path, cache_dir: &std::path::Path) -> bool {
 }
 
 fn disk_cache_dir() -> PathBuf {
-    if let Some(dir) =
-        std::env::var_os("MEDIA_IMAGE_CACHE_DIR").filter(|value| !value.is_empty())
-    {
+    if let Some(dir) = std::env::var_os("MEDIA_IMAGE_CACHE_DIR").filter(|value| !value.is_empty()) {
         return PathBuf::from(dir);
     }
     if let Some(media_data) = std::env::var_os("MEDIA_DATA_DIR")

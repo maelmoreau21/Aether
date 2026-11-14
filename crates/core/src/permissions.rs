@@ -219,7 +219,7 @@ impl PermissionsCache {
         }
     }
 
-    fn record(&mut self, cache_scope: u64, update: impl FnOnce(&mut ScopeMetrics)) {
+    fn record(&mut self, cache_scope: u64, mut update: impl FnMut(&mut ScopeMetrics)) {
         update(&mut self.totals);
         update(self.metrics.entry(cache_scope).or_default());
     }
@@ -848,9 +848,8 @@ async fn resolve_resource_decision(
                     (ok, "work", id.clone())
                 }
                 RouteTarget::Media(id) => {
-                    let (asset, library) = media_asset(store, id)
-                        .await
-                        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"))?;
+                    let err = (StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable");
+                    let (asset, library) = media_asset(store, id).await.map_err(|_| err)?;
                     let ok = library
                         .as_ref()
                         .is_some_and(|lib| visible.visible.iter().any(|v| v == lib));
@@ -1147,10 +1146,9 @@ mod tests {
 
         // Concurrent cold burst of 40 distinct poster image requests.
         let cold_stats_before = scope_permissions_cache_stats(store.cache_scope);
-        let cold_statuses = join_all(
-            (0..40).map(|i| get_status(&router, &format!("/api/v1/assets/img-{i}/image"), &cookie)),
-        )
-        .await;
+        let img_url = |i: usize| format!("/api/v1/assets/img-{i}/image");
+        let cold_futs = (0..40).map(|i| get_status(&router, &img_url(i), &cookie));
+        let cold_statuses = join_all(cold_futs).await;
         assert!(cold_statuses.into_iter().all(|s| s == StatusCode::OK));
         let cold_stats_after = scope_permissions_cache_stats(store.cache_scope);
         assert!(
@@ -1161,10 +1159,8 @@ mod tests {
 
         // Warm pass over all 40 posters: ZERO visible_libs or resource_auth SQL queries.
         let warm_before = scope_permissions_cache_stats(store.cache_scope);
-        let warm_statuses = join_all(
-            (0..40).map(|i| get_status(&router, &format!("/api/v1/assets/img-{i}/image"), &cookie)),
-        )
-        .await;
+        let warm_futs = (0..40).map(|i| get_status(&router, &img_url(i), &cookie));
+        let warm_statuses = join_all(warm_futs).await;
         assert!(warm_statuses.into_iter().all(|s| s == StatusCode::OK));
         let warm_after = scope_permissions_cache_stats(store.cache_scope);
         assert_eq!(warm_after.visible_queries - warm_before.visible_queries, 0);
@@ -1286,10 +1282,12 @@ mod tests {
 
         // Toggle adminAccess: false on the library without an explicit grant -> immediate 403.
         let _ = admin_id;
-        db_query(r#"UPDATE libraries SET options_json='{"adminAccess":false}' WHERE id='lib-films'"#)
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        db_query(
+            r#"UPDATE libraries SET options_json='{"adminAccess":false}' WHERE id='lib-films'"#,
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
         assert_eq!(
             get_status(&router, "/api/v1/assets/img-0/image", &cookie).await,
             StatusCode::FORBIDDEN

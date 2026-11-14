@@ -3,8 +3,10 @@
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
+use std::sync::{
+    Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak,
+    atomic::{AtomicU64, Ordering},
+};
 
 const DECORATED_WORK_MAX_ENTRIES: usize = 16_384;
 const LOCALE_CHAIN_MAX_ENTRIES: usize = 4_096;
@@ -103,9 +105,12 @@ impl<V> LruBucket<V> {
                 .entries
                 .get(&candidate)
                 .is_some_and(|entry| entry.last_accessed == seq);
-            if is_live && let Some(removed) = self.entries.remove(&candidate) {
-                self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
-                return true;
+            if is_live
+                && let Some(removed) = self.entries.remove(&candidate)
+            {
+                    self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
+                    return true;
+                }
             }
         }
         if let Some(oldest_key) = self
@@ -261,8 +266,7 @@ impl BoundedCatalogueCache {
             key.push_str(&prefix);
             key.push_str(work_id);
             let size = estimate_json_bytes(item);
-            self.decorated_works
-                .insert(key, state_fp, item.clone(), size);
+            self.decorated_works.insert(key, state_fp, item.clone(), size);
         }
     }
 
@@ -318,8 +322,7 @@ impl BoundedCatalogueCache {
         fast_avail: bool,
     ) {
         let size = estimate_strings_bytes(&valid_libs) + 16;
-        self.valid_libs
-            .insert(key, state_fp, (valid_libs, fast_avail), size);
+        self.valid_libs.insert(key, state_fp, (valid_libs, fast_avail), size);
     }
 
     pub(super) fn get_meta_flags(
@@ -428,18 +431,16 @@ pub(super) fn lock_cache() -> MutexGuard<'static, BoundedCatalogueCache> {
 pub fn invalidate_catalogue_cache() {
     CATALOGUE_EPOCH.fetch_add(1, Ordering::AcqRel);
     if let Some(lock) = CATALOGUE_CACHE.get() {
-        lock.lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clear();
+        let mut guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.clear();
     }
     crate::permissions::invalidate_permissions_cache();
 }
 
 pub fn catalogue_cache_stats() -> (usize, usize, usize) {
     if let Some(lock) = CATALOGUE_CACHE.get() {
-        lock.lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .stats()
+        let guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.stats()
     } else {
         (0, 0, 0)
     }

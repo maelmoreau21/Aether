@@ -169,8 +169,8 @@ pub fn resize_bounded(image: &DynamicImage, max_width: u32, max_height: u32) -> 
     if target_w == src_w && target_h == src_h {
         return image.clone();
     }
-    let downscale = (f64::from(src_w) / f64::from(target_w))
-        .max(f64::from(src_h) / f64::from(target_h));
+    let downscale =
+        (f64::from(src_w) / f64::from(target_w)).max(f64::from(src_h) / f64::from(target_h));
     if downscale > 4.0 {
         let mid_w = target_w.saturating_mul(2).min(src_w);
         let mid_h = target_h.saturating_mul(2).min(src_h);
@@ -231,13 +231,11 @@ mod optimization_tests {
     async fn decoder_semaphore_scales_above_two() {
         let concurrency = decoder_concurrency();
         assert!((4..=16).contains(&concurrency));
-        let permits = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            DECODERS.acquire_many(3),
-        )
-        .await
-        .expect("decoder semaphore should allow > 2 concurrent permits")
-        .expect("decoder semaphore should remain open");
+        let permits =
+            tokio::time::timeout(std::time::Duration::from_secs(5), DECODERS.acquire_many(3))
+                .await
+                .expect("decoder semaphore should allow > 2 concurrent permits")
+                .expect("decoder semaphore should remain open");
         drop(permits);
     }
 

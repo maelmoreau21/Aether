@@ -819,7 +819,8 @@ impl TrustedProxyCidr {
             Some((address, prefix)) => (address, Some(prefix.parse::<u8>().ok()?)),
             None => (raw, None),
         };
-        let network = address.trim().parse::<std::net::IpAddr>().ok()?.to_canonical();
+        let ip: std::net::IpAddr = address.trim().parse().ok()?;
+        let network = ip.to_canonical();
         let max = if network.is_ipv4() { 32 } else { 128 };
         let prefix = prefix.unwrap_or(max);
         (prefix <= max).then_some(Self { network, prefix })
@@ -1054,19 +1055,26 @@ pub fn local_security_with_store(
                 // rejecting conflicting `Host` vs `:authority` smuggling.
                 let authority_matches_request = match (host_header, uri_authority) {
                     (Some(h), Some(a)) => {
-                        authority_matches(Some(h), Some(a), origin_is_https)
-                            || (is_internal && authority_matches(Some(h), Some(a), internal_is_https))
+                        let public_ok = authority_matches(Some(h), Some(a), origin_is_https);
+                        let mut internal_ok = false;
+                        if is_internal {
+                            internal_ok = authority_matches(Some(h), Some(a), internal_is_https);
+                        }
+                        public_ok || internal_ok
                     }
                     _ => true,
                 };
                 let req_host = host_header.or(uri_authority);
+                let mut internal_host_ok = false;
+                if is_internal
+                    && let Some(ih) = internal_host.as_deref()
+                {
+                    internal_host_ok = authority_matches(req_host, Some(ih), internal_is_https);
+                }
                 let host_ok = authority_matches_request
                     && (authority_matches(req_host, host.as_deref(), origin_is_https)
                         || (is_internal && has_internal_proto)
-                        || (is_internal
-                            && internal_host
-                                .as_deref()
-                                .is_some_and(|ih| authority_matches(req_host, Some(ih), internal_is_https))));
+                        || internal_host_ok);
 
                 // 0. HLS capability URLs are opened by cast receivers on another origin
                 // (Chromecast's page, AirPlay). They carry their own authorization and no
@@ -1288,10 +1296,8 @@ pub fn local_security_with_store(
         .layer(SetResponseHeaderLayer::if_not_present(header::CACHE_CONTROL, HeaderValue::from_static("no-store")))
         .route("/bench.js", get(|| async { ([(header::CONTENT_TYPE, "text/javascript; charset=utf-8")], include_str!("../experiments/bench.js")) }));
     if let Some(alt_svc) = layer_alt_svc {
-        router.layer(SetResponseHeaderLayer::if_not_present(
-            ALT_SVC_HEADER,
-            alt_svc,
-        ))
+        let h3_layer = SetResponseHeaderLayer::if_not_present(ALT_SVC_HEADER, alt_svc);
+        router.layer(h3_layer)
     } else {
         router
     }
@@ -1561,7 +1567,7 @@ mod tests {
         assert!(request_is_https_with_trusted(
             &hdrs,
             &https_uri,
-            Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 9))),
+            Some(std::net::IpAddr::from([203, 0, 113, 9])),
             &no_proxies,
         ));
     }
@@ -1605,10 +1611,11 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         let res2 = app.clone().oneshot(req2).await.unwrap();
-        assert_eq!(
-            res2.headers().get(header::CONTENT_SECURITY_POLICY).and_then(|v| v.to_str().ok()),
-            Some(csp1.as_str())
-        );
+        let csp2 = res2
+            .headers()
+            .get(header::CONTENT_SECURITY_POLICY)
+            .and_then(|v| v.to_str().ok());
+        assert_eq!(csp2, Some(csp1.as_str()));
 
         // Updating store.cors_origins invalidates the cached CSP header immediately.
         {

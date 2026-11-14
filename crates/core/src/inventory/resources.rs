@@ -8,8 +8,10 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{LazyLock, Mutex};
+use std::sync::{
+    LazyLock, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
 const IMAGE_META_CACHE_CAP: usize = 4096;
 static IMAGE_META_EPOCH: AtomicU64 = AtomicU64::new(1);
@@ -45,7 +47,8 @@ async fn image_state_fingerprint(store: &IdentityStore) -> Option<(i64, i64, i64
     .fetch_one(&store.pool)
     .await
     .ok()?;
-    Some((row.0, row.1, row.2, IMAGE_META_EPOCH.load(Ordering::Relaxed)))
+    let epoch = IMAGE_META_EPOCH.load(Ordering::Relaxed);
+    Some((row.0, row.1, row.2, epoch))
 }
 
 fn cached_image_meta(
@@ -848,9 +851,10 @@ pub async fn image(
     // Catalogue URLs carry `?v=<modified>-<size>`: a changed image gets a new address, so a
     // versioned one can stay in the browser instead of being revalidated on every visit
     // (dozens of conditional requests slowed the posters of the home page down).
-    let version_token =
-        url::form_urlencoded::parse(request.uri().query().unwrap_or("").as_bytes())
-            .find_map(|(name, value)| (name == "v" && !value.is_empty()).then(|| value.into_owned()));
+    let query_bytes = request.uri().query().unwrap_or("").as_bytes();
+    let version_token = url::form_urlencoded::parse(query_bytes)
+        .find(|(name, value)| name == "v" && !value.is_empty())
+        .map(|(_, value)| value.into_owned());
     let versioned = version_token.is_some();
     let expected_etag = expected_image_etag(&meta.modified_ns, meta.size, preview_width);
     if matches!(

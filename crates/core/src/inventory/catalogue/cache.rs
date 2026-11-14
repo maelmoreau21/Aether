@@ -108,9 +108,8 @@ impl<V> LruBucket<V> {
             if is_live
                 && let Some(removed) = self.entries.remove(&candidate)
             {
-                    self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
-                    return true;
-                }
+                self.current_bytes = self.current_bytes.saturating_sub(removed.size_bytes);
+                return true;
             }
         }
         if let Some(oldest_key) = self

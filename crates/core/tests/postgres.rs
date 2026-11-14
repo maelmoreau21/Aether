@@ -853,9 +853,10 @@ async fn postgres18_v1_to_v2_migration_preserves_data_and_is_idempotent() {
     assert_eq!(version, next_version);
 
     // Re-running is idempotent and existing data is intact
-    let version_again = aether_core::database::upgrade_schema_with_steps(&mut conn, next_version, &steps)
-        .await
-        .unwrap();
+    let version_again =
+        aether_core::database::upgrade_schema_with_steps(&mut conn, next_version, &steps)
+            .await
+            .unwrap();
     assert_eq!(version_again, next_version);
     let kept: String = query_scalar("SELECT display_name FROM users WHERE id='u1'")
         .fetch_one(&mut conn)

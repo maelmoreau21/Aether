@@ -861,14 +861,11 @@ pub async fn catalogue_page(
                 );
             }
             "year-desc" => {
-                id_builder.push(
-                    "ORDER BY w.effective_year DESC, w.display_title_sort ASC, w.id ASC ",
-                );
+                id_builder
+                    .push("ORDER BY w.effective_year DESC, w.display_title_sort ASC, w.id ASC ");
             }
             "added-desc" => {
-                id_builder.push(
-                    "ORDER BY w.added_at DESC, w.display_title_sort ASC, w.id ASC ",
-                );
+                id_builder.push("ORDER BY w.added_at DESC, w.display_title_sort ASC, w.id ASC ");
             }
             "added-asc" => {
                 id_builder.push(

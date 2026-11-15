@@ -179,7 +179,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -211,6 +211,22 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
         name: "0004_acquisition_server_settings",
         sqlite_sql: "ALTER TABLE acquisition_servers ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';",
         postgres_sql: "ALTER TABLE acquisition_servers ADD COLUMN IF NOT EXISTS settings_json TEXT NOT NULL DEFAULT '{}';",
+    },
+    MigrationStep {
+        version: 5,
+        name: "0005_library_media_task_runs_chapters",
+        sqlite_sql: "CREATE TABLE library_media_task_runs_new (
+ library_id TEXT NOT NULL,
+ task TEXT NOT NULL CHECK(task IN ('identify','trickplay','chapters','intros','artwork')),
+ started_at BIGINT NOT NULL,
+ origin TEXT NOT NULL DEFAULT 'manual' CHECK(origin IN ('manual','scan')),
+ PRIMARY KEY(library_id, task)
+);
+INSERT INTO library_media_task_runs_new(library_id,task,started_at,origin) SELECT library_id,task,started_at,origin FROM library_media_task_runs;
+DROP TABLE library_media_task_runs;
+ALTER TABLE library_media_task_runs_new RENAME TO library_media_task_runs;",
+        postgres_sql: "ALTER TABLE library_media_task_runs DROP CONSTRAINT IF EXISTS library_media_task_runs_task_check;
+ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_check CHECK(task IN ('identify','trickplay','chapters','intros','artwork'));",
     },
 ];
 

@@ -7,10 +7,10 @@ use super::playback::node_error_response;
 use super::playback::prepare_asset;
 use super::playback::{chapter_request, trickplay_request};
 use super::scans::cancel_scan;
-use super::scans::register_scan;
 use super::scans::run_node_task;
 use super::scans::run_remote_scan_task;
 use super::scans::yield_background_for_playback;
+use super::scans::{register_scan, register_task};
 use super::state::NodeIdentityState;
 use super::state::NodeServerState;
 use axum::body::Body;
@@ -153,7 +153,7 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                                 if let Ok(req) =
                                     serde_json::from_value::<NodeTaskRequest>(cmd.payload)
                                 {
-                                    match register_scan(&state, &req.run_id) {
+                                    match register_task(&state, &req.run_id, &req.category) {
                                         Ok(cancel) => {
                                             let bg = state.clone();
                                             tokio::spawn(async move {
@@ -495,20 +495,6 @@ async fn handle_channel_stream_relay(state: NodeServerState, req: StreamRelayReq
                 "sheetCount": cached.sheet_count,
                 "mime": cached.mime,
                 "thumbnailCount": cached.thumbnail_count,
-                "urlPrefix": format!("/api/v1/assets/{}/trickplay/", req.target_id)
-            })
-        } else if let Some(jellyfin) = state.trickplay.check_jellyfin(&trickplay_req).await {
-            serde_json::json!({
-                "status": "ready",
-                "source": "jellyfin",
-                "intervalMs": jellyfin.interval_ms,
-                "width": jellyfin.width,
-                "height": jellyfin.height,
-                "columns": jellyfin.columns,
-                "rows": jellyfin.rows,
-                "sheetCount": jellyfin.sheet_count,
-                "mime": jellyfin.mime,
-                "thumbnailCount": jellyfin.thumbnail_count,
                 "urlPrefix": format!("/api/v1/assets/{}/trickplay/", req.target_id)
             })
         } else {

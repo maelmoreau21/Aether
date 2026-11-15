@@ -1254,14 +1254,20 @@ pub async fn publish_staged_scan(
             .fetch_optional(&mut *tx)
             .await?
             .unwrap_or_else(|| library_id.to_owned());
-    let previews_in_flight = crate::library_media_tasks::in_flight(
+    let trickplay_in_flight = crate::library_media_tasks::in_flight(
         &mut tx,
         &preview_library,
         crate::library_media_tasks::MediaTask::Trickplay,
     )
     .await?;
+    let chapters_in_flight = crate::library_media_tasks::in_flight(
+        &mut tx,
+        &preview_library,
+        crate::library_media_tasks::MediaTask::ChapterImages,
+    )
+    .await?;
     let previews_at = media_contracts::protocol::unix_now();
-    let previews = crate::trickplay::queue_scanned_assets(
+    let (previews, chapters) = crate::trickplay::queue_scanned_assets(
         &mut tx,
         library_id,
         scan_id,
@@ -1277,7 +1283,18 @@ pub async fn publish_staged_scan(
             crate::library_media_tasks::MediaTask::Trickplay,
             previews_at,
             "scan",
-            previews_in_flight,
+            trickplay_in_flight,
+        )
+        .await?;
+    }
+    if chapters > 0 {
+        crate::library_media_tasks::record_run(
+            &mut tx,
+            &preview_library,
+            crate::library_media_tasks::MediaTask::ChapterImages,
+            previews_at,
+            "scan",
+            chapters_in_flight,
         )
         .await?;
     }

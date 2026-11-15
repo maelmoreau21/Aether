@@ -124,22 +124,52 @@ pub(super) async fn start_remote_scan(
     )
 }
 
+fn register_slot(
+    state: &NodeServerState,
+    run_id: &str,
+    trickplay_task: bool,
+) -> Result<Arc<AtomicBool>, &'static str> {
+    let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
+    let mut concurrent = state
+        .concurrent_trickplay_runs
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    concurrent.retain(|id| scans.contains_key(id));
+    if scans.contains_key(run_id) {
+        return Err("duplicate_scan");
+    }
+    let trickplay_concurrency_ok =
+        trickplay_task && scans.len() < 2 && scans.keys().all(|id| concurrent.contains(id));
+    if (!scans.is_empty() && !trickplay_concurrency_ok)
+        || state.active_streams.load(Ordering::Acquire) > 0
+    {
+        return Err("node_busy_playback_priority");
+    }
+    let cancel = Arc::new(AtomicBool::new(false));
+    scans.insert(run_id.to_owned(), cancel.clone());
+    if trickplay_task {
+        concurrent.insert(run_id.to_owned());
+    }
+    Ok(cancel)
+}
+
 /// Admission is shared by inbound requests and outbound commands. Cancellation
 /// retains the slot until the old worker has actually stopped.
 pub(super) fn register_scan(
     state: &NodeServerState,
     scan_id: &str,
 ) -> Result<Arc<AtomicBool>, &'static str> {
-    let mut scans = state.active_scans.lock().unwrap_or_else(|e| e.into_inner());
-    if scans.contains_key(scan_id) {
-        return Err("duplicate_scan");
-    }
-    if !scans.is_empty() || state.active_streams.load(Ordering::Acquire) > 0 {
-        return Err("node_busy_playback_priority");
-    }
-    let cancel = Arc::new(AtomicBool::new(false));
-    scans.insert(scan_id.to_owned(), cancel.clone());
-    Ok(cancel)
+    register_slot(state, scan_id, false)
+}
+
+/// Registers a background node task, allowing up to 2 concurrent Trickplay runs
+/// when no library scan or non-Trickplay task is running and playback is idle.
+pub(super) fn register_task(
+    state: &NodeServerState,
+    run_id: &str,
+    category: &str,
+) -> Result<Arc<AtomicBool>, &'static str> {
+    register_slot(state, run_id, category == "trickplay")
 }
 
 pub(super) async fn start_node_task(
@@ -180,7 +210,7 @@ pub(super) async fn start_node_task(
             &serde_json::json!({"error":"task_target_denied"}),
         );
     }
-    let cancel = match register_scan(&state, &req.run_id) {
+    let cancel = match register_task(&state, &req.run_id, &req.category) {
         Ok(cancel) => cancel,
         Err(reason) => {
             return signed_json_response(
@@ -280,6 +310,11 @@ pub(super) async fn run_node_task(
     let result = scan_with_playback_priority(&state, &cancel, result).await;
     state
         .active_scans
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&req.run_id);
+    state
+        .concurrent_trickplay_runs
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .remove(&req.run_id);

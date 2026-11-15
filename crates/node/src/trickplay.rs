@@ -1,5 +1,4 @@
-//! Native trickplay generation, Jellyfin-compatible sprite-sheet inspection,
-//! and persistent LRU cache manager for Media Nodes.
+//! Native trickplay generation and persistent LRU cache manager for Media Nodes.
 //!
 //! Media files are always accessed in read-only mode (`ro`). Video is never transcoded
 //! for playback: FFmpeg is only used to extract low-resolution preview thumbnails.
@@ -30,23 +29,6 @@ pub const MAX_IMAGE_BYTES: u64 = 32 * 1024 * 1024;
 pub const MAX_RUNTIME: Duration = Duration::from_secs(1800);
 pub const FAILURE_COOLDOWN: Duration = Duration::from_secs(300);
 pub const DEFAULT_MAX_CACHE_BYTES: u64 = 5 * 1024 * 1024 * 1024; // 5 GiB default
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TrickplayManifest {
-    pub status: &'static str,
-    pub source: &'static str,
-    pub interval_ms: u64,
-    pub width: u32,
-    pub height: u32,
-    pub columns: u32,
-    pub rows: u32,
-    pub sheet_count: usize,
-    pub thumbnail_count: usize,
-    pub url_prefix: String,
-    #[serde(default = "jpeg_mime")]
-    pub mime: String,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -203,7 +185,7 @@ impl TrickplayManager {
             enabled,
             active_streams: Arc::new(Mutex::new(active_streams)),
             jobs: Arc::new(Mutex::new(HashMap::new())),
-            worker: Arc::new(Semaphore::const_new(2)),
+            worker: Arc::new(Semaphore::const_new(4)),
             startup_swept: Arc::new(AtomicBool::new(false)),
             verified_media_roots: Arc::new(Mutex::new(HashSet::new())),
             last_quota_sweep_ms: Arc::new(AtomicU64::new(0)),
@@ -383,154 +365,6 @@ impl TrickplayManager {
         Some(meta)
     }
 
-    /// Detect existing Jellyfin-style trickplay sheets beside an inventoried video file.
-    /// Supports dynamic resolutions (e.g. 320, 240), grids (e.g. 10x10, 5x5) and intervals.
-    pub async fn check_jellyfin(&self, request: &TrickplayRequest) -> Option<TrickplayManifest> {
-        if request.chapter_time.is_some() {
-            return None;
-        }
-        let video = &request.relative_path;
-        let root = &request.media_root;
-
-        // Try both folder conventions:
-        // 1. "Video.mp4.trickplay"
-        // 2. "Video.trickplay"
-        let parent = video.parent().unwrap_or_else(|| Path::new(""));
-        let file_name = video.file_name()?.to_string_lossy();
-        let stem = video.file_stem()?.to_string_lossy();
-
-        let candidates = [
-            parent.join(format!("{file_name}.trickplay")),
-            parent.join(format!("{stem}.trickplay")),
-        ];
-
-        for folder in candidates {
-            if let Some(manifest) = self.probe_jellyfin_folder(root, &folder, request).await {
-                return Some(manifest);
-            }
-        }
-        None
-    }
-
-    async fn probe_jellyfin_folder(
-        &self,
-        root: &Path,
-        trickplay_rel: &Path,
-        request: &TrickplayRequest,
-    ) -> Option<TrickplayManifest> {
-        let full_dir = root.join(trickplay_rel);
-        let mut read_dir = tokio::fs::read_dir(&full_dir).await.ok()?;
-
-        let mut candidate_subdirs = Vec::new();
-        while let Ok(Some(entry)) = read_dir.next_entry().await {
-            let file_type = entry.file_type().await.ok()?;
-            if file_type.is_dir() {
-                let name = entry.file_name().to_string_lossy().to_string();
-                candidate_subdirs.push(name);
-            }
-        }
-
-        // Check if there is an explicit manifest/metadata JSON in the trickplay folder
-        let meta_json = self.read_json_metadata(root, trickplay_rel).await;
-
-        for subdir_name in candidate_subdirs {
-            let sheet_rel = trickplay_rel.join(&subdir_name);
-            let parsed_grid = parse_grid_folder_name(&subdir_name);
-
-            // Open 0.jpg securely via OpenedFile to ensure confinement
-            let sheet_0_rel = sheet_rel.join("0.jpg");
-            let opened_0 = OpenedFile::open_in_root(root, &sheet_0_rel).await.ok()?;
-            if opened_0.size() == 0 || opened_0.size() > MAX_IMAGE_BYTES {
-                continue;
-            }
-
-            // Decode image dimensions
-            let dims = decode_opened_image_dimensions(opened_0).await?;
-            let (total_w, total_h) = dims;
-
-            let (cols, rows, width, height) = if let Some((w, c, r)) = parsed_grid {
-                if total_w % c == 0 && total_h % r == 0 {
-                    (c, r, total_w / c, total_h / r)
-                } else {
-                    (c, r, w, (w * 9) / 16)
-                }
-            } else if let Some(ref meta) = meta_json {
-                (meta.columns, meta.rows, meta.width, meta.height)
-            } else if total_w % DEFAULT_COLUMNS == 0 && total_h % DEFAULT_ROWS == 0 {
-                (
-                    DEFAULT_COLUMNS,
-                    DEFAULT_ROWS,
-                    total_w / DEFAULT_COLUMNS,
-                    total_h / DEFAULT_ROWS,
-                )
-            } else {
-                continue;
-            };
-
-            if cols == 0 || rows == 0 || width == 0 || height == 0 {
-                continue;
-            }
-
-            // Count contiguous sheets
-            let sheet_count = count_contiguous_sheets(root, &sheet_rel).await;
-            if sheet_count == 0 {
-                continue;
-            }
-
-            let interval_ms = meta_json
-                .as_ref()
-                .map(|m| m.interval_ms)
-                .or(request.interval_ms)
-                .unwrap_or(DEFAULT_INTERVAL_MS);
-
-            let total_capacity = sheet_count * (cols * rows) as usize;
-            let thumbnail_count = if request.duration > 0.0 {
-                let needed = (request.duration * 1000.0 / interval_ms as f64).ceil() as usize;
-                needed.min(total_capacity)
-            } else {
-                total_capacity
-            };
-
-            if thumbnail_count == 0 {
-                continue;
-            }
-
-            return Some(TrickplayManifest {
-                mime: jpeg_mime(),
-                status: "ready",
-                source: "jellyfin",
-                interval_ms,
-                width,
-                height,
-                columns: cols,
-                rows,
-                sheet_count,
-                thumbnail_count,
-                url_prefix: format!("/api/v1/assets/{}/trickplay/", request.asset_id),
-            });
-        }
-
-        None
-    }
-
-    async fn read_json_metadata(&self, root: &Path, rel: &Path) -> Option<JellyfinJsonMeta> {
-        for file_name in ["manifest.json", "metadata.json", "trickplay.json"] {
-            let path = rel.join(file_name);
-            if let Ok(opened) = OpenedFile::open_in_root(root, &path).await
-                && opened.size() > 0
-                && opened.size() <= 64 * 1024
-            {
-                let full_path = root.join(&path);
-                if let Ok(bytes) = tokio::fs::read(full_path).await
-                    && let Ok(meta) = serde_json::from_slice::<JellyfinJsonMeta>(&bytes)
-                {
-                    return Some(meta);
-                }
-            }
-        }
-        None
-    }
-
     /// Enqueue trickplay generation on the local Media Node.
     /// Resumes any partially generated sheets without re-decoding from the beginning.
     pub fn enqueue(&self, request: TrickplayRequest) -> QueueStatus {
@@ -628,6 +462,9 @@ impl TrickplayManager {
     ) -> Result<(), &'static str> {
         if !self.enabled {
             return Err("generation_disabled");
+        }
+        if self.check_native_cache(request).await.is_some() {
+            return Ok(());
         }
         let permits = if request.chapter_time.is_some() { 1 } else { 2 };
         let _permit = self
@@ -740,7 +577,9 @@ impl TrickplayManager {
             .await
             .map_err(|_| "cache_permission")?;
 
-        // Determine already completed sheets to resume from
+        // Determine already completed sheets to resume from. Checking metadata on earlier
+        // sheets and decoding only the last committed sheet avoids decoding every prior
+        // sprite sheet into RAM on resume.
         let mut completed_sheets = 0usize;
         while completed_sheets < sheet_limit {
             let sheet_path = work.join(format!("{completed_sheets}.{ext}"));
@@ -748,25 +587,32 @@ impl TrickplayManager {
                 break;
             };
             if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_IMAGE_BYTES {
-                break;
-            }
-            let opened =
-                OpenedFile::open_in_root(&work, Path::new(&format!("{completed_sheets}.{ext}")))
-                    .await
-                    .map_err(|_| "generated_image_invalid")?;
-            if !validate_sheet(opened).await {
-                // An interrupted encoder can leave a non-empty truncated final sheet.
-                // Only this uncommitted work file is discarded before resuming it.
-                tokio::fs::remove_file(&sheet_path)
-                    .await
-                    .map_err(|_| "cache_permission")?;
+                if meta.is_file() {
+                    let _ = tokio::fs::remove_file(&sheet_path).await;
+                }
                 break;
             }
             completed_sheets += 1;
         }
+        if completed_sheets > 0 {
+            let last_idx = completed_sheets - 1;
+            let last_name = format!("{last_idx}.{ext}");
+            let last_path = work.join(&last_name);
+            let opened_last = OpenedFile::open_in_root(&work, Path::new(&last_name))
+                .await
+                .map_err(|_| "generated_image_invalid")?;
+            if !validate_sheet(opened_last).await {
+                // An interrupted encoder can leave a non-empty truncated final sheet.
+                // Only this uncommitted work file is discarded before resuming it.
+                tokio::fs::remove_file(&last_path)
+                    .await
+                    .map_err(|_| "cache_permission")?;
+                completed_sheets = last_idx;
+            }
+        }
 
         if completed_sheets < sheet_limit {
-            let use_threads = if self.active_streams() == 0 { "2" } else { "1" };
+            let use_threads = if self.active_streams() == 0 { "4" } else { "2" };
             self.run_ffmpeg_resumable(
                 request,
                 &opened,
@@ -889,74 +735,8 @@ impl TrickplayManager {
                 "fps=1000/{interval_ms},scale={width}:-2:flags=fast_bilinear,format=yuv420p,tile={cols}x{rows}"
             )
         };
-
-        let mut cmd = Command::new(&self.ffmpeg_binary);
-        cmd.args([
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-nostdin",
-            "-threads",
-            use_threads,
-            "-filter_threads",
-            "1",
-        ]);
-
-        if request.chapter_time.is_none() && interval_ms >= 2_000 && request.duration >= 30.0 {
-            cmd.args(["-skip_frame", "nokey"]);
-        }
-
-        if start_time_secs > 0.0 {
-            cmd.arg("-ss").arg(format!("{:.3}", start_time_secs));
-        }
-
-        cmd.arg("-n")
-            .arg("-i")
-            .arg(&source_path)
-            .args(["-map", "0:v:0", "-an", "-sn", "-dn", "-vf"])
-            .arg(filter);
-
-        if use_webp {
-            cmd.args([
-                "-frames:v",
-                &remaining_sheets.to_string(),
-                "-c:v",
-                "libwebp",
-                "-quality",
-                &(100.0 - f32::from(quality) * 2.0)
-                    .clamp(38.0, 98.0)
-                    .to_string(),
-                "-compression_level",
-                "3",
-                "-start_number",
-                &start_sheet.to_string(),
-                "-f",
-                "image2",
-            ])
-            .arg(output.join("%d.webp"))
-            .kill_on_drop(true);
-        } else {
-            cmd.args([
-                "-frames:v",
-                &remaining_sheets.to_string(),
-                "-q:v",
-                &quality.to_string(),
-                "-start_number",
-                &start_sheet.to_string(),
-                "-f",
-                "image2",
-            ])
-            .arg(output.join("%d.jpg"))
-            .kill_on_drop(true);
-        }
-
-        cmd.stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-
-        let mut child = cmd.spawn().map_err(|_| "ffmpeg_unavailable")?;
-
-        // Monitor active streaming and yield if priority streaming starts
+        let skip_nokey =
+            request.chapter_time.is_none() && interval_ms >= 2_000 && request.duration >= 30.0;
         let active_counter = self
             .active_streams
             .lock()
@@ -967,43 +747,202 @@ impl TrickplayManager {
         } else {
             MAX_RUNTIME
         };
-        let wait_result = if let Some(counter) = active_counter {
-            let mut interval = tokio::time::interval(Duration::from_millis(500));
-            let start = Instant::now();
-            loop {
-                tokio::select! {
-                    status = child.wait() => {
-                        break status.map_err(|_| "generation_process_error");
-                    }
-                    _ = interval.tick() => {
-                        if counter.load(Ordering::Relaxed) > 0 {
-                            // Yield to streaming: terminate child gracefully, keeping partial progress
-                            let _ = child.kill().await;
-                            return Err("streaming_priority_yield");
-                        }
-                        if start.elapsed() > runtime {
-                            let _ = child.kill().await;
-                            return Err("generation_timeout");
-                        }
+        let ext = if use_webp { "webp" } else { "jpg" };
+        let first_sheet = output.join(format!("{start_sheet}.{ext}"));
+
+        if skip_nokey {
+            let piped = self
+                .run_ffmpeg_bsf_pipe(
+                    &source_path,
+                    output,
+                    start_time_secs,
+                    start_sheet,
+                    remaining_sheets,
+                    &filter,
+                    quality,
+                    use_webp,
+                    use_threads,
+                    active_counter.clone(),
+                    runtime,
+                )
+                .await;
+            match piped {
+                Ok(()) => {
+                    let produced = tokio::fs::metadata(&first_sheet)
+                        .await
+                        .is_ok_and(|meta| meta.is_file() && meta.len() > 0);
+                    if produced {
+                        opened
+                            .verify_unchanged_sync()
+                            .map_err(|_| "source_changed")?;
+                        return Ok(());
                     }
                 }
+                Err(err @ ("streaming_priority_yield" | "generation_timeout")) => return Err(err),
+                Err(_) => {}
             }
-        } else {
-            tokio::time::timeout(runtime, child.wait())
-                .await
-                .map_err(|_| "generation_timeout")?
-                .map_err(|_| "generation_process_error")
-        };
-
-        let status = wait_result?;
-        if !status.success() {
-            return Err("generation_failed");
+            for idx in start_sheet..sheet_limit {
+                let partial = output.join(format!("{idx}.{ext}"));
+                if tokio::fs::metadata(&partial).await.is_ok() {
+                    let _ = tokio::fs::remove_file(&partial).await;
+                } else {
+                    break;
+                }
+            }
         }
+
+        let mut cmd = Command::new(&self.ffmpeg_binary);
+        cmd.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-thread_type",
+            "slice",
+            "-threads",
+            use_threads,
+            "-filter_threads",
+            "1",
+            "-flags2",
+            "fast",
+        ]);
+        if skip_nokey {
+            cmd.args(["-discard", "nokey", "-skip_frame", "nokey"]);
+        }
+        if start_time_secs > 0.0 {
+            cmd.arg("-ss").arg(format!("{:.3}", start_time_secs));
+        }
+        cmd.arg("-n")
+            .arg("-i")
+            .arg(&source_path)
+            .args(["-map", "0:v:0", "-an", "-sn", "-dn"]);
+        append_ffmpeg_output_args(
+            &mut cmd,
+            start_sheet,
+            remaining_sheets,
+            &filter,
+            quality,
+            use_webp,
+            output,
+        );
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        let mut child = cmd.spawn().map_err(|_| "ffmpeg_unavailable")?;
+        wait_ffmpeg_with_priority(active_counter, runtime, &mut child, None).await?;
 
         opened
             .verify_unchanged_sync()
             .map_err(|_| "source_changed")?;
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_ffmpeg_bsf_pipe(
+        &self,
+        source_path: &Path,
+        output: &Path,
+        start_time_secs: f64,
+        start_sheet: usize,
+        remaining_sheets: usize,
+        filter: &str,
+        quality: u8,
+        use_webp: bool,
+        use_threads: &str,
+        active_counter: Option<Arc<AtomicU32>>,
+        runtime: Duration,
+    ) -> Result<(), &'static str> {
+        let mut feeder_cmd = Command::new(&self.ffmpeg_binary);
+        feeder_cmd.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
+        if start_time_secs > 0.0 {
+            feeder_cmd.arg("-ss").arg(format!("{:.3}", start_time_secs));
+        }
+        feeder_cmd
+            .arg("-i")
+            .arg(source_path)
+            .args([
+                "-map",
+                "0:v:0",
+                "-an",
+                "-sn",
+                "-dn",
+                "-c:v",
+                "copy",
+                "-bsf:v",
+                "noise=drop=not(key)",
+                "-f",
+                "matroska",
+                "-",
+            ])
+            .kill_on_drop(true)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+
+        let mut feeder = feeder_cmd.spawn().map_err(|_| "ffmpeg_unavailable")?;
+        let Some(feeder_stdout) = feeder.stdout.take() else {
+            let _ = feeder.kill().await;
+            let _ = feeder.wait().await;
+            return Err("generation_process_error");
+        };
+        let pipe_in: std::process::Stdio = match feeder_stdout.try_into() {
+            Ok(stdio) => stdio,
+            Err(_) => {
+                let _ = feeder.kill().await;
+                let _ = feeder.wait().await;
+                return Err("generation_process_error");
+            }
+        };
+
+        let mut decoder_cmd = Command::new(&self.ffmpeg_binary);
+        decoder_cmd.args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-nostdin",
+            "-thread_type",
+            "slice",
+            "-threads",
+            use_threads,
+            "-filter_threads",
+            "1",
+            "-flags2",
+            "fast",
+            "-discard",
+            "nokey",
+            "-skip_frame",
+            "nokey",
+            "-f",
+            "matroska",
+            "-i",
+            "-",
+            "-n",
+        ]);
+        append_ffmpeg_output_args(
+            &mut decoder_cmd,
+            start_sheet,
+            remaining_sheets,
+            filter,
+            quality,
+            use_webp,
+            output,
+        );
+        decoder_cmd
+            .stdin(pipe_in)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+
+        let mut decoder = match decoder_cmd.spawn() {
+            Ok(child) => child,
+            Err(_) => {
+                let _ = feeder.kill().await;
+                let _ = feeder.wait().await;
+                return Err("ffmpeg_unavailable");
+            }
+        };
+
+        wait_ffmpeg_with_priority(active_counter, runtime, &mut decoder, Some(&mut feeder)).await
     }
 
     /// A modified source or a new profile publishes under a new fingerprint: earlier
@@ -1170,7 +1109,7 @@ impl TrickplayManager {
         }
     }
 
-    /// Open a single sheet JPEG from either native cache or Jellyfin read-only directory.
+    /// Open a single sheet image from the native Aether cache.
     pub async fn open_sheet(
         &self,
         request: &TrickplayRequest,
@@ -1192,7 +1131,7 @@ impl TrickplayManager {
             ));
         }
 
-        // 1. Check Aether native cache first
+        // Check Aether native cache
         let key = self.fingerprint(request);
         let target_dir = self.cache_root.join(&key);
         if let Some(meta) = self.check_native_cache(request).await
@@ -1207,45 +1146,104 @@ impl TrickplayManager {
             return Ok((opened, meta.mime));
         }
 
-        // 2. Fall back to Jellyfin read-only sheet
-        if let Some(manifest) = self.check_jellyfin(request).await
-            && index < manifest.sheet_count
-        {
-            let video = &request.relative_path;
-            let root = &request.media_root;
-            let parent = video.parent().unwrap_or_else(|| Path::new(""));
-            let file_name = video.file_name().unwrap_or_default().to_string_lossy();
-            let stem = video.file_stem().unwrap_or_default().to_string_lossy();
-
-            let candidates = [
-                parent.join(format!("{file_name}.trickplay")),
-                parent.join(format!("{stem}.trickplay")),
-            ];
-
-            for folder in candidates {
-                let mut read_dir = match tokio::fs::read_dir(root.join(&folder)).await {
-                    Ok(rd) => rd,
-                    Err(_) => continue,
-                };
-                while let Ok(Some(entry)) = read_dir.next_entry().await {
-                    if entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false) {
-                        let sheet_rel = folder.join(entry.file_name()).join(format!("{index}.jpg"));
-                        if let Ok(opened) = OpenedFile::open_in_root(root, &sheet_rel).await
-                            && opened.size() > 0
-                            && opened.size() <= MAX_IMAGE_BYTES
-                        {
-                            return Ok((opened, jpeg_mime()));
-                        }
-                    }
-                }
-            }
-        }
-
         Err(io::Error::new(
             io::ErrorKind::NotFound,
             "trickplay_sheet_not_found",
         ))
     }
+}
+
+fn append_ffmpeg_output_args(
+    cmd: &mut Command,
+    start_sheet: usize,
+    remaining_sheets: usize,
+    filter: &str,
+    quality: u8,
+    use_webp: bool,
+    output: &Path,
+) {
+    let ext = if use_webp { "webp" } else { "jpg" };
+    cmd.args(["-vsync", "vfr", "-vf", filter])
+        .arg("-frames:v")
+        .arg(remaining_sheets.to_string());
+    if use_webp {
+        // JPEG quality scale 1..=31 (default 7) maps inverse-linearly to libwebp 20..=95 (7 -> 75).
+        let webp_q = 99u32
+            .saturating_sub(u32::from(quality.saturating_sub(1)) * 4)
+            .clamp(20, 95);
+        cmd.args([
+            "-c:v",
+            "libwebp",
+            "-preset",
+            "picture",
+            "-compression_level",
+            "0",
+        ])
+        .arg("-q:v")
+        .arg(webp_q.to_string());
+    } else {
+        cmd.arg("-q:v").arg(quality.to_string());
+    }
+    cmd.arg("-start_number")
+        .arg(start_sheet.to_string())
+        .args(["-f", "image2"])
+        .arg(output.join(format!("%d.{ext}")))
+        .kill_on_drop(true);
+}
+
+async fn kill_and_reap(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+async fn wait_ffmpeg_with_priority(
+    active_counter: Option<Arc<AtomicU32>>,
+    runtime: Duration,
+    child: &mut tokio::process::Child,
+    mut upstream: Option<&mut tokio::process::Child>,
+) -> Result<(), &'static str> {
+    let deadline = tokio::time::Instant::now() + runtime;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if let Some(ref counter) = active_counter
+                    && counter.load(Ordering::Relaxed) > 0
+                {
+                    kill_and_reap(child).await;
+                    if let Some(feeder) = upstream.as_deref_mut() {
+                        kill_and_reap(feeder).await;
+                    }
+                    return Err("streaming_priority_yield");
+                }
+                if tokio::time::Instant::now() >= deadline {
+                    kill_and_reap(child).await;
+                    if let Some(feeder) = upstream.as_deref_mut() {
+                        kill_and_reap(feeder).await;
+                    }
+                    return Err("generation_timeout");
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(_) => {
+                kill_and_reap(child).await;
+                if let Some(feeder) = upstream.as_deref_mut() {
+                    kill_and_reap(feeder).await;
+                }
+                return Err("generation_process_error");
+            }
+        }
+    };
+
+    if let Some(feeder) = upstream
+        && !matches!(feeder.try_wait(), Ok(Some(_)))
+    {
+        kill_and_reap(feeder).await;
+    }
+    if !status.success() {
+        return Err("ffmpeg_failed");
+    }
+    Ok(())
 }
 
 fn now_epoch_ms() -> u64 {
@@ -1303,75 +1301,6 @@ async fn cache_outside_media(cache: &Path, media: &Path) -> bool {
         resolved.push(part);
     }
     !resolved.starts_with(media)
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct JellyfinJsonMeta {
-    #[serde(default = "default_10k")]
-    interval_ms: u64,
-    #[serde(default = "default_320")]
-    width: u32,
-    #[serde(default = "default_180")]
-    height: u32,
-    #[serde(default = "default_10")]
-    columns: u32,
-    #[serde(default = "default_10")]
-    rows: u32,
-}
-fn default_10k() -> u64 {
-    10_000
-}
-fn default_320() -> u32 {
-    320
-}
-fn default_180() -> u32 {
-    180
-}
-fn default_10() -> u32 {
-    10
-}
-
-fn parse_grid_folder_name(name: &str) -> Option<(u32, u32, u32)> {
-    // E.g. "320 - 10x10", "240 - 5x5", "320-10x10"
-    let parts: Vec<&str> = name.split('-').map(str::trim).collect();
-    if parts.len() == 2 {
-        let width = parts[0].parse::<u32>().ok()?;
-        let (c, r) = parts[1].split_once('x')?;
-        let cols = c.trim().parse::<u32>().ok()?;
-        let rows = r.trim().parse::<u32>().ok()?;
-        if width > 0 && cols > 0 && rows > 0 {
-            return Some((width, cols, rows));
-        }
-    }
-    None
-}
-
-async fn count_contiguous_sheets(root: &Path, sheet_rel: &Path) -> usize {
-    let Ok(mut dir) = tokio::fs::read_dir(root.join(sheet_rel)).await else {
-        return 0;
-    };
-    let mut found = HashSet::new();
-    while let Ok(Some(entry)) = dir.next_entry().await {
-        let name = entry.file_name();
-        let Some(name_str) = name.to_str() else {
-            continue;
-        };
-        let Some(idx) = name_str
-            .strip_suffix(".jpg")
-            .and_then(|s| s.parse::<usize>().ok())
-        else {
-            continue;
-        };
-        if idx < MAX_SHEETS {
-            found.insert(idx);
-        }
-    }
-    let mut count = 0;
-    while found.contains(&count) {
-        count += 1;
-    }
-    count
 }
 
 async fn decode_opened_image_dimensions(opened: OpenedFile) -> Option<(u32, u32)> {
@@ -1531,19 +1460,14 @@ mod tests {
         );
         let key = manager.fingerprint(&request);
         let image = image::DynamicImage::new_rgb8(320, 180);
-        let jellyfin = media.join("film.mkv.trickplay").join("320 - 1x1");
-        std::fs::create_dir_all(&jellyfin).unwrap();
+        // Native Aether engine ignores external .trickplay folders placed in media directories.
+        let external = media.join("film.mkv.trickplay").join("320 - 1x1");
+        std::fs::create_dir_all(&external).unwrap();
         image
-            .save_with_format(jellyfin.join("0.jpg"), image::ImageFormat::Jpeg)
+            .save_with_format(external.join("0.jpg"), image::ImageFormat::Jpeg)
             .unwrap();
-        assert_eq!(
-            manager.check_jellyfin(&request).await.unwrap().mime,
-            "image/jpeg"
-        );
-        assert_eq!(
-            manager.open_sheet_with_mime(&request, 0).await.unwrap().1,
-            "image/jpeg"
-        );
+        assert!(manager.check_native_cache(&request).await.is_none());
+        assert!(manager.open_sheet_with_mime(&request, 0).await.is_err());
         for (version, mime, extension, format) in [
             (1, "image/jpeg", "jpg", image::ImageFormat::Jpeg),
             (2, "image/webp", "webp", image::ImageFormat::WebP),
@@ -1602,15 +1526,6 @@ mod tests {
         assert!(target.join("0.jpg").exists());
         assert!(!target.join("partial").exists());
         remove_dir_tolerant(&temp.path().join("absent")).await;
-    }
-
-    #[test]
-    fn parses_jellyfin_grid_folder_name() {
-        assert_eq!(parse_grid_folder_name("320 - 10x10"), Some((320, 10, 10)));
-        assert_eq!(parse_grid_folder_name("240 - 5x5"), Some((240, 5, 5)));
-        assert_eq!(parse_grid_folder_name("160-4x4"), Some((160, 4, 4)));
-        assert_eq!(parse_grid_folder_name("random"), None);
-        assert_eq!(parse_grid_folder_name("320"), None);
     }
 
     #[test]
@@ -2002,5 +1917,71 @@ mod tests {
         mgr.remove_superseded("film-1", &new_grid_b).await;
         assert!(!cache_root.join(&new_grid_a).exists());
         assert!(cache_root.join(&new_grid_b).exists());
+    }
+
+    #[tokio::test]
+    async fn resumes_from_in_progress_sheets_and_drops_only_truncated_tail() {
+        let temp = tempfile::tempdir().unwrap();
+        let media_root = temp.path().join("media");
+        let cache_root = temp.path().join("cache");
+        tokio::fs::create_dir_all(&media_root).await.unwrap();
+        let movie = media_root.join("movie.mkv");
+        tokio::fs::write(&movie, b"video").await.unwrap();
+        let opened = OpenedFile::open_in_root(&media_root, Path::new("movie.mkv"))
+            .await
+            .unwrap();
+
+        let mgr = TrickplayManager::new(
+            cache_root.clone(),
+            16 * 1024 * 1024,
+            PathBuf::from("nonexistent-ffmpeg-binary"),
+            true,
+            None,
+        );
+        let req = TrickplayRequest {
+            asset_id: "asset-resume".into(),
+            media_root,
+            relative_path: PathBuf::from("movie.mkv"),
+            duration: 20.0,
+            size: opened.size(),
+            modified_ns: opened.modified_ns().to_owned(),
+            interval_ms: Some(10_000),
+            width: Some(320),
+            quality: Some(7),
+            columns: Some(1),
+            rows: Some(1),
+            chapter_time: None,
+        };
+        let key = mgr.fingerprint(&req);
+        let work = cache_root.join(format!(".{key}.jpg.in_progress"));
+        tokio::fs::create_dir_all(&work).await.unwrap();
+
+        let mut jpg = Vec::new();
+        let img = image::DynamicImage::new_rgb8(320, 180);
+        img.write_to(
+            &mut std::io::Cursor::new(&mut jpg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+
+        // Corrupt last sheet (1.jpg) leaves 0.jpg intact and attempts resume via ffmpeg at sheet 1.
+        tokio::fs::write(work.join("0.jpg"), &jpg).await.unwrap();
+        tokio::fs::write(work.join("1.jpg"), b"truncated-partial-jpeg")
+            .await
+            .unwrap();
+        assert_eq!(
+            mgr.execute_generation(&req, &key).await.unwrap_err(),
+            "ffmpeg_unavailable"
+        );
+        assert!(work.join("0.jpg").exists(), "committed sheet 0 kept");
+        assert!(!work.join("1.jpg").exists(), "truncated sheet 1 dropped");
+
+        // Completing 1.jpg lets execute_generation publish cleanly without spawning ffmpeg.
+        tokio::fs::write(work.join("1.jpg"), &jpg).await.unwrap();
+        mgr.execute_generation(&req, &key).await.unwrap();
+        let manifest = mgr.check_native_cache(&req).await.unwrap();
+        assert_eq!(manifest.sheet_count, 2);
+        assert_eq!(manifest.thumbnail_count, 2);
+        assert!(!work.exists());
     }
 }

@@ -28,7 +28,8 @@ pub(crate) const TASK_ADMISSION_LOCK: i64 = 0x4d45444941544153;
 pub mod pipeline {
     pub const IDENTIFY: (i64, i64) = (80, 99);
     pub const IMAGES: (i64, i64) = (60, 79);
-    pub const TRICKPLAY: i64 = 50;
+    pub const TRICKPLAY: i64 = 55;
+    pub const CHAPTER_IMAGES: i64 = 48;
     pub const INTROS: (i64, i64) = (21, 45);
 
     /// Maps a provider priority (0..=1000, 1000 = preferred) into `band`.
@@ -80,14 +81,14 @@ pub mod pipeline {
         )
     }
 
-    /// Claim condition for the candidate `j`: a phase waits for the earlier phases of its
-    /// library. Two `?` placeholders are bound to `now`.
+    /// Claim condition for the candidate `j`: intro/marker analysis waits for the earlier phases
+    /// of its library, whereas Trickplay and chapter images run independently of online metadata
+    /// identification and artwork passes. Two `?` placeholders are bound to `now`.
     pub fn claim_gate() -> String {
         let intro = "(j.category='analyze' AND (j.component IN ('fingerprint','credits') \
             OR j.id IN (SELECT task_id FROM automation_task_links WHERE operation LIKE 'intro.%')))";
         format!(
-            "(j.category NOT IN ('trickplay','analyze') OR (j.category='trickplay' AND NOT {id} \
-             AND NOT {img}) OR (j.category='analyze' AND NOT {intro}) OR ({intro} AND NOT {id} \
+            "(j.category<>'analyze' OR NOT {intro} OR ({intro} AND NOT {id} \
              AND NOT {img} AND NOT {trick}))",
             id = identify_pending("j.library_id", "?1"),
             img = images_pending("j.library_id", "?1"),
@@ -125,10 +126,18 @@ pub async fn normalize_pipeline_priorities(store: &IdentityStore) -> Result<(), 
     }
     query(
         "UPDATE durable_tasks SET priority=? WHERE category='trickplay' \
-         AND status IN ('queued','paused') AND priority<>?",
+         AND COALESCE(component,'')='' AND status IN ('queued','paused') AND priority<>?",
     )
     .bind(pipeline::TRICKPLAY)
     .bind(pipeline::TRICKPLAY)
+    .execute(store.pool())
+    .await?;
+    query(
+        "UPDATE durable_tasks SET priority=? WHERE category='trickplay' \
+         AND component='chapters' AND status IN ('queued','paused') AND priority<>?",
+    )
+    .bind(pipeline::CHAPTER_IMAGES)
+    .bind(pipeline::CHAPTER_IMAGES)
     .execute(store.pool())
     .await?;
     Ok(())
@@ -492,6 +501,16 @@ pub async fn claim(
     Ok(job)
 }
 
+const LIBRARY_CONCURRENCY_FILTER: &str = "(NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL) \
+    OR (j.category='trickplay' \
+    AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL AND active.category<>'trickplay') \
+    AND (SELECT COUNT(*) FROM durable_tasks active WHERE active.library_id=j.library_id AND active.lease_until IS NOT NULL)<2))";
+
+const NODE_CONCURRENCY_FILTER: &str = "(NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup'))) \
+    OR (j.category='trickplay' \
+    AND NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND busy.category<>'trickplay' AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup'))) \
+    AND (SELECT COUNT(*) FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup')))<2))";
+
 /// Bounded production admission: one commit covers up to 100 ready Nodes.
 /// No worker starts before this transaction has committed every returned lease.
 pub async fn claim_batch(
@@ -512,7 +531,7 @@ pub async fn claim_batch(
     // Select one indexed candidate per ready Node inside SQLite/PostgreSQL. Materialize
     // before UPDATE so changing status cannot cause a second candidate on the same Node.
     // Only placeholder syntax is generated; Node identifiers remain bound values.
-    let mut sql = String::with_capacity(2600 + nodes.len() * 4);
+    let mut sql = String::with_capacity(3200 + nodes.len() * 4);
     sql.push_str("WITH ready(node_id) AS (VALUES ");
     for index in 0..nodes.len() {
         if index > 0 {
@@ -532,9 +551,13 @@ pub async fn claim_batch(
             OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
             ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
             AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) \
-            AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id \
-            AND active.lease_until IS NOT NULL) \
-            AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
+            AND ",
+    );
+    sql.push_str(LIBRARY_CONCURRENCY_FILTER);
+    sql.push_str(" AND ");
+    sql.push_str(NODE_CONCURRENCY_FILTER);
+    sql.push_str(
+        " AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
             FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
             FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
             AND ",
@@ -543,10 +566,7 @@ pub async fn claim_batch(
     sql.push_str(&gate);
     sql.push_str(
         " ORDER BY j.priority DESC,j.created_at,j.id LIMIT 1) AS id \
-            FROM ready \
-            WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id \
-            AND busy.lease_until IS NOT NULL AND (busy.category<>'system' \
-            OR busy.target_id IN ('optimize-database','backup')))) UPDATE durable_tasks \
+            FROM ready) UPDATE durable_tasks \
             SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,\
             started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',\
             processed_items=0,progress=0 WHERE id IN (SELECT id \
@@ -606,8 +626,7 @@ async fn claim_in_transaction(
             OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
             ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
             AND (n.status='connected' OR (n.id='local' AND n.status!='revoked')) \
-            AND NOT EXISTS(SELECT 1 FROM durable_tasks active WHERE active.library_id=j.library_id \
-            AND active.lease_until IS NOT NULL) \
+            AND {LIBRARY_CONCURRENCY_FILTER} AND {NODE_CONCURRENCY_FILTER} \
             AND (COALESCE(j.component,'') NOT IN ('fingerprint','credits') OR NOT EXISTS(SELECT 1 \
             FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
             FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
@@ -1147,6 +1166,11 @@ mod pipeline_tests {
         assert_eq!(automation("intro.detect", 1000), 45);
         assert!(automation("intro.parse_chapters", 0) > 20);
         assert!(pipeline::TRICKPLAY < pipeline::IMAGES.0 && pipeline::TRICKPLAY > 45);
+        const {
+            assert!(
+                pipeline::CHAPTER_IMAGES < pipeline::TRICKPLAY && pipeline::CHAPTER_IMAGES > 45
+            );
+        }
         assert!(
             pipeline::IDENTIFY.1 < 100,
             "scheduled scans (100) run first"
@@ -1191,36 +1215,97 @@ mod pipeline_tests {
             .execute(store.pool()).await.unwrap();
         // Written in reverse order: priority, not age, decides.
         task(&store, "intro", "analyze", "fingerprint", 20).await;
+        task(
+            &store,
+            "chapters",
+            "trickplay",
+            "chapters",
+            pipeline::CHAPTER_IMAGES,
+        )
+        .await;
         task(&store, "preview", "trickplay", "", pipeline::TRICKPLAY).await;
         task(&store, "identify", "analyze", "", pipeline::IDENTIFY.1).await;
         query("INSERT INTO automation_task_links(task_id,event_id,extension_id,operation,fingerprint,generation,provider) VALUES('identify','e','tmdb','metadata.search','f','1','tmdb')")
             .execute(store.pool()).await.unwrap();
 
         assert_eq!(next(&store).await.as_deref(), Some("identify"));
-        // Identification in progress or ready holds the previews and the intros.
+        // Delayed identification or an active artwork pass no longer blocks Trickplay or chapters;
+        // intros still wait until earlier phases are complete.
         release(&store, "identify", "queued").await;
         query("UPDATE durable_tasks SET available_at=1000 WHERE id='identify'")
             .execute(store.pool())
             .await
             .unwrap();
-        // A later retry does not hold the next phases, nor does an image pass once it ends.
         query("INSERT INTO artwork_collection_jobs(id,library_id,owner,parameters,created_at,updated_at) VALUES('art','films','admin','{}',1,1)")
             .execute(store.pool()).await.unwrap();
-        assert_eq!(next(&store).await, None, "the image pass runs first");
+        assert_eq!(next(&store).await.as_deref(), Some("preview"));
+        release(&store, "preview", "completed").await;
+        assert_eq!(next(&store).await.as_deref(), Some("chapters"));
+        release(&store, "chapters", "completed").await;
+        // Artwork is still active, so intro waits.
+        assert_eq!(next(&store).await, None, "intro waits for artwork pass");
         query("UPDATE artwork_collection_jobs SET status='paused'")
             .execute(store.pool())
             .await
             .unwrap();
-        assert_eq!(next(&store).await.as_deref(), Some("preview"));
-        release(&store, "preview", "queued").await;
         query("UPDATE durable_tasks SET available_at=1 WHERE id='identify'")
             .execute(store.pool())
             .await
             .unwrap();
         release(&store, "identify", "paused").await;
         // A paused phase never blocks the next ones.
-        assert_eq!(next(&store).await.as_deref(), Some("preview"));
-        release(&store, "preview", "completed").await;
         assert_eq!(next(&store).await.as_deref(), Some("intro"));
+    }
+
+    #[tokio::test]
+    async fn trickplay_claims_up_to_two_concurrently_without_blocking_other_exclusivity() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        task(&store, "tp-1", "trickplay", "", pipeline::TRICKPLAY).await;
+        task(&store, "tp-2", "trickplay", "", pipeline::TRICKPLAY).await;
+        task(&store, "tp-3", "trickplay", "", pipeline::TRICKPLAY).await;
+        task(&store, "other", "analyze", "fingerprint", 10).await;
+
+        let local = vec!["local".to_owned()];
+        let first = claim_batch(&store, &local, 100, 60).await.unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].id, "tp-1");
+
+        let second = claim_batch(&store, &local, 100, 60).await.unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].id, "tp-2");
+
+        // Bounded concurrency = 2: a 3rd trickplay task waits until one slot completes.
+        assert!(
+            claim_batch(&store, &local, 100, 60)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        release(&store, "tp-1", "completed").await;
+        let third = claim_batch(&store, &local, 100, 60).await.unwrap();
+        assert_eq!(third.len(), 1);
+        assert_eq!(third[0].id, "tp-3");
+
+        // Non-trickplay task cannot claim while a trickplay lease is still active.
+        release(&store, "tp-2", "completed").await;
+        assert!(
+            claim_batch(&store, &local, 100, 60)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        release(&store, "tp-3", "completed").await;
+        let last = claim_batch(&store, &local, 100, 60).await.unwrap();
+        assert_eq!(last.len(), 1);
+        assert_eq!(last[0].id, "other");
     }
 }

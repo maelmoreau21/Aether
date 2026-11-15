@@ -65,7 +65,7 @@ impl Default for ScanJobs {
             engine_tick: tokio::sync::Mutex::new(()),
             scheduler_tick: tokio::sync::Mutex::new(()),
             cancel: Arc::new(AtomicBool::new(false)),
-            slots: Arc::new(Semaphore::new(1)),
+            slots: Arc::new(Semaphore::new(2)),
             preparations: Arc::new(media_node::packaging::Preparations::default()),
             tasks: Mutex::new(Vec::new()),
             cancellations: Mutex::new(Default::default()),

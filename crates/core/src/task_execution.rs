@@ -18,6 +18,48 @@ use std::{
     },
 };
 
+fn probe_json_f64(value: &serde_json::Value) -> Option<f64> {
+    value
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| value.as_f64())
+        .filter(|v| v.is_finite())
+}
+
+fn trickplay_probe_hints(probe_json: &str, chapters: bool) -> (Option<f64>, Option<Vec<f64>>) {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(probe_json) else {
+        return (None, None);
+    };
+    let duration_seconds = value
+        .get("format")
+        .and_then(|format| format.get("duration"))
+        .and_then(probe_json_f64)
+        .filter(|d| *d > 0.0 && *d <= 86_400.0);
+    let chapter_times = if chapters {
+        duration_seconds.and_then(|dur| {
+            let mut times: Vec<f64> = value
+                .get("chapters")
+                .and_then(|c| c.as_array())?
+                .iter()
+                .take(1000)
+                .filter_map(|ch| {
+                    ch.get("start_time")
+                        .and_then(probe_json_f64)
+                        .or_else(|| ch.get("start_seconds").and_then(probe_json_f64))
+                })
+                .filter(|t| *t >= 0.0 && *t < dur)
+                .collect();
+            times.sort_by(f64::total_cmp);
+            times.dedup();
+            times.truncate(100);
+            Some(times)
+        })
+    } else {
+        None
+    };
+    (duration_seconds, chapter_times)
+}
+
 pub(crate) async fn dispatch(
     auth: &AuthState,
     root: &Path,
@@ -25,16 +67,18 @@ pub(crate) async fn dispatch(
     job: &Job,
 ) -> Result<(), sqlx::Error> {
     let run = format!("{}:{}", job.id, job.attempt);
-    let row: Option<(String, String, String, i64, String, String)> = if job.category == "image" {
+    let row: Option<(String, String, String, i64, String, String, String)> = if job.category
+        == "image"
+    {
         query_as(
-            "SELECT i.root_snapshot,i.relative_path,i.mime,i.size,i.modified_ns,l.node_id \
-                FROM inventory_images i \
-                JOIN libraries l ON l.id=i.library_id \
-                WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root \
-                AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
-                WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
-                JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
-                AND f.active=1 AND parent.enabled=1))",
+            "SELECT i.root_snapshot,i.relative_path,i.mime,i.size,i.modified_ns,l.node_id,'' \
+                    FROM inventory_images i \
+                    JOIN libraries l ON l.id=i.library_id \
+                    WHERE i.id=? AND i.library_id=? AND i.available=1 AND i.root_snapshot=l.root \
+                    AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+                    WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+                    JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
+                    AND f.active=1 AND parent.enabled=1))",
         )
         .bind(&job.target_id)
         .bind(&job.library_id)
@@ -42,22 +86,22 @@ pub(crate) async fn dispatch(
         .await?
     } else {
         query_as(
-            "SELECT s.root_snapshot,a.relative_path,a.mime,a.size,a.modified_ns,l.node_id \
-                FROM inventory_assets a \
-                JOIN inventory_sources s ON s.id=a.source_id \
-                JOIN libraries l ON l.id=a.library_id \
-                WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root \
-                AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
-                WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
-                JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
-                AND f.active=1 AND parent.enabled=1))",
-        )
-        .bind(&job.target_id)
-        .bind(&job.library_id)
-        .fetch_optional(auth.store.pool())
-        .await?
+                "SELECT s.root_snapshot,a.relative_path,a.mime,a.size,a.modified_ns,l.node_id,a.probe_json \
+                    FROM inventory_assets a \
+                    JOIN inventory_sources s ON s.id=a.source_id \
+                    JOIN libraries l ON l.id=a.library_id \
+                    WHERE a.id=? AND a.library_id=? AND a.available=1 AND s.root_snapshot=l.root \
+                    AND ((l.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders own \
+                    WHERE own.library_id=l.id)) OR EXISTS(SELECT 1 FROM library_folders f \
+                    JOIN libraries parent ON parent.id=f.parent_id WHERE f.library_id=l.id \
+                    AND f.active=1 AND parent.enabled=1))",
+            )
+            .bind(&job.target_id)
+            .bind(&job.library_id)
+            .fetch_optional(auth.store.pool())
+            .await?
     };
-    let Some((snapshot, relative, mime, size, modified, node)) = row else {
+    let Some((snapshot, relative, mime, size, modified, node, probe_json)) = row else {
         task_engine::finish(
             &auth.store,
             &job.id,
@@ -116,6 +160,7 @@ pub(crate) async fn dispatch(
                 .bind(&job.id).bind(job.attempt).execute(auth.store.pool()).await?;
             return Ok(());
         }
+        let (duration_seconds, chapter_times) = trickplay_probe_hints(&probe_json, chapters);
         Some((
             options.trickplay_width,
             media_contracts::protocol::TrickplayTaskOptions {
@@ -127,6 +172,8 @@ pub(crate) async fn dispatch(
                     .await
                     .ok()
                     .map(|settings| settings.trickplay_max_cache_mb),
+                duration_seconds,
+                chapter_times,
             },
         ))
     } else {

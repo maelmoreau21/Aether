@@ -298,10 +298,8 @@ async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
             .fetch_all(store.pool())
             .await
             .unwrap();
-    assert_eq!(
-        owners,
-        ["library-chapter-images-manual", "library-trickplay-manual"]
-    );
+    // Launching Trickplay never implicitly triggers chapter extraction.
+    assert_eq!(owners, ["library-trickplay-manual"]);
     let row = LibraryRow {
         id: "previews",
         name: "Previews",
@@ -309,9 +307,12 @@ async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
         reason: None,
     };
     let listed = views(&store, &row, None, false).await.unwrap();
-    // In pipeline order: identify, images, previews, intros.
+    // In scheduler order: identify, artwork, trickplay, chapters, intros.
     let kinds: Vec<_> = listed.iter().map(|view| view.kind).collect();
-    assert_eq!(kinds, ["identify", "artwork", "trickplay", "intros"]);
+    assert_eq!(
+        kinds,
+        ["identify", "artwork", "trickplay", "chapters", "intros"]
+    );
     let previews = &listed[2];
     assert_eq!(previews.id, "trickplay-previews");
     assert_eq!(previews.parent_id.as_deref(), Some("scan-previews"));
@@ -319,13 +320,14 @@ async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
     assert_eq!(previews.after_scan, Some(false));
     assert_eq!(listed[1].after_scan, Some(true));
     assert_eq!(previews.state, "queued");
-    // No earlier phase is active: nothing holds the previews back.
+    // Trickplay never waits for identify/artwork.
     assert_eq!(previews.waiting_for, None);
-    // The trickplay sheet and the chapter images of the video.
-    assert_eq!(previews.stats.as_ref().map(|stats| stats.pending), Some(2));
+    // Only the Trickplay sheet task was queued.
+    assert_eq!(previews.stats.as_ref().map(|stats| stats.pending), Some(1));
     // Without an intro extension, only the intro sub-task explains why it cannot run.
     assert!(previews.reason.is_none());
-    assert!(listed[3].reason.is_some());
+    assert!(listed[3].reason.is_none());
+    assert!(listed[4].reason.is_some());
     assert!(listed[1].reason.is_none());
     // A pause holds every queued preview; resuming puts them back in the queue.
     assert!(
@@ -363,14 +365,57 @@ async fn the_scheduler_runs_and_reports_the_preview_sub_task_of_a_library() {
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].state, "idle");
     assert_eq!(done[0].last_run.as_ref().unwrap().outcome, "succeeded");
-    assert_eq!(done[0].stats.as_ref().map(|stats| stats.done), Some(2));
-    // Turning the library's previews off makes only this sub-task unavailable.
-    query("UPDATE libraries SET options_json='{\"trickplayEnabled\":false,\"chapterImagesEnabled\":false}' WHERE id='previews'")
+    assert_eq!(done[0].stats.as_ref().map(|stats| stats.done), Some(1));
+
+    // A video with zero chapters in probe_json does not enqueue a chapter extraction task.
+    assert_eq!(
+        admit(&auth, MediaTask::ChapterImages, "previews", "admin", now)
+            .await
+            .unwrap(),
+        Admission::Queued
+    );
+    let chapter_count_empty: i64 = query_scalar(
+        "SELECT COUNT(*) FROM durable_tasks WHERE category='trickplay' AND component='chapters'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(chapter_count_empty, 0);
+
+    // Turning Trickplay off disables ONLY Trickplay while keeping ChapterImages available.
+    query("UPDATE libraries SET options_json='{\"trickplayEnabled\":false,\"chapterImagesEnabled\":true}' WHERE id='previews'")
         .execute(store.pool())
         .await
         .unwrap();
     assert_eq!(
         admit(&auth, MediaTask::Trickplay, "previews", "admin", now)
+            .await
+            .unwrap(),
+        Admission::Unavailable
+    );
+    query("UPDATE inventory_assets SET probe_json='{\"format\":{\"duration\":\"120\"},\"chapters\":[{\"start_time\":\"10\",\"tags\":{\"title\":\"Intro\"}}]}' WHERE library_id='previews'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        admit(&auth, MediaTask::ChapterImages, "previews", "admin", now)
+            .await
+            .unwrap(),
+        Admission::Queued
+    );
+    let chapter_owners: Vec<String> = query_scalar(
+        "SELECT owner FROM durable_tasks WHERE category='trickplay' AND component='chapters'",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(chapter_owners, ["library-chapter-images-manual"]);
+    query("UPDATE libraries SET options_json='{\"trickplayEnabled\":false,\"chapterImagesEnabled\":false}' WHERE id='previews'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        admit(&auth, MediaTask::ChapterImages, "previews", "admin", now)
             .await
             .unwrap(),
         Admission::Unavailable

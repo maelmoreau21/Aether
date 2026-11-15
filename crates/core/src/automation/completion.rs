@@ -142,7 +142,7 @@ pub(crate) async fn complete_with_marker_sources(
     } else {
         1
     };
-    query("UPDATE durable_tasks SET status='completed',result_json=?,progress=100,processed_items=?,lease_until=NULL,finished_at=?,updated_at=? WHERE id=? AND attempt=? AND status='running'")
+    query("UPDATE durable_tasks SET status='completed',result_json=?,progress=100,processed_items=?,lease_until=NULL,lease_owner=NULL,finished_at=?,updated_at=? WHERE id=? AND attempt=? AND status='running'")
  .bind(result.to_string()).bind(processed).bind(now).bind(now).bind(&job.id).bind(job.attempt).execute(&mut *tx).await?;
     let key = format!("analysis:{}", job.id);
     let fingerprint: String = query_scalar("SELECT fingerprint FROM automation_events WHERE id=?")

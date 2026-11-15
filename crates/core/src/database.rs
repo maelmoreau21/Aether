@@ -170,6 +170,77 @@ pub async fn begin_write_serialized(
     }
 }
 
+/// PostgreSQL session-level advisory lock held on a dedicated pooled connection (multi-Core
+/// exclusion that outlives a transaction, e.g. a whole backup or scheduling pass).
+///
+/// [`SessionLock::release`] unlocks and returns the connection to the pool. When the lock is
+/// dropped instead (panic, cancelled future, failed unlock), the connection is closed rather
+/// than pooled: ending the session releases the lock, so it can never leak to another user.
+pub struct SessionLock {
+    conn: Option<sqlx::pool::PoolConnection<Any>>,
+    key: String,
+}
+
+impl SessionLock {
+    pub async fn release(mut self) {
+        let unlocked = match self.conn.as_mut() {
+            Some(conn) => sqlx::query_scalar::<_, bool>("SELECT pg_advisory_unlock(hashtext($1))")
+                .bind(&self.key)
+                .fetch_one(&mut **conn)
+                .await
+                .unwrap_or(false),
+            None => return,
+        };
+        if unlocked {
+            // Unlocked: the connection may serve other queries again.
+            drop(self.conn.take());
+        }
+    }
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.as_mut() {
+            conn.close_on_drop();
+        }
+    }
+}
+
+/// Try to take the PostgreSQL session advisory lock `key` without waiting. `None` when another
+/// session (another Core, or another task of this one) holds it. PostgreSQL only.
+pub async fn try_session_lock(
+    pool: &sqlx::AnyPool,
+    key: &str,
+) -> Result<Option<SessionLock>, sqlx::Error> {
+    let conn = pool.acquire().await?;
+    if conn.backend_name() != "PostgreSQL" {
+        return Err(sqlx::Error::Protocol(
+            "session advisory locks require PostgreSQL".into(),
+        ));
+    }
+    // Owned by the guard before the lock is requested: a cancelled or failed request closes the
+    // connection instead of pooling a session that may hold the lock.
+    let mut lock = SessionLock {
+        conn: Some(conn),
+        key: key.to_owned(),
+    };
+    let acquired: bool = match lock.conn.as_mut() {
+        Some(conn) => {
+            sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtext($1))")
+                .bind(key)
+                .fetch_one(&mut **conn)
+                .await?
+        }
+        None => false,
+    };
+    if !acquired {
+        // Not granted: the session holds nothing and returns to the pool.
+        drop(lock.conn.take());
+        return Ok(None);
+    }
+    Ok(Some(lock))
+}
+
 /// Ordered schema upgrade step between persisted schema versions (`v1 -> v2 -> ...`).
 pub struct MigrationStep {
     pub version: i64,
@@ -179,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -206,7 +277,24 @@ ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_
         postgres_sql: "ALTER TABLE statistics_settings ALTER COLUMN event_retention_days SET DEFAULT 0;
 UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND event_retention_days = 365;",
     },
+    // Multi-Core: one row per live Core process, and the Core owning each durable lease
+    // (NULL = no owner, or a lease taken before this version).
+    MigrationStep {
+        version: 4,
+        name: "0004_core_instances",
+        sqlite_sql: CORE_INSTANCES_SQL,
+        postgres_sql: CORE_INSTANCES_SQL,
+    },
 ];
+
+const CORE_INSTANCES_SQL: &str = "CREATE TABLE core_instances (
+ id TEXT PRIMARY KEY NOT NULL,
+ started_at BIGINT NOT NULL,
+ heartbeat_at BIGINT NOT NULL,
+ hostname TEXT NOT NULL DEFAULT '',
+ version TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE durable_tasks ADD COLUMN lease_owner TEXT;";
 
 /// Install the frozen v1 schema (`crates/core/migrations/0001_initial_v1.sql`) on an empty
 /// database, apply pending migrations, and refresh derived views/indexes.
@@ -505,5 +593,60 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(note, "upgraded");
+    }
+
+    #[tokio::test]
+    async fn sqlite_v3_upgrades_to_core_instances_and_lease_owner() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(&mut conn, 3, super::MIGRATIONS)
+                .await
+                .unwrap(),
+            3
+        );
+        super::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        super::query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,attempt,lease_until,created_at,updated_at,available_at) VALUES('kept','films','admin','kept','local','scan','running',1,99,1,1,1)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(
+                &mut conn,
+                super::CURRENT_SCHEMA_VERSION,
+                super::MIGRATIONS
+            )
+            .await
+            .unwrap(),
+            4
+        );
+        // A lease taken before v4 has no owner.
+        let owner: Option<String> =
+            super::query_scalar("SELECT lease_owner FROM durable_tasks WHERE id='kept'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(owner, None);
+        super::query("INSERT INTO core_instances(id,started_at,heartbeat_at) VALUES('core',1,2)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let (hostname, version): (String, String) =
+            super::query_as("SELECT hostname,version FROM core_instances WHERE id='core'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!((hostname.as_str(), version.as_str()), ("", ""));
+        let name: String =
+            super::query_scalar("SELECT name FROM schema_migrations WHERE version=4")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(name, "0004_core_instances");
     }
 }

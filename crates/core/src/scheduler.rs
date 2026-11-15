@@ -37,9 +37,13 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 pub async fn router(auth: AuthState) -> Result<Router, sqlx::Error> {
+    // Another live Core may still be dispatching: only libraries without a live scan lease.
     crate::database::query(
-        "UPDATE scheduled_scans SET last_outcome='interrupted' WHERE last_outcome='dispatching'",
+        "UPDATE scheduled_scans SET last_outcome='interrupted' WHERE last_outcome='dispatching' \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' \
+            AND j.library_id=scheduled_scans.library_id AND j.lease_until>?)",
     )
+    .bind(now())
     .execute(&auth.store.pool)
     .await?;
     // Scan-router startup has already marked abandoned jobs as errors. Preserve
@@ -157,6 +161,7 @@ pub struct Scheduler(
     tokio::task::JoinHandle<()>,
     tokio::task::JoinHandle<()>,
     tokio::task::JoinHandle<()>,
+    tokio::task::JoinHandle<()>,
 );
 impl Drop for Scheduler {
     fn drop(&mut self) {
@@ -165,10 +170,34 @@ impl Drop for Scheduler {
         self.2.abort();
         self.3.abort();
         self.4.abort();
+        self.5.abort();
     }
 }
 impl Scheduler {
     pub fn start(auth: AuthState, root: PathBuf, jobs: Arc<ScanJobs>) -> Self {
+        // Liveness of this Core for the others sharing the database. Its own loop: a long
+        // dispatch pass must never let the heartbeat go stale.
+        let heartbeat_auth = auth.clone();
+        let heartbeat_jobs = jobs.clone();
+        let heartbeat = tokio::spawn(async move {
+            // SQLite is single-Core: nobody reads the heartbeat, and a write every 10 s would
+            // keep an idle NAS disk awake. The startup registration (scans router) is enough.
+            if !heartbeat_auth.store.is_postgres() {
+                return;
+            }
+            let mut interval = tokio::time::interval(crate::core_instances::HEARTBEAT_INTERVAL);
+            loop {
+                interval.tick().await;
+                if heartbeat_jobs.is_cancelled() {
+                    break;
+                }
+                if let Err(error) =
+                    crate::core_instances::heartbeat(&heartbeat_auth.store, now()).await
+                {
+                    eprintln!("Core heartbeat failed ({error}); retrying on next tick");
+                }
+            }
+        });
         let application_auth = auth.clone();
         let application_jobs = jobs.clone();
         let applications = tokio::spawn(async move {
@@ -246,6 +275,7 @@ impl Scheduler {
         let worker_root = root.clone();
         let worker_jobs = jobs.clone();
         let worker = tokio::spawn(async move {
+            let mut last_reclaim = tokio::time::Instant::now();
             loop {
                 if worker_jobs.is_cancelled() {
                     break;
@@ -254,6 +284,16 @@ impl Scheduler {
                     dispatch_once(&worker_auth, &worker_root, &worker_jobs, now()).await
                 {
                     eprintln!("Task dispatch pass failed ({error}); retrying");
+                }
+                // Orphans of a Core that stopped while no other Core ran its startup cleanup.
+                if last_reclaim.elapsed() >= crate::core_instances::RECLAIM_INTERVAL {
+                    last_reclaim = tokio::time::Instant::now();
+                    if let Err(error) =
+                        crate::core_instances::reclaim_orphans(&worker_auth.store, now(), false)
+                            .await
+                    {
+                        eprintln!("Orphan task cleanup failed ({error}); retrying later");
+                    }
                 }
                 let delay = if worker_jobs
                     .engine_busy
@@ -306,6 +346,7 @@ impl Scheduler {
             notifications,
             applications,
             artwork,
+            heartbeat,
         )
     }
 }
@@ -543,8 +584,14 @@ pub async fn dispatch_once(
         return Ok(());
     }
     crate::automation::drain(&auth.store, timestamp, 64).await?;
-    crate::system_task_queue::dispatch_once(auth, root, jobs, timestamp).await?;
+    // Draining before shutdown: in-flight leases keep renewing and finishing, nothing new is
+    // claimed (it would only be cancelled at exit and cost an attempt on another Core).
+    if !jobs.is_draining() {
+        crate::system_task_queue::dispatch_once(auth, root, jobs, timestamp).await?;
+    }
     let leased = crate::task_engine::leased(&auth.store, 100).await?;
+    // Local work leased by another Core runs in that process: never renew, finish or cancel it.
+    let foreign = crate::task_engine::foreign_local_leases(&auth.store).await?;
     jobs.engine_busy
         .store(!leased.is_empty(), std::sync::atomic::Ordering::Relaxed);
     let statuses: Vec<(String,String,String)> = crate::database::query_as(
@@ -558,6 +605,9 @@ pub async fn dispatch_once(
         .collect();
     for job in leased {
         if job.category == "system" {
+            continue;
+        }
+        if job.node_id == "local" && foreign.contains(&(job.id.clone(), job.attempt)) {
             continue;
         }
         if crate::automation::task_link(&auth.store, &job.id)
@@ -695,6 +745,9 @@ pub async fn dispatch_once(
     )
     .execute(&auth.store.pool)
     .await?;
+    if jobs.is_draining() {
+        return Ok(());
+    }
     let nodes: Vec<String> = crate::database::query_scalar("SELECT DISTINCT node_id FROM durable_tasks WHERE status='queued' AND lease_until IS NULL AND available_at<=? LIMIT 100")
         .bind(timestamp).fetch_all(&auth.store.pool).await?;
     let mut ready = Vec::with_capacity(nodes.len());

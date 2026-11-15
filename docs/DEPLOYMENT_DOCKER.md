@@ -162,6 +162,7 @@ L'endpoint interne `/api/v1/health` est volontairement placé en amont du middle
 | `MEDIA_TRANSCODE_MAX_SESSIONS` | `2` | Transcodages simultanés (1 à 16) ; au-delà, `transcode_capacity_reached` |
 | `MEDIA_DLNA_API_KEY` | absente | Active le serveur DLNA/UPnP pour les vieilles TV et consoles : une clé d'API `catalog:read` (Administration › Clés d'API). Le réseau voit exactement ce que la clé peut lire ; la révoquer coupe le DLNA immédiatement |
 | `MEDIA_DLNA_NAME` | `Aether` | Nom affiché par les TV pour le serveur DLNA |
+| `MEDIA_SHUTDOWN_DRAIN_SECONDS` | `0` | Secondes (0 à 120) pendant lesquelles le Core continue de servir après le signal d'arrêt en répondant 503 sur `/internal/v1/ready`, pour qu'un répartiteur de charge le retire avant la fermeture du port (voir § 7). Garder `stop_grace_period` supérieur à cette durée |
 
 **DLNA/UPnP.** Les TV découvrent le serveur par SSDP (UDP 1900, multicast `239.255.255.250`) : le conteneur doit être en `network_mode: host` (le multicast ne traverse pas le pont Docker) et le port 1900/UDP ouvert sur le pare-feu de l'hôte. Seules les adresses privées, de bouclage et de lien local sont servies ; les fichiers sont lus en lecture directe (pas de transcodage), la TV doit donc décoder le format d'origine.
 
@@ -246,6 +247,30 @@ docker compose down
 - Les tâches de scan en cours sont annulées proprement.
 - Les connexions SQLite sont vidées et le journal WAL est synchronisé.
 - Au redémarrage (`docker compose up -d`), les scans interrompus sont automatiquement marqués en état `error` avec le libellé `"Scan interrompu par un redémarrage"` et l'inventaire existant est intégralement préservé.
+
+### Sondes de vie et de disponibilité (répartiteur de charge)
+
+- `GET /api/v1/health` et `GET /internal/v1/health` sont des sondes de **vie** : 200 tant que le
+  processus répond. C'est ce qu'utilise le `HEALTHCHECK` Docker ; ne pas s'en servir pour router.
+- `GET /internal/v1/ready` est la sonde de **disponibilité** destinée à un répartiteur de charge
+  (HAProxy, Traefik, nginx…). Elle répond `200 {"ready":true,"mode":…}` seulement si la base
+  répond à `SELECT 1` en moins de 2 s et si le processus n'est pas en cours d'arrêt ; sinon
+  `503 {"ready":false,"mode":…,"reason":"database"|"draining"}`. Elle ne demande pas
+  d'authentification et n'expose aucun détail d'erreur.
+- **Drainage** : dès le signal d'arrêt (`SIGINT`, envoyé par `tini`), la sonde passe à 503
+  (`draining`) pendant que les requêtes en cours se terminent, et le Core ne réclame plus de
+  nouvelle tâche (celles en cours continuent). Avec
+  `MEDIA_SHUTDOWN_DRAIN_SECONDS`, le Core attend ce délai avant de fermer son port, ce qui laisse
+  au répartiteur le temps d'observer le 503 (choisir un délai supérieur à l'intervalle de sonde
+  multiplié par le seuil d'échec) ; `stop_grace_period` doit couvrir ce délai plus l'arrêt des
+  tâches. À l'arrêt propre, le Core retire aussi sa ligne de `core_instances` : les autres Core
+  partageant la même base PostgreSQL reprennent ses tâches locales sans attendre l'expiration de
+  son battement (45 s).
+
+> Plusieurs Core derrière un même répartiteur sur une base PostgreSQL commune restent
+> **expérimentaux** et ne sont pas prêts pour la production (voir `docs/MULTI_CORE_ROADMAP.md`) ;
+> un second Core sur SQLite n'est pas pris en charge. La sonde de disponibilité est aussi utile avec
+> un seul Core, par exemple pour un basculement actif/passif ou une mise à jour progressive.
 
 ### Sauvegarde et restauration fiables (SQLite WAL & Docker)
 

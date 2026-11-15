@@ -1777,3 +1777,13 @@ WHEN NEW.available = 1 BEGIN
         WHERE s.id = NEW.source_id
     ) AND +has_available_asset = 0;
 END;
+-- Schema v4 (database.rs MIGRATIONS, 0004_core_instances): Core processes sharing the database
+-- (multi-Core) and the Core owning each durable lease (NULL = no owner, or taken before v4).
+CREATE TABLE core_instances (
+ id TEXT PRIMARY KEY NOT NULL,
+ started_at BIGINT NOT NULL,
+ heartbeat_at BIGINT NOT NULL,
+ hostname TEXT NOT NULL DEFAULT '',
+ version TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE durable_tasks ADD COLUMN lease_owner TEXT;

@@ -25,6 +25,7 @@ pub mod automation_http;
 pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
+pub mod core_instances;
 pub mod database;
 pub mod dlna;
 pub mod extensions;
@@ -221,6 +222,10 @@ async fn secure_app_with_jobs_and_web_dist(
     let origin = auth.origin().to_owned();
     let allowed_origins = auth.allowed_origins().to_vec();
     let store_for_csp = auth.store.clone();
+    let readiness = Readiness {
+        store: auth.store.clone(),
+        jobs: jobs.clone(),
+    };
     let replay_window = Arc::new(media_contracts::protocol::ReplayWindow::new());
     let media = media_routes(inventory)
         .route(
@@ -324,7 +329,7 @@ async fn secure_app_with_jobs_and_web_dist(
         Some(store_for_csp),
         allowed_origins,
     );
-    Ok(health_routes(mode)
+    Ok(health_routes(mode, Some(readiness))
         .merge(protected)
         .layer(middleware::from_fn(server_log::trace_requests)))
 }
@@ -545,7 +550,7 @@ async fn indexed_asset_details(
 /// The production binary never selects this constructor.
 #[cfg(feature = "fixture-bench")]
 pub fn app(inventory: node::Inventory, port: u16) -> Router {
-    health_routes("localhost-fixtures").merge(local_security(
+    health_routes("localhost-fixtures", None).merge(local_security(
         public_routes("localhost-fixtures", configured_web_dist()).merge(media_routes(inventory)),
         format!("http://127.0.0.1:{port}"),
     ))
@@ -567,7 +572,41 @@ pub fn configured_web_dist() -> std::path::PathBuf {
     configured_web_dist_from(std::env::var("MEDIA_WEB_DIST").ok().as_deref())
 }
 
-fn health_routes(mode: &'static str) -> Router {
+/// What `/internal/v1/ready` checks: the database answers and the process is not draining.
+#[derive(Clone)]
+struct Readiness {
+    store: identity::IdentityStore,
+    jobs: Arc<scans::ScanJobs>,
+}
+
+/// Longest database round-trip a readiness probe waits for.
+const READY_DATABASE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Readiness for load balancers (liveness stays `/api/v1/health`): 503 while the process drains
+/// before shutdown or when the database does not answer `SELECT 1` within two seconds.
+async fn ready(mode: &'static str, readiness: Option<Readiness>) -> Response {
+    let reason = match readiness {
+        None => None,
+        Some(readiness) if readiness.jobs.is_draining() => Some("draining"),
+        Some(readiness) => {
+            let probe = sqlx::query("SELECT 1").fetch_one(readiness.store.pool());
+            match tokio::time::timeout(READY_DATABASE_TIMEOUT, probe).await {
+                Ok(Ok(_)) => None,
+                _ => Some("database"),
+            }
+        }
+    };
+    match reason {
+        None => Json(serde_json::json!({"ready": true, "mode": mode})).into_response(),
+        Some(reason) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"ready": false, "mode": mode, "reason": reason})),
+        )
+            .into_response(),
+    }
+}
+
+fn health_routes(mode: &'static str, readiness: Option<Readiness>) -> Router {
     Router::new()
         .route(
             "/api/v1/health",
@@ -592,7 +631,7 @@ fn health_routes(mode: &'static str) -> Router {
         )
         .route(
             "/internal/v1/ready",
-            get(move || async move { Json(serde_json::json!({"ready":true, "mode":mode})) }),
+            get(move || ready(mode, readiness.clone())),
         )
         .layer(SetResponseHeaderLayer::overriding(
             header::X_CONTENT_TYPE_OPTIONS,

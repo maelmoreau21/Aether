@@ -32,11 +32,11 @@ Core. Cette base n'est pas à refaire.
 | `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | chaque Core ne voit que les battements qu'il reçoit : la sélection de source et le failover divergent | §4.1 |
 | `ReplayWindow` (nonces) | `shared/protocol.rs` | un message signé rejoué sur l'autre Core passe la fenêtre anti-rejeu | §4.3 |
 | `EFFECT_GATE`, `WAKE` | `task_engine.rs` | exclusion mutuelle des effets limitée au processus | §3 |
-| Nettoyage au démarrage de `scans::router` | `scans.rs` | un Core qui démarre efface `scan_batch_receipts`, `active_scan_runs`, `active_task_runs`, `scan_staging_*` **de tous**, donc le travail en vol de l'autre Core | §3.3 |
+| Nettoyage au démarrage de `scans::router` | `scans.rs`, `core_instances.rs` | levé (schéma v4) : le nettoyage ne touche plus que le travail sans bail vivant ; voir §3.3 | §3.3 |
 | `CATALOGUE_CACHE` | `inventory/catalogue/cache.rs` | cache périmé après une écriture sur l'autre Core | §4.2 |
 | Cache de sessions / `touch` | `auth/state.rs`, `auth/touch.rs` | une révocation n'est vue qu'après expiration du cache de l'autre Core | §4.4 |
 | `MUTATIONS`, paquets d'extension locaux, `AssetStore` | `extensions/`, `assets.rs` | installations non sérialisées, fichiers locaux | §4.5 |
-| Tâches système et sauvegardes planifiées | `system_tasks.rs`, `admin_backups.rs` | deux Core lanceraient la même tâche | §3.4 |
+| Tâches système et sauvegardes planifiées | `system_task_queue.rs`, `admin_backups.rs`, `task_scheduler.rs` | levé : file et bail en base sous verrous consultatifs PostgreSQL ; voir §3.2 (point 4) | §3.2 |
 
 ## 2. Propriété durable des canaux de Node
 
@@ -128,6 +128,33 @@ c'est à étendre aux effets listés ci-dessous.
 4. **Sauvegardes et tâches système planifiées** : passer par `durable_tasks` (bail) au lieu d'un
    `Mutex`/`Semaphore` local.
 
+   **Réalisé (étape 2)** :
+
+   - mise en file (`system_task_queue::enqueue_*`) sous verrou transactionnel par tâche
+     (`begin_write_scoped`, portée `system-task-enqueue`) : « exécution active ? clé de requête
+     déjà vue ? sinon insertion » est atomique entre Core ; une violation d'unicité
+     `(owner, idempotency_key)` renvoie la ligne existante. La file indique si une ligne a été
+     insérée (`trigger_backup` et `task_scheduler::admit` n'ont plus de pré-contrôle non verrouillé) ;
+   - réclamation (`claim`) sous un verrou transactionnel global (`system-task-claim`) : jamais deux
+     baux de tâche système à la fois, même sur deux Core. C'est le seul point d'exclusion : le
+     `Mutex` par exécution de `system_tasks.rs`, qui n'excluait rien, est supprimé ;
+   - sauvegardes : une exclusion commune à la création manuelle (`POST /api/v1/admin/backups`,
+     409 `backup_already_running` si occupée) et aux exécutions planifiées (différées de 30 s sans consommer de tentative, `deferred_busy`) :
+     sémaphore par base ouverte (partagé, alors qu'il était recréé à chaque exécution planifiée)
+     plus, sur PostgreSQL, un verrou consultatif de session sur une connexion dédiée, libéré
+     explicitement ou par fermeture de la connexion. Les écritures `running` et finale de
+     `backup_schedule` sont fencées par tentative et bail vivant. Le drapeau `running` de la liste
+     vient de la base (exécution planifiée sous bail) ou de la sauvegarde en cours dans ce
+     processus : une sauvegarde manuelle lancée sur un autre Core n'y apparaît pas ;
+   - `task_scheduler::fire_due` : sur PostgreSQL, un seul Core exécute une passe à la fois (verrou
+     de session `pg_try_advisory_lock`, passe sautée sinon). Les déclencheurs « démarrage » restent
+     propres à chaque Core ; leurs doublons sont absorbés par le verrou de mise en file.
+
+   Preuve actuelle : tests unitaires SQLite et deux tests PostgreSQL (`#[ignore]`) avec deux stores
+   sur un même schéma, dans un seul processus (mises en file et réclamations concurrentes,
+   sauvegarde occupée sur l'autre Core). La preuve de sortie de l'étape 2 (§6, deux processus,
+   1 000 échéances) reste à écrire.
+
 ### 3.3 Démarrage d'un second Core
 
 Le nettoyage de démarrage de `scans::router` doit cesser d'être global. Remplacer par :
@@ -135,6 +162,47 @@ Le nettoyage de démarrage de `scans::router` doit cesser d'être global. Rempla
 Tant que ce n'est pas fait, démarrer un second Core détruit le travail en vol du premier. C'est
 le premier bloqueur à lever, et il est testable seul (deux Core, un scan en cours, démarrage du
 second).
+
+**Réalisé (schéma v4, migration `0004_core_instances`)** :
+
+- chaque ouverture de base (`IdentityStore`) est une instance de Core identifiée par un UUID
+  aléatoire ; elle s'inscrit dans `core_instances` au montage des routes et rafraîchit
+  `heartbeat_at` toutes les 10 s (boucle dédiée du `Scheduler`). Un Core silencieux depuis
+  45 s (`HEARTBEAT_STALE_SECONDS`) est réputé mort ; les lignes silencieuses depuis 24 h sont
+  supprimées ;
+- `durable_tasks.lease_owner` enregistre le Core qui a pris le bail (`NULL` : aucun, ou bail
+  antérieur à la v4) et est effacé avec le bail. Un bail local (`node_id='local'`) ne se
+  renouvelle que par son propriétaire (ou sans propriétaire) ; le répartiteur d'un Core ne
+  renouvelle, ne termine ni n'annule le travail local d'un autre Core ;
+- `core_instances::reclaim_orphans` remplace le nettoyage global, au démarrage puis toutes les
+  60 s : expiration des baux locaux qui ne peuvent plus être honorés (SQLite, mono-Core : tous au
+  démarrage ; PostgreSQL : ceux d'un autre Core mort ou inconnu, jamais ceux sans propriétaire),
+  remise en file avec fencing par tentative, puis `scan_jobs` en erreur (« Scan interrompu par un
+  redémarrage ») seulement sans tâche de scan sous bail, suppression des `active_scan_runs`,
+  `active_task_runs` et des lignes de staging dont `id:tentative` ne correspond à aucun bail ;
+- les écritures de démarrage `scheduled_scans` (`dispatching`) et `backup_schedule` (`running`)
+  ne marquent plus « interrompu » un travail encore sous bail ;
+- les verrous d'exécution (`active_scan_runs`, `active_task_runs`) sont lus **avant** les baux puis
+  supprimés par paire exacte (bibliothèque, `id:tentative`) : un verrou réécrit entre-temps pour un
+  scan qui vient d'être réclamé n'est jamais effacé par une passe périodique ;
+- le battement n'est écrit qu'en PostgreSQL (SQLite, mono-Core, ne s'inscrit qu'au démarrage : pas
+  d'écriture toutes les 10 s qui empêcherait la mise en veille d'un disque de NAS) ;
+- pendant le drainage d'arrêt (`MEDIA_SHUTDOWN_DRAIN_SECONDS`), le Core ne réclame plus de
+  nouvelle tâche ; ses baux en cours continuent d'être renouvelés et terminés ;
+- en PostgreSQL, le pool compte au moins 4 connexions (`MEDIA_DB_MAX_CONNECTIONS` plus petit est
+  relevé) : une passe de planification ou une sauvegarde tient une connexion pour son verrou de
+  session pendant que ses requêtes en prennent d'autres.
+
+**Prérequis d'exploitation : horloges synchronisées (NTP).** Baux et battements sont des
+horodatages Unix écrits avec l'horloge de chaque Core. Un écart de plus de quelques secondes
+entre machines fait expirer trop tôt les baux d'un Core en avance ou en retard ; au-delà de 45 s,
+un Core vivant est jugé mort et son travail local repris. Cette limite est commune à tous les baux
+existants (`durable_tasks`, `extension_run_owners`) ; passer à l'horloge de PostgreSQL est une
+évolution à mesurer, pas une correction de ce lot.
+
+Preuve actuelle : tests unitaires SQLite et un test PostgreSQL (`#[ignore]`) avec deux stores sur
+un même schéma, dans un seul processus. Le test d'intégration à deux processus de l'étape 1 (§6)
+reste à écrire.
 
 ### 3.4 Réveil
 

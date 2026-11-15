@@ -1,11 +1,15 @@
 //! Integration tests for healthcheck probe resilience when MEDIA_PUBLIC_URL is configured
 //! to an external origin (e.g. reverse proxy / Synology NAS domain).
-use aether_core::{auth::AuthState, identity::IdentityStore, node::Inventory, secure_app};
+use aether_core::{
+    auth::AuthState, identity::IdentityStore, node::Inventory, scans::ScanJobs, secure_app,
+    secure_app_with_jobs,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
 use http_body_util::BodyExt;
+use std::sync::Arc;
 use tower::ServiceExt;
 use zeroize::Zeroizing;
 
@@ -138,4 +142,72 @@ async fn healthcheck_resilient_under_external_public_url_while_protected_routes_
     assert_eq!(res.status(), StatusCode::OK);
 
     store.close().await;
+}
+
+async fn ready(router: &axum::Router) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .uri("/internal/v1/ready")
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
+        .unwrap();
+    let res = router.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    assert_eq!(
+        res.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test]
+async fn readiness_reports_draining_and_an_unreachable_database_while_health_stays_live() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("ready.sqlite3"))
+        .await
+        .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let media_dir = temp.path().join("media");
+    std::fs::create_dir_all(&media_dir).unwrap();
+    let inventory = Inventory::local(media_dir).await.unwrap();
+    let jobs = Arc::new(ScanJobs::default());
+    let router = secure_app_with_jobs(inventory, 3000, auth, jobs.clone())
+        .await
+        .unwrap();
+
+    let (status, body) = ready(&router).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body,
+        serde_json::json!({"ready": true, "mode": "standalone-local"})
+    );
+
+    // Database gone (pool closed): not ready, while liveness stays unchanged.
+    store.close().await;
+    let (status, body) = ready(&router).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body,
+        serde_json::json!({"ready": false, "mode": "standalone-local", "reason": "database"})
+    );
+    let req = Request::builder()
+        .uri("/api/v1/health")
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        router.clone().oneshot(req).await.unwrap().status(),
+        StatusCode::OK
+    );
+
+    // Shutdown began: load balancers must stop routing new requests here.
+    jobs.begin_draining();
+    let (status, body) = ready(&router).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        body,
+        serde_json::json!({"ready": false, "mode": "standalone-local", "reason": "draining"})
+    );
 }

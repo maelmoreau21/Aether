@@ -87,12 +87,24 @@ pub struct IdentityStore {
     /// Identity of the opened database, shared by every clone and never reused in this
     /// process. Process-wide caches key on it; a clone's address changes per request.
     pub(crate) cache_scope: u64,
+    /// Random identity of this Core process (multi-Core): generated each time a database is
+    /// opened, so two stores in one process behave as two Cores. Owns durable leases.
+    pub(crate) instance_id: std::sync::Arc<str>,
+    /// Whether the opened database is PostgreSQL (the only engine shared by several Cores).
+    pub(crate) postgres: bool,
+    /// One backup at a time per opened database, shared by manual and scheduled backups of every
+    /// clone. Across Cores (PostgreSQL) a session advisory lock adds the same exclusion.
+    pub(crate) backup_gate: std::sync::Arc<tokio::sync::Semaphore>,
 }
 
 static NEXT_CACHE_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 fn next_cache_scope() -> u64 {
     NEXT_CACHE_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+fn new_instance_id() -> std::sync::Arc<str> {
+    uuid::Uuid::new_v4().to_string().into()
 }
 
 static ACTIVE_STORE: std::sync::RwLock<Option<IdentityStore>> = std::sync::RwLock::new(None);
@@ -152,6 +164,8 @@ fn open_assets(
     )))
 }
 
+const MIN_POSTGRES_CONNECTIONS: u32 = 4;
+
 fn configure_pool_options(is_sqlite: bool) -> Result<AnyPoolOptions, IdentityError> {
     let default_max = if is_sqlite { 8 } else { 16 };
     let default_min = if is_sqlite { 1 } else { 2 };
@@ -166,6 +180,15 @@ fn configure_pool_options(is_sqlite: bool) -> Result<AnyPoolOptions, IdentityErr
         },
         Err(std::env::VarError::NotPresent) => default_max,
         Err(_) => return Err(IdentityError::Configuration),
+    };
+
+    // PostgreSQL passes hold one connection for a session advisory lock (scheduling pass,
+    // backup) while their statements acquire others: below this floor they would wait on
+    // themselves until the acquire timeout. Clamp rather than refuse an existing configuration.
+    let max = if is_sqlite {
+        max
+    } else {
+        max.max(MIN_POSTGRES_CONNECTIONS)
     };
 
     let min = match std::env::var("MEDIA_DB_MIN_CONNECTIONS")
@@ -218,6 +241,14 @@ impl IdentityStore {
     pub fn plugins_path(&self) -> &Path {
         &self.plugins_path
     }
+    /// Identity of this Core process in `core_instances` and `durable_tasks.lease_owner`.
+    pub fn instance_id(&self) -> &str {
+        &self.instance_id
+    }
+    /// Whether this store runs on PostgreSQL (several Cores may then share the database).
+    pub fn is_postgres(&self) -> bool {
+        self.postgres
+    }
     /// Explicit external PostgreSQL connection; never transfers SQLite data.
     pub async fn open_postgres(url: &str) -> Result<Self, IdentityError> {
         sqlx::any::install_default_drivers();
@@ -250,6 +281,9 @@ impl IdentityStore {
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
             cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
             cache_scope: next_cache_scope(),
+            instance_id: new_instance_id(),
+            postgres: true,
+            backup_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
         register_active_store(&store);
         Ok(store)
@@ -388,6 +422,9 @@ impl IdentityStore {
             node_registry: std::sync::Arc::new(crate::nodes::NodeRuntimeRegistry::new()),
             cors_origins: std::sync::Arc::new(std::sync::RwLock::new(Vec::new())),
             cache_scope: next_cache_scope(),
+            instance_id: new_instance_id(),
+            postgres: false,
+            backup_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
         };
         register_active_store(&store);
         Ok(store)

@@ -49,6 +49,14 @@ fn non_empty_env(name: &str) -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
+/// Seconds the Core keeps answering (readiness 503) after the stop signal before it stops
+/// accepting connections; `MEDIA_SHUTDOWN_DRAIN_SECONDS`, 0 by default, at most 120.
+fn shutdown_drain_seconds(raw: Option<String>) -> u64 {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .unwrap_or(0)
+        .min(120)
+}
+
 enum LibrarySource {
     Local(PathBuf),
     Fixture(PathBuf),
@@ -172,6 +180,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         None => app,
     };
     let scheduler = aether_core::scheduler::Scheduler::start(auth, scheduler_root, jobs);
+    let shutdown_database = database.clone();
     axum::serve(
         listener,
         app.layer(axum::middleware::from_fn(
@@ -181,8 +190,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     )
     .with_graceful_shutdown(async move {
         let _ = tokio::signal::ctrl_c().await;
+        // The listener keeps accepting until this future ends: `/internal/v1/ready` answers 503
+        // first, so a load balancer stops routing here while in-flight requests finish.
+        shutdown_jobs.begin_draining();
+        let drain = shutdown_drain_seconds(std::env::var("MEDIA_SHUTDOWN_DRAIN_SECONDS").ok());
+        if drain > 0 {
+            eprintln!("Shutdown: draining for {drain} s before stopping");
+            tokio::time::sleep(std::time::Duration::from_secs(drain)).await;
+        }
         drop(scheduler);
         shutdown_jobs.shutdown().await;
+        // The heartbeat loop stopped with the scheduler: tell the other Cores right away.
+        if let Err(error) = aether_core::core_instances::deregister(&shutdown_database).await {
+            eprintln!("Core deregistration failed ({error}); peers will see a stale heartbeat");
+        }
     })
     .await?;
     database.close().await;
@@ -207,6 +228,16 @@ mod tests {
             parse_bind_addr_from(Ok("   \t  ".into())).unwrap(),
             Ipv4Addr::LOCALHOST
         );
+    }
+
+    #[test]
+    fn shutdown_drain_defaults_to_zero_and_is_bounded() {
+        assert_eq!(shutdown_drain_seconds(None), 0);
+        assert_eq!(shutdown_drain_seconds(Some("  ".into())), 0);
+        assert_eq!(shutdown_drain_seconds(Some("abc".into())), 0);
+        assert_eq!(shutdown_drain_seconds(Some("-5".into())), 0);
+        assert_eq!(shutdown_drain_seconds(Some(" 15 ".into())), 15);
+        assert_eq!(shutdown_drain_seconds(Some("3600".into())), 120);
     }
 
     #[test]

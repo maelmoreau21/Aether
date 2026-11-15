@@ -3258,3 +3258,13 @@ CREATE TABLE auth_challenges (
  expires_at BIGINT NOT NULL
 );
 CREATE INDEX auth_challenges_expiry ON auth_challenges(expires_at);
+-- Schema v4 (database.rs MIGRATIONS, 0004_core_instances): Core processes sharing the database
+-- (multi-Core) and the Core owning each durable lease (NULL = no owner, or taken before v4).
+CREATE TABLE core_instances (
+ id TEXT PRIMARY KEY NOT NULL,
+ started_at BIGINT NOT NULL,
+ heartbeat_at BIGINT NOT NULL,
+ hostname TEXT NOT NULL DEFAULT '',
+ version TEXT NOT NULL DEFAULT ''
+);
+ALTER TABLE durable_tasks ADD COLUMN lease_owner TEXT;

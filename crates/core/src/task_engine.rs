@@ -471,6 +471,23 @@ pub async fn leased(store: &IdentityStore, limit: i64) -> Result<Vec<Job>, sqlx:
         .await
 }
 
+/// Local leases (`node_id='local'`) currently held by another Core sharing the database, as
+/// `(id, attempt)`. Their executors run in that process: this Core must neither renew, finish
+/// nor cancel them. Leases without an owner (taken before schema v4) are not listed.
+pub(crate) async fn foreign_local_leases(
+    store: &IdentityStore,
+) -> Result<std::collections::HashSet<(String, i64)>, sqlx::Error> {
+    Ok(query_as::<sqlx::Any, (String, i64)>(
+        "SELECT id,attempt FROM durable_tasks WHERE node_id='local' AND lease_until IS NOT NULL \
+            AND lease_owner IS NOT NULL AND lease_owner<>?",
+    )
+    .bind(store.instance_id())
+    .fetch_all(store.pool())
+    .await?
+    .into_iter()
+    .collect())
+}
+
 /// Serialized admission prevents overbooking even under concurrent claimers.
 pub async fn claim(
     store: &IdentityStore,
@@ -487,7 +504,15 @@ pub async fn claim(
     let _writer = store.task_writes.lock().await;
     let mut conn = store.pool().acquire().await?;
     let mut tx = begin_write_serialized(&mut conn, TASK_ADMISSION_LOCK).await?;
-    let job = claim_in_transaction(&mut tx, node_id, now, lease_seconds, node_limit).await?;
+    let job = claim_in_transaction(
+        &mut tx,
+        node_id,
+        store.instance_id(),
+        now,
+        lease_seconds,
+        node_limit,
+    )
+    .await?;
     crate::database::commit(tx).await?;
     Ok(job)
 }
@@ -547,7 +572,7 @@ pub async fn claim_batch(
             WHERE NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=ready.node_id \
             AND busy.lease_until IS NOT NULL AND (busy.category<>'system' \
             OR busy.target_id IN ('optimize-database','backup')))) UPDATE durable_tasks \
-            SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,\
+            SET status='running',attempt=attempt+1,lease_until=?,lease_owner=?,updated_at=?,\
             started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',\
             processed_items=0,progress=0 WHERE id IN (SELECT id \
             FROM candidates \
@@ -567,6 +592,7 @@ pub async fn claim_batch(
     }
     let claimed = mutation
         .bind(now.saturating_add(lease_seconds))
+        .bind(store.instance_id())
         .bind(now)
         .bind(now)
         .fetch_all(&mut *tx)
@@ -579,6 +605,7 @@ pub async fn claim_batch(
 async fn claim_in_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     node_id: &str,
+    owner: &str,
     now: i64,
     lease_seconds: i64,
     node_limit: i64,
@@ -619,8 +646,8 @@ async fn claim_in_transaction(
     let id: Option<String> = candidate.fetch_optional(&mut **tx).await?;
     let Some(id) = id else { return Ok(None) };
     query("UPDATE durable_tasks \
-            SET status='running',attempt=attempt+1,lease_until=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 \
-            WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(now).bind(now).bind(&id).execute(&mut **tx).await?;
+            SET status='running',attempt=attempt+1,lease_until=?,lease_owner=?,updated_at=?,started_at=COALESCE(started_at,?),finished_at=NULL,error='',result_json='{}',processed_items=0,progress=0 \
+            WHERE id=? AND status='queued'").bind(now.saturating_add(lease_seconds)).bind(owner).bind(now).bind(now).bind(&id).execute(&mut **tx).await?;
     let job = query_as("SELECT id,COALESCE(library_id,'') AS library_id,owner,COALESCE(node_id,'') AS \
             node_id,category,target_id,component,width,result_json,refresh_mode,status,priority,attempt,failure_count,max_attempts,progress,processed_items,created_at,updated_at,started_at,finished_at,lease_until,error \
             FROM durable_tasks \
@@ -688,7 +715,7 @@ async fn filter_automation_claims(
             || extension_active > extension_limit
             || library_active > 1
         {
-            query("UPDATE durable_tasks SET status='queued',attempt=attempt-1,lease_until=NULL,available_at=?,started_at=NULL WHERE id=?")
+            query("UPDATE durable_tasks SET status='queued',attempt=attempt-1,lease_until=NULL,lease_owner=NULL,available_at=?,started_at=NULL WHERE id=?")
                 .bind(next.max(now.saturating_add(1))).bind(&job.id).execute(&mut **tx).await?;
             continue;
         }
@@ -718,7 +745,8 @@ pub async fn renew(
     Ok(query(
         "UPDATE durable_tasks \
             SET lease_until=?,updated_at=?,progress=CASE WHEN progress>? THEN progress ELSE ? END \
-            WHERE id=? AND attempt=? AND node_id=? AND status='running' AND lease_until>?",
+            WHERE id=? AND attempt=? AND node_id=? AND status='running' AND lease_until>? \
+            AND (node_id<>'local' OR lease_owner IS NULL OR lease_owner=?)",
     )
     .bind(now.saturating_add(lease_seconds))
     .bind(now)
@@ -728,6 +756,7 @@ pub async fn renew(
     .bind(attempt)
     .bind(node_id)
     .bind(now)
+    .bind(store.instance_id())
     .execute(store.pool())
     .await?
     .rows_affected()
@@ -745,11 +774,14 @@ pub async fn finish(
 ) -> Result<bool, sqlx::Error> {
     let error = error.unwrap_or("");
     let error: String = error.chars().take(1024).collect();
-    let failed = i64::from(!error.is_empty() && error != "playback_preempted");
+    let failed =
+        i64::from(!error.is_empty() && error != "playback_preempted" && error != DEFERRED_BUSY);
     // A missing or rejected credential fails the same way until an administrator
     // edits the extension settings: retrying only repeats the request and the wait.
     let exhausted = i64::from(failed == 1 && permanent_error(&error));
-    let delay = if failed == 0 {
+    let delay = if error == DEFERRED_BUSY {
+        DEFERRED_BUSY_SECONDS
+    } else if failed == 0 {
         1
     } else if error == crate::extensions::UNIDENTIFIED_ERROR {
         // Unidentified media is left as-is and retried much later (1 h, then
@@ -773,7 +805,7 @@ pub async fn finish(
             THEN 'completed' WHEN failure_count+? >= max_attempts OR ?=1 THEN 'error' \
             ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN ? \
             ELSE 0 END,progress=CASE WHEN status='running' AND ?='' THEN 100 \
-            ELSE progress END,lease_until=NULL,updated_at=?,finished_at=CASE \
+            ELSE progress END,lease_until=NULL,lease_owner=NULL,updated_at=?,finished_at=CASE \
             WHEN status='cancelled' OR (status='running' AND (?='' \
             OR failure_count+? >= max_attempts OR ?=1)) THEN ? ELSE NULL END,available_at=CASE \
             WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? \
@@ -808,6 +840,12 @@ pub async fn finish(
 }
 
 /// Extension failures no retry can fix: the configuration must change first.
+/// Finish error of a run that could not start because an exclusive resource is busy (another
+/// backup holds the shared backup exclusion, possibly on another Core). The task is requeued
+/// after [`DEFERRED_BUSY_SECONDS`] without spending one of its attempts.
+pub const DEFERRED_BUSY: &str = "deferred_busy";
+const DEFERRED_BUSY_SECONDS: i64 = 30;
+
 fn permanent_error(error: &str) -> bool {
     matches!(
         error,
@@ -831,7 +869,7 @@ pub async fn recover_expired(store: &IdentityStore, now: i64) -> Result<u64, sql
             SET status=CASE WHEN status IN ('paused','cancelled') THEN status \
             WHEN failure_count+1>=max_attempts THEN 'error' \
             ELSE 'queued' END,failure_count=failure_count+CASE WHEN status='running' THEN 1 \
-            ELSE 0 END,lease_until=NULL,updated_at=?,available_at=?,finished_at=CASE \
+            ELSE 0 END,lease_until=NULL,lease_owner=NULL,updated_at=?,available_at=?,finished_at=CASE \
             WHEN (status='running' AND failure_count+1>=max_attempts) OR status='cancelled' THEN ? \
             ELSE NULL END,error='Worker lease expired; retry fenced' \
             WHERE lease_until<=?",
@@ -1222,5 +1260,44 @@ mod pipeline_tests {
         assert_eq!(next(&store).await.as_deref(), Some("preview"));
         release(&store, "preview", "completed").await;
         assert_eq!(next(&store).await.as_deref(), Some("intro"));
+    }
+
+    #[tokio::test]
+    async fn a_busy_exclusion_defers_without_spending_an_attempt() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
+            .execute(store.pool()).await.unwrap();
+        task(&store, "busy", "analyze", "", 10).await;
+        let mut failures = Vec::new();
+        for round in 0..5_i64 {
+            let now = 1_000 + round * 100;
+            let job = claim(&store, "local", now, 60, 1).await.unwrap().unwrap();
+            assert!(
+                finish(
+                    &store,
+                    &job.id,
+                    job.attempt,
+                    "local",
+                    now,
+                    Some(DEFERRED_BUSY)
+                )
+                .await
+                .unwrap()
+            );
+            let (status, failure_count, available_at): (String, i64, i64) = query_as(
+                "SELECT status,failure_count,available_at FROM durable_tasks WHERE id='busy'",
+            )
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            failures.push(failure_count);
+            // More deferrals than max_attempts, yet always requeued, never failed.
+            assert_eq!(status, "queued");
+            assert_eq!(available_at, now + DEFERRED_BUSY_SECONDS);
+        }
+        assert_eq!(failures, [0; 5]);
     }
 }

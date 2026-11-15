@@ -104,14 +104,15 @@ pub(crate) async fn admit(
             if known == 0 {
                 return Ok(Admission::Unavailable);
             }
-            let active: i64 = query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id=? AND status IN ('queued','running','paused')")
-                .bind(id).fetch_one(pool).await?;
-            if active > 0 {
-                return Ok(Admission::AlreadyActive);
-            }
-            crate::system_task_queue::enqueue(&auth.store, id, key, now, max_runtime_seconds)
-                .await?;
-            Ok(Admission::Queued)
+            // The enqueue lock decides atomically (across Cores too) whether a run is active.
+            let (_, inserted) =
+                crate::system_task_queue::enqueue(&auth.store, id, key, now, max_runtime_seconds)
+                    .await?;
+            Ok(if inserted {
+                Admission::Queued
+            } else {
+                Admission::AlreadyActive
+            })
         }
         TaskRef::Backup => {
             if crate::admin_backups::trigger_backup(&auth.store, key, now, max_runtime_seconds)
@@ -172,8 +173,27 @@ fn fire_key(task: &TaskRef, instant: i64) -> String {
 /// Most due triggers handled in one pass; the rest wait for the next pass (seconds later).
 const FIRE_BATCH: i64 = 64;
 
+/// Session advisory lock taken by the Core running a scheduling pass (PostgreSQL).
+const FIRE_LOCK: &str = "task-scheduler:fire-due";
+
 /// One scheduling pass. Returns the number of runs queued.
+///
+/// On PostgreSQL several Cores share the triggers: one pass runs at a time across them, the
+/// others skip theirs (the next pass comes seconds later). Without the lock the trigger CAS in
+/// [`advance`] and the enqueue locks would still prevent duplicates, at the cost of wasted work.
 pub async fn fire_due(auth: &AuthState, now: i64) -> Result<usize, sqlx::Error> {
+    if !auth.store.is_postgres() {
+        return fire_due_exclusive(auth, now).await;
+    }
+    let Some(lock) = crate::database::try_session_lock(auth.store.pool(), FIRE_LOCK).await? else {
+        return Ok(0);
+    };
+    let fired = fire_due_exclusive(auth, now).await;
+    lock.release().await;
+    fired
+}
+
+async fn fire_due_exclusive(auth: &AuthState, now: i64) -> Result<usize, sqlx::Error> {
     repair(&auth.store, now).await?;
     let due: Vec<TriggerRow> = query_as("SELECT id,task_kind,task_id,trigger_type,time_of_day_minutes,day_of_week,interval_minutes,max_runtime_seconds,enabled,next_fire_at,created_at \
             FROM task_triggers \
@@ -381,6 +401,11 @@ pub(crate) async fn adopt_legacy_system_tasks(
 }
 
 /// Queue, once per process start, every task carrying an enabled "server startup" trigger.
+///
+/// Per-Core semantics: every Core that starts fires its startup triggers. When several Cores
+/// share a database, their firings are absorbed by the enqueue lock of each task: while a run of
+/// the task is queued or running, a second start adds no row (`Admission::AlreadyActive`); two
+/// starts within the same second also share the request key `startup:<now>`.
 pub async fn fire_startup(auth: &AuthState, now: i64) -> Result<usize, sqlx::Error> {
     let rows: Vec<(String, String, Option<i64>)> = query_as("SELECT task_kind,task_id,MAX(max_runtime_seconds) FROM task_triggers WHERE trigger_type='startup' AND enabled=1 GROUP BY task_kind,task_id ORDER BY task_kind,task_id")
         .fetch_all(auth.store.pool()).await?;

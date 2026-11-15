@@ -17,7 +17,6 @@ use std::{
     path::{Path as DiskPath, PathBuf},
     sync::{Arc, Mutex},
 };
-use tokio::sync::Semaphore;
 
 struct Backups {
     auth: AuthState,
@@ -25,7 +24,6 @@ struct Backups {
     postgres_url: Option<Arc<zeroize::Zeroizing<String>>>,
     directory: Option<PathBuf>,
     media_root: PathBuf,
-    gate: Arc<Semaphore>,
     worker: Mutex<Option<tokio::task::AbortHandle>>,
     configuration: BTreeMap<String, String>,
     /// `None` when no valid key is configured: backups then fail closed.
@@ -224,11 +222,55 @@ async fn build_state(
         postgres_url,
         directory,
         media_root,
-        gate: Arc::new(Semaphore::new(1)),
         worker: Mutex::new(None),
         configuration,
         protection,
     })
+}
+
+/// Session advisory lock held by the Core running a backup (PostgreSQL).
+const BACKUP_LOCK: &str = "admin-backups:run";
+
+const BACKUP_BUSY: (&str, &str) = (
+    "backup_already_running",
+    "Une sauvegarde est déjà en cours. Réessayez lorsqu’elle sera terminée.",
+);
+
+/// Exclusion held for a whole backup, manual or scheduled: the store's gate (one backup per
+/// opened database in this process) plus, on PostgreSQL, a session advisory lock that other
+/// Cores sharing the database see too.
+struct BackupGuard {
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    session: Option<crate::database::SessionLock>,
+}
+
+impl BackupGuard {
+    /// `None` when a backup already runs in this process or, on PostgreSQL, on another Core.
+    async fn try_acquire(
+        store: &crate::identity::IdentityStore,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        let Ok(permit) = store.backup_gate.clone().try_acquire_owned() else {
+            return Ok(None);
+        };
+        let session = if store.is_postgres() {
+            match crate::database::try_session_lock(store.pool(), BACKUP_LOCK).await? {
+                Some(lock) => Some(lock),
+                None => return Ok(None),
+            }
+        } else {
+            None
+        };
+        Ok(Some(Self {
+            _permit: permit,
+            session,
+        }))
+    }
+
+    async fn release(self) {
+        if let Some(session) = self.session {
+            session.release().await;
+        }
+    }
 }
 
 fn router_with_state(state: Backups) -> Router {
@@ -457,17 +499,37 @@ async fn list(
         (available, reason)
     };
     let schedule = load_schedule(&state).await?;
+    let running = running(&state)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(Listing {
             schedule,
             available,
             reason,
-            running: state.gate.available_permits() == 0,
+            running,
             archives,
         }),
     )
         .into_response())
+}
+
+/// Whether a backup runs: a scheduled run recorded in the database under a live lease (on any
+/// Core), or a backup of this process (a manual backup only exists in the request serving it).
+async fn running(state: &Backups) -> Result<bool, sqlx::Error> {
+    if state.auth.store.backup_gate.available_permits() == 0 {
+        return Ok(true);
+    }
+    let scheduled: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) FROM backup_schedule WHERE singleton=1 AND last_outcome='running' \
+            AND EXISTS(SELECT 1 FROM durable_tasks WHERE category='system' \
+            AND target_id='backup' AND status='running' AND lease_until>?)",
+    )
+    .bind(now())
+    .fetch_one(state.auth.store.pool())
+    .await?;
+    Ok(scheduled > 0)
 }
 
 async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
@@ -594,15 +656,15 @@ async fn create(
     if state.source.is_none() && state.postgres_url.is_none() {
         return Err(StatusCode::NOT_IMPLEMENTED.into());
     }
-    let permit = state
-        .gate
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| StatusCode::CONFLICT)?;
-    // Own the permit across disconnects; scheduler and manual requests share this gate.
+    let guard = BackupGuard::try_acquire(&state.auth.store)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or_else(|| BackupFailure::new(StatusCode::CONFLICT, BACKUP_BUSY.0, BACKUP_BUSY.1))?;
+    // Own the exclusion across disconnects; scheduled and manual backups share it.
     let result = tokio::spawn(async move {
-        let _permit = permit;
-        perform_backup(&state).await
+        let result = perform_backup(&state).await;
+        guard.release().await;
+        result
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
@@ -712,14 +774,11 @@ pub(crate) async fn trigger_backup(
     timestamp: i64,
     max_runtime_seconds: Option<i64>,
 ) -> Result<bool, sqlx::Error> {
-    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN ('queued','running','paused')")
-        .fetch_one(store.pool())
-        .await?;
-    if active > 0 {
-        return Ok(false);
-    }
-    crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds).await?;
-    Ok(true)
+    // The enqueue lock decides atomically, across Cores too, whether a run is already active.
+    let (_, inserted) =
+        crate::system_task_queue::enqueue_backup(store, key, timestamp, max_runtime_seconds)
+            .await?;
+    Ok(inserted)
 }
 
 /// Execute a queued scheduled backup under its durable-task lease. The outcome is recorded only
@@ -739,16 +798,52 @@ pub(crate) async fn execute_scheduled(
     run_scheduled(&state, Some(job)).await
 }
 
+/// SQL condition (4 binds: id, id, attempt, now) true without a fence (`id=''`) or while the
+/// fenced attempt still holds a live lease.
+const LEASE_FENCE: &str = "(?='' OR EXISTS(SELECT 1 FROM durable_tasks WHERE id=? AND attempt=? \
+    AND status='running' AND lease_until>?))";
+
 async fn run_scheduled(
     state: &Backups,
     fence: Option<&crate::task_engine::Job>,
 ) -> Result<(), StatusCode> {
-    // `running` is set when the run really starts, never while it only waits in the queue.
-    crate::database::query("UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' WHERE singleton=1")
-        .bind(now())
-        .execute(state.auth.store.pool())
+    // Manual and scheduled backups share one exclusion. A busy run is deferred (LOCKED maps to
+    // `task_engine::DEFERRED_BUSY`): requeued later without spending one of its attempts.
+    let Some(guard) = BackupGuard::try_acquire(&state.auth.store)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    else {
+        eprintln!("scheduled backup: another backup is running; deferred");
+        return Err(StatusCode::LOCKED);
+    };
+    let result = run_scheduled_exclusive(state, fence).await;
+    guard.release().await;
+    result
+}
+
+async fn run_scheduled_exclusive(
+    state: &Backups,
+    fence: Option<&crate::task_engine::Job>,
+) -> Result<(), StatusCode> {
+    let (task_id, attempt) = fence.map_or(("", 0), |job| (job.id.as_str(), job.attempt));
+    // `running` is set when the run really starts, never while it only waits in the queue, and
+    // only by the attempt that still holds the lease.
+    let started = crate::database::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE backup_schedule SET last_started_at=?,last_completed_at=NULL,last_outcome='running' \
+            WHERE singleton=1 AND {LEASE_FENCE}"
+    )))
+    .bind(now())
+    .bind(task_id)
+    .bind(task_id)
+    .bind(attempt)
+    .bind(now())
+    .execute(state.auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if started.rows_affected() == 0 {
+        eprintln!("scheduled backup: lease lost before start");
+        return Err(StatusCode::CONFLICT);
+    }
     let result = perform_backup(state).await;
     if let Err(error) = &result {
         eprintln!(
@@ -770,9 +865,24 @@ async fn run_scheduled(
             return Err(StatusCode::CONFLICT);
         }
     }
-    crate::database::query("UPDATE backup_schedule SET last_completed_at=?,last_outcome=? WHERE singleton=1 AND last_outcome='running'")
-        .bind(now()).bind(if result.is_ok() {"succeeded"} else {"failed"})
-        .execute(state.auth.store.pool()).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Fenced again in the statement itself: the lease may expire between the check and the write.
+    crate::database::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE backup_schedule SET last_completed_at=?,last_outcome=? \
+            WHERE singleton=1 AND last_outcome='running' AND {LEASE_FENCE}"
+    )))
+    .bind(now())
+    .bind(if result.is_ok() {
+        "succeeded"
+    } else {
+        "failed"
+    })
+    .bind(task_id)
+    .bind(task_id)
+    .bind(attempt)
+    .bind(now())
+    .execute(state.auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let (Some(job), Err(error)) = (fence, &result) {
         // The administrator-facing reason, shown as the task's last-run message.
         let mut detail = serde_json::from_str::<serde_json::Value>(&job.result_json)
@@ -796,10 +906,12 @@ async fn run_scheduled(
 fn start_worker(state: &Arc<Backups>) {
     let weak = Arc::downgrade(state);
     let task = tokio::spawn(async move {
-        // On startup distinguish an interrupted scheduled attempt from completion.
+        // On startup distinguish an interrupted scheduled attempt from completion. A backup
+        // still leased (by another live Core sharing the database) is not interrupted.
         if let Some(state) = weak.upgrade() {
-            let _ = crate::database::query("UPDATE backup_schedule SET last_outcome='interrupted',last_completed_at=? WHERE singleton=1 AND last_outcome='running'")
-                .bind(now()).execute(state.auth.store.pool()).await;
+            let timestamp = now();
+            let _ = crate::database::query("UPDATE backup_schedule SET last_outcome='interrupted',last_completed_at=? WHERE singleton=1 AND last_outcome='running' AND NOT EXISTS(SELECT 1 FROM durable_tasks WHERE category='system' AND target_id='backup' AND lease_until>?)")
+                .bind(timestamp).bind(timestamp).execute(state.auth.store.pool()).await;
         }
         // Scheduled backups fire from their triggers (`task_scheduler`), like every task.
     });
@@ -877,7 +989,6 @@ mod tests {
             postgres_url: None,
             directory: Some(temp.path().join("backups")),
             media_root: media,
-            gate: Arc::new(Semaphore::new(1)),
             worker: Mutex::new(None),
             configuration: BTreeMap::new(),
             protection: Some(Protection::Encrypted(
@@ -940,6 +1051,218 @@ mod tests {
         .unwrap();
         assert_eq!(persisted, "failed");
         reopened.close().await;
+    }
+
+    const TEST_KEY: &str = "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12";
+
+    /// An administrator session; returns its cookie and CSRF token.
+    async fn admin_session(store: &crate::identity::IdentityStore) -> (String, String) {
+        use sha2::{Digest, Sha256};
+        let token = "b".repeat(64);
+        crate::database::query(
+            "INSERT INTO users(id,role,display_name) VALUES('admin','administrator','Admin')",
+        )
+        .execute(store.pool())
+        .await
+        .unwrap();
+        crate::database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?,'admin',unixepoch(),unixepoch(),unixepoch()+3600)")
+            .bind(format!("{:x}", Sha256::digest(token.as_bytes())))
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let csrf = format!("{:x}", Sha256::digest(format!("csrf:{token}").as_bytes()));
+        (format!("aether_session={token}"), csrf)
+    }
+
+    async fn call(
+        app: &Router,
+        method: &str,
+        session: &(String, String),
+    ) -> (StatusCode, serde_json::Value) {
+        use tower::ServiceExt;
+        let response = app
+            .clone()
+            .oneshot(
+                axum::http::Request::builder()
+                    .method(method)
+                    .uri("/api/v1/admin/backups")
+                    .header("origin", "http://127.0.0.1:3000")
+                    .header("cookie", &session.0)
+                    .header("x-csrf-token", &session.1)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = response.status();
+        let body = axum::body::to_bytes(response.into_body(), 65536)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&body).unwrap())
+    }
+
+    async fn state_for(auth: AuthState, temp: &DiskPath) -> (Backups, Router) {
+        let media = temp.join("media");
+        std::fs::create_dir_all(&media).unwrap();
+        let configuration = BTreeMap::from([("MEDIA_BACKUP_KEY".to_owned(), TEST_KEY.to_owned())]);
+        let directory = Some(temp.join("backups"));
+        let state = build_state(
+            auth.clone(),
+            media.clone(),
+            directory.clone(),
+            configuration.clone(),
+        )
+        .await
+        .unwrap();
+        let app = router_with_configuration(auth, media, directory, configuration)
+            .await
+            .unwrap();
+        (state, app)
+    }
+
+    #[tokio::test]
+    async fn manual_and_scheduled_backups_share_one_exclusion() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&temp.path().join("live.sqlite3"))
+            .await
+            .unwrap();
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let session = admin_session(&store).await;
+        // Two states built separately (as the scheduler does per run) still share the gate.
+        let (scheduled, app) = state_for(auth, temp.path()).await;
+        let guard = BackupGuard::try_acquire(&store)
+            .await
+            .unwrap()
+            .expect("no backup running");
+        let (status, body) = call(&app, "POST", &session).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(body["code"], BACKUP_BUSY.0);
+        let (status, body) = call(&app, "GET", &session).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["running"], true);
+        // Busy exclusion: deferred (LOCKED maps to `task_engine::DEFERRED_BUSY`), not failed.
+        assert_eq!(
+            run_scheduled(&scheduled, None).await,
+            Err(StatusCode::LOCKED)
+        );
+        assert_ne!(
+            load_schedule(&scheduled).await.unwrap().last_outcome,
+            "running"
+        );
+        guard.release().await;
+        let (_, body) = call(&app, "GET", &session).await;
+        assert_eq!(body["running"], false);
+        // Free again: a manual backup runs and keeps its 201 contract.
+        let (status, body) = call(&app, "POST", &session).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        drop((scheduled, app));
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn a_scheduled_backup_records_nothing_once_its_lease_is_lost() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = crate::identity::IdentityStore::open(&temp.path().join("live.sqlite3"))
+            .await
+            .unwrap();
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let (state, _app) = state_for(auth, temp.path()).await;
+        assert!(trigger_backup(&store, "k", 100, None).await.unwrap());
+        let (id, attempt): (String, i64) = crate::database::query_as(
+            "SELECT id,attempt FROM durable_tasks WHERE category='system' AND target_id='backup'",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap();
+        // Queued, never leased: the attempt holds no lease and may not mark the schedule running.
+        let job = crate::task_engine::get(&store, &id).await.unwrap().unwrap();
+        assert_eq!(job.attempt, attempt);
+        assert_eq!(
+            run_scheduled(&state, Some(&job)).await,
+            Err(StatusCode::CONFLICT)
+        );
+        assert_ne!(load_schedule(&state).await.unwrap().last_outcome, "running");
+        assert!(!temp.path().join("backups").exists(), "no backup ran");
+        drop(state);
+        store.close().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires a temporary PostgreSQL 18 server and MEDIA_TEST_POSTGRES_URL"]
+    async fn postgres_a_backup_on_one_core_makes_the_other_busy() {
+        let connection = std::env::var("MEDIA_TEST_POSTGRES_URL")
+            .expect("set MEDIA_TEST_POSTGRES_URL to a disposable PostgreSQL 18 server");
+        let pool = sqlx::PgPool::connect(&connection).await.unwrap();
+        let schema = format!("backups_{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE SCHEMA {schema}")))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let mut url = url::Url::parse(&connection).unwrap();
+        url.query_pairs_mut()
+            .append_pair("options", &format!("-csearch_path={schema}"));
+        let a = crate::identity::IdentityStore::open_postgres(url.as_str())
+            .await
+            .unwrap();
+        let b = crate::identity::IdentityStore::open_postgres(url.as_str())
+            .await
+            .unwrap();
+
+        // Both Cores start a backup at once: exactly one gets the exclusion.
+        for round in 0..10 {
+            let (x, y) = tokio::join!(BackupGuard::try_acquire(&a), BackupGuard::try_acquire(&b));
+            let guards: Vec<BackupGuard> = [x.unwrap(), y.unwrap()].into_iter().flatten().collect();
+            assert_eq!(guards.len(), 1, "round {round}");
+            for guard in guards {
+                guard.release().await;
+            }
+        }
+
+        // A manual backup runs on Core A: Core B answers busy, manual or scheduled.
+        let guard = BackupGuard::try_acquire(&a).await.unwrap().expect("free");
+        let temp = tempfile::tempdir().unwrap();
+        let session = admin_session(&b).await;
+        let auth_b = AuthState::new(b.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let (scheduled_b, app_b) = state_for(auth_b, temp.path()).await;
+        let (status, body) = call(&app_b, "POST", &session).await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["code"], BACKUP_BUSY.0);
+        // Busy exclusion: deferred (LOCKED maps to `task_engine::DEFERRED_BUSY`), not failed.
+        assert_eq!(
+            run_scheduled(&scheduled_b, None).await,
+            Err(StatusCode::LOCKED)
+        );
+        assert!(BackupGuard::try_acquire(&b).await.unwrap().is_none());
+
+        // Core A's backup task dies without unlocking: closing its connection frees the lock.
+        drop(guard);
+        let mut freed = None;
+        for _ in 0..50 {
+            if let Some(guard) = BackupGuard::try_acquire(&b).await.unwrap() {
+                freed = Some(guard);
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        freed
+            .expect("a dropped guard releases the lock")
+            .release()
+            .await;
+
+        drop((scheduled_b, app_b));
+        a.close().await;
+        b.close().await;
+        sqlx::query(sqlx::AssertSqlSafe(format!("DROP SCHEMA {schema} CASCADE")))
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
     }
 
     #[test]

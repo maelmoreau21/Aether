@@ -12,7 +12,6 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase")]
@@ -361,7 +360,6 @@ pub struct SystemTasksState {
     /// Never modified by any task; only used to refuse overlapping cleanup scopes.
     pub media_root: PathBuf,
     pub owned_dirs: Vec<OwnedDir>,
-    pub gate: Arc<Mutex<()>>,
 }
 
 /// Directories Aether owns and may clean, resolved from configuration only.
@@ -556,7 +554,6 @@ pub(crate) fn execution_state(auth: AuthState, media_root: PathBuf) -> SystemTas
         auth,
         media_root,
         owned_dirs,
-        gate: Arc::new(Mutex::new(())),
     }
 }
 
@@ -587,7 +584,8 @@ async fn execute_inner(
         )
         .await;
     }
-    let _guard = state.gate.lock().await;
+    // No in-process gate: the durable queue leases one maintenance run at a time
+    // (`system_task_queue::claim`), across Cores too; manual runs are queued like scheduled ones.
     let task_id = job.map_or("", |job| job.id.as_str());
     let attempt = job.map_or(0, |job| job.attempt);
 
@@ -942,7 +940,6 @@ mod tests {
             auth,
             media_root: temp.join("media"),
             owned_dirs,
-            gate: Arc::new(Mutex::new(())),
         }
     }
 

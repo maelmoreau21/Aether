@@ -27,7 +27,7 @@ Statut : **audit par inspection du code (grep + lecture ciblée), aucun test mul
 | `ACTIVE_CHANNELS`, `PENDING_STREAMS` | `nodes.rs` | un Node est connecté à un seul Core ; un relais ne traverse pas les Core | affinité Node→Core enregistrée en base, redirection |
 | `CATALOGUE_CACHE` | `inventory.rs` | cache périmé après écriture sur un autre Core | clé de version en base, ou cache désactivé en multi-Core |
 | `AssetStore` (`gate`, `commit`, `leases`) | `assets.rs` | collecteur et écritures non coordonnés ; `LocalFs` local à chaque Core | backend partagé + verrou de collecte en base (cf. en-tête du module) |
-| `system_tasks` `gate` (Mutex) et sauvegarde planifiée (`admin_backups.rs`, Semaphore) | — | deux Core pourraient lancer la même tâche/sauvegarde | passer par `durable_tasks` (lease) |
+| ~~`system_tasks` `gate` (Mutex) et sauvegarde planifiée (`admin_backups.rs`, Semaphore)~~ | `system_task_queue.rs`, `admin_backups.rs` | levé : mise en file et réclamation sous verrous consultatifs PG, sauvegardes sous verrou de session PG (voir `MULTI_CORE_ROADMAP.md` §3.2) | — |
 | `scans.rs` annulations, `auth.rs` `pending` | — | état local au processus | **à examiner** : non audité en détail |
 
 ## Non vérifié

@@ -51,6 +51,8 @@ pub struct ScanJobs {
     pub(crate) engine_tick: tokio::sync::Mutex<()>,
     pub(crate) scheduler_tick: tokio::sync::Mutex<()>,
     cancel: Arc<AtomicBool>,
+    /// Set when shutdown begins: the readiness probe answers 503 so load balancers stop routing.
+    draining: AtomicBool,
     pub(crate) slots: Arc<Semaphore>,
     pub(crate) preparations: Arc<media_node::packaging::Preparations>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
@@ -65,6 +67,7 @@ impl Default for ScanJobs {
             engine_tick: tokio::sync::Mutex::new(()),
             scheduler_tick: tokio::sync::Mutex::new(()),
             cancel: Arc::new(AtomicBool::new(false)),
+            draining: AtomicBool::new(false),
             slots: Arc::new(Semaphore::new(1)),
             preparations: Arc::new(media_node::packaging::Preparations::default()),
             tasks: Mutex::new(Vec::new()),
@@ -122,6 +125,16 @@ impl ScanJobs {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancel.load(Ordering::Acquire)
+    }
+
+    /// Stop accepting new work from load balancers (`/internal/v1/ready` answers 503) while
+    /// in-flight requests finish. Irreversible: the process is shutting down.
+    pub fn begin_draining(&self) {
+        self.draining.store(true, Ordering::Release);
+    }
+
+    pub fn is_draining(&self) -> bool {
+        self.draining.load(Ordering::Acquire)
     }
 
     pub async fn shutdown(&self) {
@@ -230,23 +243,11 @@ pub async fn router(
     root: PathBuf,
     jobs: Arc<ScanJobs>,
 ) -> Result<Router, sqlx::Error> {
-    // A stopped process cannot resume a probe. Keep its last inventory and report interruption.
-    crate::database::query("UPDATE scan_jobs SET status='error',errors_json='[\"Scan interrompu par un redémarrage\"]',errors_count=1,warnings_count=0 WHERE status IN ('queued','running')").execute(&auth.store.pool).await?;
-    crate::database::query("DELETE FROM scan_batch_receipts")
-        .execute(&auth.store.pool)
-        .await?;
-    crate::database::query("DELETE FROM active_scan_runs")
-        .execute(&auth.store.pool)
-        .await?;
-    crate::database::query("DELETE FROM active_task_runs")
-        .execute(&auth.store.pool)
-        .await?;
-    crate::database::query("DELETE FROM scan_staging_files")
-        .execute(&auth.store.pool)
-        .await?;
-    crate::database::query("DELETE FROM scan_staging_issues")
-        .execute(&auth.store.pool)
-        .await?;
+    // Register this Core, then release only the work no live Core can finish: another Core
+    // sharing the database (PostgreSQL) keeps its scans, run fences and staging.
+    let now = media_contracts::protocol::unix_now();
+    crate::core_instances::heartbeat(&auth.store, now).await?;
+    crate::core_instances::reclaim_orphans(&auth.store, now, true).await?;
     Ok(Router::new()
         .route("/api/v1/admin/libraries/{id}/scan", get(status).post(start))
         .layer(DefaultBodyLimit::max(4096))

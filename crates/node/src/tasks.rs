@@ -466,28 +466,45 @@ pub async fn run_task_with_trickplay_options(
                     .collect();
                 times.sort_by(f64::total_cmp);
                 times.dedup();
+                let mut pending = times.into_iter().take(MAX_PREPARED_CHAPTERS);
+                let mut join_set = tokio::task::JoinSet::new();
                 let mut prepared = 0_u64;
-                for time in times.into_iter().take(MAX_PREPARED_CHAPTERS) {
-                    let req = crate::trickplay::TrickplayRequest {
-                        asset_id: asset_id.as_str().to_owned(),
-                        media_root: root.to_path_buf(),
-                        relative_path: relative.to_path_buf(),
-                        duration,
-                        size: opened.size(),
-                        modified_ns: opened.modified_ns().to_owned(),
-                        interval_ms: None,
-                        width,
-                        quality: trickplay.map(|options| options.quality),
-                        columns: None,
-                        rows: None,
-                        chapter_time: Some(time),
-                    };
-                    if mgr.check_native_cache(&req).await.is_none() {
-                        let key = mgr.fingerprint(&req);
-                        mgr.generate_background(&req, &key)
-                            .await
-                            .map_err(io::Error::other)?;
+                loop {
+                    let max_concurrency = if mgr.active_streams() == 0 { 2 } else { 1 };
+                    while join_set.len() < max_concurrency {
+                        let Some(time) = pending.next() else {
+                            break;
+                        };
+                        let req = crate::trickplay::TrickplayRequest {
+                            asset_id: asset_id.as_str().to_owned(),
+                            media_root: root.to_path_buf(),
+                            relative_path: relative.to_path_buf(),
+                            duration,
+                            size: opened.size(),
+                            modified_ns: opened.modified_ns().to_owned(),
+                            interval_ms: None,
+                            width,
+                            quality: trickplay.map(|options| options.quality),
+                            columns: None,
+                            rows: None,
+                            chapter_time: Some(time),
+                        };
+                        let task_mgr = mgr.clone();
+                        join_set.spawn(async move {
+                            if task_mgr.check_native_cache(&req).await.is_none() {
+                                let key = task_mgr.fingerprint(&req);
+                                task_mgr
+                                    .generate_background(&req, &key)
+                                    .await
+                                    .map_err(io::Error::other)?;
+                            }
+                            Ok::<(), io::Error>(())
+                        });
                     }
+                    let Some(joined) = join_set.join_next().await else {
+                        break;
+                    };
+                    joined.map_err(io::Error::other)??;
                     prepared += 1;
                 }
                 return Ok(json!({"assetId": asset_id.as_str(), "chapterImages": prepared}));

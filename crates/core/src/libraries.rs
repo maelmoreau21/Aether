@@ -14,10 +14,20 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::path::{Path as DiskPath, PathBuf};
+use std::{
+    path::{Path as DiskPath, PathBuf},
+    sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
+};
 
 /// Upper bound on folders aggregated by one library (each is validated against its node roots).
 pub(crate) const MAX_LIBRARY_FOLDERS: usize = 256;
+const MAX_ROOT_SUBDIRS_PER_MOUNT: usize = 256;
+const ROOTS_CACHE_TTL: Duration = Duration::from_secs(30);
+
+type RootsCacheEntry = (Vec<PathBuf>, Instant, Vec<String>);
+
+static ROOTS_CACHE: LazyLock<Mutex<Option<RootsCacheEntry>>> = LazyLock::new(|| Mutex::new(None));
 
 #[derive(Clone)]
 struct LibraryState {
@@ -231,11 +241,8 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
                 JOIN media_nodes n ON n.id=l.node_id \
                 WHERE (l.id=? OR l.id IN (SELECT library_id FROM library_folders WHERE parent_id=? \
                 AND active=1)) AND l.enabled=1 AND n.status='connected' \
-                AND w.kind IN ('film','series') AND (w.kind='series' OR EXISTS(SELECT 1 \
-                FROM inventory_editions ce JOIN inventory_versions cv ON cv.edition_id=ce.id \
-                JOIN inventory_sources cs ON cs.version_id=cv.id JOIN inventory_assets ca \
-                ON ca.source_id=cs.id WHERE ce.work_id=w.id AND ca.available=1 \
-                AND cs.root_snapshot=l.root)) AND (EXISTS(SELECT 1 FROM work_image_entries wi \
+                AND w.kind IN ('film','series') AND w.has_available_asset = 1 \
+                AND (EXISTS(SELECT 1 FROM work_image_entries wi \
                 WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp \
                 WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i \
                 WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 \
@@ -268,33 +275,85 @@ async fn list(
         serde_json::json!({"libraries":load(&state.auth.store).await?}),
     ))
 }
+async fn discover_local_roots(allowed_roots: &[PathBuf]) -> Vec<String> {
+    let mut local_roots = Vec::new();
+    for allowed in allowed_roots {
+        let Ok(local_root) = validate_library_root(allowed, allowed).await else {
+            continue;
+        };
+        let root_str = local_root.to_string_lossy().into_owned();
+        if !local_roots.contains(&root_str) {
+            local_roots.push(root_str);
+        }
+        let Ok(mut entries) = tokio::fs::read_dir(&local_root).await else {
+            continue;
+        };
+        let mut subdirs = 0usize;
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let Ok(ft) = entry.file_type().await else {
+                continue;
+            };
+            if ft.is_file() {
+                continue;
+            }
+            let is_dir = if ft.is_symlink() {
+                entry.metadata().await.is_ok_and(|m| m.is_dir())
+            } else {
+                ft.is_dir()
+            };
+            if !is_dir {
+                continue;
+            }
+            if subdirs >= MAX_ROOT_SUBDIRS_PER_MOUNT {
+                break;
+            }
+            subdirs += 1;
+            let path = entry.path();
+            if let Ok(sub) = validate_library_root(&path, &local_root).await {
+                let sub_str = sub.to_string_lossy().into_owned();
+                if !local_roots.contains(&sub_str) {
+                    local_roots.push(sub_str);
+                }
+            }
+        }
+    }
+    local_roots
+}
 async fn roots(
     State(state): State<LibraryState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     administrator(&state, &headers, false).await?;
-    let mut all_roots = Vec::new();
-    for allowed in crate::local_mounts::allowed_roots(&state.root).await {
-        if let Ok(local_root) = validate_library_root(&allowed, &allowed).await {
-            all_roots.push(local_root.to_string_lossy().into_owned());
-            if let Ok(mut entries) = tokio::fs::read_dir(&local_root).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    if let Ok(meta) = entry.metadata().await
-                        && meta.is_dir()
-                    {
-                        let path = entry.path();
-                        if let Ok(sub) = validate_library_root(&path, &local_root).await {
-                            let sub_str = sub.to_string_lossy().into_owned();
-                            if !all_roots.contains(&sub_str) {
-                                all_roots.push(sub_str);
-                            }
-                        }
-                    }
-                }
-            }
+    let allowed_roots = crate::local_mounts::allowed_roots(&state.root).await;
+    let cached_local_roots = {
+        let guard = match ROOTS_CACHE.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some((key, cached_at, roots)) = guard.as_ref()
+            && *key == allowed_roots
+            && cached_at.elapsed() < ROOTS_CACHE_TTL
+        {
+            Some(roots.clone())
+        } else {
+            None
         }
-    }
-    let local_roots = all_roots.clone();
+    };
+    let local_roots = match cached_local_roots {
+        Some(roots) => roots,
+        None => {
+            let computed = discover_local_roots(&allowed_roots).await;
+            if !computed.is_empty() {
+                let mut guard = match ROOTS_CACHE.lock() {
+                    Ok(guard) => guard,
+                    Err(poisoned) => poisoned.into_inner(),
+                };
+                *guard = Some((allowed_roots, Instant::now(), computed.clone()));
+            }
+            computed
+        }
+    };
+    let mut all_roots = local_roots.clone();
     if let Ok(rows) = crate::database::query(
         "SELECT roots_json FROM media_nodes WHERE kind='remote' AND status != 'revoked' ORDER BY name, id",
     )

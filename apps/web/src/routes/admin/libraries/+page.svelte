@@ -80,7 +80,7 @@
       ...init,
       credentials: 'same-origin',
       cache: 'no-store',
-      signal: AbortSignal.timeout(10000)
+      signal: AbortSignal.timeout(30000)
     });
     if (response.status === 401) throw new Error($t('your_session_has_expired_sign_in'));
     if (response.status === 403) throw new Error($t('access_denied_check_your_session_and'));
@@ -161,7 +161,7 @@
       const [data, accounts, configured, nodeList, memberships] = await Promise.all([
         request<{ libraries: Library[] }>('/api/v1/admin/libraries'),
         request<{ users: AuthUser[] }>('/api/v1/admin/users'),
-        request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots'),
+        request<{ roots: string[]; localRoots?: string[] }>('/api/v1/admin/roots').catch((): { roots: string[]; localRoots?: string[] } => ({ roots: [] })),
         request<{ nodes: AdminNode[] }>('/api/v1/admin/nodes').catch(() => { nodesError = $t('media_node_status_unavailable_try_again'); return { nodes: [] as AdminNode[] }; }),
         request<{ groups: UserGroup[] }>('/api/v1/admin/groups')
       ]);
@@ -509,7 +509,9 @@
             <AdminGroups {groups} {users} {libraries} onchanged={refreshAccess} />
           </div>
           <div hidden={currentHash !== '#api-keys-section'}>
-            <AdminApiKeys {users} {libraries} />
+            {#if currentHash === '#api-keys-section'}
+              <AdminApiKeys {users} {libraries} />
+            {/if}
           </div>
           {#if currentHash === '#avatars-section'}
             <div>

@@ -55,7 +55,7 @@ async fn present_kinds(
     .map_err(db)?;
     Ok(kinds.into_iter().collect())
 }
-const IMAGE_KINDS: [&str; 6] = ["poster", "backdrop", "logo", "thumb", "banner", "disc"];
+use super::image_collection::IMAGE_KINDS;
 /// Next identified film or series of an automatic job that still needs the providers.
 /// Works with nothing missing are marked done here without any network call.
 async fn next_auto_work(
@@ -73,7 +73,7 @@ async fn next_auto_work(
     let options: crate::library_options::LibraryOptions = serde_json::from_str(&options)
         .map_err(|_| err(StatusCode::CONFLICT, "invalid_library_options"))?;
     let mut cursor = job.cursor_work.clone();
-    for _ in 0..50 {
+    loop {
         let next: Option<String> = query_scalar(
             "SELECT w.id \
                 FROM inventory_works w \
@@ -109,7 +109,6 @@ async fn next_auto_work(
         }
         return Ok((Some(work), cursor));
     }
-    Ok((None, cursor))
 }
 async fn mark_auto_attempt(auth: &AuthState, work: &str, mode: &str) -> Result<(), Error> {
     query("INSERT INTO artwork_auto_attempts(work_id,mode,attempted_at) VALUES(?,?,?) ON CONFLICT(work_id,mode) DO UPDATE SET attempted_at=excluded.attempted_at")
@@ -523,7 +522,7 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<bool, Error> {
         .bind(if denied {"paused"} else {"queued"}).bind(if retry||denied {&cursor} else {&work}).bind(i64::from(!retry&&!denied))
         .bind(value["downloaded"].as_i64().unwrap_or(0)).bind(value["duplicates"].as_i64().unwrap_or(0)).bind(value["skipped"].as_i64().unwrap_or(0))
         .bind(i64::from(!error_code.is_empty())+value["errors"].as_array().map_or(0,|v|v.len() as i64)).bind(if retry {job.work_attempts+1} else {0}).bind(error_code)
-        .bind(now()+if retry {15} else {1}).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
+        .bind(if retry { now() + 15 } else { 0 }).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
     if let Some(mode) = auto.as_deref()
         && !retry
         && !denied

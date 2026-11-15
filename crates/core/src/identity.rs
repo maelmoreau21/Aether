@@ -153,9 +153,9 @@ fn open_assets(
 }
 
 fn configure_pool_options(is_sqlite: bool) -> Result<AnyPoolOptions, IdentityError> {
-    let default_max = if is_sqlite { 8 } else { 16 };
-    let default_min = if is_sqlite { 1 } else { 2 };
-    let default_acquire = if is_sqlite { 15 } else { 30 };
+    let default_max = if is_sqlite { 24 } else { 16 };
+    let default_min = 2;
+    let default_acquire = if is_sqlite { 25 } else { 30 };
 
     let max = match std::env::var("MEDIA_DB_MAX_CONNECTIONS")
         .or_else(|_| std::env::var("MEDIA_DB_POOL_MAX"))
@@ -287,7 +287,7 @@ impl IdentityStore {
             .ok()
             .and_then(|v| v.parse().ok())
             .map(Duration::from_secs)
-            .unwrap_or(Duration::from_secs(15));
+            .unwrap_or(Duration::from_secs(30));
         Self::open_with_timeout(path, busy_timeout).await
     }
 

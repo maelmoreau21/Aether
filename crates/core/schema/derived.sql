@@ -41,3 +41,24 @@ CREATE INDEX IF NOT EXISTS inventory_works_avail_added_desc
     ON inventory_works(kind, has_available_asset, added_at DESC, display_title_sort ASC, id ASC);
 CREATE INDEX IF NOT EXISTS inventory_works_avail_year_desc
     ON inventory_works(kind, has_available_asset, effective_year DESC, display_title_sort ASC, id ASC);
+
+CREATE INDEX IF NOT EXISTS durable_tasks_target_cat_comp
+    ON durable_tasks (target_id, category, component, status);
+
+CREATE INDEX IF NOT EXISTS durable_tasks_cat_comp_status_fin
+    ON durable_tasks (category, component, status, finished_at, id);
+
+CREATE INDEX IF NOT EXISTS durable_tasks_lib_cat_status_avail
+    ON durable_tasks (library_id, category, status, available_at);
+
+CREATE INDEX IF NOT EXISTS automation_task_links_op_task
+    ON automation_task_links (operation, task_id);
+
+CREATE INDEX IF NOT EXISTS automation_task_links_event
+    ON automation_task_links (event_id, task_id);
+
+CREATE INDEX IF NOT EXISTS automation_dependencies_prereq
+    ON automation_dependencies (prerequisite_id, task_id);
+
+CREATE INDEX IF NOT EXISTS artwork_auto_attempts_mode_time
+    ON artwork_auto_attempts (work_id, mode, attempted_at);

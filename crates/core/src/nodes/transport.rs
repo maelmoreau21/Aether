@@ -1,6 +1,6 @@
 //! Existing signed control messages, URL validation and pairing/rotation HTTP transport.
 use super::NodesState;
-use super::registry::{MediaNodeRecord, load_node};
+use super::registry::{MediaNodeRecord, load_node, refresh_node_in_registry};
 use crate::error;
 use axum::body::Body;
 use axum::http::HeaderMap;
@@ -79,21 +79,16 @@ pub(super) async fn verify_signed_node_call(
     if header_node_id.is_empty() || header_node_id == "local" {
         return Err(error(StatusCode::UNAUTHORIZED, "invalid_node_id"));
     }
-    let rec = match load_node(&state.auth.store, header_node_id).await {
+    let mut rec = match load_node(&state.auth.store, header_node_id).await {
         Ok(Some(r)) => r,
         Ok(None) => return Err(error(StatusCode::FORBIDDEN, "unknown_node")),
         Err(_) => return Err(error(StatusCode::INTERNAL_SERVER_ERROR, "database_error")),
     };
-    if rec.status == NodeStatus::Revoked.as_str() || rec.shared_secret.is_empty() {
-        return Err(error(StatusCode::FORBIDDEN, "node_revoked"));
-    }
     let header_key_id = headers
         .get(HDR_KEY_ID)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if !constant_time_eq(header_key_id.as_bytes(), rec.key_id.as_bytes()) {
-        return Err(error(StatusCode::UNAUTHORIZED, "invalid_key_id"));
-    }
+    let key = resolve_node_signing_key(&state.auth.store, &mut rec, header_key_id).await?;
     let timestamp = headers
         .get(HDR_TIMESTAMP)
         .and_then(|v| v.to_str().ok())
@@ -118,12 +113,12 @@ pub(super) async fn verify_signed_node_call(
 
     let now = unix_now();
     verify_internal_request(
-        &rec.shared_secret,
+        &key.secret,
         "node-to-core",
         method.as_str(),
         path_and_query,
         &rec.id,
-        &rec.key_id,
+        &key.key_id,
         timestamp,
         &nonce,
         &actual_body_sha,
@@ -136,6 +131,9 @@ pub(super) async fn verify_signed_node_call(
         .replay_window
         .check_and_record(&rec.id, &nonce, timestamp, now)
         .map_err(|reason| error(StatusCode::UNAUTHORIZED, reason))?;
+    if key.pending {
+        promote_pending_key(&state.auth.store, &mut rec, &key).await?;
+    }
 
     let _ = crate::database::query(
         "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
@@ -151,6 +149,121 @@ pub(super) async fn verify_signed_node_call(
         .record_success(&rec.id, None, now);
 
     Ok((rec, nonce))
+}
+
+/// Key a Node-signed request is verified with: the Node's current key, or the pending key of a
+/// two-phase secret rotation (roadmap §2.3).
+pub(super) struct NodeSigningKey {
+    pub key_id: String,
+    pub secret: String,
+    /// The pending key: once the request's signature is verified, it is promoted
+    /// ([`promote_pending_key`]).
+    pub pending: bool,
+}
+
+/// `(status, key_id, shared_secret, pending_key_id, pending_secret)` of a Node.
+type NodeKeyRow = (String, String, String, Option<String>, Option<String>);
+
+/// Choose the key a Node request signed with `header_key_id` is verified with.
+///
+/// Read from the database at every call (one primary-key lookup, next to the `last_seen_at`
+/// update every verified call already does): the registry cache of this Core may predate a
+/// rotation, a promotion or a revocation done by another Core. `rec` is brought up to date with
+/// the stored current key and status. The pending key is never cached nor returned by any API.
+#[allow(clippy::result_large_err)]
+pub(super) async fn resolve_node_signing_key(
+    store: &crate::identity::IdentityStore,
+    rec: &mut MediaNodeRecord,
+    header_key_id: &str,
+) -> Result<NodeSigningKey, Response> {
+    let row: Option<NodeKeyRow> =
+        crate::database::query_as(
+            "SELECT status, key_id, shared_secret, pending_key_id, pending_secret FROM media_nodes WHERE id=?",
+        )
+        .bind(&rec.id)
+        .fetch_optional(&store.pool)
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database_error"))?;
+    let Some((status, key_id, shared_secret, pending_key_id, pending_secret)) = row else {
+        return Err(error(StatusCode::FORBIDDEN, "unknown_node"));
+    };
+    let revoked = status == NodeStatus::Revoked.as_str();
+    if key_id != rec.key_id
+        || shared_secret != rec.shared_secret
+        || revoked != (rec.status == NodeStatus::Revoked.as_str())
+    {
+        rec.key_id = key_id;
+        rec.shared_secret = shared_secret;
+        rec.status = status;
+        let _ = refresh_node_in_registry(store, &rec.id).await;
+    }
+    if revoked || rec.shared_secret.is_empty() {
+        return Err(error(StatusCode::FORBIDDEN, "node_revoked"));
+    }
+    if constant_time_eq(header_key_id.as_bytes(), rec.key_id.as_bytes()) {
+        return Ok(NodeSigningKey {
+            key_id: rec.key_id.clone(),
+            secret: rec.shared_secret.clone(),
+            pending: false,
+        });
+    }
+    if let (Some(pending_key_id), Some(pending_secret)) = (pending_key_id, pending_secret)
+        && !pending_key_id.is_empty()
+        && !pending_secret.is_empty()
+        && constant_time_eq(header_key_id.as_bytes(), pending_key_id.as_bytes())
+    {
+        return Ok(NodeSigningKey {
+            key_id: pending_key_id,
+            secret: pending_secret,
+            pending: true,
+        });
+    }
+    Err(error(StatusCode::UNAUTHORIZED, "invalid_key_id"))
+}
+
+/// The Node signed a verified request with its pending key: it applied the rotation, so the
+/// pending key becomes its only key and the previous one is refused from now on. The `UPDATE`
+/// is conditional on the key still being pending (a newer rotation, a revocation or another
+/// Core's promotion may have happened since it was read); a concurrent promotion of the same
+/// key is accepted. `rec` then carries the new key, so the signed response uses it.
+#[allow(clippy::result_large_err)]
+pub(super) async fn promote_pending_key(
+    store: &crate::identity::IdentityStore,
+    rec: &mut MediaNodeRecord,
+    key: &NodeSigningKey,
+) -> Result<(), Response> {
+    let promoted = crate::database::query(
+        "UPDATE media_nodes SET key_id=pending_key_id, shared_secret=pending_secret, \
+            pending_key_id=NULL, pending_secret=NULL, pending_since=NULL \
+            WHERE id=? AND pending_key_id=? AND status != 'revoked'",
+    )
+    .bind(&rec.id)
+    .bind(&key.key_id)
+    .execute(&store.pool)
+    .await
+    .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database_error"))?
+    .rows_affected();
+    if promoted == 0 {
+        let current: Option<String> = crate::database::query_scalar(
+            "SELECT key_id FROM media_nodes WHERE id=? AND status != 'revoked'",
+        )
+        .bind(&rec.id)
+        .fetch_optional(&store.pool)
+        .await
+        .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "database_error"))?;
+        if current.as_deref() != Some(key.key_id.as_str()) {
+            return Err(error(StatusCode::UNAUTHORIZED, "invalid_key_id"));
+        }
+    } else {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"node_secret_promoted","nodeId":rec.id,"keyId":key.key_id})
+        );
+    }
+    rec.key_id = key.key_id.clone();
+    rec.shared_secret = key.secret.clone();
+    let _ = refresh_node_in_registry(store, &rec.id).await;
+    Ok(())
 }
 
 pub(super) fn signed_core_response<T: Serialize>(

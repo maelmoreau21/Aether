@@ -10,6 +10,7 @@
 //!   verified via short-lived Core-signed `PlaybackToken`, plus Core-relayed streaming
 //!   (`/internal/v1/node/assets/{id}/content` and `/internal/v1/node/assets/{id}/image`).
 
+mod commands;
 mod control_transport;
 mod epoch;
 mod outbound;
@@ -18,6 +19,7 @@ mod routes;
 mod scans;
 mod state;
 
+pub use commands::{CommandLog, REMEMBERED_COMMANDS};
 pub use control_transport::{
     post_signed_to_core, post_signed_to_core_raw, send_signed_http_request,
 };

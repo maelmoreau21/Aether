@@ -102,10 +102,10 @@ Après : une boîte aux lettres par Node (`NodeChannel`) qui survit aux polls :
 Compatibilité : `expiresAt` est facultatif. Un ancien Core n'en envoie pas (jamais périmé) ; un
 ancien Node l'ignore. Tests : `command_envelope_without_deadline_stays_wire_compatible`.
 
-**Reste vrai** : la livraison est « au plus une fois ». Une réponse perdue sur le réseau perd la
-commande, sans accusé de réception. Les travaux durables s'en remettent à leur bail (§4), un relais
-expire côté navigateur. Un accusé par commande est le sujet de la boîte d'envoi durable de la
-feuille de route multi-Core.
+Depuis le schéma v6 (§3.6), la boîte aux lettres en mémoire ne porte plus que les demandes de
+**relais** : scan, annulation, tâche, synchronisation d'inventaire, rotation de secret et révocation
+passent par la boîte d'envoi durable, avec accusé de réception. Pour le relais, la livraison reste
+« au plus une fois » : une réponse perdue sur le réseau perd la demande, qui expire côté navigateur.
 
 ### 3.2 Péremption d'un Node silencieux
 
@@ -163,6 +163,63 @@ En mono-Core SQLite rien ne change pour l'exploitant : le Core reprend toujours 
 `server::epoch::tests` (Node), `command_envelope_epoch_is_optional_on_the_wire` et, avec un vrai
 Node et son vrai `start_channel_worker`,
 `a_real_node_never_executes_a_command_of_a_former_channel_owner`.
+
+### 3.6 Boîte d'envoi durable et accusés (multi-Core, étape 4)
+
+Table `node_commands` (schéma v6, migration `0006_node_commands`). Détail et preuves dans
+[`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md) §2.2 ; effets visibles :
+
+- **émission** : les émetteurs (scan, annulation de scan, tâche, synchronisation d'inventaire,
+  rotation de secret, révocation) écrivent une ligne, depuis n'importe quel Core. Ils exigent
+  toujours que le Node soit joignable, mais d'après la base quand le Node polle un autre Core
+  (bail de canal valide, `last_seen_at` de moins de 30 s), d'après la mémoire de ce Core sinon.
+  À défaut, ils gardent leur repli HTTP direct (`baseUrl`) ou leur erreur d'avant. File bornée à
+  256 commandes en attente par Node (refus à l'émission au-delà ; une tâche refusée garde son code
+  `node_busy_playback_priority`) ;
+- **livraison** : par le seul Core propriétaire du canal, une commande par réponse de poll, la
+  plus ancienne d'abord, avec l'époque et `expiresAt`. La boîte durable passe avant la boîte en
+  mémoire. Une commande écrite par ce Core réveille aussitôt le poll en attente (même latence
+  qu'avant) ; écrite par un autre Core, elle est vue par une sonde d'une seconde (PostgreSQL
+  seulement) ;
+- **accusés** : le poll suivant du Node porte `commandAcks: true` et `ackedCommandIds` (au plus
+  256 identifiants de 200 caractères au plus, dans le corps signé, omis quand la liste est vide) :
+  commandes exécutées, ignorées comme doublon ou parce que périmées. Une commande refusée pour une
+  époque inférieure n'est **pas** accusée : le propriétaire courant la relivre ;
+- **relivraison** : sans accusé après 30 s (un poll complet plus une marge), ou livrée sous une
+  époque antérieure, une commande encore valide est remise en file ; ces six types sont déclarés
+  relivrables (voir `nodes::outbox::redeliverable`) ;
+- **idempotence côté Node** : le Node retient en mémoire les 512 derniers identifiants traités
+  (`CommandLog`) et n'exécute jamais deux fois le même ; un doublon est accusé quand même. Chaque
+  émission reçoit un identifiant propre (suffixe aléatoire) : deux synchronisations successives
+  d'une bibliothèque sont deux commandes. Une synchronisation annule les synchronisations plus
+  anciennes de la même bibliothèque encore en attente ou non accusées. Cette mémoire ne survit pas
+  au redémarrage du Node : une relivraison après redémarrage est réexécutée (le travail lancé
+  avant est mort avec le processus ; scans et tâches restent gardés par leur identifiant et leur
+  tentative côté Core) ;
+- **compatibilité** : un ancien Node n'envoie pas `commandAcks` ; ses commandes ne sont jamais
+  relivrées (au plus une fois, comme avant) et passent à `expired` après 30 s. Un ancien Core
+  ignore les deux champs (`HeartbeatPayload` n'a jamais refusé les champs inconnus) ;
+- les lignes terminées (`acked`, `expired`, `cancelled`) sont supprimées après 24 h par la passe
+  périodique de chaque Core ; le contenu d'une commande (dont la clé d'une rotation) est effacé dès
+  qu'elle est accusée, périmée ou annulée.
+
+Tests : `nodes::outbox::tests` (SQLite), `server::commands::tests` (Node),
+`poll_acknowledgements_are_optional_on_the_wire` et, avec un vrai Node,
+`a_real_node_executes_an_outbox_command_once_and_acknowledges_it`.
+
+### 3.7 Rotation de secret en deux temps
+
+Une rotation par le canal enregistre la nouvelle clé **en attente** (schéma v6 :
+`media_nodes.pending_key_id`, `pending_secret`, `pending_since`) ; la clé courante reste valide
+et sert aux appels directs du Core. La première requête signée par le Node avec la nouvelle clé
+la promeut atomiquement ; l'ancienne est refusée ensuite, sur tous les Core (clés relues en base
+à chaque requête de Node). Une commande perdue, retardée ou périmée ne déconnecte donc plus le
+Node : il continue avec l'ancienne clé, et la vue d'administration indique `pendingRotation`. Une
+nouvelle rotation remplace une rotation non encore livrée et est refusée (`409`) tant qu'une
+rotation livrée n'est pas réglée ; une rotation dont la clé n'est plus en attente n'est jamais
+livrée. La révocation et le réappairage effacent la clé en attente. Le Node ignore une rotation
+vers la clé qu'il utilise déjà. La rotation directe (`baseUrl`, synchrone) est inchangée. Détail,
+limites et preuves : [`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md) §2.3.
 
 ## 4. Tâches distribuées : baux, reprises, annulations, idempotence
 

@@ -294,6 +294,13 @@ impl Scheduler {
                     {
                         eprintln!("Orphan task cleanup failed ({error}); retrying later");
                     }
+                    // Node command outbox: expiry and redelivery for Nodes that stopped polling,
+                    // removal of finished commands older than a day.
+                    if let Err(error) =
+                        crate::nodes::outbox::maintain(&worker_auth.store, now()).await
+                    {
+                        eprintln!("Node command outbox cleanup failed ({error}); retrying later");
+                    }
                 }
                 let delay = if worker_jobs
                     .engine_busy

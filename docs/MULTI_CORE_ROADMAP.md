@@ -27,7 +27,7 @@ Core. Cette base n'est pas à refaire.
 
 | État | Où | Pourquoi il bloque deux Core | Section |
 |---|---|---|---|
-| `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | en partie levé (schéma v5) : la propriété du canal et son époque sont en base, le Node refuse les commandes d'un ancien propriétaire ; une commande émise par un Core non propriétaire reste refusée (boîte d'envoi durable : §2.2) | §2 |
+| `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | en partie levé (schémas v5 et v6) : la propriété du canal et son époque sont en base, le Node refuse les commandes d'un ancien propriétaire, les commandes de contrôle passent par la boîte d'envoi durable et peuvent être émises depuis n'importe quel Core ; seules les demandes de relais restent en mémoire, chez le propriétaire | §2 |
 | `PENDING_STREAMS` | `nodes/channel.rs` | le relais exige que la requête navigateur et le flux montant du Node arrivent sur le **même** Core | §2.4 |
 | `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | chaque Core ne voit que les battements qu'il reçoit : la sélection de source et le failover divergent | §4.1 |
 | `ReplayWindow` (nonces) | `shared/protocol.rs` | un message signé rejoué sur l'autre Core passe la fenêtre anti-rejeu | §4.3 |
@@ -84,7 +84,8 @@ répond au Node par un refus « autre propriétaire » (le Node se reconnecte à
   jette aussi les commandes mises en file sous l'ancienne époque ;
 - `uplink_url` reste vide : il n'existe pas encore d'URL interne propre à chaque Core
   (`MEDIA_CORE_INTERNAL_URL` est l'URL logique) ; son remplissage dépend du choix de §2.4 ;
-- la liste d'administration des Nodes expose `channelOwner` et `channelEpoch` (champs facultatifs) ;
+- la liste d'administration des Nodes expose `channelOwner` et `channelEpoch` (champs facultatifs),
+  et `pendingRotation` (booléen omis quand faux) pendant une rotation de secret en deux temps (§2.3) ;
 - au passage, un poll dont le chemin `/nodes/{id}/channel` ne nomme pas le Node signataire est
   refusé (`403 node_id_mismatch`) : un Node correctement signé pouvait jusque-là lire la boîte aux
   lettres d'un autre Node.
@@ -121,6 +122,85 @@ node_commands(id, node_id, epoch, type, payload, expires_at, state, attempts, cr
 L'échéance (`expiresAt`) du protocole actuel est exactement le champ dont cette table a besoin ;
 le passage au durable ne casse pas le fil.
 
+**Réalisé (étape 4, schéma v6, migration `0006_node_commands`)** :
+
+- table `node_commands(id, node_id → media_nodes ON DELETE CASCADE, command_type, payload_json,
+  state, epoch, attempts, idempotent, expires_at, created_at, seq, delivered_at, acked_at,
+  origin_core)`, index `(node_id, state, seq)`. Écart par rapport au plan : la colonne `seq`
+  (microsecondes, strictement croissante dans un processus) ordonne les commandes, car
+  `created_at` (secondes) ne départage pas plusieurs émissions d'une même seconde. Entre deux Core
+  l'ordre suit leurs horloges (prérequis NTP, §3.3) ; il n'est strict que pour un même émetteur ;
+- **émission** (`nodes::outbox::enqueue`, n'importe quel Core) : une insertion, sans lire
+  l'époque. Écart : l'époque est celle de la **livraison**, posée par le propriétaire ; une
+  commande livrée sous une époque antérieure et non accusée est remise en file au premier poll du
+  nouveau propriétaire. Émetteurs passés à la boîte durable : scan, annulation de scan, tâche,
+  synchronisation d'inventaire, rotation de secret, révocation. Leurs contrats HTTP ne changent pas :
+  le contrôle « Node connecté » (sinon repli HTTP direct ou `503`) lit la mémoire de ce Core pour
+  les Nodes qu'il sert, et sinon la base (bail de canal valide d'un autre Core et `last_seen_at` de
+  moins de 30 s), jamais le seul `ACTIVE_CHANNELS` local. File bornée à 256 commandes en attente
+  par Node (contrôle avant insertion, approximatif sous concurrence) ;
+- **livraison** (Core propriétaire, dans le poll, après `acquire()` à l'époque E) : la maintenance
+  du Node (une instruction : périmées → `expired`, livrées sans accusé depuis 30 s ou sous une
+  époque < E → `queued` si relivrables et encore valides, sinon `expired`), puis la plus ancienne
+  commande `queued` non périmée passe à `delivered` (époque E, `delivered_at`, `attempts + 1`) par
+  un `UPDATE` conditionnel qui exige aussi que ce Core possède encore le canal à l'époque E. Écart :
+  pas de transaction englobante, chaque transition est une instruction atomique (comparer-et-
+  échanger) ; deux Core ne livrent jamais la même commande. **Une commande par réponse** : le
+  format de réponse n'en porte qu'une et un lot casserait les anciens Nodes ; le Node repolle
+  aussitôt. Les demandes de relais de lecture (boîte en mémoire, échéance courte) passent avant
+  l'arriéré durable, qui ne peut donc pas les faire expirer ;
+- **réveil** : une émission de ce Core réveille le poll en attente dans le processus (aucune
+  latence ajoutée en mono-Core SQLite, vérifié par le test de bout en bout) ; en PostgreSQL, un
+  poll en attente sonde aussi la table chaque seconde (`SELECT id … LIMIT 1` indexé) pour les
+  commandes écrites par un autre Core. Coût : une lecture par seconde et par Node connecté sur son
+  propriétaire (100 Nodes : 100 lectures légères par seconde), à mesurer contre le seuil du §7.
+  `LISTEN/NOTIFY` n'est pas fait : le pool `Any` n'expose pas d'écouteur, il faudrait une connexion
+  PostgreSQL dédiée par Core ;
+- **accusés** : le poll suivant du Node porte `commandAcks: true` et `ackedCommandIds` (corps signé,
+  au plus 256 identifiants, omis quand vide). Le Core les applique pour ce Node seulement. Le Node
+  accuse les commandes exécutées, ignorées comme doublon ou périmées, jamais celles refusées pour
+  une époque inférieure ;
+- **relivraison et idempotence par type** : tous les types durables sont relivrables (scan et tâche
+  par leur `id:tentative`, gardés côté Node par `register_scan` et côté Core par le fencing des lots
+  et résultats ; annulation, rotation vers la même clé et révocation sont rejouables ; une
+  synchronisation d'inventaire annule à l'émission les synchronisations plus anciennes de la même
+  bibliothèque ; une annulation annule à l'émission le démarrage non accusé du même scan ou de la
+  même tâche, qui ne peut donc jamais être relivré après elle). Le Node retient les 512 derniers
+  identifiants traités, en mémoire, et ne déduplique que les commandes de la boîte d'envoi (elles
+  portent une époque et un identifiant unique) : un Core antérieur réutilise des identifiants
+  déterministes (`sync-{bibliothèque}`, `cancel-{scan}`) pour de nouvelles commandes, qui doivent
+  s'exécuter comme avant (persister
+  coûterait une écriture synchrone par commande) : une relivraison après un redémarrage du Node est
+  réexécutée. Un Node qui n'accuse pas (version antérieure) reçoit chaque commande au plus une fois ;
+- **purge** : la passe périodique du répartiteur de tâches (toutes les 60 s, chaque Core) applique
+  la même maintenance à tous les Nodes et supprime les lignes terminées de plus de 24 h. Le contenu
+  d'une commande est effacé dès qu'elle est accusée, périmée ou annulée ;
+- **relais** inchangé : boîte aux lettres en mémoire du propriétaire, avec `PENDING_STREAMS` (§2.4) ;
+- **révocation** : mise en file puis livrée par le poll en attente (signé avec le secret encore
+  valide), les autres commandes en attente du Node sont annulées.
+
+Preuve actuelle : tests unitaires SQLite (ordre, époque posée à la livraison, refus d'un Core non
+propriétaire ou d'une époque ancienne, accusés limités au Node, relivraison après 30 s ou changement
+d'époque, au plus une fois sans accusé, péremption, borne, remplacement des synchronisations,
+purge, joignabilité), test Node (`CommandLog` : doublons, liste d'accusés bornée), tests de
+compatibilité serde, un test de bout en bout avec un vrai Node et son vrai `start_channel_worker`
+(un Core, SQLite : commande exécutée moins de 5 s après l'émission, accusée, relivrée une seconde
+fois sans être réexécutée) et un test PostgreSQL (`#[ignore]`,
+`postgres_outbox_delivers_every_command_once_across_ownership_changes`) : deux stores sur un schéma
+isolé, **dans un seul processus**. B, non propriétaire, émet ; A, propriétaire, livre. Puis 10 000
+commandes émises alternativement par les deux Core pendant qu'un **Node simulé** (le vrai
+`CommandLog`, la marque d'époque simulée) polle alternativement les deux Core sous une horloge
+simulée, en appelant les fonctions du poll (`acquire`, `acknowledge`, `maintain_node`,
+`claim_next`) ; injections : une réponse perdue toutes les 97 livraisons, accusés retenus 40 s
+toutes les 499 exécutions, à chaque changement une commande livrée par l'ancien propriétaire
+arrive après que le nouveau a parlé ; trois changements de propriétaire (battement du propriétaire
+périmé, désinscription propre, battement périmé). Exécution du 15 novembre : 10 000 commandes
+exécutées exactement une fois, 10 263 livraisons, 105 réponses perdues relivrées, 158 doublons
+ignorés par le Node, 3 commandes d'ancienne époque refusées, environ 116 s. **Ce test ne prouve
+pas** : deux vrais processus Core, le chemin HTTP du poll sur PostgreSQL (sonde d'une seconde
+comprise), un vrai réseau, un arrêt brutal réel ni le redémarrage d'un Node (mémoire des doublons
+perdue).
+
 ### 2.3 Fencing côté Node
 
 Chaque commande porte l'`epoch` du propriétaire. Le Node mémorise la plus haute époque vue
@@ -152,17 +232,76 @@ son bail) ne peut plus agir sur ce Node dès que le nouveau propriétaire a parl
   testent l'état sous le même verrou : une commande poussée juste avant la perte du canal est
   refusée à l'émetteur, jamais acceptée puis perdue en silence.
 
-**Limite restante — rotation de secret** : `rotate_node_secret` enregistre la nouvelle clé dès que la
-commande est **mise en file**, sans accusé du Node (livraison au plus une fois, comme avant
-l'étape 3). Une commande abandonnée après sa mise en file (changement d'époque, perte du canal
-après la mise en file) laisse le Node sur l'ancienne clé alors que la base attend la nouvelle ; il
-faut alors appairer le Node à nouveau. Correction prévue avec la boîte d'envoi durable et ses
-accusés (étape 4) : rotation en deux temps, ancienne clé valide jusqu'à la première requête signée
-avec la nouvelle.
+**Réalisé — rotation de secret en deux temps** (même étape de schéma v6, colonnes
+`media_nodes.pending_key_id`, `pending_secret`, `pending_since`) :
+
+- par le canal, `rotate_node_secret` n'écrit plus la nouvelle clé comme clé courante : elle est
+  enregistrée **en attente** (avant la mise en file, car le Node peut signer avec elle dès la
+  livraison), puis la commande `RotateSecret` passe par la boîte d'envoi durable. La clé courante
+  reste valide et les appels directs du Core vers le Node (jetons de lecture, sondes, tâches)
+  continuent de l'utiliser ;
+- vérification des requêtes signées par un Node (`transport::resolve_node_signing_key`, utilisée
+  par `verify_signed_node_call` — poll, battement, lots et fin de scan, résultats de tâche,
+  autorisation de lecture — et par le flux montant du relais) : la clé courante **ou** la clé en
+  attente. La première requête valide signée avec la clé en attente la **promeut** par un `UPDATE`
+  conditionnel (`WHERE id=? AND pending_key_id=?`) ; l'ancienne clé est refusée ensuite. Une
+  promotion concurrente de la même clé (autre requête, autre Core) est acceptée. La réponse signée
+  par le Core utilise la clé avec laquelle le Node a signé sa requête ;
+- les clés sont relues en base à chaque requête de Node (une lecture par clé primaire, à côté de
+  la mise à jour de `last_seen_at` déjà faite à chaque appel vérifié) : un Core dont le cache de
+  registre date d'avant une promotion ou une révocation faite par un autre Core refuse quand même
+  l'ancienne clé et accepte la nouvelle. La clé en attente n'est jamais mise en cache ni renvoyée ;
+  la vue d'administration n'expose qu'un booléen facultatif `pendingRotation` ;
+- une nouvelle rotation **remplace** une rotation en attente dont la commande n'a jamais été
+  livrée (commande annulée). Dès que la commande de la clé en attente a été livrée **une fois**,
+  toute nouvelle rotation est refusée (`409`), même après péremption de la commande : le Node a
+  peut-être appliqué la clé avant de se couper. Elle reste en attente jusqu'à sa promotion par
+  usage, un réappairage ou une révocation. L'enregistrement de la clé en attente et la livraison
+  d'une rotation sont sérialisés par un verrou consultatif par Node (`node-rotation`), ce qui
+  ferme l'écart d'écriture entre deux administrateurs ; les lignes de commande qui en gardent la
+  trace ne sont pas purgées tant que leur clé est en attente. Le propriétaire du canal ne livre une rotation que si sa clé est encore la clé en attente
+  (condition dans l'`UPDATE` de livraison) ; sinon il l'annule : une rotation remplacée, un
+  réappairage ou une rotation directe intervenus entre-temps ne basculent jamais le Node sur une
+  clé que le Core n'accepte plus ;
+- commande perdue, retardée ou périmée : le Node garde l'ancienne clé, toujours acceptée ; la
+  commande est relivrée tant qu'elle est valide (300 s), puis la rotation reste en attente
+  (`pendingRotation`) ;
+- la révocation et le réappairage effacent la clé en attente ; la révocation annule aussi la
+  commande de rotation en file ;
+- Node : une rotation pour la clé déjà en usage (relivraison après accusé perdu ou redémarrage)
+  ne change rien et ne réécrit pas l'identité ; elle est accusée. Une rotation adressée à un autre
+  Node, ou sans clé, est ignorée ;
+- rotation directe (Node appairé avec `baseUrl` et injoignable par le canal) : inchangée,
+  synchrone, confirmée par la preuve mutuelle du Node ; la nouvelle clé devient courante aussitôt
+  et toute clé en attente est effacée.
+
+Limites : entre l'application de la nouvelle clé par le Node et sa promotion (le poll suivant,
+immédiat), un appel direct du Core signé avec l'ancienne clé, ou un jeton de lecture émis avec
+elle, peut être refusé une fois par le Node ; une requête du Node encore en vol signée avec
+l'ancienne clé peut être refusée après la promotion. Les autres Core suivent la promotion à la
+première requête de Node qu'ils vérifient ; leurs appels directs et jetons de lecture utilisent
+leur cache de registre jusqu'à son rafraîchissement (état local au processus, §4.1). Une
+rotation livrée à un Node qui ne revient jamais bloque les rotations suivantes : réappairer ou
+révoquer le Node.
+
+Preuve : tests unitaires SQLite (`nodes::rotation_tests` : clé en attente acceptée, promotion au
+premier usage puis refus de l'ancienne clé, réponse signée avec la clé de la requête, commande
+perdue puis relivrée puis périmée sans déconnexion, nouvelle rotation qui remplace une rotation
+non livrée, refus tant qu'une rotation livrée n'est pas réglée, rotation périmée ou remplacée
+jamais livrée, révocation qui efface la clé en attente, promotions concurrentes, second Core au
+cache périmé), test Node (`server::outbound::tests` : rotation idempotente pour la clé en usage),
+migration v5 → v6, un test de bout en bout avec un vrai Node et son vrai `start_channel_worker`
+(`a_rotation_over_the_channel_is_promoted_by_the_nodes_first_use_of_the_new_key` : rotation,
+application par le Node, promotion, accusé, ancienne clé refusée, canal toujours actif), un test
+de la rotation directe (`a_direct_rotation_is_confirmed_by_the_node_and_current_at_once`) et un
+test PostgreSQL `#[ignore]` (`postgres_rotation_emitted_by_another_core_is_promoted_on_first_use` :
+deux stores dans un processus, B émet, A livre et promeut, B refuse l'ancienne clé). Ces tests ne
+couvrent pas deux vrais processus Core ni un redémarrage réel du Node pendant la rotation.
 
 **Reste non fencé** (appels signés directs du Core vers le Node, `core-to-node`, hors canal ; ils
 ne visent que les Nodes appairés avec une `baseUrl` et, sauf la révocation envoyée par les deux
-voies, ne servent que quand ce Core n'a pas de canal actif pour le Node) :
+voies, ne servent que quand le Node n'est joignable par le canal d'aucun Core — depuis l'étape 4,
+un Node qui polle un autre Core reçoit ces commandes par la boîte d'envoi durable, donc fencées) :
 
 | Appel | Route Node | Émetteur |
 |---|---|---|
@@ -386,7 +525,7 @@ avant la suivante.
 | 1 | Identité de Core (`core_instances`), nettoyage de démarrage non global (§3.3) | un second Core démarre pendant un scan sans l'interrompre ; test d'intégration deux processus |
 | 2 | Tâches système et sauvegardes via `durable_tasks` (§3.2.4) | deux Core, une seule exécution par échéance, sur 1 000 échéances |
 | 3 | Propriété des canaux + époque (§2.1, §2.3) — fait pour le canal, appels directs non fencés ; preuve de sortie à écrire | arrêt brutal du propriétaire : le Node est repris par l'autre Core en moins de 3 baux, aucune commande d'époque ancienne exécutée |
-| 4 | Boîte d'envoi durable (§2.2) | commandes émises depuis le Core non propriétaire ; aucune perte, aucun doublon sur 10 000 commandes avec 3 arrêts brutaux |
+| 4 | Boîte d'envoi durable (§2.2) — fait ; preuve dans un seul processus avec Node simulé (10 000 commandes, 3 changements de propriétaire, zéro perte, zéro double exécution), preuve à deux processus à écrire ; rotation de secret en deux temps faite (§2.3) | commandes émises depuis le Core non propriétaire ; aucune perte, aucun doublon sur 10 000 commandes avec 3 arrêts brutaux |
 | 5 | Fencing des publications et lots (§3.2.1-2) | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
 | 6 | Caches : génération de catalogue, santé de Node (§4) | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |
 | 7 | Effets externes (§5) | injection de pannes entre appel et confirmation : état `unknown` observé, jamais de rejeu non idempotent |

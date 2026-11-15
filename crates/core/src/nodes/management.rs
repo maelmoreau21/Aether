@@ -225,6 +225,9 @@ pub(super) async fn pair_node_admin(
             connection_mode='inbound',
             key_id=excluded.key_id,
             shared_secret=excluded.shared_secret,
+            pending_key_id=NULL,
+            pending_secret=NULL,
+            pending_since=NULL,
             roots_json=excluded.roots_json,
             last_seen_at=excluded.last_seen_at,
             version=excluded.version,
@@ -442,6 +445,9 @@ pub(super) async fn enroll_node(
             connection_mode=excluded.connection_mode,
             key_id=excluded.key_id,
             shared_secret=excluded.shared_secret,
+            pending_key_id=NULL,
+            pending_secret=NULL,
+            pending_since=NULL,
             roots_json=excluded.roots_json,
             last_seen_at=excluded.last_seen_at,
             revoked_at=NULL",
@@ -514,7 +520,8 @@ pub(super) async fn reconnect_node(
     if rec.status == NodeStatus::Revoked.as_str() {
         return Err(StatusCode::CONFLICT);
     }
-    let is_channel_active = super::channel::channel_is_active(&id).await;
+    // Connected through its control channel, to this Core or to another one.
+    let is_channel_active = super::outbox::node_reachable(&state.auth.store, &id).await;
     if is_channel_active {
         let now = unix_now();
         crate::database::query(
@@ -665,6 +672,14 @@ pub(super) async fn rotate_node_secret(
     if rec.status == NodeStatus::Revoked.as_str() {
         return Err(StatusCode::CONFLICT);
     }
+    // Two-phase rotation (roadmap §2.3): a rotation not delivered yet is replaced by this one;
+    // one already delivered and not settled keeps its key pending (the Node may sign with it).
+    if !super::outbox::supersede_rotation(&state.auth.store, &id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        return Err(StatusCode::CONFLICT);
+    }
 
     let new_key_id = format!("key-{}", uuid::Uuid::new_v4().simple());
     let new_secret = random_secret_hex();
@@ -686,13 +701,13 @@ pub(super) async fn rotate_node_secret(
     };
 
     while tokio::time::Instant::now() <= deadline {
-        let channel_sender = {
-            let channels = ACTIVE_CHANNELS.read().await;
-            channels.get(&id).cloned()
-        };
-        if let Some(sender) = channel_sender
-            && !sender.is_closed()
-        {
+        // Durable outbox: delivered by whichever Core owns the Node's channel. The new key is
+        // only pending: the current one keeps working (Core->Node calls keep using it) until
+        // the Node's first request signed with the new key promotes it, so a command lost,
+        // late or expired never disconnects the Node. Pending before queued: the Node may
+        // sign with the new key as soon as the command is delivered.
+        if super::outbox::node_reachable(&state.auth.store, &id).await {
+            stage_pending_key(&state.auth.store, &id, &new_key_id, &new_secret).await?;
             let cmd = NodeCommandEnvelope {
                 command_id: format!("rotate-{new_key_id}"),
                 command_type: NodeCommandType::RotateSecret,
@@ -700,10 +715,14 @@ pub(super) async fn rotate_node_secret(
                 epoch: None,
                 payload: serde_json::to_value(&req_payload).unwrap_or_default(),
             };
-            if sender.send(cmd).await.is_ok() {
+            if super::outbox::enqueue(&state.auth.store, &id, cmd)
+                .await
+                .is_ok()
+            {
                 sent = true;
                 break;
             }
+            clear_pending_key(&state.auth.store, &id, &new_key_id).await;
         }
         if !is_outbound {
             break;
@@ -712,24 +731,6 @@ pub(super) async fn rotate_node_secret(
     }
 
     if sent {
-        let now = unix_now();
-        crate::database::query(
-            "UPDATE media_nodes SET key_id=?, shared_secret=?, status='connected', last_seen_at=? WHERE id=?",
-        )
-        .bind(&new_key_id)
-        .bind(&new_secret)
-        .bind(now)
-        .bind(&id)
-        .execute(&state.auth.store.pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let _ = refresh_node_in_registry(&state.auth.store, &id).await;
-        state
-            .auth
-            .store
-            .node_registry
-            .record_success(&id, Some(1), now);
-
         let views = load_admin_nodes(&state.auth.store)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -765,7 +766,7 @@ pub(super) async fn rotate_node_secret(
 
     let now = unix_now();
     crate::database::query(
-        "UPDATE media_nodes SET key_id=?, shared_secret=?, status='connected', last_seen_at=? WHERE id=?",
+        "UPDATE media_nodes SET key_id=?, shared_secret=?, pending_key_id=NULL, pending_secret=NULL, pending_since=NULL, status='connected', last_seen_at=? WHERE id=?",
     )
     .bind(&new_key_id)
     .bind(&new_secret)
@@ -791,6 +792,35 @@ pub(super) async fn rotate_node_secret(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+/// Record the new key of a rotation as the Node's pending key (replacing an older pending one,
+/// whose command [`super::outbox::supersede_rotation`] cancelled); the current key is unchanged.
+async fn stage_pending_key(
+    store: &crate::identity::IdentityStore,
+    node_id: &str,
+    key_id: &str,
+    secret: &str,
+) -> Result<(), StatusCode> {
+    let staged = super::outbox::stage_rotation_key(store, node_id, key_id, secret, unix_now())
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if staged {
+        Ok(())
+    } else {
+        Err(StatusCode::CONFLICT)
+    }
+}
+
+/// Forget a pending key whose command could not be queued.
+async fn clear_pending_key(store: &crate::identity::IdentityStore, node_id: &str, key_id: &str) {
+    let _ = crate::database::query(
+        "UPDATE media_nodes SET pending_key_id=NULL, pending_secret=NULL, pending_since=NULL WHERE id=? AND pending_key_id=?",
+    )
+    .bind(node_id)
+    .bind(key_id)
+    .execute(&store.pool)
+    .await;
+}
+
 pub(super) async fn revoke_node_admin(
     State(state): State<NodesState>,
     AxumPath(id): AxumPath<String>,
@@ -805,20 +835,25 @@ pub(super) async fn revoke_node_admin(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    // Best-effort notify Node of revocation via channel or HTTP
+    // Best-effort notify Node of revocation via channel or HTTP. Through the durable outbox, the
+    // poll parked on the owning Core (this one: woken at once; another: within its probe
+    // interval) delivers it signed with the current secret, before the wipe below makes the
+    // Node's next poll fail authentication. Whatever else was waiting for the Node is cancelled.
+    if super::outbox::node_reachable(&state.auth.store, &id).await
+        && let Ok(revoke_id) = super::outbox::enqueue(
+            &state.auth.store,
+            &id,
+            NodeCommandEnvelope {
+                command_id: format!("revoke-{}", unix_now()),
+                command_type: NodeCommandType::Revoke,
+                expires_at: None,
+                epoch: None,
+                payload: serde_json::Value::Null,
+            },
+        )
+        .await
     {
-        let channels = ACTIVE_CHANNELS.read().await;
-        if let Some(sender) = channels.get(&id) {
-            let _ = sender
-                .send(NodeCommandEnvelope {
-                    command_id: format!("revoke-{}", unix_now()),
-                    command_type: NodeCommandType::Revoke,
-                    expires_at: None,
-                    epoch: None,
-                    payload: serde_json::Value::Null,
-                })
-                .await;
-        }
+        let _ = super::outbox::cancel_pending(&state.auth.store, &id, &revoke_id).await;
     }
     ACTIVE_CHANNELS.write().await.remove(&id);
 
@@ -841,7 +876,7 @@ pub(super) async fn revoke_node_admin(
     let revoked_key_id = format!("revoked-{}", uuid::Uuid::new_v4().simple());
     let wiped_secret = random_secret_hex();
     crate::database::query(
-        "UPDATE media_nodes SET status='revoked', key_id=?, shared_secret=?, revoked_at=? WHERE id=?",
+        "UPDATE media_nodes SET status='revoked', key_id=?, shared_secret=?, pending_key_id=NULL, pending_secret=NULL, pending_since=NULL, revoked_at=? WHERE id=?",
     )
     .bind(&revoked_key_id)
     .bind(&wiped_secret)

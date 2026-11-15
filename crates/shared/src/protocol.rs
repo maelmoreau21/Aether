@@ -313,7 +313,22 @@ pub struct HeartbeatPayload {
     pub resource_pressure: Option<ResourcePressure>,
     pub indexed_assets: usize,
     pub timestamp: i64,
+    /// The Node acknowledges the channel commands it handled (durable outbox, multi-Core step
+    /// 4). Omitted when false: an older Node never acknowledges, and the Core then never
+    /// redelivers to it (at-most-once, as before).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub command_acks: bool,
+    /// Ids of the commands handled since the last accepted poll: executed, or ignored as a
+    /// duplicate or as expired (never those refused for a stale epoch). Sent in the signed body
+    /// of the next control poll, at most [`MAX_ACKED_COMMAND_IDS`]; omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub acked_command_ids: Vec<String>,
 }
+
+/// Bound of [`HeartbeatPayload::acked_command_ids`] on both sides.
+pub const MAX_ACKED_COMMAND_IDS: usize = 256;
+/// Longest command id a Node acknowledges or a Core accepts in an acknowledgement.
+pub const MAX_COMMAND_ID_LEN: usize = 200;
 
 /// Core -> Node secret rotation request (`POST /internal/v1/node/rotate-secret`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1162,6 +1177,53 @@ mod tests {
             expires_at: Option<i64>,
         }
         assert!(serde_json::from_str::<PreviousEnvelope>(fenced).is_ok());
+    }
+
+    #[test]
+    fn poll_acknowledgements_are_optional_on_the_wire() {
+        // An older Node's poll body (no acknowledgement fields) still decodes.
+        let legacy = r#"{"protocolVersion":"v1","nodeId":"n","roots":[],"publicUrl":null,"activeScans":0,"activeScanIds":[],"activeStreams":0,"indexedAssets":0,"timestamp":5}"#;
+        let decoded: HeartbeatPayload = serde_json::from_str(legacy).unwrap();
+        assert!(!decoded.command_acks);
+        assert!(decoded.acked_command_ids.is_empty());
+        // Nothing to acknowledge and no support declared: serialised exactly as before.
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), legacy);
+        // A newer Node declares the support; empty acknowledgements are still omitted.
+        let empty = HeartbeatPayload {
+            command_acks: true,
+            ..decoded.clone()
+        };
+        let encoded = serde_json::to_string(&empty).unwrap();
+        assert!(encoded.contains(r#""commandAcks":true"#), "{encoded}");
+        assert!(!encoded.contains("ackedCommandIds"), "{encoded}");
+        let acked = HeartbeatPayload {
+            acked_command_ids: vec!["scan-1-a".into()],
+            ..empty
+        };
+        let encoded = serde_json::to_string(&acked).unwrap();
+        assert!(
+            encoded.contains(r#""ackedCommandIds":["scan-1-a"]"#),
+            "{encoded}"
+        );
+        assert_eq!(
+            serde_json::from_str::<HeartbeatPayload>(&encoded).unwrap(),
+            acked
+        );
+        // An older Core decodes a newer Node's poll: `HeartbeatPayload` never denied unknown
+        // fields, so the acknowledgements are ignored there.
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        #[allow(dead_code)]
+        struct PreviousHeartbeat {
+            protocol_version: String,
+            node_id: NodeId,
+            roots: Vec<String>,
+            public_url: Option<String>,
+            active_scans: u32,
+            indexed_assets: usize,
+            timestamp: i64,
+        }
+        assert!(serde_json::from_str::<PreviousHeartbeat>(&encoded).is_ok());
     }
 
     #[test]

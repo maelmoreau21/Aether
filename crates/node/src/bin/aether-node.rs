@@ -183,6 +183,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 indexed_assets,
                 resource_pressure,
                 timestamp: media_contracts::protocol::unix_now(),
+                command_acks: false,
+                acked_command_ids: Vec::new(),
             };
             let _ = media_node::server::post_signed_to_core(
                 &hb_state,

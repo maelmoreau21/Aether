@@ -10,7 +10,10 @@
 //! * direct-streaming capability tokens are bound to a Node, an asset, an action and a live
 //!   session, and are refused when tampered, forged for another viewer or after logout;
 //! * a protocol-version mismatch is rejected and the Node recovers on its next valid call;
-//! * commands queued for a Node survive between and behind control polls.
+//! * commands queued for a Node survive between and behind control polls;
+//! * a durable outbox command is executed once and acknowledged, even when delivered twice;
+//! * a secret rotation over the channel is promoted by the Node's first use of the new key,
+//!   after which the old key is refused, without interrupting the Node's polling.
 //!
 //! The scenarios need the generated fixtures (`scripts/generate-fixtures.ps1`) and, for the
 //! non-equivalent copy, an `ffmpeg` binary; they say so and return early when it is missing.
@@ -177,6 +180,7 @@ struct Cluster {
     core_origin: String,
     store: IdentityStore,
     admin_cookie: String,
+    admin_csrf: String,
     alice_cookie: String,
     alice_hash: String,
     bob_cookie: String,
@@ -461,6 +465,7 @@ impl Cluster {
             core_origin,
             store,
             admin_cookie,
+            admin_csrf: csrf,
             alice_cookie: users[0].0.clone(),
             alice_hash: users[0].1.clone(),
             bob_cookie: users[1].0.clone(),
@@ -534,14 +539,28 @@ impl Cluster {
         protocol: &str,
     ) -> (StatusCode, Bytes) {
         let (secret, key_id) = self.node_secret(&node.id).await;
+        self.signed_node_post_with(node, path, body, protocol, &key_id, &secret)
+            .await
+    }
+
+    /// Like [`Self::signed_node_post`], signed with an explicit key.
+    async fn signed_node_post_with(
+        &self,
+        node: &NodeHandle,
+        path: &str,
+        body: Vec<u8>,
+        protocol: &str,
+        key_id: &str,
+        secret: &str,
+    ) -> (StatusCode, Bytes) {
         let (now, nonce, sha) = (unix_now(), random_nonce_hex(), sha256_hex(&body));
         let signature = sign_internal_request(
-            &secret,
+            secret,
             "node-to-core",
             "POST",
             path,
             &node.id,
-            &key_id,
+            key_id,
             now,
             &nonce,
             &sha,
@@ -553,7 +572,7 @@ impl Cluster {
             &[
                 (HDR_PROTOCOL, protocol),
                 (HDR_NODE_ID, &node.id),
-                (HDR_KEY_ID, &key_id),
+                (HDR_KEY_ID, key_id),
                 (HDR_TIMESTAMP, &now.to_string()),
                 (HDR_NONCE, &nonce),
                 (HDR_BODY_SHA256, &sha),
@@ -579,6 +598,8 @@ impl Cluster {
             resource_pressure: None,
             indexed_assets: 1,
             timestamp: unix_now(),
+            command_acks: false,
+            acked_command_ids: Vec::new(),
         })
         .unwrap()
     }
@@ -1539,6 +1560,344 @@ async fn direct_streaming_bypasses_the_core_and_the_relay_costs_are_measured() {
             "build": "debug, loopback, Core and Nodes in one process"
         })
     );
+    c.node1.kill().await;
+    c.node2.kill().await;
+}
+
+/// Durable outbox (multi-Core step 4) with a real Node running its real channel worker: a command
+/// written while the Node's poll is parked on this Core is delivered at once (in-process wake, no
+/// database probe on SQLite), executed once and acknowledged by the Node's next poll. Delivered
+/// again (an acknowledgement lost, a redelivery after a takeover), it is acknowledged again but
+/// never executed a second time.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_real_node_executes_an_outbox_command_once_and_acknowledges_it() {
+    let Some(mp4) = identical_copy() else { return };
+    let mut c = Cluster::start_with(&mp4, &mp4, 0, false).await;
+    let worker = media_node::server::start_channel_worker(c.node1_state.clone());
+    let node = c.node1.id.clone();
+    let sync = |library: &str| {
+        command(
+            &format!("sync-{library}"),
+            "sync_inventory",
+            json!({"payload": {"libraryId": library, "rootSnapshot": "/outbox", "assets": [], "images": []}}),
+        )
+    };
+    let has_library = |library: &str| {
+        c.node1_state
+            .inventory
+            .read()
+            .unwrap()
+            .libraries
+            .contains_key(library)
+    };
+    let row = |id: String| {
+        let pool = c.store.pool().clone();
+        async move {
+            aether_core::database::query_as::<_, (String, i64, Option<i64>)>(
+                "SELECT state, attempts, epoch FROM node_commands WHERE id=?",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let acked = |id: String| {
+        let row = &row;
+        async move {
+            tokio::time::timeout(Duration::from_secs(15), async {
+                loop {
+                    let current = row(id.clone()).await;
+                    if current.0 == "acked" {
+                        break current;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{id} was not acknowledged"))
+        }
+    };
+
+    // The Node's poll is parked on this Core (it acquired the channel).
+    let channel = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(channel) = ACTIVE_CHANNELS.read().await.get(&node).cloned()
+                && channel.epoch() != 0
+                && !channel.is_closed()
+            {
+                break channel;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the Node polls its channel");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let started = std::time::Instant::now();
+    let id = aether_core::nodes::outbox::enqueue(&c.store, &node, sync("outbox-lib"))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !has_library("outbox-lib") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the outbox command is executed");
+    // Far below the 25 s long poll: the parked poll was woken in-process.
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    let (_, attempts, epoch) = acked(id.clone()).await;
+    assert_eq!(attempts, 1);
+    assert_eq!(epoch, Some(channel.epoch()));
+
+    // The acknowledgement is lost and the command delivered again: the Node must not apply it
+    // twice. Its effect is undone on the Node so that a second execution would show.
+    c.node1_state
+        .inventory
+        .write()
+        .unwrap()
+        .libraries
+        .remove("outbox-lib");
+    let payload =
+        json!({"libraryId": "outbox-lib", "rootSnapshot": "/outbox", "assets": [], "images": []});
+    query("UPDATE node_commands SET state='queued', payload_json=? WHERE id=?")
+        .bind(payload.to_string())
+        .bind(&id)
+        .execute(c.store.pool())
+        .await
+        .unwrap();
+    // A newer command wakes the poll; the requeued one is older and handed over first.
+    let wake = aether_core::nodes::outbox::enqueue(&c.store, &node, sync("outbox-wake"))
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !has_library("outbox-wake") {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the newer command is executed");
+    let (_, attempts, _) = acked(id.clone()).await;
+    assert_eq!(attempts, 2, "delivered a second time");
+    acked(wake).await;
+    assert!(
+        !has_library("outbox-lib"),
+        "a redelivered command was executed twice"
+    );
+
+    worker.abort();
+    c.node1.kill().await;
+    c.node2.kill().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rotation_over_the_channel_is_promoted_by_the_nodes_first_use_of_the_new_key() {
+    let Some(mp4) = identical_copy() else { return };
+    let mut c = Cluster::start_with(&mp4, &mp4, 0, false).await;
+    let worker = media_node::server::start_channel_worker(c.node1_state.clone());
+    let node = c.node1.id.clone();
+    let node_key = || {
+        let identity = c.node1_state.identity.read().unwrap();
+        (
+            identity.key_id.clone(),
+            identity.shared_secret.clone().unwrap_or_default(),
+        )
+    };
+    let stored = || {
+        let pool = c.store.pool().clone();
+        let node = node.clone();
+        async move {
+            aether_core::database::query_as::<_, (String, Option<String>)>(
+                "SELECT key_id, pending_key_id FROM media_nodes WHERE id=?",
+            )
+            .bind(node)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(channel) = ACTIVE_CHANNELS.read().await.get(&node).cloned()
+                && channel.epoch() != 0
+                && !channel.is_closed()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the Node polls its channel");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (old_key, old_secret) = node_key();
+    assert_eq!(stored().await, (old_key.clone(), None));
+
+    let (status, _, body) = http_request(
+        &c.core_origin,
+        Method::POST,
+        &format!("/api/v1/admin/nodes/{node}/rotate-secret"),
+        &[
+            ("origin", c.core_origin.as_str()),
+            ("cookie", c.admin_cookie.as_str()),
+            ("x-csrf-token", c.admin_csrf.as_str()),
+        ],
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let view: Value = serde_json::from_slice(&body).unwrap();
+    // Answered before the Node used the new key: it is still pending, never exposed.
+    if view["keyId"] == old_key.as_str() {
+        assert_eq!(view["pendingRotation"], true, "{view}");
+    }
+    assert!(view.get("pendingKeyId").is_none() && view.get("sharedSecret").is_none());
+
+    // The Node applies the command; its next poll, signed with the new key, promotes it.
+    let (new_key, new_secret) = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let current = node_key();
+            if current.0 != old_key && stored().await == (current.0.clone(), None) {
+                break current;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the new key is applied by the Node and promoted by the Core");
+    assert_ne!(new_secret, old_secret);
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let state: String = query_scalar(
+                "SELECT state FROM node_commands WHERE node_id=? AND command_type='rotate_secret'",
+            )
+            .bind(&node)
+            .fetch_one(c.store.pool())
+            .await
+            .unwrap();
+            if state == "acked" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the rotation is acknowledged");
+
+    // The old key is refused from now on; the new one is accepted.
+    let heartbeat = "/internal/v1/core/heartbeat";
+    let (status, body) = c
+        .signed_node_post_with(
+            &c.node1,
+            heartbeat,
+            c.heartbeat(&c.node1),
+            PROTOCOL_VERSION,
+            &old_key,
+            &old_secret,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(String::from_utf8_lossy(&body).contains("invalid_key_id"));
+    let (status, _) = c
+        .signed_node_post_with(
+            &c.node1,
+            heartbeat,
+            c.heartbeat(&c.node1),
+            PROTOCOL_VERSION,
+            &new_key,
+            &new_secret,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The Node kept polling with the new key: a later command still reaches it.
+    let sync = command(
+        "sync-after-rotation",
+        "sync_inventory",
+        json!({"payload": {"libraryId": "after-rotation", "rootSnapshot": "/rotation", "assets": [], "images": []}}),
+    );
+    aether_core::nodes::outbox::enqueue(&c.store, &node, sync)
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            if c.node1_state
+                .inventory
+                .read()
+                .unwrap()
+                .libraries
+                .contains_key("after-rotation")
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the channel keeps working after the rotation");
+
+    worker.abort();
+    c.node1.kill().await;
+    c.node2.kill().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_direct_rotation_is_confirmed_by_the_node_and_current_at_once() {
+    let Some(mp4) = identical_copy() else { return };
+    let mut c = Cluster::start_with(&mp4, &mp4, 0, false).await;
+    // No channel worker: the Node is reachable only through its `baseUrl` (synchronous path).
+    let node = c.node1.id.clone();
+    let (old_secret, old_key) = c.node_secret(&node).await;
+    let (status, _, body) = http_request(
+        &c.core_origin,
+        Method::POST,
+        &format!("/api/v1/admin/nodes/{node}/rotate-secret"),
+        &[
+            ("origin", c.core_origin.as_str()),
+            ("cookie", c.admin_cookie.as_str()),
+            ("x-csrf-token", c.admin_csrf.as_str()),
+        ],
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+    let view: Value = serde_json::from_slice(&body).unwrap();
+    assert!(view.get("pendingRotation").is_none(), "{view}");
+    let (new_secret, new_key) = c.node_secret(&node).await;
+    assert_ne!(new_key, old_key);
+    let pending: Option<String> = query_scalar("SELECT pending_key_id FROM media_nodes WHERE id=?")
+        .bind(&node)
+        .fetch_one(c.store.pool())
+        .await
+        .unwrap();
+    assert_eq!(pending, None);
+    {
+        let identity = c.node1_state.identity.read().unwrap();
+        assert_eq!(identity.key_id, new_key);
+        assert_eq!(identity.shared_secret.as_deref(), Some(new_secret.as_str()));
+    }
+    let heartbeat = "/internal/v1/core/heartbeat";
+    let (status, _) = c
+        .signed_node_post_with(
+            &c.node1,
+            heartbeat,
+            c.heartbeat(&c.node1),
+            PROTOCOL_VERSION,
+            &old_key,
+            &old_secret,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = c
+        .signed_node_post(&c.node1, heartbeat, c.heartbeat(&c.node1), PROTOCOL_VERSION)
+        .await;
+    assert_eq!(status, StatusCode::OK);
     c.node1.kill().await;
     c.node2.kill().await;
 }

@@ -250,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 5;
+pub const CURRENT_SCHEMA_VERSION: i64 = 6;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -293,7 +293,56 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
         sqlite_sql: NODE_CHANNEL_OWNER_SQL,
         postgres_sql: NODE_CHANNEL_OWNER_SQL,
     },
+    // Multi-Core: durable outbox of Node commands, written by any Core, delivered by the owner
+    // of the Node's channel, acknowledged by the Node (`nodes::outbox`); and the pending key of
+    // a two-phase secret rotation, promoted by the Node's first request signed with it.
+    MigrationStep {
+        version: 6,
+        name: "0006_node_commands",
+        sqlite_sql: NODE_COMMANDS_SQLITE_SQL,
+        postgres_sql: NODE_COMMANDS_POSTGRES_SQL,
+    },
 ];
+
+/// Table of migration v6, shared by both engines.
+macro_rules! node_commands_table_sql {
+    () => {
+        "CREATE TABLE node_commands (
+ id TEXT PRIMARY KEY NOT NULL,
+ node_id TEXT NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
+ command_type TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','delivered','acked','expired','cancelled')),
+ epoch BIGINT,
+ attempts BIGINT NOT NULL DEFAULT 0,
+ idempotent BIGINT NOT NULL DEFAULT 0,
+ expires_at BIGINT NOT NULL,
+ created_at BIGINT NOT NULL,
+ seq BIGINT NOT NULL,
+ delivered_at BIGINT,
+ acked_at BIGINT,
+ origin_core TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX node_commands_pending ON node_commands(node_id, state, seq);
+CREATE INDEX node_commands_created ON node_commands(created_at);"
+    };
+}
+
+// `media_nodes` is a STRICT table on SQLite: INTEGER there (64 bits), BIGINT on PostgreSQL.
+const NODE_COMMANDS_SQLITE_SQL: &str = concat!(
+    node_commands_table_sql!(),
+    "
+ALTER TABLE media_nodes ADD COLUMN pending_key_id TEXT;
+ALTER TABLE media_nodes ADD COLUMN pending_secret TEXT;
+ALTER TABLE media_nodes ADD COLUMN pending_since INTEGER;"
+);
+const NODE_COMMANDS_POSTGRES_SQL: &str = concat!(
+    node_commands_table_sql!(),
+    "
+ALTER TABLE media_nodes ADD COLUMN pending_key_id TEXT;
+ALTER TABLE media_nodes ADD COLUMN pending_secret TEXT;
+ALTER TABLE media_nodes ADD COLUMN pending_since BIGINT;"
+);
 
 const NODE_CHANNEL_OWNER_SQL: &str = "CREATE TABLE node_channel_owner (
  node_id TEXT PRIMARY KEY NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
@@ -706,5 +755,80 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(name, "0005_node_channel_owner");
+    }
+
+    #[tokio::test]
+    async fn sqlite_v5_upgrades_to_node_commands() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(&mut conn, 5, super::MIGRATIONS)
+                .await
+                .unwrap(),
+            5
+        );
+        super::query(
+            "INSERT INTO media_nodes(id,name,kind,status) VALUES('nas','NAS','remote','connected')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(&mut conn, 6, super::MIGRATIONS)
+                .await
+                .unwrap(),
+            6
+        );
+        super::query(
+            "INSERT INTO node_commands(id,node_id,command_type,payload_json,expires_at,created_at,seq) \
+                VALUES('c','nas','scan','{}',9,1,1)",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        let row: (String, i64, i64, Option<i64>, String) = super::query_as(
+            "SELECT state,attempts,idempotent,epoch,origin_core FROM node_commands WHERE id='c'",
+        )
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(row, ("queued".into(), 0, 0, None, String::new()));
+        // An existing Node has no pending secret rotation.
+        let pending: (Option<String>, Option<String>, Option<i64>) = super::query_as(
+            "SELECT pending_key_id,pending_secret,pending_since FROM media_nodes WHERE id='nas'",
+        )
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(pending, (None, None, None));
+        assert!(
+            super::query("UPDATE node_commands SET state='lost' WHERE id='c'")
+                .execute(&mut conn)
+                .await
+                .is_err(),
+            "unknown states are refused"
+        );
+        // Deleting the Node deletes its commands.
+        super::query("PRAGMA foreign_keys=ON")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        super::query("DELETE FROM media_nodes WHERE id='nas'")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let left: i64 = super::query_scalar("SELECT COUNT(*) FROM node_commands")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(left, 0);
+        let name: String =
+            super::query_scalar("SELECT name FROM schema_migrations WHERE version=6")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(name, "0006_node_commands");
     }
 }

@@ -3278,3 +3278,29 @@ CREATE TABLE node_channel_owner (
  lease_until BIGINT NOT NULL,
  uplink_url TEXT NOT NULL DEFAULT ''
 );
+
+-- Schema v6 (database.rs MIGRATIONS, 0006_node_commands): durable outbox of Media Node
+-- commands (multi-Core), written by any Core, delivered by the channel owner, acknowledged.
+CREATE TABLE node_commands (
+ id TEXT PRIMARY KEY NOT NULL,
+ node_id TEXT NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
+ command_type TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','delivered','acked','expired','cancelled')),
+ epoch BIGINT,
+ attempts BIGINT NOT NULL DEFAULT 0,
+ idempotent BIGINT NOT NULL DEFAULT 0,
+ expires_at BIGINT NOT NULL,
+ created_at BIGINT NOT NULL,
+ seq BIGINT NOT NULL,
+ delivered_at BIGINT,
+ acked_at BIGINT,
+ origin_core TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX node_commands_pending ON node_commands(node_id, state, seq);
+CREATE INDEX node_commands_created ON node_commands(created_at);
+-- Same step v6: pending key of a two-phase Node secret rotation (NULL = none), promoted by
+-- the Node's first request signed with it.
+ALTER TABLE media_nodes ADD COLUMN pending_key_id TEXT;
+ALTER TABLE media_nodes ADD COLUMN pending_secret TEXT;
+ALTER TABLE media_nodes ADD COLUMN pending_since BIGINT;

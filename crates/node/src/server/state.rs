@@ -123,6 +123,8 @@ pub struct NodeServerState {
     pub replay_window: Arc<ReplayWindow>,
     /// Highest command-channel epoch seen from a Core (multi-Core fencing).
     pub channel_epoch: Arc<super::epoch::ChannelEpochFence>,
+    /// Channel commands handled recently and acknowledgements to send (multi-Core step 4).
+    pub commands: Arc<super::commands::CommandLog>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub active_streams: Arc<AtomicU32>,
     pub resources: Arc<crate::resources::Sampler>,
@@ -211,6 +213,7 @@ impl NodeServerState {
             inventory: Arc::new(RwLock::new(inventory)),
             replay_window: Arc::new(ReplayWindow::new()),
             channel_epoch: Arc::new(channel_epoch),
+            commands: Arc::new(super::commands::CommandLog::new()),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
             active_streams,
             local_node: LocalNode,

@@ -4,6 +4,7 @@
 mod channel;
 mod channel_owner;
 mod management;
+pub mod outbox;
 mod playback;
 mod registry;
 mod scans;
@@ -107,3 +108,7 @@ pub fn router(auth: AuthState, replay_window: Arc<ReplayWindow>) -> Router {
 #[cfg(test)]
 #[path = "tests.rs"]
 mod transport_policy_tests;
+
+#[cfg(test)]
+#[path = "rotation_tests.rs"]
+mod rotation_tests;

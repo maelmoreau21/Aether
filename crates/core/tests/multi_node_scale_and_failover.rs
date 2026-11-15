@@ -461,6 +461,8 @@ async fn scale_benchmark_1_10_and_100_simulated_nodes_warm_selection() {
                 resource_pressure: None,
                 indexed_assets: 1,
                 timestamp: unix_now(),
+                command_acks: false,
+                acked_command_ids: Vec::new(),
             };
             store
                 .node_registry()
@@ -591,6 +593,8 @@ async fn scale_benchmark_1_10_and_100_simulated_nodes_warm_selection() {
         resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     store
         .node_registry()
@@ -608,6 +612,8 @@ async fn scale_benchmark_1_10_and_100_simulated_nodes_warm_selection() {
         resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     store
         .node_registry()
@@ -929,6 +935,8 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     store
         .node_registry()
@@ -946,6 +954,8 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     store
         .node_registry()
@@ -1214,6 +1224,8 @@ async fn real_multi_node_failover_progress_continuity_and_concurrency() {
         resource_pressure: None,
         indexed_assets: 1,
         timestamp: unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     let hb_bytes = serde_json::to_vec(&hb_payload).unwrap();
     let hb_hash = sha256_hex(&hb_bytes);

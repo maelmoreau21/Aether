@@ -118,6 +118,8 @@ async fn test_nodes_version_tracking_local_and_remote() {
         resource_pressure: None,
         indexed_assets: 10,
         timestamp: media_contracts::protocol::unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     let body_bytes = serde_json::to_vec(&hb).unwrap();
     let ts = media_contracts::protocol::unix_now();
@@ -184,6 +186,8 @@ async fn test_nodes_version_tracking_local_and_remote() {
         resource_pressure: None,
         indexed_assets: 10,
         timestamp: media_contracts::protocol::unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     let body_bytes = serde_json::to_vec(&legacy_hb).unwrap();
     let ts = media_contracts::protocol::unix_now();

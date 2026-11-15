@@ -1,6 +1,6 @@
 //! Remote task/scan dispatch, fenced result ingestion and inventory synchronization.
 use super::NodesState;
-use super::channel::ACTIVE_CHANNELS;
+use super::outbox;
 use super::registry::{load_node, refresh_node_in_registry};
 use super::transport::{signed_core_response, verify_signed_node_call};
 use crate::error;
@@ -126,16 +126,27 @@ pub(crate) async fn dispatch_remote_task(
     if rec.status == "revoked" {
         return Err("Node revoked".into());
     }
-    if let Some(sender) = ACTIVE_CHANNELS.read().await.get(node).cloned() {
-        return sender
-            .try_send(NodeCommandEnvelope {
+    // Through the durable outbox when the Node polls a Core (this one or another).
+    if outbox::node_reachable(store, node).await {
+        return outbox::enqueue(
+            store,
+            node,
+            NodeCommandEnvelope {
                 command_id: format!("task-{}", request.run_id),
                 command_type: NodeCommandType::Task,
                 expires_at: None,
                 epoch: None,
                 payload: serde_json::to_value(request).map_err(|_| "Task encoding failed")?,
-            })
-            .map_err(|_| "node_busy_playback_priority".into());
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| match error {
+            outbox::EnqueueError::Full => "node_busy_playback_priority".into(),
+            outbox::EnqueueError::Database(_) => {
+                "Node task unavailable; waiting for reconnection".into()
+            }
+        });
     }
     let base = rec.base_url.as_deref().ok_or("Node offline")?;
     let body = serde_json::to_vec(request).map_err(|_| "Task encoding failed")?;
@@ -264,16 +275,20 @@ pub(crate) async fn cancel_remote_scan(
     if rec.status == "revoked" {
         return Err("Node revoked".into());
     }
-    if let Some(sender) = ACTIVE_CHANNELS.read().await.get(node).cloned() {
-        sender
-            .try_send(NodeCommandEnvelope {
+    if outbox::node_reachable(store, node).await {
+        outbox::enqueue(
+            store,
+            node,
+            NodeCommandEnvelope {
                 command_id: format!("cancel-{scan}"),
                 command_type: NodeCommandType::CancelScan,
                 expires_at: None,
                 epoch: None,
                 payload: serde_json::json!({"scanId":scan}),
-            })
-            .map_err(|_| "Node channel busy")?;
+            },
+        )
+        .await
+        .map_err(|_| "Node channel busy")?;
         // Sending is not an execution acknowledgement: retain capacity until expiry.
         return Err("Cancellation sent; awaiting worker expiry".into());
     }
@@ -720,7 +735,7 @@ pub async fn sync_all_libraries_for_node(
     if rec.status != NodeStatus::Connected.as_str() {
         return Ok(());
     }
-    let is_channel_active = super::channel::channel_is_active(node_id).await;
+    let is_channel_active = outbox::node_reachable(store, node_id).await;
     if !is_channel_active && rec.base_url.is_none() {
         return Ok(());
     }
@@ -746,9 +761,7 @@ pub async fn sync_all_libraries_for_node(
                 epoch: None,
                 payload: serde_json::to_value(&sync).unwrap_or_default(),
             };
-            let channels = ACTIVE_CHANNELS.read().await;
-            if let Some(sender) = channels.get(node_id) {
-                let _ = sender.send(cmd).await;
+            if outbox::enqueue(store, node_id, cmd).await.is_ok() {
                 continue;
             }
         }
@@ -840,8 +853,7 @@ pub async fn dispatch_remote_scan(
         excluded_patterns,
     };
 
-    let is_channel_active = super::channel::channel_is_active(node_id).await;
-    if is_channel_active {
+    if outbox::node_reachable(store, node_id).await {
         let cmd = NodeCommandEnvelope {
             command_id: format!("scan-{scan_id}"),
             command_type: NodeCommandType::Scan,
@@ -849,9 +861,7 @@ pub async fn dispatch_remote_scan(
             epoch: None,
             payload: serde_json::to_value(&start_req).unwrap_or_default(),
         };
-        let sender = ACTIVE_CHANNELS.read().await.get(node_id).cloned();
-        let sent = sender.is_some_and(|sender| sender.try_send(cmd).is_ok());
-        if sent {
+        if outbox::enqueue(store, node_id, cmd).await.is_ok() {
             let _ = crate::database::query(
                 "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
             )

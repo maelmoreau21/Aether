@@ -97,6 +97,9 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                 .collect();
 
             let resource_pressure = Some(state.resources.sample().await);
+            // Handled commands are acknowledged in this poll's signed body, and forgotten only
+            // once the Core accepted it (a failed poll sends them again).
+            let acks = state.commands.pending_acks();
             let hb = HeartbeatPayload {
                 protocol_version: PROTOCOL_VERSION.to_owned(),
                 version: Some(media_contracts::version::current_version().to_string()),
@@ -116,6 +119,8 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                 resource_pressure,
                 indexed_assets,
                 timestamp: unix_now(),
+                command_acks: true,
+                acked_command_ids: acks.clone(),
             };
 
             let body = serde_json::to_vec(&hb).unwrap_or_default();
@@ -139,6 +144,7 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
             {
                 Ok((status, _headers, resp_bytes)) => {
                     if status.is_success() {
+                        state.commands.acknowledged(&acks);
                         let Ok(cmd) = serde_json::from_slice::<NodeCommandEnvelope>(&resp_bytes)
                         else {
                             tokio::time::sleep(backoff).await;
@@ -150,7 +156,8 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                             state.channel_epoch.admit(cmd.epoch).await
                         {
                             // A former owner of the channel, unaware that another Core took
-                            // it over: never act on its commands (no acknowledgement exists).
+                            // it over: never act on its commands. Not acknowledged either: the
+                            // current owner redelivers it if it is idempotent.
                             eprintln!(
                                 "{}",
                                 serde_json::json!({"event":"node_command_stale_epoch","commandId":cmd.command_id,"commandType":cmd.command_type,"epoch":cmd.epoch,"highestEpoch":highest})
@@ -162,6 +169,18 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                             eprintln!(
                                 "{}",
                                 serde_json::json!({"event":"node_command_expired","commandId":cmd.command_id,"expiresAt":cmd.expires_at})
+                            );
+                            if cmd.command_type != NodeCommandType::Ping {
+                                state.commands.acknowledge(&cmd.command_id);
+                            }
+                            continue;
+                        }
+                        if state.commands.already_handled(&cmd) {
+                            // Redelivered by the Core's outbox (acknowledgement lost or late):
+                            // already handled once, acknowledged again, never run twice.
+                            eprintln!(
+                                "{}",
+                                serde_json::json!({"event":"node_command_duplicate","commandId":cmd.command_id,"commandType":cmd.command_type})
                             );
                             continue;
                         }
@@ -236,15 +255,19 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                                 if let Ok(rot) =
                                     serde_json::from_value::<RotateSecretRequest>(cmd.payload)
                                 {
-                                    {
+                                    let _identity_change = state.identity_changes.lock().await;
+                                    let changed = {
                                         let mut guard = state
                                             .identity
                                             .write()
                                             .unwrap_or_else(|e| e.into_inner());
-                                        guard.shared_secret = Some(rot.new_secret);
-                                        guard.key_id = rot.new_key_id;
+                                        apply_channel_rotation(&mut guard, rot)
+                                    };
+                                    // The next poll signs with the new key: the Core promotes
+                                    // it then (two-phase rotation) and refuses the old one.
+                                    if changed {
+                                        let _ = state.persist_identity().await;
                                     }
-                                    let _ = state.persist_identity().await;
                                 }
                             }
                             NodeCommandType::Revoke => {
@@ -312,6 +335,25 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
             }
         }
     })
+}
+
+/// Apply a secret rotation received over the channel; returns whether the identity changed.
+///
+/// The Core may deliver the same rotation again (acknowledgement lost, Node restarted since):
+/// the key already in use is left as is, without a rewrite of the identity file. A rotation
+/// addressed to another Node, or without a key, is ignored.
+fn apply_channel_rotation(identity: &mut NodeIdentityState, rot: RotateSecretRequest) -> bool {
+    if rot.node_id != identity.node_id || rot.new_key_id.is_empty() || rot.new_secret.is_empty() {
+        return false;
+    }
+    if identity.key_id == rot.new_key_id
+        && identity.shared_secret.as_deref() == Some(rot.new_secret.as_str())
+    {
+        return false;
+    }
+    identity.key_id = rot.new_key_id;
+    identity.shared_secret = Some(rot.new_secret);
+    true
 }
 
 async fn handle_channel_scan(state: NodeServerState, req: RemoteScanStartRequest) {
@@ -717,4 +759,64 @@ async fn send_stream_uplink_error(
     let mut res = Response::new(Body::empty());
     *res.status_mut() = status;
     send_stream_uplink_body(state, core_url, identity, stream_id, res).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use media_contracts::ids::NodeId;
+
+    fn identity() -> NodeIdentityState {
+        NodeIdentityState {
+            node_id: NodeId::new("nas"),
+            name: "NAS".into(),
+            public_url: None,
+            core_internal_url: None,
+            shared_secret: Some("old-secret".into()),
+            key_id: "key-old".into(),
+            revoked: false,
+        }
+    }
+
+    fn rotation(node: &str, key_id: &str, secret: &str) -> RotateSecretRequest {
+        RotateSecretRequest {
+            protocol_version: PROTOCOL_VERSION.to_owned(),
+            node_id: NodeId::new(node),
+            new_key_id: key_id.into(),
+            new_secret: secret.into(),
+            timestamp: 0,
+            nonce: "n".into(),
+        }
+    }
+
+    #[test]
+    fn channel_rotation_is_idempotent_for_the_key_in_use() {
+        let mut id = identity();
+        assert!(apply_channel_rotation(
+            &mut id,
+            rotation("nas", "key-new", "new-secret")
+        ));
+        assert_eq!(id.key_id, "key-new");
+        assert_eq!(id.shared_secret.as_deref(), Some("new-secret"));
+        // Redelivered after a lost acknowledgement or a restart: nothing changes.
+        assert!(!apply_channel_rotation(
+            &mut id,
+            rotation("nas", "key-new", "new-secret")
+        ));
+        assert_eq!(id.key_id, "key-new");
+        assert_eq!(id.shared_secret.as_deref(), Some("new-secret"));
+    }
+
+    #[test]
+    fn channel_rotation_for_another_node_or_without_key_is_ignored() {
+        let mut id = identity();
+        assert!(!apply_channel_rotation(
+            &mut id,
+            rotation("other", "key-new", "new-secret")
+        ));
+        assert!(!apply_channel_rotation(&mut id, rotation("nas", "", "s")));
+        assert!(!apply_channel_rotation(&mut id, rotation("nas", "k", "")));
+        assert_eq!(id.key_id, "key-old");
+        assert_eq!(id.shared_secret.as_deref(), Some("old-secret"));
+    }
 }

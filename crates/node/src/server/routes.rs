@@ -346,6 +346,8 @@ async fn node_heartbeat(
         resource_pressure,
         indexed_assets,
         timestamp: unix_now(),
+        command_acks: false,
+        acked_command_ids: Vec::new(),
     };
     let secret = identity.shared_secret.unwrap_or_default();
     signed_json_response(

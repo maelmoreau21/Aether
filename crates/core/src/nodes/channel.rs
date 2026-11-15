@@ -1,8 +1,11 @@
 //! Outbound Node control channels, bounded relay uplinks and heartbeats.
 use super::NodesState;
 use super::channel_owner::{self, CHANNEL_OWNED_ELSEWHERE, ChannelOwnership};
+use super::outbox;
 use super::registry::{load_node, refresh_node_in_registry};
-use super::transport::{signed_core_response, verify_signed_node_call};
+use super::transport::{
+    promote_pending_key, resolve_node_signing_key, signed_core_response, verify_signed_node_call,
+};
 use crate::error;
 use axum::body::Body;
 use axum::extract::Path as AxumPath;
@@ -65,6 +68,21 @@ struct MailboxInner {
     epoch: AtomicI64,
     /// Set once this Core lost the channel to another Core: the mailbox never delivers again.
     fenced: AtomicBool,
+    /// Incremented when this process wrote a durable command for the Node (`node_commands`):
+    /// a parked poll then reads the outbox at once instead of at its next database probe.
+    outbox: AtomicU64,
+}
+
+/// Why [`NodeChannel::wait_next`] returned.
+pub(super) enum PollWake {
+    /// A command of the in-memory mailbox (relay requests).
+    Command(NodeCommandEnvelope),
+    /// This process enqueued a durable command for the Node: read the outbox.
+    Outbox,
+    /// Nothing happened during the wait.
+    Timeout,
+    /// A newer poll superseded this one, or this Core lost the channel: answer with a ping.
+    Ended,
 }
 
 /// Durable-for-the-process mailbox of one Node.
@@ -112,6 +130,7 @@ impl NodeChannel {
             expired: AtomicU64::new(0),
             epoch: AtomicI64::new(0),
             fenced: AtomicBool::new(false),
+            outbox: AtomicU64::new(0),
         }))
     }
 
@@ -232,6 +251,30 @@ impl NodeChannel {
         wait: Duration,
     ) -> Option<NodeCommandEnvelope> {
         let deadline = tokio::time::Instant::now() + wait;
+        match self.wait_until(guard, deadline, None).await {
+            PollWake::Command(command) => Some(command),
+            PollWake::Outbox | PollWake::Timeout | PollWake::Ended => None,
+        }
+    }
+
+    /// Wait up to `wait` for a mailbox command or for a durable command written by this
+    /// process since `outbox_seen` (updated on return).
+    pub(super) async fn wait_next(
+        &self,
+        guard: &PollGuard,
+        wait: Duration,
+        outbox_seen: &mut u64,
+    ) -> PollWake {
+        let deadline = tokio::time::Instant::now() + wait;
+        self.wait_until(guard, deadline, Some(outbox_seen)).await
+    }
+
+    async fn wait_until(
+        &self,
+        guard: &PollGuard,
+        deadline: tokio::time::Instant,
+        mut outbox_seen: Option<&mut u64>,
+    ) -> PollWake {
         loop {
             // Register interest before inspecting the queue so a concurrent send is never missed.
             let notified = self.0.wake.notified();
@@ -240,15 +283,33 @@ impl NodeChannel {
             if self.0.generation.load(Ordering::Acquire) != guard.generation
                 || self.0.fenced.load(Ordering::Acquire)
             {
-                return None;
+                return PollWake::Ended;
             }
             if let Some(command) = self.pop_live(unix_now()) {
-                return Some(command);
+                return PollWake::Command(command);
+            }
+            if let Some(seen) = outbox_seen.as_deref_mut() {
+                let current = self.0.outbox.load(Ordering::Acquire);
+                if current != *seen {
+                    *seen = current;
+                    return PollWake::Outbox;
+                }
             }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return None;
+                return PollWake::Timeout;
             }
         }
+    }
+
+    /// Current outbox signal, to pass to [`Self::wait_next`].
+    pub(super) fn outbox_signal(&self) -> u64 {
+        self.0.outbox.load(Ordering::Acquire)
+    }
+
+    /// A durable command was written for this Node by this process: wake its parked poll.
+    pub(super) fn signal_outbox(&self) {
+        self.0.outbox.fetch_add(1, Ordering::AcqRel);
+        self.0.wake.notify_waiters();
     }
 }
 
@@ -274,6 +335,13 @@ pub async fn live_channel(node_id: &str) -> Option<NodeChannel> {
 /// Whether the Node currently holds a control poll open on this Core.
 pub async fn channel_is_active(node_id: &str) -> bool {
     live_channel(node_id).await.is_some()
+}
+
+/// Wake the poll of `node_id` parked on this Core, if any, to read its durable outbox.
+pub(super) async fn signal_outbox(node_id: &str) {
+    if let Some(channel) = ACTIVE_CHANNELS.read().await.get(node_id) {
+        channel.signal_outbox();
+    }
 }
 
 pub static PENDING_STREAMS: LazyLock<Mutex<HashMap<String, oneshot::Sender<RelayStreamResponse>>>> =
@@ -338,6 +406,18 @@ pub(super) async fn node_channel(
     };
 
     let hb: Result<HeartbeatPayload, _> = serde_json::from_slice(&body);
+    // Acknowledgements of the previous polls' durable commands, for this Node only.
+    let acks_supported = hb.as_ref().is_ok_and(|h| h.command_acks);
+    if let Ok(h) = &hb
+        && !h.acked_command_ids.is_empty()
+        && let Err(err) =
+            outbox::acknowledge(&state.auth.store, &id, &h.acked_command_ids, now).await
+    {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"node_command_ack_failed","nodeId":id,"error":err.to_string()})
+        );
+    }
     if let Ok(ref h) = hb {
         let roots_json = serde_json::to_string(&h.roots).unwrap_or_else(|_| rec.roots_json.clone());
         let _ = crate::database::query(
@@ -380,23 +460,97 @@ pub(super) async fn node_channel(
         channels.entry(id.clone()).or_default().clone()
     };
     channel.adopt_epoch(epoch);
+    let mut outbox_seen = channel.outbox_signal();
     let guard = channel.begin_poll();
-    let mut command = channel
-        .next_command(&guard, POLL_WAIT)
-        .await
-        .unwrap_or_else(|| NodeCommandEnvelope {
-            command_id: "ping".to_owned(),
-            command_type: NodeCommandType::Ping,
-            payload: serde_json::Value::Null,
-            expires_at: None,
-            epoch: None,
-        });
+    let command = serve_poll(
+        &state.auth.store,
+        &id,
+        epoch,
+        acks_supported,
+        &channel,
+        &guard,
+        &mut outbox_seen,
+    )
+    .await;
     drop(guard);
+    let mut command = command.unwrap_or_else(|| NodeCommandEnvelope {
+        command_id: "ping".to_owned(),
+        command_type: NodeCommandType::Ping,
+        payload: serde_json::Value::Null,
+        expires_at: None,
+        epoch: None,
+    });
     // Every delivered command, the ping included, carries the epoch of this ownership: the
     // Node raises its fence on it and refuses whatever a former owner still sends.
     command.epoch = Some(epoch);
 
     signed_core_response(&rec, &nonce, StatusCode::OK, &command)
+}
+
+/// Next command of one poll: the durable outbox first (oldest first), then the in-memory mailbox
+/// (relay requests), for at most [`POLL_WAIT`]. `None` answers with a ping.
+///
+/// The outbox is read at the start of the poll, whenever this process enqueues a command for the
+/// Node (in-process wake, same latency as the mailbox), and on PostgreSQL every
+/// [`outbox::PROBE_INTERVAL`] while the poll is parked, for commands written by another Core: one
+/// indexed `SELECT ... LIMIT 1` per parked poll and second on the owning Core. SQLite is a single
+/// Core, so every enqueue wakes the poll and no probe runs.
+async fn serve_poll(
+    store: &crate::identity::IdentityStore,
+    node_id: &str,
+    epoch: i64,
+    acks_supported: bool,
+    channel: &NodeChannel,
+    guard: &PollGuard,
+    outbox_seen: &mut u64,
+) -> Option<NodeCommandEnvelope> {
+    let deadline = tokio::time::Instant::now() + POLL_WAIT;
+    let probe = store.is_postgres();
+    // Expiry and redelivery of this Node's unacknowledged commands, once per poll.
+    if let Err(err) = outbox::maintain_node(store, node_id, epoch, unix_now()).await {
+        eprintln!(
+            "{}",
+            serde_json::json!({"event":"node_outbox_maintenance_failed","nodeId":node_id,"error":err.to_string()})
+        );
+    }
+    let mut read_outbox = true;
+    loop {
+        // Playback relays (in-memory mailbox, short TTL) go before the durable backlog, which
+        // could otherwise hold them past their deadline.
+        if let Some(command) = channel.pop_live(unix_now()) {
+            return Some(command);
+        }
+        if read_outbox {
+            match outbox::claim_next(store, node_id, epoch, acks_supported, unix_now()).await {
+                Ok(Some(command)) => return Some(command),
+                Ok(None) => {}
+                Err(err) => eprintln!(
+                    "{}",
+                    serde_json::json!({"event":"node_outbox_claim_failed","nodeId":node_id,"error":err.to_string()})
+                ),
+            }
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return None;
+        }
+        let wait = if probe {
+            remaining.min(outbox::PROBE_INTERVAL)
+        } else {
+            remaining
+        };
+        read_outbox = match channel.wait_next(guard, wait, outbox_seen).await {
+            PollWake::Command(command) => return Some(command),
+            PollWake::Ended => return None,
+            PollWake::Outbox => true,
+            PollWake::Timeout => {
+                probe
+                    && outbox::has_queued(store, node_id, unix_now())
+                        .await
+                        .unwrap_or(false)
+            }
+        };
+    }
 }
 
 /// This Core does not own the Node's channel (any more): its mailbox must stop delivering.
@@ -417,13 +571,10 @@ pub(super) async fn receive_stream_uplink(
         .path_and_query()
         .map(|v| v.as_str())
         .unwrap_or("/internal/v1/core/nodes/stream-uplink");
-    let rec = match load_node(&state.auth.store, &id).await {
+    let mut rec = match load_node(&state.auth.store, &id).await {
         Ok(Some(r)) => r,
         _ => return error(StatusCode::UNAUTHORIZED, "unknown_node"),
     };
-    if rec.status == NodeStatus::Revoked.as_str() {
-        return error(StatusCode::FORBIDDEN, "node_revoked");
-    }
 
     let digest = media_node::transport::stream_metadata_digest(&headers);
     let req_ts = headers
@@ -443,17 +594,19 @@ pub(super) async fn receive_stream_uplink(
         .get(HDR_KEY_ID)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if req_kid != rec.key_id {
-        return error(StatusCode::UNAUTHORIZED, "invalid_key_id");
-    }
+    // Current key, or the pending key of a secret rotation (promoted once verified).
+    let key = match resolve_node_signing_key(&state.auth.store, &mut rec, req_kid).await {
+        Ok(key) => key,
+        Err(res) => return res,
+    };
 
     if verify_internal_request(
-        &rec.shared_secret,
+        &key.secret,
         "node-to-core",
         Method::POST.as_str(),
         pq,
         &id,
-        &rec.key_id,
+        &key.key_id,
         req_ts,
         req_nonce,
         &digest,
@@ -463,6 +616,11 @@ pub(super) async fn receive_stream_uplink(
     .is_err()
     {
         return error(StatusCode::UNAUTHORIZED, "invalid_signature");
+    }
+    if key.pending
+        && let Err(res) = promote_pending_key(&state.auth.store, &mut rec, &key).await
+    {
+        return res;
     }
 
     let stream_status = headers
@@ -616,6 +774,40 @@ mod tests {
             .unwrap();
         assert_eq!(got.command_id, "late");
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn a_parked_poll_is_woken_at_once_by_a_durable_command_of_this_process() {
+        let channel = NodeChannel::new();
+        let mut seen = channel.outbox_signal();
+        let poll = channel.begin_poll();
+        let signaller = channel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            signaller.signal_outbox();
+        });
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            channel
+                .wait_next(&poll, Duration::from_secs(5), &mut seen)
+                .await,
+            PollWake::Outbox
+        ));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        // Consumed: the next wait times out instead of reporting the same signal again.
+        assert!(matches!(
+            channel.wait_next(&poll, SHORT, &mut seen).await,
+            PollWake::Timeout
+        ));
+        // A signal sent before the wait started is not missed.
+        channel.signal_outbox();
+        assert!(matches!(
+            channel.wait_next(&poll, SHORT, &mut seen).await,
+            PollWake::Outbox
+        ));
+        // A mailbox-only wait (`next_command`) ignores it.
+        channel.signal_outbox();
+        assert!(channel.next_command(&poll, SHORT).await.is_none());
     }
 
     #[tokio::test]

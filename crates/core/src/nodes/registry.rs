@@ -77,6 +77,10 @@ pub struct AdminNodeView {
     /// Ownership epoch of that channel, carried by every command the owner delivers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channel_epoch: Option<i64>,
+    /// A secret rotation waits for the Node to use its new key (two-phase rotation); omitted
+    /// otherwise. Neither the pending key id nor its secret is ever exposed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pending_rotation: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -518,6 +522,15 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
         .into_iter()
         .map(|(node, core, epoch)| (node, (core, epoch)))
         .collect();
+    let pending_rotations: std::collections::HashSet<String> =
+        crate::database::query_scalar::<_, String>(
+            "SELECT id FROM media_nodes WHERE pending_key_id IS NOT NULL",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     let now = unix_now();
     let mut views = Vec::with_capacity(records.len());
@@ -579,6 +592,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             .get(&rec.id)
             .map(|(core, epoch)| (Some(core.clone()), Some(*epoch)))
             .unwrap_or_default();
+        let pending_rotation = pending_rotations.contains(&rec.id);
 
         views.push(AdminNodeView {
             id: rec.id,
@@ -603,6 +617,7 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             scans: node_scans,
             channel_owner,
             channel_epoch,
+            pending_rotation,
         });
     }
     Ok(views)

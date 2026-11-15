@@ -179,7 +179,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 3;
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -205,6 +205,12 @@ ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_
         sqlite_sql: "UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND event_retention_days = 365;",
         postgres_sql: "ALTER TABLE statistics_settings ALTER COLUMN event_retention_days SET DEFAULT 0;
 UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND event_retention_days = 365;",
+    },
+    MigrationStep {
+        version: 4,
+        name: "0004_acquisition_server_settings",
+        sqlite_sql: "ALTER TABLE acquisition_servers ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';",
+        postgres_sql: "ALTER TABLE acquisition_servers ADD COLUMN IF NOT EXISTS settings_json TEXT NOT NULL DEFAULT '{}';",
     },
 ];
 

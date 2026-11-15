@@ -48,6 +48,21 @@ try {
       const record = records.find(item => item.id === path.split('/').at(-1));
       json = { ...record, selection: { seasons: [2], episodes: [{ season: 2, episode: 3 }] }, events: [{ status: record.status, createdAt: timestamp }] };
     }
+    else if (path.endsWith('/admin/acquisition/servers/test') && method === 'POST') {
+      json = {
+        ok: true,
+        appName: 'Radarr',
+        version: '5.14.0',
+        system: { appName: 'Radarr', version: '5.14.0', instanceName: 'Radarr' },
+        options: {
+          rootFolders: [{ id: 1, path: '/movies', accessible: true, freeSpace: 1099511627776 }],
+          qualityProfiles: [{ id: 1, name: 'Qualité test' }],
+          metadataProfiles: [],
+          languageProfiles: [],
+          tags: [{ id: 1, label: 'aether' }]
+        }
+      };
+    }
     else if (path.endsWith('/admin/acquisition/servers') && method === 'POST') {
       configured = input;
       const saved = { ...input, id: 'radarr-new', hasApiKey: true };
@@ -104,11 +119,11 @@ try {
   await page.getByLabel('Nom', { exact: true }).fill('Nouveau NAS');
   await page.getByLabel('Adresse du serveur', { exact: true }).fill('http://synthetic.invalid:7878');
   await page.getByLabel('Clé API', { exact: true }).fill('synthetic-arr-key');
+  await page.getByRole('button', { name: 'Tester la connexion' }).click();
+  await page.getByText('Connecté à Radarr v5.14.0', { exact: false }).waitFor();
   await page.getByLabel('Emplacement de destination').selectOption('films');
-  await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
-  await page.getByRole('button', { name: 'Charger les dossiers et profils' }).click();
   await page.getByLabel('Dossier distant').selectOption('/movies');
-  await page.getByLabel('Profil de qualité').selectOption('1');
+  await page.getByLabel('Profil de qualité par défaut').selectOption('1');
   await page.getByLabel('Connexion activée').check();
   await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Connexion enregistrée' }).waitFor();

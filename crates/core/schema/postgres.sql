@@ -2850,6 +2850,7 @@ CREATE TABLE acquisition_servers (
  base_url TEXT NOT NULL, api_key TEXT NOT NULL, allowed_ips_json TEXT NOT NULL,
  library_id TEXT NOT NULL REFERENCES libraries(id), root_folder TEXT NOT NULL, quality_profile_id BIGINT NOT NULL,
  quality_profiles_json TEXT NOT NULL DEFAULT '[]',
+ settings_json TEXT NOT NULL DEFAULT '{}',
  metadata_profile_id BIGINT, is_default BIGINT NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)), enabled BIGINT NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)), generation TEXT NOT NULL
 );
 CREATE TABLE media_requests (

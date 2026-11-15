@@ -3,7 +3,8 @@
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import {
-    applicationRequest, features, loadFeatures, type QualityProfile, type RemoteServer,
+    applicationRequest, features, loadFeatures,
+    type ArrTag, type QualityProfile, type RemoteServer, type ServerOptions, type ServerSettings, type ServerSystemStatus, type ServerTestResult,
     loadPolicyOverview, saveDefaultPolicy,
     type PolicyRule
   } from './api';
@@ -11,10 +12,26 @@
   import { t } from '../i18n';
 
   let { embedded = false }: { embedded?: boolean } = $props();
-  interface Options { rootFolders: { path: string }[]; qualityProfiles: QualityProfile[]; metadataProfiles: QualityProfile[] }
   interface Location { id: string; name: string; kind: 'films' | 'series' | 'music'; nodeId: string; nodeName?: string; root: string }
 
-  const blank = (): Omit<RemoteServer, 'id'> => ({
+  const defaultSettings = (): ServerSettings => ({
+    externalUrl: null,
+    tags: [],
+    availableTags: [],
+    searchOnAdd: true,
+    minimumAvailability: 'released',
+    seriesType: 'standard',
+    seasonFolder: true,
+    languageProfileId: null,
+    animeQualityProfileId: null,
+    animeRootFolder: null,
+    animeLanguageProfileId: null,
+    animeTags: [],
+    monitorNewItems: 'none',
+    lastStatus: null
+  });
+
+  const blank = (): Omit<RemoteServer, 'id'> & { settings: ServerSettings } => ({
     name: '',
     kind: 'radarr',
     baseUrl: '',
@@ -23,13 +40,15 @@
     qualityProfileId: 0,
     qualityProfiles: [],
     metadataProfileId: undefined,
+    settings: defaultSettings(),
     isDefault: false,
-    enabled: false
+    enabled: true
   });
 
   let activeTab = $state<'services' | 'general'>('services');
   let loading = $state(true);
   let busy = $state(false);
+  let testing = $state(false);
   let error = $state('');
   let message = $state('');
   let servers = $state<RemoteServer[]>([]);
@@ -39,7 +58,11 @@
   let key = $state('');
   let autoApprove = $state(false);
   let maxPending = $state(20);
-  let options = $state<Options | null>(null);
+  let options = $state<ServerOptions | null>(null);
+  let connectionTested = $state(false);
+  let connectionStatus = $state<ServerSystemStatus | null>(null);
+  let connectionError = $state('');
+  let showAnimeSettings = $state(false);
   let confirmingRemoval = $state<string | null>(null);
 
   let defaultRule = $state<PolicyRule>({
@@ -50,6 +73,32 @@
 
   const administrator = $derived($session?.user.role === 'administrator');
   const matchingLocations = $derived(locations.filter(location => location.kind === (form.kind === 'radarr' ? 'films' : form.kind === 'sonarr' ? 'series' : 'music')));
+  const settingsUnlocked = $derived(Boolean(editing) || connectionTested);
+  const availableTags = $derived<ArrTag[]>(options?.tags ?? form.settings.availableTags ?? []);
+
+  function formatBytes(bytes: number | null | undefined): string {
+    if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return '';
+    const units = ['o', 'Ko', 'Mo', 'Go', 'To', 'Po'];
+    let value = bytes;
+    let idx = 0;
+    while (value >= 1024 && idx < units.length - 1) {
+      value /= 1024;
+      idx += 1;
+    }
+    return `${value >= 10 || idx === 0 ? value.toFixed(0) : value.toFixed(2)} ${units[idx]}`;
+  }
+
+  function mergeSettings(raw?: Partial<ServerSettings> | null): ServerSettings {
+    const base = defaultSettings();
+    if (!raw) return base;
+    return {
+      ...base,
+      ...raw,
+      tags: [...(raw.tags ?? [])],
+      availableTags: [...(raw.availableTags ?? [])],
+      animeTags: [...(raw.animeTags ?? [])]
+    };
+  }
 
   async function refresh() {
     const [list, settings, destinations, overview] = await Promise.all([
@@ -87,6 +136,7 @@
 
   function edit(server: RemoteServer) {
     editing = server.id;
+    const merged = mergeSettings(server.settings);
     form = {
       name: server.name,
       kind: server.kind,
@@ -96,11 +146,18 @@
       qualityProfileId: server.qualityProfileId,
       qualityProfiles: [...(server.qualityProfiles ?? [])],
       metadataProfileId: server.metadataProfileId,
+      settings: merged,
       isDefault: server.isDefault,
       enabled: server.enabled
     };
     key = '';
     options = null;
+    connectionTested = false;
+    connectionStatus = merged.lastStatus ?? null;
+    connectionError = '';
+    showAnimeSettings = Boolean(
+      merged.animeQualityProfileId || merged.animeRootFolder || merged.animeLanguageProfileId || merged.animeTags.length > 0
+    );
     message = '';
     activeTab = 'services';
   }
@@ -110,6 +167,23 @@
     form = blank();
     key = '';
     options = null;
+    connectionTested = false;
+    connectionStatus = null;
+    connectionError = '';
+    showAnimeSettings = false;
+  }
+
+  function toggleTag(listKey: 'tags' | 'animeTags', id: number) {
+    const current = form.settings[listKey];
+    if (current.includes(id)) {
+      form.settings[listKey] = current.filter(item => item !== id);
+    } else {
+      form.settings[listKey] = [...current, id];
+    }
+  }
+
+  function tagLabel(server: RemoteServer, id: number): string {
+    return server.settings?.availableTags?.find(t => t.id === id)?.label ?? `#${id}`;
   }
 
   function ensureDefaultInProfiles() {
@@ -152,6 +226,73 @@
     return found ? found.name : `#${server.qualityProfileId}`;
   }
 
+  function applyDiscoveredOptions(discovered: ServerOptions, system?: ServerSystemStatus | null) {
+    options = discovered;
+    connectionTested = true;
+    connectionStatus = system ?? null;
+    connectionError = '';
+    form.settings = {
+      ...form.settings,
+      availableTags: [...(discovered.tags ?? [])],
+      lastStatus: system ?? form.settings.lastStatus
+    };
+    if (!form.libraryId && matchingLocations.length === 1) {
+      form.libraryId = matchingLocations[0].id;
+    }
+    if (!form.rootFolder && discovered.rootFolders.length > 0) {
+      const accessible = discovered.rootFolders.find(f => f.accessible !== false) ?? discovered.rootFolders[0];
+      form.rootFolder = accessible.path;
+    }
+    if ((!form.qualityProfileId || form.qualityProfileId <= 0) && discovered.qualityProfiles.length > 0) {
+      form.qualityProfileId = discovered.qualityProfiles[0].id;
+    }
+    if (form.qualityProfileId > 0) {
+      ensureDefaultInProfiles();
+    }
+    if (form.kind === 'lidarr' && !form.metadataProfileId && discovered.metadataProfiles.length > 0) {
+      form.metadataProfileId = discovered.metadataProfiles[0].id;
+    }
+    if (form.kind === 'sonarr' && !form.settings.languageProfileId && (discovered.languageProfiles?.length ?? 0) > 0) {
+      form.settings.languageProfileId = discovered.languageProfiles![0].id;
+    }
+  }
+
+  async function testConnection() {
+    testing = true;
+    connectionError = '';
+    error = '';
+    message = '';
+    try {
+      const result = await applicationRequest<ServerTestResult>('/api/v1/admin/acquisition/servers/test', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(editing ? { id: editing } : {}),
+          kind: form.kind,
+          baseUrl: form.baseUrl,
+          ...(key ? { apiKey: key } : {})
+        })
+      });
+      const system: ServerSystemStatus = result.system ?? {
+        appName: result.appName,
+        version: result.version,
+        instanceName: result.instanceName
+      };
+      if (result.options) {
+        applyDiscoveredOptions(result.options, system);
+      } else {
+        connectionTested = true;
+        connectionStatus = system;
+      }
+      message = $t('connection_successful');
+    } catch (cause) {
+      connectionTested = false;
+      connectionStatus = null;
+      connectionError = cause instanceof Error ? cause.message : $t('connection_failed');
+    } finally {
+      testing = false;
+    }
+  }
+
   async function save(event: SubmitEvent) {
     event.preventDefault();
     busy = true;
@@ -180,26 +321,15 @@
     error = '';
     message = '';
     try {
-      await applicationRequest(`/api/v1/admin/acquisition/servers/${encodeURIComponent(id)}/test`, { method: 'POST' });
-      message = $t('connection_successful');
-    } catch (cause) {
-      error = cause instanceof Error ? cause.message : $t('connection_failed');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function loadOptions() {
-    if (!editing) return;
-    busy = true;
-    error = '';
-    try {
-      options = await applicationRequest<Options>(`/api/v1/admin/acquisition/servers/${encodeURIComponent(editing)}/options`);
-      if (form.qualityProfileId > 0) {
-        ensureDefaultInProfiles();
+      const result = await applicationRequest<ServerTestResult>(`/api/v1/admin/acquisition/servers/${encodeURIComponent(id)}/test`, { method: 'POST' });
+      const app = result.system?.appName ?? result.appName;
+      const version = result.system?.version ?? result.version;
+      message = app && version ? $t('arr_connected_banner', { app, version }) : $t('connection_successful');
+      if (editing === id && result.options) {
+        applyDiscoveredOptions(result.options, result.system ?? { appName: app, version });
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : $t('profiles_unavailable');
+      error = cause instanceof Error ? cause.message : $t('connection_failed');
     } finally {
       busy = false;
     }
@@ -288,16 +418,31 @@
                   <div>
                     <h3>{server.name}</h3>
                     <small>
-                      {server.kind} · {server.enabled ? $t('active_state') : $t('disabled_state')}{server.isDefault ? $t('applications_default') : ''}
+                      {server.kind}
+                      {#if server.settings?.lastStatus?.version} · v{server.settings.lastStatus.version}{/if}
+                      · {server.enabled ? $t('active_state') : $t('disabled_state')}{server.isDefault ? $t('applications_default') : ''}
                     </small>
                     <p class="muted small">
-                      {server.baseUrl} · {$t('default_quality_profile')}: <strong>{defaultProfileLabel(server)}</strong>
+                      {server.baseUrl}
+                      {#if server.rootFolder} · <code>{server.rootFolder}</code>{/if}
+                      · {$t('default_quality_profile')}: <strong>{defaultProfileLabel(server)}</strong>
                       {#if (server.qualityProfiles?.length ?? 0) > 1}
                         ({$t('quality_profiles_count', { count: server.qualityProfiles?.length ?? 0 })})
                       {/if}
                     </p>
+                    {#if server.settings?.tags?.length}
+                      <div class="tag-pills">
+                        {#each server.settings.tags as tagId (tagId)}
+                          <span class="badge tone-info">{tagLabel(server, tagId)}</span>
+                        {/each}
+                      </div>
+                    {/if}
                   </div>
                   <div class="row">
+                    {#if server.settings?.externalUrl}
+                      <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+                      <a class="button-link" href={server.settings.externalUrl} target="_blank" rel="noopener noreferrer">{$t('arr_open_service', { service: server.kind })}</a>
+                    {/if}
                     <button disabled={busy} onclick={() => edit(server)}>{$t('edit')}</button>
                     <button disabled={busy} onclick={() => test(server.id)}>{$t('test')}</button>
                     <button class="danger" disabled={busy} onclick={() => confirmingRemoval = server.id}>{$t('remove')}</button>
@@ -322,112 +467,283 @@
         <section class="panel stack">
           <h2>{editing ? $t('edit_connection') : $t('add_a_connection')}</h2>
           <form class="stack" onsubmit={save}>
-            <div class="fields">
-              <label>{$t('name')}
-                <input required maxlength="100" bind:value={form.name} />
-              </label>
-              <label>{$t('service')}
-                <select bind:value={form.kind} onchange={() => { form.libraryId = ''; form.qualityProfiles = []; options = null; }}>
-                  <option value="radarr">{$t('radarr_films')}</option>
-                  <option value="sonarr">{$t('sonarr_series')}</option>
-                  <option value="lidarr">{$t('lidarr_music')}</option>
-                </select>
-              </label>
-              <label>{$t('server_address')}
-                <input required type="url" maxlength="2048" bind:value={form.baseUrl} placeholder="http://serveur:7878" />
-              </label>
-              <label>{$t('api_key_label')}{editing ? $t('leave_empty_to_keep') : ''}
-                <input type="password" autocomplete="new-password" required={!editing} maxlength="512" bind:value={key} />
-              </label>
-              <label>{$t('destination_location')}
-                <select required bind:value={form.libraryId}>
-                  <option value="">{$t('choose_a_library_folder')}</option>
-                  {#each matchingLocations as location (location.id)}
-                    <option value={location.id}>{location.name} · {location.nodeName ?? location.nodeId} · {location.root}</option>
-                  {/each}
-                </select>
-              </label>
-            </div>
-            <p class="muted">{$t('choosing_an_http_address_explicitly_allows')}</p>
-
-            {#if editing}
-              <div>
-                <button type="button" disabled={busy} onclick={loadOptions}>{$t('load_folders_and_profiles')}</button>
-              </div>
-            {/if}
-
-            <div class="fields">
-              <label>{$t('remote_folder')}
-                {#if options}
-                  <select required bind:value={form.rootFolder}>
-                    <option value="">{$t('choose_a_folder')}</option>
-                    {#each options.rootFolders as folder (folder.path)}
-                      <option value={folder.path}>{folder.path}</option>
-                    {/each}
-                  </select>
-                {:else}
-                  <input bind:value={form.rootFolder} maxlength="1024" placeholder={$t('choose_after_the_first_save')} />
-                {/if}
-              </label>
-
-              <label>{$t('default_quality_profile')}
-                {#if options}
-                  <select bind:value={form.qualityProfileId} onchange={ensureDefaultInProfiles}>
-                    <option value={0}>{$t('choose_a_profile')}</option>
-                    {#each options.qualityProfiles as profile (profile.id)}
-                      <option value={profile.id}>{profile.name}</option>
-                    {/each}
-                  </select>
-                {:else}
-                  <input type="number" min="0" bind:value={form.qualityProfileId} />
-                {/if}
-              </label>
-
-              {#if form.kind === 'lidarr'}
-                <label>{$t('metadata_profile')}
-                  {#if options}
-                    <select bind:value={form.metadataProfileId}>
-                      <option value={undefined}>{$t('choose_a_profile')}</option>
-                      {#each options.metadataProfiles as profile (profile.id)}
-                        <option value={profile.id}>{profile.name}</option>
-                      {/each}
-                    </select>
-                  {:else}
-                    <input type="number" min="1" bind:value={form.metadataProfileId} />
-                  {/if}
+            <div class="arr-step">
+              <h3>{$t('arr_step_connection')}</h3>
+              <div class="fields">
+                <label>{$t('name')}
+                  <input required maxlength="100" bind:value={form.name} placeholder={form.kind === 'radarr' ? 'Radarr' : form.kind === 'sonarr' ? 'Sonarr' : 'Lidarr'} />
                 </label>
+                <label>{$t('service')}
+                  <select bind:value={form.kind} onchange={() => { form.libraryId = ''; form.qualityProfiles = []; form.rootFolder = ''; form.qualityProfileId = 0; form.metadataProfileId = undefined; options = null; connectionTested = false; connectionStatus = null; connectionError = ''; }}>
+                    <option value="radarr">{$t('radarr_films')}</option>
+                    <option value="sonarr">{$t('sonarr_series')}</option>
+                    <option value="lidarr">{$t('lidarr_music')}</option>
+                  </select>
+                </label>
+                <label>{$t('server_address')}
+                  <input required type="url" maxlength="2048" bind:value={form.baseUrl} placeholder={form.kind === 'radarr' ? 'http://serveur:7878' : form.kind === 'sonarr' ? 'http://serveur:8989' : 'http://serveur:8686'} />
+                </label>
+                <label>{$t('api_key_label')}{editing ? $t('leave_empty_to_keep') : ''}
+                  <input type="password" autocomplete="new-password" required={!editing} maxlength="512" bind:value={key} />
+                </label>
+              </div>
+              <p class="muted small">{$t('choosing_an_http_address_explicitly_allows')}</p>
+
+              <div class="row">
+                <button type="button" class="secondary" disabled={busy || testing || !form.baseUrl || (!editing && !key)} onclick={testConnection}>
+                  {testing ? $t('arr_testing_connection') : editing ? $t('arr_test_and_sync') : $t('arr_test_connection')}
+                </button>
+              </div>
+
+              {#if connectionError}
+                <p role="alert" class="feedback error">{connectionError}</p>
+              {/if}
+              {#if connectionStatus}
+                <div class="arr-status-banner">
+                  <strong>✓ {$t('arr_connected_banner', { app: connectionStatus.appName ?? form.kind, version: connectionStatus.version ? `v${connectionStatus.version}` : '' })}</strong>
+                  {#if connectionStatus.instanceName}<span class="muted"> · {connectionStatus.instanceName}</span>{/if}
+                  {#if options}<p class="muted small">{$t('arr_connected_hint')}</p>{/if}
+                </div>
               {/if}
             </div>
 
-            {#if options?.qualityProfiles?.length || (form.qualityProfiles?.length ?? 0) > 0}
-              <div class="quality-profiles-box">
-                <h4>{$t('available_quality_profiles')}</h4>
-                <p class="muted small">{$t('available_quality_profiles_hint')}</p>
-                <div class="quality-profiles-grid">
-                  {#each (options?.qualityProfiles ?? form.qualityProfiles ?? []) as profile (profile.id)}
-                    {@const isDef = profile.id === form.qualityProfileId}
-                    <label class="quality-chip" class:is-default={isDef}>
-                      <input
-                        type="checkbox"
-                        checked={profileEnabled(profile.id)}
-                        disabled={busy || isDef}
-                        onchange={e => toggleQualityProfile(profile, e.currentTarget.checked)}
-                      />
-                      <span>{profile.name}</span>
-                      {#if isDef}
-                        <small class="badge tone-info">{$t('quality_profile_default_badge')}</small>
+            <hr class="seerr-divider" />
+
+            <div class="arr-step" class:arr-step-locked={!settingsUnlocked}>
+              <h3>{$t('arr_step_settings')}</h3>
+              {#if !settingsUnlocked}
+                <p class="muted">{$t('arr_connect_first_hint')}</p>
+              {:else}
+                <div class="fields">
+                  <label>{$t('destination_location')}
+                    <select required bind:value={form.libraryId}>
+                      <option value="">{$t('choose_a_library_folder')}</option>
+                      {#each matchingLocations as location (location.id)}
+                        <option value={location.id}>{location.name} · {location.nodeName ?? location.nodeId} · {location.root}</option>
+                      {/each}
+                    </select>
+                  </label>
+
+                  <label>{$t('remote_folder')}
+                    {#if options}
+                      <select required={form.enabled} bind:value={form.rootFolder}>
+                        <option value="">{$t('choose_a_folder')}</option>
+                        {#each options.rootFolders as folder (folder.path)}
+                          <option value={folder.path}>
+                            {folder.path}{folder.freeSpace != null ? ` (${$t('arr_free_space', { size: formatBytes(folder.freeSpace) })})` : ''}{folder.accessible === false ? ` · ${$t('arr_folder_inaccessible')}` : ''}
+                          </option>
+                        {/each}
+                      </select>
+                    {:else}
+                      <input required={form.enabled} bind:value={form.rootFolder} maxlength="1024" />
+                    {/if}
+                  </label>
+
+                  <label>{$t('default_quality_profile')}
+                    {#if options}
+                      <select required={form.enabled} bind:value={form.qualityProfileId} onchange={ensureDefaultInProfiles}>
+                        <option value={0}>{$t('choose_a_profile')}</option>
+                        {#each options.qualityProfiles as profile (profile.id)}
+                          <option value={profile.id}>{profile.name}</option>
+                        {/each}
+                      </select>
+                    {:else}
+                      <input type="number" min="0" bind:value={form.qualityProfileId} />
+                    {/if}
+                  </label>
+
+                  {#if form.kind === 'lidarr'}
+                    <label>{$t('metadata_profile')}
+                      {#if options}
+                        <select required={form.enabled} bind:value={form.metadataProfileId}>
+                          <option value={undefined}>{$t('choose_a_profile')}</option>
+                          {#each options.metadataProfiles as profile (profile.id)}
+                            <option value={profile.id}>{profile.name}</option>
+                          {/each}
+                        </select>
+                      {:else}
+                        <input type="number" min="1" bind:value={form.metadataProfileId} />
                       {/if}
                     </label>
-                  {/each}
-                </div>
-              </div>
-            {/if}
+                    <label>{$t('arr_monitor_new_items')}
+                      <select bind:value={form.settings.monitorNewItems}>
+                        <option value="none">{$t('arr_monitor_none')}</option>
+                        <option value="all">{$t('arr_monitor_all')}</option>
+                        <option value="new">{$t('arr_monitor_new')}</option>
+                      </select>
+                    </label>
+                  {/if}
 
-            <label class="check"><input type="checkbox" bind:checked={form.isDefault} />{$t('default_destination_for_this_media_type')}</label>
-            <label class="check"><input type="checkbox" bind:checked={form.enabled} />{$t('connection_enabled')}</label>
-            <div class="row">
-              <button class="primary" disabled={busy}>{$t('save')}</button>
-              {#if editing}<button type="button" disabled={busy} onclick={clear}>{$t('finish_editing')}</button>{/if}
+                  {#if form.kind === 'radarr'}
+                    <label>{$t('arr_minimum_availability')}
+                      <select bind:value={form.settings.minimumAvailability}>
+                        <option value="announced">{$t('arr_min_avail_announced')}</option>
+                        <option value="inCinemas">{$t('arr_min_avail_in_cinemas')}</option>
+                        <option value="released">{$t('arr_min_avail_released')}</option>
+                        <option value="preDB">{$t('arr_min_avail_predb')}</option>
+                      </select>
+                    </label>
+                  {/if}
+
+                  {#if form.kind === 'sonarr'}
+                    <label>{$t('arr_series_type')}
+                      <select bind:value={form.settings.seriesType}>
+                        <option value="standard">{$t('arr_series_type_standard')}</option>
+                        <option value="daily">{$t('arr_series_type_daily')}</option>
+                        <option value="anime">{$t('arr_series_type_anime')}</option>
+                      </select>
+                    </label>
+                    {#if options?.languageProfiles?.length || form.settings.languageProfileId}
+                      <label>{$t('arr_language_profile')}
+                        {#if options?.languageProfiles?.length}
+                          <select bind:value={form.settings.languageProfileId}>
+                            <option value={null}>{$t('arr_language_profile_none')}</option>
+                            {#each options.languageProfiles as profile (profile.id)}
+                              <option value={profile.id}>{profile.name}</option>
+                            {/each}
+                          </select>
+                        {:else}
+                          <input type="number" min="1" bind:value={form.settings.languageProfileId} />
+                        {/if}
+                      </label>
+                    {/if}
+                  {/if}
+
+                  <label>{$t('arr_external_url')}
+                    <input type="url" maxlength="2048" bind:value={form.settings.externalUrl} placeholder="https://arr.exemple.com" />
+                  </label>
+                </div>
+
+                {#if options?.qualityProfiles?.length || (form.qualityProfiles?.length ?? 0) > 0}
+                  <div class="quality-profiles-box">
+                    <h4>{$t('available_quality_profiles')}</h4>
+                    <p class="muted small">{$t('available_quality_profiles_hint')}</p>
+                    <div class="quality-profiles-grid">
+                      {#each (options?.qualityProfiles ?? form.qualityProfiles ?? []) as profile (profile.id)}
+                        {@const isDef = profile.id === form.qualityProfileId}
+                        <label class="quality-chip" class:is-default={isDef}>
+                          <input
+                            type="checkbox"
+                            checked={profileEnabled(profile.id)}
+                            disabled={busy || isDef}
+                            onchange={e => toggleQualityProfile(profile, e.currentTarget.checked)}
+                          />
+                          <span>{profile.name}</span>
+                          {#if isDef}
+                            <small class="badge tone-info">{$t('quality_profile_default_badge')}</small>
+                          {/if}
+                        </label>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+
+                <div class="quality-profiles-box">
+                  <h4>{$t('arr_tags')}</h4>
+                  {#if availableTags.length > 0}
+                    <div class="quality-profiles-grid">
+                      {#each availableTags as tag (tag.id)}
+                        <label class="quality-chip" class:is-default={form.settings.tags.includes(tag.id)}>
+                          <input
+                            type="checkbox"
+                            checked={form.settings.tags.includes(tag.id)}
+                            disabled={busy}
+                            onchange={() => toggleTag('tags', tag.id)}
+                          />
+                          <span>{tag.label}</span>
+                        </label>
+                      {/each}
+                    </div>
+                  {:else}
+                    <p class="muted small">{$t('arr_tags_none')}</p>
+                  {/if}
+                </div>
+
+                {#if form.kind === 'sonarr'}
+                  <label class="check">
+                    <input type="checkbox" bind:checked={form.settings.seasonFolder} />
+                    {$t('arr_season_folders')}
+                  </label>
+
+                  <div class="quality-profiles-box">
+                    <div class="record-header">
+                      <div>
+                        <h4>{$t('arr_anime_section')}</h4>
+                        <p class="muted small">{$t('arr_anime_section_hint')}</p>
+                      </div>
+                      <button type="button" onclick={() => showAnimeSettings = !showAnimeSettings}>
+                        {showAnimeSettings ? '−' : '+'}
+                      </button>
+                    </div>
+                    {#if showAnimeSettings}
+                      <div class="fields">
+                        <label>{$t('arr_anime_root_folder')}
+                          {#if options}
+                            <select bind:value={form.settings.animeRootFolder}>
+                              <option value={null}>{$t('arr_use_default_setting')}</option>
+                              {#each options.rootFolders as folder (folder.path)}
+                                <option value={folder.path}>{folder.path}</option>
+                              {/each}
+                            </select>
+                          {:else}
+                            <input bind:value={form.settings.animeRootFolder} maxlength="1024" placeholder={$t('arr_use_default_setting')} />
+                          {/if}
+                        </label>
+                        <label>{$t('arr_anime_quality_profile')}
+                          {#if options}
+                            <select bind:value={form.settings.animeQualityProfileId}>
+                              <option value={null}>{$t('arr_use_default_setting')}</option>
+                              {#each options.qualityProfiles as profile (profile.id)}
+                                <option value={profile.id}>{profile.name}</option>
+                              {/each}
+                            </select>
+                          {:else}
+                            <input type="number" min="1" bind:value={form.settings.animeQualityProfileId} />
+                          {/if}
+                        </label>
+                        {#if options?.languageProfiles?.length || form.settings.animeLanguageProfileId}
+                          <label>{$t('arr_anime_language_profile')}
+                            {#if options?.languageProfiles?.length}
+                              <select bind:value={form.settings.animeLanguageProfileId}>
+                                <option value={null}>{$t('arr_use_default_setting')}</option>
+                                {#each options.languageProfiles as profile (profile.id)}
+                                  <option value={profile.id}>{profile.name}</option>
+                                {/each}
+                              </select>
+                            {:else}
+                              <input type="number" min="1" bind:value={form.settings.animeLanguageProfileId} />
+                            {/if}
+                          </label>
+                        {/if}
+                      </div>
+                      {#if availableTags.length > 0}
+                        <span class="small muted">{$t('arr_anime_tags')}</span>
+                        <div class="quality-profiles-grid">
+                          {#each availableTags as tag (tag.id)}
+                            <label class="quality-chip" class:is-default={form.settings.animeTags.includes(tag.id)}>
+                              <input
+                                type="checkbox"
+                                checked={form.settings.animeTags.includes(tag.id)}
+                                disabled={busy}
+                                onchange={() => toggleTag('animeTags', tag.id)}
+                              />
+                              <span>{tag.label}</span>
+                            </label>
+                          {/each}
+                        </div>
+                      {/if}
+                    {/if}
+                  </div>
+                {/if}
+
+                <label class="check"><input type="checkbox" bind:checked={form.settings.searchOnAdd} />{$t('arr_search_on_add')}</label>
+                <label class="check"><input type="checkbox" bind:checked={form.isDefault} />{$t('default_destination_for_this_media_type')}</label>
+                <label class="check"><input type="checkbox" bind:checked={form.enabled} />{$t('connection_enabled')}</label>
+                <div class="row">
+                  <button class="primary" disabled={busy}>{$t('save')}</button>
+                  {#if editing}<button type="button" disabled={busy} onclick={clear}>{$t('finish_editing')}</button>{/if}
+                </div>
+              {/if}
             </div>
           </form>
         </section>
@@ -579,5 +895,31 @@
   }
   .quality-chip.is-default {
     border-color: var(--accent, #5ea2ff);
+  }
+  .arr-step {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .arr-step h3 {
+    margin: 0;
+  }
+  .arr-step-locked {
+    opacity: 0.65;
+  }
+  .arr-status-banner {
+    border: 1px solid var(--ok, #4ade80);
+    background: rgba(74, 222, 128, 0.08);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+  }
+  .arr-status-banner p {
+    margin: 0.25rem 0 0;
+  }
+  .tag-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
   }
 </style>

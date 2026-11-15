@@ -90,11 +90,45 @@ export interface SearchResult {
   canRequest?: boolean; autoApprove?: boolean;
 }
 export interface QualityProfile { id: number; name: string }
+export interface ArrTag { id: number; label: string }
+export interface RootFolderOption { id?: number | null; path: string; accessible?: boolean; freeSpace?: number | null }
+export interface ServerSystemStatus { appName?: string | null; version?: string | null; instanceName?: string | null }
+export interface ServerOptions {
+  rootFolders: RootFolderOption[];
+  qualityProfiles: QualityProfile[];
+  metadataProfiles: QualityProfile[];
+  languageProfiles?: QualityProfile[];
+  tags?: ArrTag[];
+}
+export interface ServerTestResult {
+  ok: boolean;
+  version?: string | null;
+  appName?: string | null;
+  instanceName?: string | null;
+  system?: ServerSystemStatus;
+  options?: ServerOptions;
+}
+export interface ServerSettings {
+  externalUrl?: string | null;
+  tags: number[];
+  availableTags: ArrTag[];
+  searchOnAdd: boolean;
+  minimumAvailability: 'announced' | 'inCinemas' | 'released' | 'preDB';
+  seriesType: 'standard' | 'daily' | 'anime';
+  seasonFolder: boolean;
+  languageProfileId?: number | null;
+  animeQualityProfileId?: number | null;
+  animeRootFolder?: string | null;
+  animeLanguageProfileId?: number | null;
+  animeTags: number[];
+  monitorNewItems: 'none' | 'all' | 'new';
+  lastStatus?: ServerSystemStatus | null;
+}
 export interface RequestSelection { seasons?: number[]; episodes?: { season: number; episode: number }[]; albumIds?: string[]; monitorFuture?: boolean; serverId?: string; qualityProfileId?: number }
 export interface RequestEvent { status?: string; action?: string; createdAt: number; message?: string; code?: string | null; actorLabel?: string | null }
 export interface DownloadProgress { percent: number; totalBytes: number; remainingBytes: number; status: string; timeleft?: string | null; items: number }
 export interface MediaRequest extends SearchResult { id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; own?: boolean; workId?: string | null; error?: string; errorCode?: string | null; selection?: RequestSelection; progress?: DownloadProgress | null; events?: RequestEvent[]; authorLabel?: string | null; sourceStatus?: string | null }
-export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; rootFolder: string; qualityProfileId: number; qualityProfiles?: QualityProfile[]; metadataProfileId?: number; isDefault: boolean; enabled: boolean }
+export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; rootFolder: string; qualityProfileId: number; qualityProfiles?: QualityProfile[]; metadataProfileId?: number; settings?: ServerSettings; isDefault: boolean; enabled: boolean }
 export interface ReportContext { engine?: string; errorCode?: string; audioTrackId?: string; subtitleTrackId?: string }
 export interface ReportInput { category: string; description: string; workId?: string; trackId?: string; assetId?: string; positionSeconds?: number; endSeconds?: number; context?: ReportContext }
 export interface ReportSubject { kind: string; title: string; year?: number | null; artist?: string; album?: string; workId?: string; trackId?: string; image?: string }

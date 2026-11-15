@@ -311,10 +311,35 @@ pub async fn ensure(
         object.remove("_singleRecordingId");
         object.remove("_singleReleaseId");
     }
-    let quality_profile_id = input
-        .quality_profile_id
-        .unwrap_or(server.quality_profile_id);
-    body["rootFolderPath"] = json!(server.root_folder);
+    let settings = server.settings();
+    let is_anime = input.kind == "series"
+        && (settings.series_type == "anime"
+            || canonical["seriesType"]
+                .as_str()
+                .is_some_and(|s| s.eq_ignore_ascii_case("anime"))
+            || canonical["genres"].as_array().is_some_and(|genres| {
+                genres
+                    .iter()
+                    .any(|g| g.as_str().is_some_and(|s| s.eq_ignore_ascii_case("anime")))
+            }));
+    let quality_profile_id = input.quality_profile_id.unwrap_or_else(|| {
+        if is_anime {
+            settings
+                .anime_quality_profile_id
+                .unwrap_or(server.quality_profile_id)
+        } else {
+            server.quality_profile_id
+        }
+    });
+    let root_folder = if is_anime {
+        settings
+            .anime_root_folder
+            .as_deref()
+            .unwrap_or(&server.root_folder)
+    } else {
+        &server.root_folder
+    };
+    body["rootFolderPath"] = json!(root_folder);
     body["qualityProfileId"] = json!(quality_profile_id);
     body["monitored"] = json!(!single);
     if single {
@@ -328,11 +353,37 @@ pub async fn ensure(
     }
     match input.kind.as_str() {
         "film" => {
-            body["minimumAvailability"] = json!("released");
+            body["minimumAvailability"] = json!(settings.minimum_availability);
+            if !settings.tags.is_empty() {
+                body["tags"] = json!(settings.tags);
+            }
             body["addOptions"] = json!({"searchForMovie":false});
         }
         "series" => {
-            body["seasonFolder"] = json!(true);
+            body["seasonFolder"] = json!(settings.season_folder);
+            body["seriesType"] = json!(if is_anime {
+                "anime"
+            } else {
+                settings.series_type.as_str()
+            });
+            let lang_id = if is_anime {
+                settings
+                    .anime_language_profile_id
+                    .or(settings.language_profile_id)
+            } else {
+                settings.language_profile_id
+            };
+            if let Some(lang_id) = lang_id {
+                body["languageProfileId"] = json!(lang_id);
+            }
+            let tags = if is_anime && !settings.anime_tags.is_empty() {
+                &settings.anime_tags
+            } else {
+                &settings.tags
+            };
+            if !tags.is_empty() {
+                body["tags"] = json!(tags);
+            }
             body["monitorNewItems"] = json!(if input.monitor_future { "all" } else { "none" });
             body["addOptions"] = json!({"monitor":"none","searchForMissingEpisodes":false,"searchForCutoffUnmetEpisodes":false});
             if let Some(seasons) = body["seasons"].as_array_mut() {
@@ -343,7 +394,14 @@ pub async fn ensure(
         }
         "artist" => {
             body["metadataProfileId"] = json!(server.metadata_profile_id);
-            body["monitorNewItems"] = json!(if input.monitor_future { "all" } else { "none" });
+            body["monitorNewItems"] = json!(if input.monitor_future {
+                "all"
+            } else {
+                settings.monitor_new_items.as_str()
+            });
+            if !settings.tags.is_empty() {
+                body["tags"] = json!(settings.tags);
+            }
             body["addOptions"] = json!({"monitor":"none","albumsToMonitor":input.album_ids,"searchForMissingAlbums":false});
         }
         "album" => {
@@ -352,7 +410,10 @@ pub async fn ensure(
             artist["qualityProfileId"] = json!(quality_profile_id);
             artist["metadataProfileId"] = json!(server.metadata_profile_id);
             artist["monitored"] = json!(true);
-            artist["monitorNewItems"] = json!("none");
+            artist["monitorNewItems"] = json!(settings.monitor_new_items.as_str());
+            if !settings.tags.is_empty() {
+                artist["tags"] = json!(settings.tags);
+            }
             artist["addOptions"] = json!({"monitor":"none","albumsToMonitor":[input.external_id],"searchForMissingAlbums":false});
             body["artist"] = artist;
             body["addOptions"] = json!({"searchForNewAlbum":false});
@@ -389,16 +450,19 @@ pub async fn search_missing(server: &Server, input: &RequestInput, id: &str) -> 
     let number = id
         .parse::<i64>()
         .map_err(|_| err(StatusCode::BAD_GATEWAY, "invalid_remote_id"))?;
+    let should_search = server.settings().search_on_add;
     match input.kind.as_str() {
         "film" => {
-            server
-                .call(
-                    "POST",
-                    "command",
-                    &[],
-                    Some(json!({"name":"MoviesSearch","movieIds":[number]})),
-                )
-                .await?;
+            if should_search {
+                server
+                    .call(
+                        "POST",
+                        "command",
+                        &[],
+                        Some(json!({"name":"MoviesSearch","movieIds":[number]})),
+                    )
+                    .await?;
+            }
         }
         "series" => {
             let mut series = server
@@ -449,16 +513,18 @@ pub async fn search_missing(server: &Server, input: &RequestInput, id: &str) -> 
                         Some(json!({"episodeIds":ids,"monitored":true})),
                     )
                     .await?;
-                server
-                    .call(
-                        "POST",
-                        "command",
-                        &[],
-                        Some(json!({"name":"EpisodeSearch","episodeIds":ids})),
-                    )
-                    .await?;
+                if should_search {
+                    server
+                        .call(
+                            "POST",
+                            "command",
+                            &[],
+                            Some(json!({"name":"EpisodeSearch","episodeIds":ids})),
+                        )
+                        .await?;
+                }
             }
-            if input.seasons.is_empty() && input.episodes.is_empty() {
+            if should_search && input.seasons.is_empty() && input.episodes.is_empty() {
                 server
                     .call(
                         "POST",
@@ -468,17 +534,19 @@ pub async fn search_missing(server: &Server, input: &RequestInput, id: &str) -> 
                     )
                     .await?;
             }
-            for season in &input.seasons {
-                server
-                    .call(
-                        "POST",
-                        "command",
-                        &[],
-                        Some(
-                            json!({"name":"SeasonSearch","seriesId":number,"seasonNumber":season}),
-                        ),
-                    )
-                    .await?;
+            if should_search {
+                for season in &input.seasons {
+                    server
+                        .call(
+                            "POST",
+                            "command",
+                            &[],
+                            Some(
+                                json!({"name":"SeasonSearch","seriesId":number,"seasonNumber":season}),
+                            ),
+                        )
+                        .await?;
+                }
             }
         }
         "album" => {
@@ -490,14 +558,16 @@ pub async fn search_missing(server: &Server, input: &RequestInput, id: &str) -> 
                     Some(json!({"albumIds":[number],"monitored":true})),
                 )
                 .await?;
-            server
-                .call(
-                    "POST",
-                    "command",
-                    &[],
-                    Some(json!({"name":"AlbumSearch","albumIds":[number]})),
-                )
-                .await?;
+            if should_search {
+                server
+                    .call(
+                        "POST",
+                        "command",
+                        &[],
+                        Some(json!({"name":"AlbumSearch","albumIds":[number]})),
+                    )
+                    .await?;
+            }
         }
         "artist" => {
             let mut artist = server
@@ -537,14 +607,16 @@ pub async fn search_missing(server: &Server, input: &RequestInput, id: &str) -> 
                         Some(json!({"albumIds":ids,"monitored":true})),
                     )
                     .await?;
-                server
-                    .call(
-                        "POST",
-                        "command",
-                        &[],
-                        Some(json!({"name":"AlbumSearch","albumIds":ids})),
-                    )
-                    .await?;
+                if should_search {
+                    server
+                        .call(
+                            "POST",
+                            "command",
+                            &[],
+                            Some(json!({"name":"AlbumSearch","albumIds":ids})),
+                        )
+                        .await?;
+                }
             }
         }
         _ => return Err(err(StatusCode::UNPROCESSABLE_ENTITY, "track_not_supported")),

@@ -865,8 +865,13 @@ mod tests {
             login["csrfToken"].as_str().unwrap().parse().unwrap(),
         );
         let jobs = Arc::new(ScanJobs::default());
-        // Hold the only probe slot to prove queued jobs cannot race a second launch.
-        let permit = jobs.slots.clone().acquire_owned().await.unwrap();
+        // Hold all probe slots to prove queued jobs cannot race a second launch.
+        let permits = jobs
+            .slots
+            .clone()
+            .acquire_many_owned(u32::try_from(jobs.slots.available_permits()).unwrap())
+            .await
+            .unwrap();
         let state = ScanState {
             auth: auth.clone(),
             root: root.clone(),
@@ -904,7 +909,7 @@ mod tests {
             "queued"
         );
         jobs.shutdown().await;
-        drop(permit);
+        drop(permits);
         assert_eq!(
             status(State(state.clone()), Path("films".into()), headers.clone())
                 .await

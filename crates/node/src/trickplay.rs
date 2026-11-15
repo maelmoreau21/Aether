@@ -1163,7 +1163,7 @@ fn append_ffmpeg_output_args(
     output: &Path,
 ) {
     let ext = if use_webp { "webp" } else { "jpg" };
-    cmd.args(["-vsync", "vfr", "-vf", filter])
+    cmd.args(["-fps_mode", "vfr", "-vf", filter])
         .arg("-frames:v")
         .arg(remaining_sheets.to_string());
     if use_webp {

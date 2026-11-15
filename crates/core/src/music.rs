@@ -399,18 +399,40 @@ pub(crate) async fn scan_fenced(
     })
     .await?;
     let _effects = crate::task_engine::EFFECT_GATE.lock().await;
-    if cancel.load(std::sync::atomic::Ordering::Acquire)
-        || (fenced && !crate::nodes::scan_run_authorized(store, library, "local", &scan).await)
-    {
+    if cancel.load(std::sync::atomic::Ordering::Acquire) {
         return Err("Music scan interrupted".into());
     }
+    // Tracks are published one by one; the sweep of tracks this scan did not see and the
+    // snapshot are one transaction, fenced inside it: a stale attempt never hides the tracks
+    // published by a newer one.
+    let mut conn = store.pool.acquire().await?;
+    let mut tx = if fenced {
+        let attempt = crate::inventory::ScanAttempt {
+            library_id: library,
+            node_id: "local",
+            scan_id: &scan,
+        };
+        let (tx, hold) = crate::inventory::fence::begin(
+            &mut conn,
+            attempt,
+            crate::inventory::fence::Effect::Publish,
+            store.instance_id(),
+            media_contracts::protocol::unix_now(),
+        )
+        .await?;
+        if hold == crate::inventory::fence::Hold::Lost {
+            tx.rollback().await?;
+            return Err("Music scan interrupted".into());
+        }
+        tx
+    } else {
+        crate::database::begin_write(&mut conn).await?
+    };
     query("UPDATE music_tracks SET available=0 WHERE library_id=? AND scan_id!=?")
         .bind(library)
-        .bind(scan)
-        .execute(&store.pool)
+        .bind(&scan)
+        .execute(&mut *tx)
         .await?;
-    let mut conn = store.pool.acquire().await?;
-    let mut tx = crate::database::begin_write(&mut conn).await?;
     crate::automation::emit_music_snapshot(&mut tx, library, media_contracts::protocol::unix_now())
         .await?;
     crate::database::commit(tx).await?;

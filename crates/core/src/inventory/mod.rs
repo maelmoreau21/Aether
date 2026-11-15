@@ -7,6 +7,7 @@ mod catalogue;
 mod details;
 mod editorial;
 mod equivalence;
+pub(crate) mod fence;
 mod hls;
 mod playback;
 mod publication;
@@ -30,17 +31,18 @@ pub(crate) use catalogue::{
 };
 pub use details::asset_details;
 pub use editorial::{editorial_warnings, refresh_editorial_for_works, refresh_work_editorial};
+pub use fence::{Publication, ScanAttempt};
 pub use hls::{hls_master, hls_subtitle_playlist, subtitle_component as hls_subtitle_component};
 pub(crate) use playback::playable_asset_for_work;
 pub(crate) use playback::{
     audio_operational_id, report_track_allowed, usable_marker, valid_chapters,
 };
 pub use playback::{descriptor, descriptor_for_user};
-pub use publication::publish_staged_scan;
+pub use publication::{publish_fenced_scan, publish_staged_scan};
 pub use resources::{audio, content, image, prepared, subtitle};
 pub use scan::{
     backfill_title_sort_unicode, clean_staging, ingest, load_cache, load_image_cache,
-    load_scan_cache, stage_batch,
+    load_scan_cache, stage_batch, stage_fenced_batch,
 };
 
 fn id() -> String {
@@ -50,5 +52,7 @@ fn decode(text: &str) -> Result<Probe, sqlx::Error> {
     serde_json::from_str(text).map_err(|e| sqlx::Error::Decode(Box::new(e)))
 }
 
+#[cfg(test)]
+mod fence_tests;
 #[cfg(test)]
 mod tests;

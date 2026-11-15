@@ -393,14 +393,63 @@ pub async fn clean_staging(store: &IdentityStore, scan_id: &str) -> Result<(), s
     Ok(())
 }
 
+/// Stage a batch without attempt fencing: tests and in-process tooling only. Scan executors
+/// stage with [`stage_fenced_batch`].
 pub async fn stage_batch(
     store: &IdentityStore,
     scan_id: &str,
     library_id: &str,
     batch: &InventoryBatch,
 ) -> Result<(), sqlx::Error> {
+    stage(store, None, scan_id, library_id, batch)
+        .await
+        .map(drop)
+}
+
+/// Stage a batch of `attempt` in a transaction that first re-verifies, inside it, that the
+/// attempt is running under a live lease and not yet published (see [`super::fence`]).
+/// Returns `false`, with nothing written, when the attempt no longer owns the scan.
+pub async fn stage_fenced_batch(
+    store: &IdentityStore,
+    attempt: super::ScanAttempt<'_>,
+    batch: &InventoryBatch,
+) -> Result<bool, sqlx::Error> {
+    stage(
+        store,
+        Some(attempt),
+        attempt.scan_id,
+        attempt.library_id,
+        batch,
+    )
+    .await
+}
+
+async fn stage(
+    store: &IdentityStore,
+    fence: Option<super::ScanAttempt<'_>>,
+    scan_id: &str,
+    library_id: &str,
+    batch: &InventoryBatch,
+) -> Result<bool, sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
-    let mut tx = crate::database::begin_write(&mut conn).await?;
+    let mut tx = match fence {
+        None => crate::database::begin_write(&mut conn).await?,
+        Some(attempt) => {
+            let (tx, hold) = super::fence::begin(
+                &mut conn,
+                attempt,
+                super::fence::Effect::Stage,
+                store.instance_id(),
+                media_contracts::protocol::unix_now(),
+            )
+            .await?;
+            if hold != super::fence::Hold::Held {
+                tx.rollback().await?;
+                return Ok(false);
+            }
+            tx
+        }
+    };
     // A replayed transport batch has no second effect, including issue counters.
     if query("INSERT INTO scan_batch_receipts(scan_id,sequence) VALUES(?,?) ON CONFLICT DO NOTHING")
         .bind(scan_id)
@@ -412,7 +461,7 @@ pub async fn stage_batch(
     {
         tx.commit().await?;
         crate::system_memory::trim_memory();
-        return Ok(());
+        return Ok(true);
     }
     let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(library_id)
@@ -615,7 +664,7 @@ pub async fn stage_batch(
     }
     tx.commit().await?;
     crate::system_memory::trim_memory();
-    Ok(())
+    Ok(true)
 }
 
 /// One-time bounded batch backfill to align `inventory_works.title_sort` with Rust's

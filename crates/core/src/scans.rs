@@ -542,11 +542,19 @@ async fn enqueue_one(
                 };
                 let errors_json = serde_json::to_string(&vec![format!("Scan échoué: {detailed}")])
                     .unwrap_or_else(|_| "[\"Scan échoué\"]".into());
-                let _ = crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-                    .bind(errors_json)
-                    .bind(&job_id).bind(&scan_id)
-                    .execute(&store_err.pool)
-                    .await;
+                let _ = inventory::fence::report(
+                    &store_err,
+                    inventory::ScanAttempt {
+                        library_id: &job_id,
+                        node_id: &node_id,
+                        scan_id: &scan_id,
+                    },
+                    inventory::fence::JobReport::Failed {
+                        errors_json: &errors_json,
+                        reset_warnings: true,
+                    },
+                )
+                .await;
             }
             if let Ok(mut tokens) = runner_jobs.cancellations.lock() {
                 tokens.remove(&scan_id);
@@ -560,10 +568,12 @@ async fn enqueue_one(
             let root = crate::local_mounts::validate(std::path::Path::new(&root), &allowed_root).await?;
             if kind == "music" {
                 let count = crate::music::scan_fenced(&store, &job_id, &root, &cancel, Some(&scan_id)).await?;
-                crate::database::query("UPDATE scan_jobs \
-                        SET status='completed',discovered=?,probed=?,reused=0 \
-                        WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r \
-                        WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(count as i64).bind(count as i64).bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
+                inventory::fence::report(
+                    &store,
+                    inventory::ScanAttempt { library_id: &job_id, node_id: "local", scan_id: &scan_id },
+                    inventory::fence::JobReport::Counted { discovered: count as i64, probed: count as i64 },
+                )
+                .await?;
                 if let Some((task_id, attempt_str)) = scan_id.split_once(':')
                     && let Ok(attempt) = attempt_str.parse::<i64>()
                 {
@@ -600,11 +610,13 @@ async fn enqueue_one(
                     let job_id = job_id_stage.clone();
                     async move {
                         let _effects = crate::task_engine::EFFECT_GATE.lock().await;
-                        if !crate::nodes::scan_run_authorized(&store,&job_id,"local",&scan_id).await {
-                            return Err(std::io::Error::other("Scan attempt fenced"));
+                        // Attempt, lease and owner are re-verified inside the staging transaction.
+                        let attempt = inventory::ScanAttempt { library_id: &job_id, node_id: "local", scan_id: &scan_id };
+                        match inventory::stage_fenced_batch(&store, attempt, &batch).await {
+                            Ok(true) => Ok(()),
+                            Ok(false) => Err(std::io::Error::other("Scan attempt fenced")),
+                            Err(e) => Err(std::io::Error::other(e.to_string())),
                         }
-                        inventory::stage_batch(&store, &scan_id, &job_id, &batch).await
-                            .map_err(|e| std::io::Error::other(e.to_string()))
                     }
                 }
             ).await?;
@@ -614,11 +626,15 @@ async fn enqueue_one(
                 return Err("Scan stopped or preempted for playback".into());
             }
 
+            // In-process ordering with control actions only: the publication transaction itself
+            // re-verifies attempt, lease and owner, and serializes the library across Cores.
             let _effects = crate::task_engine::EFFECT_GATE.lock().await;
-            if !crate::nodes::scan_run_authorized(&store, &job_id, "local", &scan_id).await {
+            let attempt = inventory::ScanAttempt { library_id: &job_id, node_id: "local", scan_id: &scan_id };
+            if inventory::publish_fenced_scan(&store, attempt, &root, report.complete).await?
+                == inventory::Publication::Fenced
+            {
                 return Err("Tentative de scan expirée".into());
             }
-            inventory::publish_staged_scan(&store, &scan_id, &job_id, &root, report.complete).await?;
             let conflicts = inventory::editorial_warnings(&store, &job_id).await?;
             let total_errors = (report.errors_count as i64) + (conflicts.len() as i64);
             let total_warnings = report.warnings_count as i64;
@@ -627,19 +643,23 @@ async fn enqueue_one(
             // Purge staging tables to strictly bound SQLite storage growth
             let _ = inventory::clean_staging(&store, &scan_id).await;
 
-            crate::database::query("UPDATE scan_jobs SET status=?,discovered=?,probed=?,reused=?,errors_json=?,errors_count=?,warnings_count=? WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-                // Unreadable subfolders are warnings (publication stays partial via
-                // `report.complete`); only an interrupted traversal fails the scan.
-                .bind(if report.interrupted { "error" } else { "completed" })
-                .bind(report.discovered as i64)
-                .bind(report.probed as i64)
-                .bind(report.reused as i64)
-                .bind(serde_json::to_string(&errors)?)
-                .bind(total_errors)
-                .bind(total_warnings)
-                .bind(&job_id).bind(&scan_id)
-                .execute(&store.pool)
-                .await?;
+            let errors_json = serde_json::to_string(&errors)?;
+            inventory::fence::report(
+                &store,
+                attempt,
+                inventory::fence::JobReport::Finished {
+                    // Unreadable subfolders are warnings (publication stays partial via
+                    // `report.complete`); only an interrupted traversal fails the scan.
+                    status: if report.interrupted { "error" } else { "completed" },
+                    discovered: report.discovered as i64,
+                    probed: report.probed as i64,
+                    reused: report.reused as i64,
+                    errors_json: &errors_json,
+                    errors_count: total_errors,
+                    warnings_count: total_warnings,
+                },
+            )
+            .await?;
             if let Some((task_id, attempt_str)) = scan_id.split_once(':')
                 && let Ok(attempt) = attempt_str.parse::<i64>()
             {
@@ -677,12 +697,19 @@ async fn enqueue_one(
             let err_msg = format!("Scan échoué: {detailed_msg}");
             let errors_json = serde_json::to_string(&vec![err_msg])
                 .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
-            let _ =
-                crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1,warnings_count=0 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-                    .bind(errors_json)
-                    .bind(&job_id).bind(&scan_id)
-                    .execute(&store.pool)
-                    .await;
+            let _ = inventory::fence::report(
+                &store,
+                inventory::ScanAttempt {
+                    library_id: &job_id,
+                    node_id: &node_id_err,
+                    scan_id: &scan_id,
+                },
+                inventory::fence::JobReport::Failed {
+                    errors_json: &errors_json,
+                    reset_warnings: true,
+                },
+            )
+            .await;
             if let Some((task_id, attempt_str)) = scan_id_err.split_once(':')
                 && let Ok(attempt) = attempt_str.parse::<i64>()
             {

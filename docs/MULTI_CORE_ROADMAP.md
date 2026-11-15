@@ -31,7 +31,7 @@ Core. Cette base n'est pas à refaire.
 | `PENDING_STREAMS` | `nodes/channel.rs` | le relais exige que la requête navigateur et le flux montant du Node arrivent sur le **même** Core | §2.4 |
 | `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | chaque Core ne voit que les battements qu'il reçoit : la sélection de source et le failover divergent | §4.1 |
 | `ReplayWindow` (nonces) | `shared/protocol.rs` | un message signé rejoué sur l'autre Core passe la fenêtre anti-rejeu | §4.3 |
-| `EFFECT_GATE`, `WAKE` | `task_engine.rs` | exclusion mutuelle des effets limitée au processus | §3 |
+| `EFFECT_GATE`, `WAKE` | `task_engine.rs` | en partie levé (schéma v7) : publication, lots et statut final d'un scan sont fencés dans leur transaction (tentative, bail, propriétaire, verrou par bibliothèque) ; `EFFECT_GATE` ne fait plus qu'ordonner les effets dans un processus ; `WAKE` reste local | §3 |
 | Nettoyage au démarrage de `scans::router` | `scans.rs`, `core_instances.rs` | levé (schéma v4) : le nettoyage ne touche plus que le travail sans bail vivant ; voir §3.3 | §3.3 |
 | `CATALOGUE_CACHE` | `inventory/catalogue/cache.rs` | cache périmé après une écriture sur l'autre Core | §4.2 |
 | Cache de sessions / `touch` | `auth/state.rs`, `auth/touch.rs` | une révocation n'est vue qu'après expiration du cache de l'autre Core | §4.4 |
@@ -365,6 +365,63 @@ c'est à étendre aux effets listés ci-dessous.
    effets mais pas entre Core.
 2. **Réception de lots de scan** (`stage_batch`) : refus d'un lot dont la tentative n'est plus la
    courante (existe : `stale_scan_attempt`) ; ajouter l'époque du canal.
+
+   **Réalisé (étape 5, points 1 et 2)** — module `inventory/fence.rs` :
+
+   - **une seule transaction** : la publication (`publish_staged_scan`) était déjà une unique
+     transaction (aucun commit intermédiaire, y compris pour les grandes bibliothèques) ; elle le
+     reste. Aucun marqueur de reprise n'est donc nécessaire pour l'atomicité, et le coût du fencing
+     est de trois requêtes ponctuelles en tête de transaction ;
+   - **vérification dans la transaction de l'effet** (`publish_fenced_scan`, `stage_fenced_batch`) :
+     verrou consultatif transactionnel par bibliothèque sur PostgreSQL (portée `scan-publish`), puis
+     verrouillage de la ligne `durable_tasks` de la tentative par une mise à jour neutre exigeant
+     `id`, `attempt`, `node_id`, `library_id`, `status='running'`, `lease_until > now` et, pour
+     `node_id='local'`, `lease_owner` = ce Core (ou NULL, bail antérieur au schéma v4) ; puis la
+     barrière `active_scan_runs` (bibliothèque active, Node non révoqué). Une réclamation, une
+     expiration ou une annulation validée entre-temps est vue après le verrou ; aucune ne peut être
+     validée avant la fin de la transaction. La **publication**, longue, vérifie d'abord sans
+     verrouiller la ligne puis prend ce verrou de ligne seulement **juste avant son commit**
+     (`fence::confirm`, à l'heure courante) : pendant qu'elle écrit, le répartiteur continue de
+     renouveler le bail de sa propre tentative (sinon une publication de plus de 60 s bloquait le
+     renouvellement, le répartiteur et `task_writes`, puis faisait expirer et rescanner une
+     publication réussie). Bail perdu entre-temps : rollback complet. Sur SQLite, `BEGIN IMMEDIATE` sérialise déjà et la
+     même vérification est faite. En cas d'échec : rollback, rien d'écrit, issue `Fenced`
+     (`stale_scan_attempt` 409 côté Node, « Tentative de scan expirée » en local) ;
+   - **jamais deux fois** (schéma v7, `scan_jobs.published_scan_id`) : la publication inscrit sa
+     tentative dans la même transaction. Une complétion rejouée par le Node, ou reçue par deux Core,
+     trouve le marqueur et ne publie rien (`AlreadyPublished`, réponse 200 inchangée). Sans lui, la
+     seconde publication aurait publié une zone de staging vidée et masqué tous les assets d'une
+     bibliothèque complète ; ce défaut existait aussi à un seul Core. Un lot reçu après la
+     publication de sa tentative est refusé ;
+   - **écritures finales** : `scan_jobs` (complétion, échec distant, échec de publication,
+     configuration changée, fin et erreur locales, scan musical) passent par `fence::report`, dans
+     une transaction qui vérifie que la tentative est toujours la courante de sa tâche et que sa
+     barrière `active_scan_runs` est en place (statut, bail, bibliothèque active et Node non révoqué
+     non exigés : une tentative arrêtée par l'administrateur, expirée, ou dont la bibliothèque vient
+     d'être désactivée signale encore sa propre issue, jamais celle d'une tentative plus récente). Les mises à jour distantes en
+     `WHERE library_id=?` sans barrière ont disparu. `task_engine::finish` exige désormais aussi
+     le propriétaire d'un bail local, comme `renew`. La correction de la racine canonique reçue
+     d'un Node et le balayage final des pistes musicales (local et distant) sont fencés de même ;
+     les pistes musicales restent publiées une à une avec le seul pré-contrôle
+     (`scan_run_authorized`, désormais lui aussi sensible au propriétaire local) ;
+   - **époque du canal non exigée pour les lots** : un lot est un appel signé du Node, rattaché à
+     la tentative durable et non au propriétaire du canal ; il reste valide sur le Core qui le
+     reçoit tant que la tentative tient son bail. L'exiger arrêterait un scan à chaque reprise de
+     canal et changerait le format filaire ; le fencing par tentative en base suffit ;
+   - `EFFECT_GATE` reste un ordre interne au processus (contrôles administrateur) ; l'exclusion entre
+     Core ne dépend que de la base.
+
+   Preuve actuelle : tests SQLite (bail expiré, tentative supplantée ou annulée, bail d'un autre
+   Core, mauvais Node : rien d'écrit ; point d'arrêt `cfg(test)` au milieu de la publication, en
+   erreur puis en future abandonnée : inventaire strictement inchangé, puis la tentative suivante
+   publie une seule fois ; lots périmés refusés ; complétion distante rejouée sans effet) et deux
+   tests PostgreSQL `#[ignore]` avec deux stores sur un schéma isolé, **dans un seul processus** :
+   même complétion publiée en concurrence par les deux Core (une publication, aucun doublon),
+   tentative périmée contre tentative courante, et arrêt brutal simulé en tuant la connexion
+   PostgreSQL du Core A au milieu de sa publication (`pg_terminate_backend`) : rien de publié,
+   le Core B attendait le verrou puis est refusé tant que le bail de A vit ; après expiration, la
+   nouvelle tentative de B publie une fois et complètement. La mort réelle d'un processus Core
+   n'est pas encore testée.
 3. **Effets d'extension** (métadonnées, état d'extension) : voir `MULTI_CORE_READINESS.md`
    § bloqueur 2.
 4. **Sauvegardes et tâches système planifiées** : passer par `durable_tasks` (bail) au lieu d'un
@@ -526,7 +583,7 @@ avant la suivante.
 | 2 | Tâches système et sauvegardes via `durable_tasks` (§3.2.4) | deux Core, une seule exécution par échéance, sur 1 000 échéances |
 | 3 | Propriété des canaux + époque (§2.1, §2.3) — fait pour le canal, appels directs non fencés ; preuve de sortie à écrire | arrêt brutal du propriétaire : le Node est repris par l'autre Core en moins de 3 baux, aucune commande d'époque ancienne exécutée |
 | 4 | Boîte d'envoi durable (§2.2) — fait ; preuve dans un seul processus avec Node simulé (10 000 commandes, 3 changements de propriétaire, zéro perte, zéro double exécution), preuve à deux processus à écrire ; rotation de secret en deux temps faite (§2.3) | commandes émises depuis le Core non propriétaire ; aucune perte, aucun doublon sur 10 000 commandes avec 3 arrêts brutaux |
-| 5 | Fencing des publications et lots (§3.2.1-2) | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
+| 5 | Fencing des publications et lots (§3.2.1-2) — fait (schéma v7) ; preuve dans un seul processus (deux stores PostgreSQL, connexion du Core A tuée en pleine publication, point d'arrêt de test), preuve à deux processus avec arrêt réel à écrire | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
 | 6 | Caches : génération de catalogue, santé de Node (§4) | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |
 | 7 | Effets externes (§5) | injection de pannes entre appel et confirmation : état `unknown` observé, jamais de rejeu non idempotent |
 | 8 | Chaos à deux Core | scénarios de `MULTI_NODE_RELIABILITY.md` rejoués à deux Core avec coupures réseau, redémarrages, tâches concurrentes, droits différents |

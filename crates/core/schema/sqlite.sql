@@ -1823,3 +1823,7 @@ CREATE INDEX node_commands_created ON node_commands(created_at);
 ALTER TABLE media_nodes ADD COLUMN pending_key_id TEXT;
 ALTER TABLE media_nodes ADD COLUMN pending_secret TEXT;
 ALTER TABLE media_nodes ADD COLUMN pending_since INTEGER;
+
+-- Schema v7 (database.rs MIGRATIONS, 0007_scan_publication_marker): scan attempt whose staged
+-- inventory the library job last published (multi-Core publication fencing).
+ALTER TABLE scan_jobs ADD COLUMN published_scan_id TEXT;

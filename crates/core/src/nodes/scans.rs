@@ -36,30 +36,22 @@ use sqlx::Row;
 use std::io;
 
 /// Every result must belong to the current physical scan and, for durable tasks,
-/// to an unexpired running attempt. Legacy scans also receive a unique fence.
+/// to an unexpired running attempt (owned by this Core when it runs locally). Legacy scans also
+/// receive a unique fence. An early refusal only: every effect re-verifies the same fence inside
+/// its own transaction (`inventory::fence`).
 pub(crate) async fn scan_run_authorized(
     store: &IdentityStore,
     library: &str,
     node: &str,
     scan: &str,
 ) -> bool {
-    let valid: i64 = crate::database::query_scalar(
-        "SELECT COUNT(*) \
-            FROM active_scan_runs r \
-            JOIN libraries l ON l.id=r.library_id \
-            JOIN media_nodes n ON n.id=l.node_id \
-            WHERE r.library_id=? AND r.node_id=? AND r.scan_id=? AND ((l.enabled=1 \
-            AND NOT EXISTS(SELECT 1 FROM library_folders own WHERE own.library_id=l.id)) \
-            OR EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
-            ON parent.id=f.parent_id WHERE f.library_id=l.id AND f.active=1 AND parent.enabled=1)) \
-            AND l.node_id=r.node_id AND n.status!='revoked'",
-    )
-    .bind(library)
-    .bind(node)
-    .bind(scan)
-    .fetch_one(&store.pool)
-    .await
-    .unwrap_or(0);
+    let valid: i64 = crate::database::query_scalar(inventory::fence::ACTIVE_RUN_SQL)
+        .bind(library)
+        .bind(node)
+        .bind(scan)
+        .fetch_one(&store.pool)
+        .await
+        .unwrap_or(0);
     if valid != 1 {
         return false;
     }
@@ -67,8 +59,20 @@ pub(crate) async fn scan_run_authorized(
         let Ok(attempt) = attempt.parse::<i64>() else {
             return false;
         };
-        let live:i64=crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE id=? AND attempt=? AND node_id=? AND library_id=? AND status='running' AND lease_until>?")
-            .bind(id).bind(attempt).bind(node).bind(library).bind(unix_now()).fetch_one(&store.pool).await.unwrap_or(0);
+        let live: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM durable_tasks WHERE id=? AND attempt=? AND node_id=? \
+                AND library_id=? AND status='running' AND lease_until>? \
+                AND (node_id<>'local' OR lease_owner IS NULL OR lease_owner=?)",
+        )
+        .bind(id)
+        .bind(attempt)
+        .bind(node)
+        .bind(library)
+        .bind(unix_now())
+        .bind(store.instance_id())
+        .fetch_one(&store.pool)
+        .await
+        .unwrap_or(0);
         return live == 1;
     }
     true
@@ -435,16 +439,23 @@ pub(super) async fn receive_scan_batch(
         return error(StatusCode::FORBIDDEN, "library_not_owned_by_node");
     }
 
-    if inventory::stage_batch(
+    // The attempt and its lease are re-verified inside the staging transaction. The channel
+    // epoch is not: a batch is the Node's own signed call, bound to the durable attempt, and
+    // stays valid on whichever Core receives it while that attempt holds its lease.
+    match inventory::stage_fenced_batch(
         &state.auth.store,
-        &scan_id,
-        sub.library_id.as_str(),
+        inventory::ScanAttempt {
+            library_id: sub.library_id.as_str(),
+            node_id: &rec.id,
+            scan_id: &scan_id,
+        },
         &sub.batch,
     )
     .await
-    .is_err()
     {
-        return error(StatusCode::INTERNAL_SERVER_ERROR, "stage_batch_failed");
+        Ok(true) => {}
+        Ok(false) => return error(StatusCode::CONFLICT, "stale_scan_attempt"),
+        Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "stage_batch_failed"),
     }
 
     let ack = BatchAck {
@@ -487,6 +498,11 @@ pub(super) async fn receive_scan_complete(
         return error(StatusCode::FORBIDDEN, "scan_identity_mismatch");
     }
     let lib_id = comp.library_id.as_str();
+    let attempt = inventory::ScanAttempt {
+        library_id: lib_id,
+        node_id: &rec.id,
+        scan_id: &scan_id,
+    };
 
     // Update library root to canonical root_snapshot reported by the Node if needed
     let lib_row: Option<(String,)> = crate::database::query_as(
@@ -511,19 +527,32 @@ pub(super) async fn receive_scan_complete(
         // A scan started on the previous configuration cannot undo an admin edit.
         let errors =
             serde_json::json!(["Library configuration changed; retry required"]).to_string();
-        let _=crate::database::query("UPDATE scan_jobs SET status='error',errors_json=?,errors_count=1 WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)")
-            .bind(errors).bind(lib_id).bind(&scan_id).execute(&state.auth.store.pool).await;
+        let _ = inventory::fence::report(
+            &state.auth.store,
+            attempt,
+            inventory::fence::JobReport::Failed {
+                errors_json: &errors,
+                reset_warnings: false,
+            },
+        )
+        .await;
         let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
         return error(StatusCode::CONFLICT, "scan_configuration_changed");
     }
 
-    if !comp.root_snapshot.is_empty() {
-        let _ = crate::database::query("UPDATE libraries SET root=? WHERE id=? AND node_id=?")
-            .bind(&comp.root_snapshot)
-            .bind(lib_id)
-            .bind(&rec.id)
-            .execute(&state.auth.store.pool)
-            .await;
+    if !comp.root_snapshot.is_empty()
+        && matches!(
+            fenced_write(
+                &state.auth.store,
+                attempt,
+                "UPDATE libraries SET root=? WHERE id=? AND node_id=?",
+                &[&comp.root_snapshot, lib_id, &rec.id],
+            )
+            .await,
+            Ok(inventory::fence::Hold::Lost)
+        )
+    {
+        return error(StatusCode::CONFLICT, "stale_scan_attempt");
     }
 
     let library_kind: Option<String> =
@@ -534,29 +563,52 @@ pub(super) async fn receive_scan_complete(
             .ok()
             .flatten();
     if library_kind.as_deref() == Some("music") {
-        if comp.finished.complete {
-            let _=crate::database::query("UPDATE music_tracks SET available=0 WHERE library_id=? AND scan_id!=? AND EXISTS(SELECT 1 FROM music_scan_runs WHERE library_id=? AND scan_id=?)").bind(lib_id).bind(&scan_id).bind(lib_id).bind(&scan_id).execute(&state.auth.store.pool).await;
+        if comp.finished.complete
+            && matches!(
+                fenced_write(
+                    &state.auth.store,
+                    attempt,
+                    "UPDATE music_tracks SET available=0 WHERE library_id=? AND scan_id!=? \
+                    AND EXISTS(SELECT 1 FROM music_scan_runs WHERE library_id=? AND scan_id=?)",
+                    &[lib_id, &scan_id, lib_id, &scan_id],
+                )
+                .await,
+                Ok(inventory::fence::Hold::Lost)
+            )
+        {
+            return error(StatusCode::CONFLICT, "stale_scan_attempt");
         }
     } else {
         let root_path = std::path::Path::new(&comp.root_snapshot);
-        if let Err(err) = inventory::publish_staged_scan(
+        // One transaction, fenced inside it: a replayed completion (or the same completion on two
+        // Cores) publishes once; an attempt that lost its lease publishes nothing.
+        match inventory::publish_fenced_scan(
             &state.auth.store,
-            &scan_id,
-            lib_id,
+            attempt,
             root_path,
             comp.finished.complete,
         )
         .await
         {
-            eprintln!("[REMOTE SCAN PUBLISH ERROR in {lib_id}]: {err:?}");
-            let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
-            let _ = crate::database::query(
-            "UPDATE scan_jobs SET status='error', errors_json='[\"Échec de publication du scan distant\"]', errors_count=1 WHERE library_id=?",
-        )
-        .bind(lib_id)
-        .execute(&state.auth.store.pool)
-        .await;
-            return error(StatusCode::INTERNAL_SERVER_ERROR, "publish_scan_failed");
+            Ok(inventory::Publication::Published | inventory::Publication::AlreadyPublished) => {}
+            Ok(inventory::Publication::Fenced) => {
+                let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
+                return error(StatusCode::CONFLICT, "stale_scan_attempt");
+            }
+            Err(err) => {
+                eprintln!("[REMOTE SCAN PUBLISH ERROR in {lib_id}]: {err:?}");
+                let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
+                let _ = inventory::fence::report(
+                    &state.auth.store,
+                    attempt,
+                    inventory::fence::JobReport::Failed {
+                        errors_json: "[\"Échec de publication du scan distant\"]",
+                        reset_warnings: false,
+                    },
+                )
+                .await;
+                return error(StatusCode::INTERNAL_SERVER_ERROR, "publish_scan_failed");
+            }
         }
     }
     let conflicts = inventory::editorial_warnings(&state.auth.store, lib_id)
@@ -565,18 +617,28 @@ pub(super) async fn receive_scan_complete(
     let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
 
     let errors_json = serde_json::to_string(&conflicts).unwrap_or_else(|_| "[]".to_owned());
-    let _ = crate::database::query(
-        "UPDATE scan_jobs SET status=?, discovered=?, probed=?, reused=?, errors_json=?, errors_count=?, warnings_count=0 WHERE library_id=?",
+    let _ = inventory::fence::report(
+        &state.auth.store,
+        attempt,
+        inventory::fence::JobReport::Finished {
+            // Older Nodes do not report interruption: keep their former "incomplete means error".
+            status: if comp
+                .finished
+                .interrupted
+                .map_or(comp.finished.complete, |interrupted| !interrupted)
+            {
+                "completed"
+            } else {
+                "error"
+            },
+            discovered: comp.finished.discovered as i64,
+            probed: comp.finished.probed as i64,
+            reused: comp.finished.reused as i64,
+            errors_json: &errors_json,
+            errors_count: conflicts.len() as i64,
+            warnings_count: 0,
+        },
     )
-    // Older Nodes do not report interruption: keep their former "incomplete means error".
-    .bind(if comp.finished.interrupted.map_or(comp.finished.complete, |interrupted| !interrupted) { "completed" } else { "error" })
-    .bind(comp.finished.discovered as i64)
-    .bind(comp.finished.probed as i64)
-    .bind(comp.finished.reused as i64)
-    .bind(errors_json)
-    .bind(conflicts.len() as i64)
-    .bind(lib_id)
-    .execute(&state.auth.store.pool)
     .await;
 
     let inventory_sync = build_library_inventory_sync(&state.auth.store, lib_id)
@@ -590,6 +652,37 @@ pub(super) async fn receive_scan_complete(
         inventory_sync,
     };
     signed_core_response(&rec, &nonce, StatusCode::OK, &resp)
+}
+
+/// One statement of a remote completion, written only while the attempt still owns its running
+/// scan (checked inside the same transaction, see `inventory::fence`). Skipped, and reported as
+/// such, when the attempt lost the scan or already published it (replayed completion).
+async fn fenced_write(
+    store: &IdentityStore,
+    attempt: inventory::ScanAttempt<'_>,
+    sql: &'static str,
+    binds: &[&str],
+) -> Result<inventory::fence::Hold, sqlx::Error> {
+    let mut conn = store.pool.acquire().await?;
+    let (mut tx, hold) = inventory::fence::begin(
+        &mut conn,
+        attempt,
+        inventory::fence::Effect::Publish,
+        store.instance_id(),
+        unix_now(),
+    )
+    .await?;
+    if hold != inventory::fence::Hold::Held {
+        tx.rollback().await?;
+        return Ok(hold);
+    }
+    let mut statement = crate::database::query(sql);
+    for value in binds {
+        statement = statement.bind(*value);
+    }
+    statement.execute(&mut *tx).await?;
+    crate::database::commit(tx).await?;
+    Ok(hold)
 }
 
 pub(super) async fn receive_scan_fail(
@@ -624,12 +717,18 @@ pub(super) async fn receive_scan_fail(
     let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
     let err_json = serde_json::to_string(&vec![format!("Scan Node échoué: {}", fail.message)])
         .unwrap_or_else(|_| "[\"Scan Node échoué\"]".to_owned());
-    let _ = crate::database::query(
-        "UPDATE scan_jobs SET status='error', errors_json=?, errors_count=1 WHERE library_id=?",
+    let _ = inventory::fence::report(
+        &state.auth.store,
+        inventory::ScanAttempt {
+            library_id: fail.library_id.as_str(),
+            node_id: &rec.id,
+            scan_id: &scan_id,
+        },
+        inventory::fence::JobReport::Failed {
+            errors_json: &err_json,
+            reset_warnings: false,
+        },
     )
-    .bind(err_json)
-    .bind(fail.library_id.as_str())
-    .execute(&state.auth.store.pool)
     .await;
 
     signed_core_response(

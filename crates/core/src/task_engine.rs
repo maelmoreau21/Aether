@@ -12,7 +12,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-/// Serialize control changes with the final authorization/publication of scan effects.
+/// Serialize control changes with the final authorization/publication of scan effects inside
+/// this process only. Exclusion between Cores never depends on it: every scan effect re-verifies
+/// its attempt and lease inside its own transaction, under a per-library advisory lock on
+/// PostgreSQL (`inventory::fence`).
 pub static EFFECT_GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 pub static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
@@ -810,7 +813,8 @@ pub async fn finish(
             OR failure_count+? >= max_attempts OR ?=1)) THEN ? ELSE NULL END,available_at=CASE \
             WHEN status IN ('paused','cancelled') THEN ? ELSE ? END,error=? \
             WHERE id=? AND attempt=? AND node_id=? AND lease_until>? \
-            AND status IN ('running','paused','cancelled')",
+            AND status IN ('running','paused','cancelled') \
+            AND (node_id<>'local' OR lease_owner IS NULL OR lease_owner=?)",
     )
     .bind(&error)
     .bind(failed)
@@ -829,6 +833,7 @@ pub async fn finish(
     .bind(attempt)
     .bind(node_id)
     .bind(now)
+    .bind(store.instance_id())
     .execute(store.pool())
     .await?
     .rows_affected()

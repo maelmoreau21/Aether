@@ -279,3 +279,234 @@ fn playback_bearers_require_https_except_local_loopback() {
         assert!(validate_public_url(raw).is_ok());
     }
 }
+
+/// Signed Node -> Core call, as a Media Node sends it.
+async fn node_call(
+    app: &axum::Router,
+    secret: &str,
+    node: &str,
+    path: &str,
+    body: Vec<u8>,
+) -> StatusCode {
+    use tower::ServiceExt;
+    let now = unix_now();
+    let nonce = random_nonce_hex();
+    let digest = sha256_hex(&body);
+    let signature = sign_internal_request(
+        secret,
+        "node-to-core",
+        "POST",
+        path,
+        node,
+        "test-key",
+        now,
+        &nonce,
+        &digest,
+    );
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri(path)
+                .header(HDR_PROTOCOL, PROTOCOL_VERSION)
+                .header(HDR_NODE_ID, node)
+                .header(HDR_KEY_ID, "test-key")
+                .header(HDR_TIMESTAMP, now.to_string())
+                .header(HDR_NONCE, nonce)
+                .header(HDR_BODY_SHA256, digest)
+                .header(HDR_SIGNATURE, signature)
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// Multi-Core step 5: a remote batch of a stale attempt is refused with nothing staged, and a
+/// completion replayed by the Node (or received by a second Core) publishes once: it never
+/// republishes the emptied staging area, which would hide every asset of the library.
+#[tokio::test]
+async fn remote_scan_effects_are_fenced_by_the_durable_attempt() {
+    use media_contracts::inventory::{InventoryBatch, ScannedFile};
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("remote-fence.sqlite"))
+        .await
+        .unwrap();
+    let secret = "synthetic-test-node-secret-not-a-deployment-secret";
+    crate::database::query("INSERT INTO media_nodes(id,name,kind,status,key_id,shared_secret) VALUES('nas','NAS','remote','connected','test-key',?)").bind(secret).execute(store.pool()).await.unwrap();
+    crate::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','nas','/volume1/films',1)").execute(store.pool()).await.unwrap();
+    crate::database::query("INSERT INTO scan_jobs(library_id,status) VALUES('films','running')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let now = unix_now();
+    crate::database::query(
+        "INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,\
+            attempt,lease_until,started_at,created_at,updated_at,available_at) \
+            VALUES('scan','films','admin','scan','nas','scan','running',2,?,?,?,?,?)",
+    )
+    .bind(now + 600)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .bind(now)
+    .execute(store.pool())
+    .await
+    .unwrap();
+    crate::database::query(
+        "INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES('films','scan:2','nas')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let app = router(auth, Arc::new(ReplayWindow::new()));
+    let batch = |scan: &str| {
+        serde_json::to_vec(&media_contracts::protocol::RemoteBatchSubmission {
+            node_id: NodeId::new("nas"),
+            library_id: LibraryId::new("films"),
+            batch: InventoryBatch {
+                scan_id: scan.into(),
+                sequence: 0,
+                files: (0..3)
+                    .map(|index| ScannedFile {
+                        relative_path: format!("Film {index} (2020).mkv"),
+                        title: format!("Film {index}"),
+                        identity_key: format!("film-{index}"),
+                        size: 10 + index,
+                        modified_ns: "1".into(),
+                        mime: "video/x-matroska".into(),
+                        probe: serde_json::from_value(serde_json::json!({
+                            "format": {"duration": "60"},
+                            "streams": [{"index": 0, "codec_type": "video", "codec_name": "av1"}]
+                        }))
+                        .unwrap(),
+                        ..Default::default()
+                    })
+                    .collect(),
+                errors: vec![],
+                warnings: vec![],
+            },
+        })
+        .unwrap()
+    };
+    let staged = || async {
+        crate::database::query_scalar::<sqlx::Any, i64>("SELECT COUNT(*) FROM scan_staging_files")
+            .fetch_one(store.pool())
+            .await
+            .unwrap()
+    };
+    // Superseded attempt: refused, nothing staged.
+    crate::database::query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES('films','scan:1','nas') ON CONFLICT(library_id) DO UPDATE SET scan_id=excluded.scan_id")
+        .execute(store.pool()).await.unwrap();
+    assert_eq!(
+        node_call(
+            &app,
+            secret,
+            "nas",
+            "/internal/v1/core/scans/scan:1/batches",
+            batch("scan:1")
+        )
+        .await,
+        StatusCode::CONFLICT
+    );
+    crate::database::query("UPDATE active_scan_runs SET scan_id='scan:2' WHERE library_id='films'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    // Expired lease: refused, nothing staged.
+    crate::database::query("UPDATE durable_tasks SET lease_until=? WHERE id='scan'")
+        .bind(now - 1)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        node_call(
+            &app,
+            secret,
+            "nas",
+            "/internal/v1/core/scans/scan:2/batches",
+            batch("scan:2")
+        )
+        .await,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(staged().await, 0);
+    crate::database::query("UPDATE durable_tasks SET lease_until=? WHERE id='scan'")
+        .bind(now + 600)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        node_call(
+            &app,
+            secret,
+            "nas",
+            "/internal/v1/core/scans/scan:2/batches",
+            batch("scan:2")
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(staged().await, 3);
+
+    let completion = serde_json::to_vec(&serde_json::json!({"nodeId":"nas","libraryId":"films","rootSnapshot":"/volume1/films","configRevision":"films:/volume1/films","finished":{"scan_id":"scan:2","last_sequence":0,"discovered":3,"probed":3,"reused":0,"complete":true}})).unwrap();
+    let available = || async {
+        crate::database::query_scalar::<sqlx::Any, i64>(
+            "SELECT COUNT(*) FROM inventory_assets WHERE library_id='films' AND available=1",
+        )
+        .fetch_one(store.pool())
+        .await
+        .unwrap()
+    };
+    for _ in 0..2 {
+        assert_eq!(
+            node_call(
+                &app,
+                secret,
+                "nas",
+                "/internal/v1/core/scans/scan:2/complete",
+                completion.clone()
+            )
+            .await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            available().await,
+            3,
+            "a replayed completion publishes nothing"
+        );
+    }
+    let (status, published): (String, Option<String>) = crate::database::query_as(
+        "SELECT status,published_scan_id FROM scan_jobs WHERE library_id='films'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        (status.as_str(), published.as_deref()),
+        ("completed", Some("scan:2"))
+    );
+    // Once the attempt lost its lease, its completion is refused.
+    crate::database::query("UPDATE durable_tasks SET lease_until=? WHERE id='scan'")
+        .bind(now - 1)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        node_call(
+            &app,
+            secret,
+            "nas",
+            "/internal/v1/core/scans/scan:2/complete",
+            completion
+        )
+        .await,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(available().await, 3);
+    store.close().await;
+}

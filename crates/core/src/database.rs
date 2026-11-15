@@ -250,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 6;
+pub const CURRENT_SCHEMA_VERSION: i64 = 7;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -302,7 +302,19 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
         sqlite_sql: NODE_COMMANDS_SQLITE_SQL,
         postgres_sql: NODE_COMMANDS_POSTGRES_SQL,
     },
+    // Multi-Core: the scan attempt (`durable_tasks.id:attempt`) whose staged inventory the
+    // library's job last published, written in the publication transaction itself. A
+    // completion replayed by a Node, or received by two Cores, finds it and publishes nothing.
+    MigrationStep {
+        version: 7,
+        name: "0007_scan_publication_marker",
+        sqlite_sql: SCAN_PUBLICATION_MARKER_SQL,
+        postgres_sql: SCAN_PUBLICATION_MARKER_SQL,
+    },
 ];
+
+const SCAN_PUBLICATION_MARKER_SQL: &str =
+    "ALTER TABLE scan_jobs ADD COLUMN published_scan_id TEXT;";
 
 /// Table of migration v6, shared by both engines.
 macro_rules! node_commands_table_sql {
@@ -830,5 +842,38 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(name, "0006_node_commands");
+    }
+
+    #[tokio::test]
+    async fn sqlite_v6_upgrades_to_scan_publication_marker() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        super::upgrade_schema_with_steps(&mut conn, 6, super::MIGRATIONS)
+            .await
+            .unwrap();
+        super::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        super::query("INSERT INTO scan_jobs(library_id,status) VALUES('films','completed')")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(&mut conn, 7, super::MIGRATIONS)
+                .await
+                .unwrap(),
+            7
+        );
+        // Existing jobs keep their status and have published nothing yet.
+        let (status, marker): (String, Option<String>) = super::query_as(
+            "SELECT status,published_scan_id FROM scan_jobs WHERE library_id='films'",
+        )
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!((status.as_str(), marker), ("completed", None));
     }
 }

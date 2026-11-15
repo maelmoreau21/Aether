@@ -1,6 +1,7 @@
 //! Atomic publication of staged films/series and their automation snapshot.
 
 use super::editorial::refresh_editorial_for_works;
+use super::fence::{Effect, Hold, Publication, ScanAttempt};
 use super::{decode, id};
 use crate::database::{query, query_as, query_scalar};
 use crate::identity::IdentityStore;
@@ -8,6 +9,8 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use std::{collections::HashMap, path::Path};
 
+/// Publish a staged scan without attempt fencing: tests and in-process tooling only. Scan
+/// executors publish with [`publish_fenced_scan`].
 pub async fn publish_staged_scan(
     store: &IdentityStore,
     scan_id: &str,
@@ -15,8 +18,67 @@ pub async fn publish_staged_scan(
     root: &Path,
     complete: bool,
 ) -> Result<(), sqlx::Error> {
+    publish(store, None, scan_id, library_id, root, complete)
+        .await
+        .map(drop)
+}
+
+/// Publish the staged scan of `attempt` in ONE transaction that first re-verifies, inside it,
+/// that the attempt still owns the scan (see [`super::fence`]) and records the publication.
+/// Nothing is written unless the outcome is [`Publication::Published`].
+pub async fn publish_fenced_scan(
+    store: &IdentityStore,
+    attempt: ScanAttempt<'_>,
+    root: &Path,
+    complete: bool,
+) -> Result<Publication, sqlx::Error> {
+    publish(
+        store,
+        Some(attempt),
+        attempt.scan_id,
+        attempt.library_id,
+        root,
+        complete,
+    )
+    .await
+}
+
+async fn publish(
+    store: &IdentityStore,
+    fence: Option<ScanAttempt<'_>>,
+    scan_id: &str,
+    library_id: &str,
+    root: &Path,
+    complete: bool,
+) -> Result<Publication, sqlx::Error> {
     let mut conn = store.pool.acquire().await?;
-    let mut tx = crate::database::begin_write(&mut conn).await?;
+    let mut tx = match fence {
+        None => crate::database::begin_write(&mut conn).await?,
+        Some(attempt) => {
+            let (mut tx, hold) = super::fence::begin(
+                &mut conn,
+                attempt,
+                Effect::Publish,
+                store.instance_id(),
+                media_contracts::protocol::unix_now(),
+            )
+            .await?;
+            match hold {
+                Hold::Held => {
+                    super::fence::mark_published(&mut tx, attempt).await?;
+                    tx
+                }
+                Hold::Published => {
+                    tx.rollback().await?;
+                    return Ok(Publication::AlreadyPublished);
+                }
+                Hold::Lost => {
+                    tx.rollback().await?;
+                    return Ok(Publication::Fenced);
+                }
+            }
+        }
+    };
 
     let configured: Option<(String, String)> = query_as(
         "SELECT l.root, l.kind FROM libraries l          JOIN media_nodes n ON n.id=l.node_id          WHERE l.id=? AND l.enabled=1 AND l.kind IN ('films', 'series')          AND n.status != 'revoked'",
@@ -1175,6 +1237,9 @@ pub async fn publish_staged_scan(
         }
     }
 
+    // Every asset, edition and work of the scan is written but not committed.
+    #[cfg(test)]
+    super::fence::failpoint::hit(&mut tx, scan_id).await?;
     refresh_editorial_for_works(&mut tx, &affected_work_ids).await?;
     let encoded: String = query_scalar("SELECT options_json FROM libraries WHERE id=?")
         .bind(library_id)
@@ -1297,8 +1362,21 @@ pub async fn publish_staged_scan(
         .execute(&mut *tx)
         .await?;
 
+    if let Some(attempt) = fence
+        && !super::fence::confirm(
+            &mut tx,
+            attempt,
+            store.instance_id(),
+            media_contracts::protocol::unix_now(),
+        )
+        .await?
+    {
+        // The lease was lost while writing: nothing of this publication survives.
+        tx.rollback().await?;
+        return Ok(Publication::Fenced);
+    }
     tx.commit().await?;
     crate::task_engine::WAKE.notify_one();
     crate::system_memory::trim_memory();
-    Ok(())
+    Ok(Publication::Published)
 }

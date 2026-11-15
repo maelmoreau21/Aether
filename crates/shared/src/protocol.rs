@@ -149,6 +149,12 @@ pub enum NodeCommandType {
 /// older Node ignores it, so the field is additive within protocol `v1`. A command that is
 /// delivered after its deadline describes a situation that no longer exists (a browser
 /// that gave up on a relay, a scan the administrator already cancelled), so both sides drop it.
+///
+/// `epoch` is the ownership epoch of the Core that delivers the command (multi-Core fencing,
+/// `node_channel_owner.epoch`). It travels inside the signed response body, so it is
+/// authenticated by the existing body digest. It is additive like `expires_at`: an older Core
+/// sends none (the Node accepts the command as before) and an older Node ignores it. A Node
+/// refuses a command whose epoch is lower than the highest epoch it has seen.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeCommandEnvelope {
@@ -157,6 +163,8 @@ pub struct NodeCommandEnvelope {
     pub payload: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
 }
 
 impl NodeCommandType {
@@ -1099,8 +1107,10 @@ mod tests {
                 "targetId": "asset-1"
             }),
             expires_at: Some(1_000),
+            epoch: Some(7),
         };
         let serialized = serde_json::to_string(&cmd).unwrap();
+        assert!(serialized.contains("\"epoch\":7"), "{serialized}");
         let deserialized: NodeCommandEnvelope = serde_json::from_str(&serialized).unwrap();
         assert_eq!(cmd, deserialized);
     }
@@ -1123,12 +1133,45 @@ mod tests {
     }
 
     #[test]
+    fn command_envelope_epoch_is_optional_on_the_wire() {
+        // An older Core sends no epoch: the command decodes and carries none.
+        let legacy = r#"{"commandId":"c","commandType":"scan","payload":null,"expiresAt":9}"#;
+        let decoded: NodeCommandEnvelope = serde_json::from_str(legacy).unwrap();
+        assert_eq!(decoded.epoch, None);
+        // Without an epoch the envelope serialises exactly as before.
+        let encoded = serde_json::to_string(&decoded).unwrap();
+        assert!(!encoded.contains("epoch"), "{encoded}");
+        assert_eq!(encoded, legacy);
+        // A newer Core's epoch decodes here, and a Node that predates the field ignores it
+        // (`NodeCommandEnvelope` never denied unknown fields).
+        let fenced = r#"{"commandId":"c","commandType":"ping","payload":null,"epoch":42}"#;
+        assert_eq!(
+            serde_json::from_str::<NodeCommandEnvelope>(fenced)
+                .unwrap()
+                .epoch,
+            Some(42)
+        );
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        #[allow(dead_code)]
+        struct PreviousEnvelope {
+            command_id: String,
+            command_type: NodeCommandType,
+            payload: serde_json::Value,
+            #[serde(default)]
+            expires_at: Option<i64>,
+        }
+        assert!(serde_json::from_str::<PreviousEnvelope>(fenced).is_ok());
+    }
+
+    #[test]
     fn command_deadlines_are_strict_for_core_and_skew_tolerant_for_nodes() {
         let relay = NodeCommandEnvelope {
             command_id: "r".into(),
             command_type: NodeCommandType::StreamRelay,
             payload: serde_json::Value::Null,
             expires_at: None,
+            epoch: None,
         }
         .with_default_expiry(1_000);
         assert_eq!(relay.expires_at, Some(1_015));

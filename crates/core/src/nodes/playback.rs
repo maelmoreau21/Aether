@@ -242,6 +242,7 @@ pub async fn relay_from_remote_node(
                     command_id: format!("cmd-{}", uuid::Uuid::new_v4().simple()),
                     command_type: NodeCommandType::StreamRelay,
                     expires_at: None,
+                    epoch: None,
                     payload: serde_json::to_value(StreamRelayRequest {
                         head: request.method() == Method::HEAD,
                         stream_id: stream_id.clone(),

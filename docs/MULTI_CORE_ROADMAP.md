@@ -27,7 +27,7 @@ Core. Cette base n'est pas à refaire.
 
 | État | Où | Pourquoi il bloque deux Core | Section |
 |---|---|---|---|
-| `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | un Node n'est connecté qu'à un Core ; une commande émise par l'autre Core est refusée ou perdue | §2 |
+| `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | en partie levé (schéma v5) : la propriété du canal et son époque sont en base, le Node refuse les commandes d'un ancien propriétaire ; une commande émise par un Core non propriétaire reste refusée (boîte d'envoi durable : §2.2) | §2 |
 | `PENDING_STREAMS` | `nodes/channel.rs` | le relais exige que la requête navigateur et le flux montant du Node arrivent sur le **même** Core | §2.4 |
 | `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | chaque Core ne voit que les battements qu'il reçoit : la sélection de source et le failover divergent | §4.1 |
 | `ReplayWindow` (nonces) | `shared/protocol.rs` | un message signé rejoué sur l'autre Core passe la fenêtre anti-rejeu | §4.3 |
@@ -61,6 +61,43 @@ core_id = excluded.core_id OR lease_until < now` (comparer-et-échanger). L'épo
 que lors d'un **changement** de propriétaire. Le Core perdant constate zéro ligne modifiée et
 répond au Node par un refus « autre propriétaire » (le Node se reconnecte à l'URL logique).
 
+**Réalisé (étape 3, schéma v5, migration `0005_node_channel_owner`)** :
+
+- table `node_channel_owner(node_id → media_nodes ON DELETE CASCADE, core_id, epoch, lease_until,
+  uplink_url DEFAULT '')`. `core_id` est `IdentityStore::instance_id()` ;
+- chaque poll de canal (`node_channel`, avant de servir la boîte aux lettres) exécute **une**
+  instruction `INSERT … ON CONFLICT(node_id) DO UPDATE … WHERE`, valide sur SQLite et PostgreSQL,
+  puis relit `(core_id, epoch)`. Prise ou renouvellement si : ce Core est déjà propriétaire, le bail
+  est expiré (`lease_until < now`), le propriétaire n'est pas un Core vivant (aucune ligne
+  `core_instances` battue depuis moins de 45 s : mort, ou retiré par un arrêt propre, donc reprise
+  **immédiate** après un arrêt propre), ou la base est SQLite (mono-Core par construction : un
+  redémarrage, même après un plantage de quelques secondes, n'attend jamais l'ancien bail).
+  Bail : `CHANNEL_LEASE_SECONDS` = 3 × `POLL_WAIT` (25 s) = 75 s ;
+- époque : inchangée tant que le propriétaire est le même ; à chaque changement de propriétaire,
+  `max(époque + 1, now)`. Écart assumé par rapport au simple `+1` : l'époque reste strictement
+  croissante, et une ligne perdue (Node supprimé puis réappairé, base restaurée depuis une
+  sauvegarde) repart au-dessus de ce que le Node a déjà vu ; avec `+1` depuis une valeur restaurée
+  plus petite, le Node refuserait toutes les commandes indéfiniment ;
+- Core perdant : `409 Conflict` signé `channel_owned_elsewhere` ; s'il tenait une boîte aux lettres
+  pour ce Node, elle est retirée de `ACTIVE_CHANNELS` et **fermée** (`NodeChannel::fence` : file
+  vidée, émission refusée, poll en attente terminé). Une boîte dont l'époque change entre deux polls
+  jette aussi les commandes mises en file sous l'ancienne époque ;
+- `uplink_url` reste vide : il n'existe pas encore d'URL interne propre à chaque Core
+  (`MEDIA_CORE_INTERNAL_URL` est l'URL logique) ; son remplissage dépend du choix de §2.4 ;
+- la liste d'administration des Nodes expose `channelOwner` et `channelEpoch` (champs facultatifs) ;
+- au passage, un poll dont le chemin `/nodes/{id}/channel` ne nomme pas le Node signataire est
+  refusé (`403 node_id_mismatch`) : un Node correctement signé pouvait jusque-là lire la boîte aux
+  lettres d'un autre Node.
+
+Reprise après **arrêt brutal** en PostgreSQL : un Core redémarré sur le **même hôte** (même
+`HOSTNAME`, par exemple le même conteneur relancé par `restart: unless-stopped`) reconnaît son
+prédécesseur (même nom d'hôte, démarré avant lui) et reprend aussitôt son canal et ses baux locaux
+(`core_instances::alive_sql`, partagé avec `reclaim_orphans`). Deux Core sur un même hôte doivent
+donc avoir des `HOSTNAME` distincts. Un **autre** Core attend que le battement du mort soit périmé
+(45 s), au plus la fin du bail (75 s) ; pendant ce temps le Node reçoit des `409` et repolle toutes
+les 500 ms. Un arrêt propre libère le canal immédiatement. Derrière un répartiteur sans affinité, un poll qui
+tombe sur un Core non propriétaire est refusé puis rejoué : l'affinité par Node est souhaitable.
+
 ### 2.2 Commandes : de la mémoire à la boîte d'envoi durable
 
 Aujourd'hui une commande vit dans la mémoire du Core propriétaire (livraison au plus une
@@ -90,6 +127,72 @@ Chaque commande porte l'`epoch` du propriétaire. Le Node mémorise la plus haut
 (persistée) et **refuse toute commande d'époque inférieure** ; il refuse aussi les requêtes
 signées d'un Core d'époque ancienne. Un ancien Core isolé du réseau (donc ignorant qu'il a perdu
 son bail) ne peut plus agir sur ce Node dès que le nouveau propriétaire a parlé une fois.
+
+**Réalisé (étape 3) pour le canal de commandes** :
+
+- `NodeCommandEnvelope.epoch` : champ facultatif (`serde(default)`, omis quand absent), dans le corps
+  de la réponse signée du poll, donc authentifié par l'empreinte de corps existante sans changer la
+  chaîne signée. Le Core le pose sur **toute** commande livrée, `ping` compris (le `ping` sert de
+  poignée de main qui élève la marque) ;
+- Node : `ChannelEpochFence` (`crates/node/src/server/epoch.rs`), plus haute époque dans
+  `node_channel_epoch.json` (fichier temporaire, `fsync`, renommage). Époque inférieure → commande
+  non exécutée, journal `node_command_stale_epoch` (le protocole n'a pas d'accusé de refus) ; égale
+  → acceptée ; supérieure → marque élevée et persistée **avant** l'exécution ; absente (ancien Core)
+  → acceptée comme avant. Fichier illisible → marque 0 (journalisé), comme un Node sans fencing.
+  Une marque plus d'une heure en avance sur l'horloge du Node (écrite sous une horloge fausse puis
+  corrigée, base restaurée) est abandonnée au profit de l'époque reçue, journal
+  `node_channel_epoch_mark_in_future` : sinon le Node refuserait toute commande légitime jusqu'à ce
+  que l'horloge la rattrape. Une époque d'ancien propriétaire reste sous une marque légitime ;
+  Un nouvel appairage (`/internal/v1/node/pair`) ou enrôlement remet la marque à zéro (autre
+  installation, époques sans rapport) ;
+- compatibilité : ancien Core → nouveau Node (aucune époque, tout est accepté) ; nouveau Core →
+  ancien Node (champ ignoré, `409` traité comme une erreur ordinaire avec recul de 1 à 5 s).
+
+- boîte aux lettres : la mise sous fencing (`NodeChannel::fence`) et l'envoi (`try_send`)
+  testent l'état sous le même verrou : une commande poussée juste avant la perte du canal est
+  refusée à l'émetteur, jamais acceptée puis perdue en silence.
+
+**Limite restante — rotation de secret** : `rotate_node_secret` enregistre la nouvelle clé dès que la
+commande est **mise en file**, sans accusé du Node (livraison au plus une fois, comme avant
+l'étape 3). Une commande abandonnée après sa mise en file (changement d'époque, perte du canal
+après la mise en file) laisse le Node sur l'ancienne clé alors que la base attend la nouvelle ; il
+faut alors appairer le Node à nouveau. Correction prévue avec la boîte d'envoi durable et ses
+accusés (étape 4) : rotation en deux temps, ancienne clé valide jusqu'à la première requête signée
+avec la nouvelle.
+
+**Reste non fencé** (appels signés directs du Core vers le Node, `core-to-node`, hors canal ; ils
+ne visent que les Nodes appairés avec une `baseUrl` et, sauf la révocation envoyée par les deux
+voies, ne servent que quand ce Core n'a pas de canal actif pour le Node) :
+
+| Appel | Route Node | Émetteur |
+|---|---|---|
+| sonde de battement | `POST /internal/v1/node/heartbeat` | `management::reconnect_node` |
+| révocation | `POST /internal/v1/node/revoke` | `management::revoke_node_admin` (envoyée aussi par le canal, fencée) |
+| rotation de secret | `POST /internal/v1/node/rotate-secret` | `transport::send_signed_rotation_request` |
+| tâche | `POST /internal/v1/node/tasks` | `scans::dispatch_remote_task` |
+| annulation de scan | `POST /internal/v1/node/scans/{id}/cancel` | `scans::cancel_remote_scan` |
+| scan | `POST /internal/v1/node/scans` | `scans::dispatch_remote_scan` |
+| synchronisation d'inventaire | `POST /internal/v1/node/inventory-sync` | `scans::sync_all_libraries_for_node` |
+
+Raison : la chaîne signée ne peut pas changer, un en-tête hors signature ne serait pas authentifié,
+et les corps de `NodeTaskRequest` et `RemoteScanStartRequest` refusent les champs inconnus (un ancien
+Node rejetterait la requête). Les fencer demande soit un en-tête versionné couvert par une nouvelle
+version de signature, soit de faire passer ces envois par le canal (boîte d'envoi durable, §2.2).
+Le relais (`StreamRelay`) passe par le canal et est donc fencé ; les jetons de lecture directe ne
+changent pas (vérifiés en ligne à chaque requête).
+
+Preuve actuelle : tests unitaires SQLite (acquisition, renouvellement à époque constante, reprise
+après expiration du bail, reprise immédiate d'un propriétaire mort ou retiré, boîte aux lettres du
+Core perdant fermée), tests Node (marque persistée à travers un redémarrage, époque inférieure
+refusée, absence d'époque acceptée, époque supérieure élevant la marque), tests de compatibilité
+serde, un test PostgreSQL (`#[ignore]`, deux stores sur un schéma isolé, un seul processus : A
+possède N, B refusé tant que A vit, B reprend avec une époque supérieure quand le battement de A est
+périmé et le renouvellement de A échoue, reprise immédiate après désinscription, une seule victoire
+sur deux acquisitions concurrentes) et un test de bout en bout avec un vrai Node et son vrai
+`start_channel_worker` (`multi_node_reliability`, un seul Core : l'époque ancienne y est simulée en
+abaissant la ligne) : une commande d'époque inférieure n'est pas exécutée. **La preuve de sortie de
+l'étape 3 (§6 : arrêt brutal du propriétaire, Node repris par l'autre Core en moins de 3 baux, deux
+vrais processus Core derrière un répartiteur) reste à écrire.**
 
 ### 2.4 Le relais, cas difficile
 
@@ -282,7 +385,7 @@ avant la suivante.
 | 0 | Fait : boîte aux lettres à échéance, péremption, équivalence des sources | `multi_node_reliability` |
 | 1 | Identité de Core (`core_instances`), nettoyage de démarrage non global (§3.3) | un second Core démarre pendant un scan sans l'interrompre ; test d'intégration deux processus |
 | 2 | Tâches système et sauvegardes via `durable_tasks` (§3.2.4) | deux Core, une seule exécution par échéance, sur 1 000 échéances |
-| 3 | Propriété des canaux + époque (§2.1, §2.3) | arrêt brutal du propriétaire : le Node est repris par l'autre Core en moins de 3 baux, aucune commande d'époque ancienne exécutée |
+| 3 | Propriété des canaux + époque (§2.1, §2.3) — fait pour le canal, appels directs non fencés ; preuve de sortie à écrire | arrêt brutal du propriétaire : le Node est repris par l'autre Core en moins de 3 baux, aucune commande d'époque ancienne exécutée |
 | 4 | Boîte d'envoi durable (§2.2) | commandes émises depuis le Core non propriétaire ; aucune perte, aucun doublon sur 10 000 commandes avec 3 arrêts brutaux |
 | 5 | Fencing des publications et lots (§3.2.1-2) | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
 | 6 | Caches : génération de catalogue, santé de Node (§4) | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |

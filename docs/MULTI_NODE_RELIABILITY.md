@@ -135,6 +135,35 @@ son état. Les autorisations de lecture directe échouaient déjà (le Core refu
 **Ce changement côté Node n'est couvert par aucun test automatique** (le contrôle d'échéance
 côté Node non plus, hors la logique pure de `NodeCommandEnvelope`).
 
+### 3.5 Propriété du canal et époque (multi-Core, étape 3)
+
+Chaque poll de canal acquiert ou renouvelle, en une seule instruction de comparer-et-échanger, la
+ligne `node_channel_owner` du Node (bail de 75 s, trois polls ; détail dans
+[`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md) §2.1). Effets visibles côté protocole :
+
+- le Core refuse un poll dont l'identifiant de chemin n'est pas celui du Node signataire
+  (`403 node_id_mismatch`) : auparavant un Node correctement signé pouvait lire la boîte aux
+  lettres d'un autre Node, rotations de secret comprises ;
+- un Core qui ne possède pas le canal (un autre Core vivant tient un bail valide) répond
+  `409 Conflict` **signé**, corps `{"error":"channel_owned_elsewhere"}`, et ferme sa propre boîte aux
+  lettres pour ce Node (plus aucune livraison, file vidée). Le Node vérifie la signature, journalise
+  `node_channel_owned_elsewhere` et repolle après 500 ms son URL de Core configurée (l'URL logique
+  du répartiteur en multi-Core). Un ancien Node voit une erreur ordinaire et retente avec son recul
+  de 1 à 5 s ;
+- toute commande livrée, `ping` compris, porte `epoch` (champ facultatif de `NodeCommandEnvelope`,
+  dans le corps signé de la réponse). Le Node garde la plus haute époque vue dans
+  `node_channel_epoch.json` (écriture atomique, dans `MEDIA_NODE_DATA_DIR`) et **n'exécute pas** une
+  commande d'époque inférieure (journal `node_command_stale_epoch` ; le protocole n'a pas
+  d'accusé de refus). Une commande sans époque (ancien Core) est acceptée comme avant ; un ancien
+  Node ignore le champ. Un nouvel appairage ou enrôlement remet la marque à zéro.
+
+En mono-Core SQLite rien ne change pour l'exploitant : le Core reprend toujours le canal
+(redémarrage = nouvelle instance = époque supérieure). Tests : `nodes::channel_owner::tests`,
+`nodes::channel::tests::a_core_that_lost_the_channel_closes_its_mailbox`,
+`server::epoch::tests` (Node), `command_envelope_epoch_is_optional_on_the_wire` et, avec un vrai
+Node et son vrai `start_channel_worker`,
+`a_real_node_never_executes_a_command_of_a_former_channel_owner`.
+
 ## 4. Tâches distribuées : baux, reprises, annulations, idempotence
 
 Aucune modification : les tests existants sont rejoués et passent (`distributed_tasks` : 5 verts,

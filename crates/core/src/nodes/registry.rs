@@ -71,6 +71,12 @@ pub struct AdminNodeView {
     pub selection_score: i64,
     pub libraries: Vec<NodeLibraryRef>,
     pub scans: Vec<NodeScanSummary>,
+    /// Core instance owning the Node's command channel (`node_channel_owner`), when any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_owner: Option<String>,
+    /// Ownership epoch of that channel, carried by every command the owner delivers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_epoch: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -502,6 +508,16 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
         .into_iter()
         .map(|(nid, cnt)| (nid, cnt.max(0) as usize))
         .collect();
+    let channel_owners: HashMap<String, (String, i64)> =
+        crate::database::query_as::<_, (String, String, i64)>(
+            "SELECT node_id, core_id, epoch FROM node_channel_owner",
+        )
+        .fetch_all(&store.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(node, core, epoch)| (node, (core, epoch)))
+        .collect();
 
     let now = unix_now();
     let mut views = Vec::with_capacity(records.len());
@@ -559,6 +575,10 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             .max(entry.telemetry.core_active_relays);
         let db_assets = asset_count_map.get(&rec.id).copied().unwrap_or(0);
         let indexed_assets = entry.telemetry.indexed_assets.max(db_assets);
+        let (channel_owner, channel_epoch) = channel_owners
+            .get(&rec.id)
+            .map(|(core, epoch)| (Some(core.clone()), Some(*epoch)))
+            .unwrap_or_default();
 
         views.push(AdminNodeView {
             id: rec.id,
@@ -581,6 +601,8 @@ pub async fn load_admin_nodes(store: &IdentityStore) -> Result<Vec<AdminNodeView
             selection_score,
             libraries: node_libs,
             scans: node_scans,
+            channel_owner,
+            channel_epoch,
         });
     }
     Ok(views)

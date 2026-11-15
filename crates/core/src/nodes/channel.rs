@@ -1,5 +1,6 @@
 //! Outbound Node control channels, bounded relay uplinks and heartbeats.
 use super::NodesState;
+use super::channel_owner::{self, CHANNEL_OWNED_ELSEWHERE, ChannelOwnership};
 use super::registry::{load_node, refresh_node_in_registry};
 use super::transport::{signed_core_response, verify_signed_node_call};
 use crate::error;
@@ -27,7 +28,7 @@ use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::sync::Notify;
@@ -41,7 +42,7 @@ pub struct RelayStreamResponse {
 }
 
 /// Longest time one control poll waits for a command before answering with a ping.
-const POLL_WAIT: Duration = Duration::from_secs(25);
+pub(super) const POLL_WAIT: Duration = Duration::from_secs(25);
 /// A Node that re-polls immediately leaves a gap of a few milliseconds between two polls;
 /// it is still considered connected for this long after its last poll ended.
 const POLL_GRACE_MS: i64 = 5_000;
@@ -60,6 +61,10 @@ struct MailboxInner {
     polling: AtomicU32,
     last_poll_end_ms: AtomicI64,
     expired: AtomicU64,
+    /// Channel ownership epoch under which this Core serves the Node (0: not acquired yet).
+    epoch: AtomicI64,
+    /// Set once this Core lost the channel to another Core: the mailbox never delivers again.
+    fenced: AtomicBool,
 }
 
 /// Durable-for-the-process mailbox of one Node.
@@ -105,11 +110,17 @@ impl NodeChannel {
             polling: AtomicU32::new(0),
             last_poll_end_ms: AtomicI64::new(0),
             expired: AtomicU64::new(0),
+            epoch: AtomicI64::new(0),
+            fenced: AtomicBool::new(false),
         }))
     }
 
-    /// True when no poll is in flight and the last one ended more than the grace ago.
+    /// True when no poll is in flight and the last one ended more than the grace ago, or when
+    /// this Core lost the channel to another Core.
     pub fn is_closed(&self) -> bool {
+        if self.0.fenced.load(Ordering::Acquire) {
+            return true;
+        }
         if self.0.polling.load(Ordering::Acquire) > 0 {
             return false;
         }
@@ -125,6 +136,48 @@ impl NodeChannel {
         self.0.expired.load(Ordering::Relaxed)
     }
 
+    /// Ownership epoch this mailbox delivers under (0 before the first acquisition).
+    pub fn epoch(&self) -> i64 {
+        self.0.epoch.load(Ordering::Acquire)
+    }
+
+    /// Record the epoch of the ownership acquired by the current poll. Commands queued under
+    /// another epoch (an earlier ownership of this Core, lost meanwhile) are dropped undelivered:
+    /// they were decided without knowing what the other owner did with the Node.
+    fn adopt_epoch(&self, epoch: i64) {
+        let previous = self.0.epoch.swap(epoch, Ordering::AcqRel);
+        if previous != 0 && previous != epoch {
+            self.drop_queued();
+        }
+    }
+
+    fn drop_queued(&self) {
+        let dropped = {
+            let mut queue = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
+            let dropped = queue.len();
+            queue.clear();
+            dropped
+        };
+        self.0.expired.fetch_add(dropped as u64, Ordering::Relaxed);
+    }
+
+    /// This Core lost the Node's channel: refuse new commands, drop the queued ones (counted as
+    /// expired) and end any poll still waiting here with a ping.
+    pub fn fence(&self) {
+        // Set under the queue lock: a sender that passed `is_closed()` just before cannot push
+        // into this mailbox afterwards and be told its command was accepted.
+        let dropped = {
+            let mut queue = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
+            self.0.fenced.store(true, Ordering::Release);
+            let dropped = queue.len();
+            queue.clear();
+            dropped
+        };
+        self.0.expired.fetch_add(dropped as u64, Ordering::Relaxed);
+        self.0.generation.fetch_add(1, Ordering::AcqRel);
+        self.0.wake.notify_waiters();
+    }
+
     /// Enqueue without waiting. Acceptance means "buffered for the next poll", not "executed".
     pub fn try_send(&self, command: NodeCommandEnvelope) -> Result<(), CommandRefused> {
         if self.is_closed() {
@@ -133,7 +186,8 @@ impl NodeChannel {
         let command = command.with_default_expiry(unix_now());
         {
             let mut queue = self.0.queue.lock().unwrap_or_else(|e| e.into_inner());
-            if queue.len() >= MAILBOX_CAPACITY {
+            // Re-checked under the lock `fence()` takes: refused, never silently dropped.
+            if self.0.fenced.load(Ordering::Acquire) || queue.len() >= MAILBOX_CAPACITY {
                 return Err(CommandRefused);
             }
             queue.push_back(command);
@@ -183,7 +237,9 @@ impl NodeChannel {
             let notified = self.0.wake.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if self.0.generation.load(Ordering::Acquire) != guard.generation {
+            if self.0.generation.load(Ordering::Acquire) != guard.generation
+                || self.0.fenced.load(Ordering::Acquire)
+            {
                 return None;
             }
             if let Some(command) = self.pop_live(unix_now()) {
@@ -258,9 +314,30 @@ pub(super) async fn node_channel(
     if rec.status == NodeStatus::Revoked.as_str() {
         return error(StatusCode::FORBIDDEN, "node_revoked");
     }
+    // The signature authenticates the Node named in the headers: it may only poll its own
+    // channel, never collect the commands (secret rotations included) queued for another Node.
+    if id != rec.id {
+        return error(StatusCode::FORBIDDEN, "node_id_mismatch");
+    }
+
+    let now = unix_now();
+    // Acquire or renew this Core's ownership of the channel before serving it (multi-Core).
+    let epoch = match channel_owner::acquire(&state.auth.store, &id, now).await {
+        Ok(ChannelOwnership::Owned { epoch }) => epoch,
+        Ok(ChannelOwnership::OwnedElsewhere { .. }) => {
+            fence_local_channel(&id).await;
+            // Signed, so the Node can trust the refusal; it reconnects through its Core URL.
+            return signed_core_response(
+                &rec,
+                &nonce,
+                StatusCode::CONFLICT,
+                &serde_json::json!({ "error": CHANNEL_OWNED_ELSEWHERE }),
+            );
+        }
+        Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "database_error"),
+    };
 
     let hb: Result<HeartbeatPayload, _> = serde_json::from_slice(&body);
-    let now = unix_now();
     if let Ok(ref h) = hb {
         let roots_json = serde_json::to_string(&h.roots).unwrap_or_else(|_| rec.roots_json.clone());
         let _ = crate::database::query(
@@ -302,8 +379,9 @@ pub(super) async fn node_channel(
         channels.retain(|key, existing| key == &id || !existing.is_closed());
         channels.entry(id.clone()).or_default().clone()
     };
+    channel.adopt_epoch(epoch);
     let guard = channel.begin_poll();
-    let command = channel
+    let mut command = channel
         .next_command(&guard, POLL_WAIT)
         .await
         .unwrap_or_else(|| NodeCommandEnvelope {
@@ -311,10 +389,21 @@ pub(super) async fn node_channel(
             command_type: NodeCommandType::Ping,
             payload: serde_json::Value::Null,
             expires_at: None,
+            epoch: None,
         });
     drop(guard);
+    // Every delivered command, the ping included, carries the epoch of this ownership: the
+    // Node raises its fence on it and refuses whatever a former owner still sends.
+    command.epoch = Some(epoch);
 
     signed_core_response(&rec, &nonce, StatusCode::OK, &command)
+}
+
+/// This Core does not own the Node's channel (any more): its mailbox must stop delivering.
+async fn fence_local_channel(node_id: &str) {
+    if let Some(channel) = ACTIVE_CHANNELS.write().await.remove(node_id) {
+        channel.fence();
+    }
 }
 
 pub(super) async fn receive_stream_uplink(
@@ -450,6 +539,7 @@ mod tests {
             command_type: kind,
             payload: serde_json::Value::Null,
             expires_at,
+            epoch: None,
         }
     }
 
@@ -615,5 +705,72 @@ mod tests {
             .unwrap();
         let got = channel.next_command(&current, SHORT).await.unwrap();
         assert_eq!(got.command_id, "only-new");
+    }
+
+    #[tokio::test]
+    async fn a_core_that_lost_the_channel_closes_its_mailbox() {
+        let node = format!("fenced-{}", uuid::Uuid::new_v4().simple());
+        let channel = NodeChannel::new();
+        channel.adopt_epoch(7);
+        let poll = channel.begin_poll();
+        ACTIVE_CHANNELS
+            .write()
+            .await
+            .insert(node.clone(), channel.clone());
+        // A poll parked on an empty mailbox, as the Node's long poll is.
+        let waiting = {
+            let channel = channel.clone();
+            tokio::spawn(async move {
+                let started = std::time::Instant::now();
+                (
+                    channel.next_command(&poll, Duration::from_secs(5)).await,
+                    started.elapsed(),
+                )
+            })
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!waiting.is_finished(), "the poll is parked before the loss");
+        // The renewal failed: another Core owns the Node now. The parked poll must be woken.
+        fence_local_channel(&node).await;
+        assert!(ACTIVE_CHANNELS.read().await.get(&node).is_none());
+        assert!(live_channel(&node).await.is_none());
+        let (delivered, waited) = waiting.await.unwrap();
+        assert!(delivered.is_none(), "nothing is delivered after the loss");
+        assert!(waited < Duration::from_secs(2), "woken, not timed out");
+        // A clone still held by an emitter refuses, even while a poll is in flight.
+        let _poll = channel.begin_poll();
+        assert!(channel.is_closed());
+        assert_eq!(
+            channel.try_send(command("late", NodeCommandType::CancelScan, None)),
+            Err(CommandRefused)
+        );
+        // Commands queued before the loss are dropped and counted as expired, never delivered.
+        let queued = NodeChannel::new();
+        let _poll = queued.begin_poll();
+        queued
+            .try_send(command("queued", NodeCommandType::Scan, None))
+            .unwrap();
+        queued.fence();
+        assert_eq!(queued.queued(), 0);
+        assert_eq!(queued.expired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn commands_queued_under_a_former_epoch_are_never_delivered_under_a_new_one() {
+        let channel = NodeChannel::new();
+        assert_eq!(channel.epoch(), 0);
+        channel.adopt_epoch(10);
+        let poll = channel.begin_poll();
+        channel
+            .try_send(command("old", NodeCommandType::Scan, None))
+            .unwrap();
+        // Same ownership renewed: the queue is kept.
+        channel.adopt_epoch(10);
+        assert_eq!(channel.queued(), 1);
+        // This Core lost the channel and won it back meanwhile: decided under the old epoch.
+        channel.adopt_epoch(12);
+        assert_eq!(channel.epoch(), 12);
+        assert_eq!(channel.queued(), 0);
+        assert!(channel.next_command(&poll, SHORT).await.is_none());
     }
 }

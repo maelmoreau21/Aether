@@ -121,6 +121,8 @@ pub struct NodeServerState {
     pub(super) identity_changes: Arc<tokio::sync::Mutex<()>>,
     pub inventory: Arc<RwLock<NodeOperationalInventory>>,
     pub replay_window: Arc<ReplayWindow>,
+    /// Highest command-channel epoch seen from a Core (multi-Core fencing).
+    pub channel_epoch: Arc<super::epoch::ChannelEpochFence>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
     pub active_streams: Arc<AtomicU32>,
     pub resources: Arc<crate::resources::Sampler>,
@@ -187,6 +189,8 @@ impl NodeServerState {
             NodeOperationalInventory::default()
         };
 
+        let channel_epoch = super::epoch::ChannelEpochFence::load(&canonical_data).await;
+
         let mut updated_config = config;
         updated_config.data_dir = canonical_data;
         updated_config.allowed_roots = canonical_roots;
@@ -206,6 +210,7 @@ impl NodeServerState {
             identity_changes: Arc::new(tokio::sync::Mutex::new(())),
             inventory: Arc::new(RwLock::new(inventory)),
             replay_window: Arc::new(ReplayWindow::new()),
+            channel_epoch: Arc::new(channel_epoch),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
             active_streams,
             local_node: LocalNode,

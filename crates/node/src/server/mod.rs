@@ -11,6 +11,7 @@
 //!   (`/internal/v1/node/assets/{id}/content` and `/internal/v1/node/assets/{id}/image`).
 
 mod control_transport;
+mod epoch;
 mod outbound;
 mod playback;
 mod routes;
@@ -20,6 +21,7 @@ mod state;
 pub use control_transport::{
     post_signed_to_core, post_signed_to_core_raw, send_signed_http_request,
 };
+pub use epoch::{ChannelEpochFence, EpochVerdict};
 pub use outbound::start_channel_worker;
 pub use playback::{ActiveStreamGuard, track_stream_body};
 pub use routes::{app_with_state, enroll_with_core};

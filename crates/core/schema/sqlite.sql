@@ -1787,3 +1787,13 @@ CREATE TABLE core_instances (
  version TEXT NOT NULL DEFAULT ''
 );
 ALTER TABLE durable_tasks ADD COLUMN lease_owner TEXT;
+
+-- Schema v5 (database.rs MIGRATIONS, 0005_node_channel_owner): the Core owning each Media
+-- Node's command channel (multi-Core), under a lease, with a strictly increasing epoch.
+CREATE TABLE node_channel_owner (
+ node_id TEXT PRIMARY KEY NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
+ core_id TEXT NOT NULL,
+ epoch BIGINT NOT NULL,
+ lease_until BIGINT NOT NULL,
+ uplink_url TEXT NOT NULL DEFAULT ''
+);

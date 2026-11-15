@@ -2,6 +2,7 @@
 
 use super::control_transport::post_signed_to_core;
 use super::control_transport::send_signed_http_request;
+use super::epoch::EpochVerdict;
 use super::playback::ActiveStreamGuard;
 use super::playback::node_error_response;
 use super::playback::prepare_asset;
@@ -49,6 +50,12 @@ use std::io;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+/// Error prefix of [`send_signed_http_request`] for the signed `409 Conflict` a Core answers when
+/// another Core owns this Node's channel (`channel_owned_elsewhere`).
+const CHANNEL_OWNED_ELSEWHERE_STATUS: &str = "HTTP 409 ";
+/// Pause before polling again after such a refusal.
+const CHANNEL_OWNED_ELSEWHERE_RETRY: Duration = Duration::from_millis(500);
 
 /// Maintain persistent outbound control connection to Core. Automatically reconnects.
 pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<()> {
@@ -139,6 +146,17 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                             continue;
                         };
                         backoff = Duration::from_secs(1);
+                        if let EpochVerdict::Stale { highest } =
+                            state.channel_epoch.admit(cmd.epoch).await
+                        {
+                            // A former owner of the channel, unaware that another Core took
+                            // it over: never act on its commands (no acknowledgement exists).
+                            eprintln!(
+                                "{}",
+                                serde_json::json!({"event":"node_command_stale_epoch","commandId":cmd.command_id,"commandType":cmd.command_type,"epoch":cmd.epoch,"highestEpoch":highest})
+                            );
+                            continue;
+                        }
                         if cmd.is_expired_with_skew(unix_now()) {
                             // Delivered long after its deadline: the situation it described is gone.
                             eprintln!(
@@ -276,6 +294,16 @@ pub fn start_channel_worker(state: NodeServerState) -> tokio::task::JoinHandle<(
                         tokio::time::sleep(backoff).await;
                         backoff = (backoff * 2).min(Duration::from_secs(5));
                     }
+                }
+                Err(err) if err.to_string().starts_with(CHANNEL_OWNED_ELSEWHERE_STATUS) => {
+                    // Signed refusal of a Core that does not own this channel (multi-Core): poll
+                    // again shortly through the configured, logical Core URL.
+                    eprintln!(
+                        "{}",
+                        serde_json::json!({"event":"node_channel_owned_elsewhere","core":core_url})
+                    );
+                    backoff = Duration::from_secs(1);
+                    tokio::time::sleep(CHANNEL_OWNED_ELSEWHERE_RETRY).await;
                 }
                 Err(_err) => {
                     tokio::time::sleep(backoff).await;

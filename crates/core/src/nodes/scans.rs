@@ -132,6 +132,7 @@ pub(crate) async fn dispatch_remote_task(
                 command_id: format!("task-{}", request.run_id),
                 command_type: NodeCommandType::Task,
                 expires_at: None,
+                epoch: None,
                 payload: serde_json::to_value(request).map_err(|_| "Task encoding failed")?,
             })
             .map_err(|_| "node_busy_playback_priority".into());
@@ -269,6 +270,7 @@ pub(crate) async fn cancel_remote_scan(
                 command_id: format!("cancel-{scan}"),
                 command_type: NodeCommandType::CancelScan,
                 expires_at: None,
+                epoch: None,
                 payload: serde_json::json!({"scanId":scan}),
             })
             .map_err(|_| "Node channel busy")?;
@@ -741,6 +743,7 @@ pub async fn sync_all_libraries_for_node(
                 command_id: format!("sync-{}", sync.library_id),
                 command_type: NodeCommandType::SyncInventory,
                 expires_at: None,
+                epoch: None,
                 payload: serde_json::to_value(&sync).unwrap_or_default(),
             };
             let channels = ACTIVE_CHANNELS.read().await;
@@ -843,6 +846,7 @@ pub async fn dispatch_remote_scan(
             command_id: format!("scan-{scan_id}"),
             command_type: NodeCommandType::Scan,
             expires_at: None,
+            epoch: None,
             payload: serde_json::to_value(&start_req).unwrap_or_default(),
         };
         let sender = ACTIVE_CHANNELS.read().await.get(node_id).cloned();

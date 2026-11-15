@@ -30,13 +30,35 @@ const STAGED_SCANS: [&str; 4] = [
     "SELECT DISTINCT scan_id FROM scan_staging_fingerprints",
 ];
 
-fn hostname() -> String {
+/// Host this Core runs on: `HOSTNAME` (set by Docker to the container id, stable across
+/// restarts of the same container), else `/etc/hostname`, else `COMPUTERNAME`.
+pub(crate) fn hostname() -> String {
     std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .ok()
+        .filter(|h| !h.trim().is_empty())
+        .or_else(|| std::fs::read_to_string("/etc/hostname").ok())
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
         .unwrap_or_default()
+        .trim()
         .chars()
         .take(255)
         .collect()
+}
+
+/// SQL condition true while the Core whose id is in `column` is alive for this Core: its
+/// heartbeat is fresh, and it is not this Core's own predecessor (same non-empty host name,
+/// started earlier). A Core restarted after a crash (OOM, SIGKILL, `restart: unless-stopped`)
+/// thus takes its predecessor's work back at once instead of waiting for the stale heartbeat;
+/// two Cores on one host must therefore have distinct host names (`HOSTNAME`).
+///
+/// Binds, in order: stale cutoff (`now - HEARTBEAT_STALE_SECONDS`), [`hostname`], this
+/// Core's instance id.
+pub(crate) fn alive_sql(column: &str) -> String {
+    format!(
+        "EXISTS(SELECT 1 FROM core_instances c WHERE c.id={column} AND c.heartbeat_at>=? \
+            AND NOT (c.hostname<>'' AND c.hostname=? AND c.started_at<(SELECT \
+            COALESCE(MAX(m.started_at),0) FROM core_instances m WHERE m.id=?)))"
+    )
 }
 
 /// Register this Core or refresh its heartbeat, then forget Cores silent for a day.
@@ -88,16 +110,17 @@ pub(crate) async fn reclaim_orphans(
 ) -> Result<(), sqlx::Error> {
     if store.is_postgres() {
         let _writer = store.task_writes.lock().await;
-        query(
+        query(sqlx::AssertSqlSafe(format!(
             "UPDATE durable_tasks SET lease_until=? WHERE node_id='local' AND lease_until>? \
-                AND lease_owner IS NOT NULL AND lease_owner<>? AND NOT EXISTS(SELECT 1 \
-                FROM core_instances c WHERE c.id=durable_tasks.lease_owner \
-                AND c.heartbeat_at>=?)",
-        )
+                AND lease_owner IS NOT NULL AND lease_owner<>? AND NOT {}",
+            alive_sql("durable_tasks.lease_owner")
+        )))
         .bind(now)
         .bind(now)
         .bind(store.instance_id())
         .bind(now.saturating_sub(HEARTBEAT_STALE_SECONDS))
+        .bind(hostname())
+        .bind(store.instance_id())
         .execute(store.pool())
         .await?;
     } else if startup {
@@ -512,6 +535,13 @@ mod tests {
         // The real clock: the scans router reclaims at the current time.
         let now = media_contracts::protocol::unix_now();
         heartbeat(&a, now).await.unwrap();
+        // Two stores in one process share a host name, which would make B take A for its own
+        // crashed predecessor (same host, started earlier): A runs on another machine here.
+        query("UPDATE core_instances SET hostname='core-a-host' WHERE id=?")
+            .bind(a.instance_id())
+            .execute(a.pool())
+            .await
+            .unwrap();
         leased_scan(&a, Some(a.instance_id())).await;
         // A lease taken before schema v4 has no owner: it is left to expire on its own.
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('legacy','Legacy','films','local','/media/legacy',1)")

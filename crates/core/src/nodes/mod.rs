@@ -2,6 +2,7 @@
 //! The facade preserves the existing `crate::nodes` public paths.
 
 mod channel;
+mod channel_owner;
 mod management;
 mod playback;
 mod registry;

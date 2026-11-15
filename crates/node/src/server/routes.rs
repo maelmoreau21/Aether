@@ -257,6 +257,14 @@ async fn pair_node(
         )
             .into_response();
     }
+    // A new pairing may be with another installation: its channel epochs restart.
+    if let Err(err) = state.channel_epoch.reset().await {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": err.to_string() })),
+        )
+            .into_response();
+    }
 
     let roots = state
         .config
@@ -634,5 +642,7 @@ pub async fn enroll_with_core(
     }
 
     state.persist_identity().await?;
+    // A new enrollment may be with another installation: its channel epochs restart.
+    state.channel_epoch.reset().await?;
     Ok(())
 }

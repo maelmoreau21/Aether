@@ -250,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+pub const CURRENT_SCHEMA_VERSION: i64 = 5;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -285,7 +285,23 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
         sqlite_sql: CORE_INSTANCES_SQL,
         postgres_sql: CORE_INSTANCES_SQL,
     },
+    // Multi-Core: the Core owning each Media Node's command channel, under a lease, with a
+    // strictly increasing epoch that the Node uses to refuse commands of a former owner.
+    MigrationStep {
+        version: 5,
+        name: "0005_node_channel_owner",
+        sqlite_sql: NODE_CHANNEL_OWNER_SQL,
+        postgres_sql: NODE_CHANNEL_OWNER_SQL,
+    },
 ];
+
+const NODE_CHANNEL_OWNER_SQL: &str = "CREATE TABLE node_channel_owner (
+ node_id TEXT PRIMARY KEY NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
+ core_id TEXT NOT NULL,
+ epoch BIGINT NOT NULL,
+ lease_until BIGINT NOT NULL,
+ uplink_url TEXT NOT NULL DEFAULT ''
+);";
 
 const CORE_INSTANCES_SQL: &str = "CREATE TABLE core_instances (
  id TEXT PRIMARY KEY NOT NULL,
@@ -623,7 +639,7 @@ mod tests {
             )
             .await
             .unwrap(),
-            4
+            super::CURRENT_SCHEMA_VERSION
         );
         // A lease taken before v4 has no owner.
         let owner: Option<String> =
@@ -648,5 +664,47 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(name, "0004_core_instances");
+    }
+
+    #[tokio::test]
+    async fn sqlite_v4_upgrades_to_node_channel_owner() {
+        sqlx::any::install_default_drivers();
+        let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
+            .await
+            .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(&mut conn, 4, super::MIGRATIONS)
+                .await
+                .unwrap(),
+            4
+        );
+        super::query(
+            "INSERT INTO media_nodes(id,name,kind,status) VALUES('nas','NAS','remote','connected')",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        assert_eq!(
+            super::upgrade_schema_with_steps(&mut conn, 5, super::MIGRATIONS)
+                .await
+                .unwrap(),
+            5
+        );
+        super::query("INSERT INTO node_channel_owner(node_id,core_id,epoch,lease_until) VALUES('nas','core',3,9)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        let (epoch, uplink): (i64, String) =
+            super::query_as("SELECT epoch,uplink_url FROM node_channel_owner WHERE node_id='nas'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!((epoch, uplink.as_str()), (3, ""));
+        let name: String =
+            super::query_scalar("SELECT name FROM schema_migrations WHERE version=5")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(name, "0005_node_channel_owner");
     }
 }

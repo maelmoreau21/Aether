@@ -106,6 +106,7 @@ async fn spawn_node_server(
     token: &str,
 ) -> (
     String,
+    NodeServerState,
     tokio::sync::oneshot::Sender<()>,
     tokio::sync::oneshot::Receiver<()>,
 ) {
@@ -137,16 +138,18 @@ async fn spawn_node_server(
             })
             .await
             .expect("node state");
+            let handle = state.clone();
             tokio::spawn(async move {
                 let _ = axum::serve(listener, node_router(state)).await;
             });
-            let _ = ready_tx.send(public_url);
+            let _ = ready_tx.send((public_url, handle));
             let _ = stop_rx.await;
         });
         drop(runtime);
         let _ = stopped_tx.send(());
     });
-    (ready_rx.await.expect("node started"), stop_tx, stopped_rx)
+    let (url, state) = ready_rx.await.expect("node started");
+    (url, state, stop_tx, stopped_rx)
 }
 
 fn fixture(name: &str) -> PathBuf {
@@ -180,6 +183,8 @@ struct Cluster {
     bob_hash: String,
     node1: NodeHandle,
     node2: NodeHandle,
+    /// Node 1's runtime state (identity, inventory, channel epoch fence).
+    node1_state: NodeServerState,
     lib1: String,
     lib2: String,
     /// Playback asset hosted by Node 1 / Node 2.
@@ -266,8 +271,8 @@ impl Cluster {
             let _ = axum::serve(listener, app).await;
         });
 
-        let (u1, s1, w1) = spawn_node_server("Node A", r1.clone(), d1, "pair-a").await;
-        let (u2, s2, w2) = spawn_node_server("Node B", r2.clone(), d2, "pair-b").await;
+        let (u1, node1_state, s1, w1) = spawn_node_server("Node A", r1.clone(), d1, "pair-a").await;
+        let (u2, _, s2, w2) = spawn_node_server("Node B", r2.clone(), d2, "pair-b").await;
 
         let (st, headers, body) = http_request(
             &core_origin,
@@ -474,6 +479,7 @@ impl Cluster {
                 stop: Some(s2),
                 stopped: Some(w2),
             },
+            node1_state,
             lib1: libs[0].clone(),
             lib2: libs[1].clone(),
             asset1,
@@ -963,6 +969,154 @@ async fn commands_queued_behind_a_poll_or_between_polls_are_delivered_in_order()
         "{:?}",
         started.elapsed()
     );
+    c.node1.kill().await;
+    c.node2.kill().await;
+}
+
+/// Multi-Core fencing with a real Node running its real channel worker: every delivered command
+/// carries the channel ownership epoch, the Node keeps the highest one, and a command stamped
+/// with a lower epoch (a former owner that missed the takeover) is never executed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_real_node_never_executes_a_command_of_a_former_channel_owner() {
+    let Some(mp4) = identical_copy() else { return };
+    let mut c = Cluster::start_with(&mp4, &mp4, 0, false).await;
+    let worker = media_node::server::start_channel_worker(c.node1_state.clone());
+    let node = c.node1.id.clone();
+    let sync = |library: &str| {
+        command(
+            &format!("sync-{library}"),
+            "sync_inventory",
+            json!({"payload": {"libraryId": library, "rootSnapshot": "/fence", "assets": [], "images": []}}),
+        )
+    };
+    let applied = |library: &'static str| {
+        let state = c.node1_state.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(15), async {
+                while !state
+                    .inventory
+                    .read()
+                    .unwrap()
+                    .libraries
+                    .contains_key(library)
+                {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{library} was not applied"));
+        }
+    };
+    // The channel of this Core under `epoch`, once the Node's poll acquired it.
+    let channel_at = |epoch: Option<i64>| {
+        let node = node.clone();
+        async move {
+            tokio::time::timeout(Duration::from_secs(15), async {
+                loop {
+                    if let Some(channel) = ACTIVE_CHANNELS.read().await.get(&node).cloned()
+                        && channel.epoch() != 0
+                        && epoch.is_none_or(|e| channel.epoch() == e)
+                    {
+                        break channel;
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .expect("the Node polls its channel")
+        }
+    };
+    let set_epoch = |epoch: i64| {
+        let (pool, node) = (c.store.pool().clone(), node.clone());
+        async move {
+            query("UPDATE node_channel_owner SET epoch=? WHERE node_id=?")
+                .bind(epoch)
+                .bind(&node)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    };
+    let wake = |id: &str| command(id, "cancel_scan", json!({"payload": {"scanId": "none"}}));
+
+    // The current owner's commands are executed and raise the Node's mark to its epoch.
+    let channel = channel_at(None).await;
+    let current = channel.epoch();
+    let owner: (String, i64) = aether_core::database::query_as(
+        "SELECT core_id, epoch FROM node_channel_owner WHERE node_id=?",
+    )
+    .bind(&node)
+    .fetch_one(c.store.pool())
+    .await
+    .unwrap();
+    assert_eq!(owner, (c.store.instance_id().to_owned(), current));
+    channel.try_send(sync("fence-current")).unwrap();
+    applied("fence-current").await;
+    assert_eq!(c.node1_state.channel_epoch.highest().await, current);
+
+    // A former owner speaks with an older epoch (simulated: this Core's row is set back).
+    set_epoch(current - 1).await;
+    channel.try_send(wake("wake-1")).unwrap();
+    let stale = channel_at(Some(current - 1)).await;
+    stale.try_send(sync("fence-stale")).unwrap();
+    // Wait until it was handed to the Node: the epoch did not change meanwhile, so the poll that
+    // took it stamped it with the older epoch (nothing was dropped on the Core side).
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while stale.queued() > 0 {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the stale command is delivered");
+
+    // The legitimate owner speaks again: its command runs, and it was handled after the stale
+    // one on the Node's single command loop, so the stale one was refused, not merely late.
+    set_epoch(current + 1).await;
+    stale.try_send(wake("wake-2")).unwrap();
+    let newer = channel_at(Some(current + 1)).await;
+    newer.try_send(sync("fence-after")).unwrap();
+    applied("fence-after").await;
+    assert!(
+        !c.node1_state
+            .inventory
+            .read()
+            .unwrap()
+            .libraries
+            .contains_key("fence-stale"),
+        "a command of an older epoch was executed"
+    );
+    assert_eq!(c.node1_state.channel_epoch.highest().await, current + 1);
+
+    // The administrator sees who owns the channel.
+    let (status, _, body) = http_request(
+        &c.core_origin,
+        Method::GET,
+        "/api/v1/admin/nodes",
+        &[("cookie", &c.admin_cookie)],
+        vec![],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let nodes = serde_json::from_slice::<Value>(&body).unwrap()["nodes"].clone();
+    let listed = nodes
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["id"] == node.as_str())
+        .unwrap();
+    assert_eq!(listed["channelOwner"], c.store.instance_id());
+    assert_eq!(listed["channelEpoch"], current + 1);
+    assert!(
+        nodes
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["id"] != node.as_str())
+            .all(|n| n.get("channelEpoch").is_none()),
+        "{nodes}"
+    );
+
+    worker.abort();
     c.node1.kill().await;
     c.node2.kill().await;
 }

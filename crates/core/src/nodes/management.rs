@@ -697,6 +697,7 @@ pub(super) async fn rotate_node_secret(
                 command_id: format!("rotate-{new_key_id}"),
                 command_type: NodeCommandType::RotateSecret,
                 expires_at: None,
+                epoch: None,
                 payload: serde_json::to_value(&req_payload).unwrap_or_default(),
             };
             if sender.send(cmd).await.is_ok() {
@@ -813,6 +814,7 @@ pub(super) async fn revoke_node_admin(
                     command_id: format!("revoke-{}", unix_now()),
                     command_type: NodeCommandType::Revoke,
                     expires_at: None,
+                    epoch: None,
                     payload: serde_json::Value::Null,
                 })
                 .await;

@@ -21,3 +21,7 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+[profile.dev.package.wasmi]
+opt-level = 2
+debug = false

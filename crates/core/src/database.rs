@@ -250,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 8;
+pub const CURRENT_SCHEMA_VERSION: i64 = 10;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -277,19 +277,41 @@ ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_
         postgres_sql: "ALTER TABLE statistics_settings ALTER COLUMN event_retention_days SET DEFAULT 0;
 UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND event_retention_days = 365;",
     },
+    MigrationStep {
+        version: 4,
+        name: "0004_acquisition_server_settings",
+        sqlite_sql: "ALTER TABLE acquisition_servers ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';",
+        postgres_sql: "ALTER TABLE acquisition_servers ADD COLUMN IF NOT EXISTS settings_json TEXT NOT NULL DEFAULT '{}';",
+    },
+    MigrationStep {
+        version: 5,
+        name: "0005_library_media_task_runs_chapters",
+        sqlite_sql: "CREATE TABLE library_media_task_runs_new (
+ library_id TEXT NOT NULL,
+ task TEXT NOT NULL CHECK(task IN ('identify','trickplay','chapters','intros','artwork')),
+ started_at BIGINT NOT NULL,
+ origin TEXT NOT NULL DEFAULT 'manual' CHECK(origin IN ('manual','scan')),
+ PRIMARY KEY(library_id, task)
+);
+INSERT INTO library_media_task_runs_new(library_id,task,started_at,origin) SELECT library_id,task,started_at,origin FROM library_media_task_runs;
+DROP TABLE library_media_task_runs;
+ALTER TABLE library_media_task_runs_new RENAME TO library_media_task_runs;",
+        postgres_sql: "ALTER TABLE library_media_task_runs DROP CONSTRAINT IF EXISTS library_media_task_runs_task_check;
+ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_check CHECK(task IN ('identify','trickplay','chapters','intros','artwork'));",
+    },
     // Multi-Core: one row per live Core process, and the Core owning each durable lease
     // (NULL = no owner, or a lease taken before this version).
     MigrationStep {
-        version: 4,
-        name: "0004_core_instances",
+        version: 6,
+        name: "0006_core_instances",
         sqlite_sql: CORE_INSTANCES_SQL,
         postgres_sql: CORE_INSTANCES_SQL,
     },
     // Multi-Core: the Core owning each Media Node's command channel, under a lease, with a
     // strictly increasing epoch that the Node uses to refuse commands of a former owner.
     MigrationStep {
-        version: 5,
-        name: "0005_node_channel_owner",
+        version: 7,
+        name: "0007_node_channel_owner",
         sqlite_sql: NODE_CHANNEL_OWNER_SQL,
         postgres_sql: NODE_CHANNEL_OWNER_SQL,
     },
@@ -297,8 +319,8 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
     // of the Node's channel, acknowledged by the Node (`nodes::outbox`); and the pending key of
     // a two-phase secret rotation, promoted by the Node's first request signed with it.
     MigrationStep {
-        version: 6,
-        name: "0006_node_commands",
+        version: 8,
+        name: "0008_node_commands",
         sqlite_sql: NODE_COMMANDS_SQLITE_SQL,
         postgres_sql: NODE_COMMANDS_POSTGRES_SQL,
     },
@@ -306,8 +328,8 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
     // library's job last published, written in the publication transaction itself. A
     // completion replayed by a Node, or received by two Cores, finds it and publishes nothing.
     MigrationStep {
-        version: 7,
-        name: "0007_scan_publication_marker",
+        version: 9,
+        name: "0009_scan_publication_marker",
         sqlite_sql: SCAN_PUBLICATION_MARKER_SQL,
         postgres_sql: SCAN_PUBLICATION_MARKER_SQL,
     },
@@ -315,8 +337,8 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
     // written by the Core receiving its heartbeats while other Cores are live, read by those
     // Cores to rank sources (`nodes::health`).
     MigrationStep {
-        version: 8,
-        name: "0008_node_health",
+        version: 10,
+        name: "0010_node_health",
         sqlite_sql: NODE_HEALTH_SQL,
         postgres_sql: NODE_HEALTH_SQL,
     },
@@ -690,16 +712,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sqlite_v3_upgrades_to_core_instances_and_lease_owner() {
+    async fn sqlite_v5_upgrades_to_core_instances_and_lease_owner() {
         sqlx::any::install_default_drivers();
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
         assert_eq!(
-            super::upgrade_schema_with_steps(&mut conn, 3, super::MIGRATIONS)
+            super::upgrade_schema_with_steps(&mut conn, 5, super::MIGRATIONS)
                 .await
                 .unwrap(),
-            3
+            5
         );
         super::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
             .execute(&mut conn)
@@ -737,24 +759,24 @@ mod tests {
                 .unwrap();
         assert_eq!((hostname.as_str(), version.as_str()), ("", ""));
         let name: String =
-            super::query_scalar("SELECT name FROM schema_migrations WHERE version=4")
+            super::query_scalar("SELECT name FROM schema_migrations WHERE version=6")
                 .fetch_one(&mut conn)
                 .await
                 .unwrap();
-        assert_eq!(name, "0004_core_instances");
+        assert_eq!(name, "0006_core_instances");
     }
 
     #[tokio::test]
-    async fn sqlite_v4_upgrades_to_node_channel_owner() {
+    async fn sqlite_v6_upgrades_to_node_channel_owner() {
         sqlx::any::install_default_drivers();
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
         assert_eq!(
-            super::upgrade_schema_with_steps(&mut conn, 4, super::MIGRATIONS)
+            super::upgrade_schema_with_steps(&mut conn, 6, super::MIGRATIONS)
                 .await
                 .unwrap(),
-            4
+            6
         );
         super::query(
             "INSERT INTO media_nodes(id,name,kind,status) VALUES('nas','NAS','remote','connected')",
@@ -763,10 +785,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            super::upgrade_schema_with_steps(&mut conn, 5, super::MIGRATIONS)
+            super::upgrade_schema_with_steps(&mut conn, 7, super::MIGRATIONS)
                 .await
                 .unwrap(),
-            5
+            7
         );
         super::query("INSERT INTO node_channel_owner(node_id,core_id,epoch,lease_until) VALUES('nas','core',3,9)")
             .execute(&mut conn)
@@ -779,24 +801,24 @@ mod tests {
                 .unwrap();
         assert_eq!((epoch, uplink.as_str()), (3, ""));
         let name: String =
-            super::query_scalar("SELECT name FROM schema_migrations WHERE version=5")
+            super::query_scalar("SELECT name FROM schema_migrations WHERE version=7")
                 .fetch_one(&mut conn)
                 .await
                 .unwrap();
-        assert_eq!(name, "0005_node_channel_owner");
+        assert_eq!(name, "0007_node_channel_owner");
     }
 
     #[tokio::test]
-    async fn sqlite_v5_upgrades_to_node_commands() {
+    async fn sqlite_v7_upgrades_to_node_commands() {
         sqlx::any::install_default_drivers();
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
         assert_eq!(
-            super::upgrade_schema_with_steps(&mut conn, 5, super::MIGRATIONS)
+            super::upgrade_schema_with_steps(&mut conn, 7, super::MIGRATIONS)
                 .await
                 .unwrap(),
-            5
+            7
         );
         super::query(
             "INSERT INTO media_nodes(id,name,kind,status) VALUES('nas','NAS','remote','connected')",
@@ -805,10 +827,10 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            super::upgrade_schema_with_steps(&mut conn, 6, super::MIGRATIONS)
+            super::upgrade_schema_with_steps(&mut conn, 8, super::MIGRATIONS)
                 .await
                 .unwrap(),
-            6
+            8
         );
         super::query(
             "INSERT INTO node_commands(id,node_id,command_type,payload_json,expires_at,created_at,seq) \
@@ -854,20 +876,20 @@ mod tests {
             .unwrap();
         assert_eq!(left, 0);
         let name: String =
-            super::query_scalar("SELECT name FROM schema_migrations WHERE version=6")
+            super::query_scalar("SELECT name FROM schema_migrations WHERE version=8")
                 .fetch_one(&mut conn)
                 .await
                 .unwrap();
-        assert_eq!(name, "0006_node_commands");
+        assert_eq!(name, "0008_node_commands");
     }
 
     #[tokio::test]
-    async fn sqlite_v6_upgrades_to_scan_publication_marker() {
+    async fn sqlite_v8_upgrades_to_scan_publication_marker() {
         sqlx::any::install_default_drivers();
         let mut conn = sqlx::AnyConnection::connect("sqlite::memory:")
             .await
             .unwrap();
-        super::upgrade_schema_with_steps(&mut conn, 6, super::MIGRATIONS)
+        super::upgrade_schema_with_steps(&mut conn, 8, super::MIGRATIONS)
             .await
             .unwrap();
         super::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
@@ -879,10 +901,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            super::upgrade_schema_with_steps(&mut conn, 7, super::MIGRATIONS)
+            super::upgrade_schema_with_steps(&mut conn, 9, super::MIGRATIONS)
                 .await
                 .unwrap(),
-            7
+            9
         );
         // Existing jobs keep their status and have published nothing yet.
         let (status, marker): (String, Option<String>) = super::query_as(

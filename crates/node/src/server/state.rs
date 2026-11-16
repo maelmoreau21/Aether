@@ -126,6 +126,7 @@ pub struct NodeServerState {
     /// Channel commands handled recently and acknowledgements to send (multi-Core step 4).
     pub commands: Arc<super::commands::CommandLog>,
     pub active_scans: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub(super) concurrent_trickplay_runs: Arc<Mutex<std::collections::HashSet<String>>>,
     pub active_streams: Arc<AtomicU32>,
     pub resources: Arc<crate::resources::Sampler>,
     pub local_node: LocalNode,
@@ -215,6 +216,7 @@ impl NodeServerState {
             channel_epoch: Arc::new(channel_epoch),
             commands: Arc::new(super::commands::CommandLog::new()),
             active_scans: Arc::new(Mutex::new(HashMap::new())),
+            concurrent_trickplay_runs: Arc::new(Mutex::new(std::collections::HashSet::new())),
             active_streams,
             local_node: LocalNode,
             preparations: Arc::new(crate::packaging::Preparations::default()),

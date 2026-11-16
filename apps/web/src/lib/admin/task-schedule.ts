@@ -29,7 +29,7 @@ export interface TaskStats {
   images: number | null;
 }
 /** Media sub-tasks of a library: shown under its scan, run by hand or after each scan. */
-export type MediaTaskKind = 'identify' | 'artwork' | 'trickplay' | 'intros';
+export type MediaTaskKind = 'identify' | 'artwork' | 'trickplay' | 'chapters' | 'intros';
 export interface ScheduledTask {
   id: string;
   kind: 'system' | 'scan' | 'backup' | MediaTaskKind;
@@ -53,7 +53,7 @@ export interface ScheduledTask {
   /** For a media sub-task: whether it also runs on its own after each library scan. */
   afterScan?: boolean | null;
   /** For a queued media sub-task: the earlier phase of its library it waits for. */
-  waitingFor?: 'identify' | 'artwork' | 'trickplay' | null;
+  waitingFor?: 'identify' | 'artwork' | 'trickplay' | 'chapters' | null;
 }
 export interface TriggerDraft {
   type: TriggerType;
@@ -132,7 +132,8 @@ export type SummaryTone = 'ok' | 'error' | 'warning' | 'muted' | 'active';
 const phaseKeys: Record<NonNullable<ScheduledTask['waitingFor']>, TranslationKey> = {
   identify: 'sched_phase_identify',
   artwork: 'sched_phase_artwork',
-  trickplay: 'sched_phase_trickplay'
+  trickplay: 'sched_phase_trickplay',
+  chapters: 'sched_phase_chapters'
 };
 
 export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 'lastRun' | 'waitingFor'>, now: number, t: Translate): { text: string; tone: SummaryTone } {
@@ -211,6 +212,7 @@ export function categoryLabel(category: string, t: Translate): string {
 const mediaNameKeys: Record<MediaTaskKind, TranslationKey> = {
   identify: 'sched_identify_name',
   trickplay: 'sched_trickplay_name',
+  chapters: 'sched_chapters_name',
   intros: 'sched_intros_name',
   artwork: 'sched_artwork_name'
 };

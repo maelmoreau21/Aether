@@ -14,7 +14,7 @@
 //!   ([`confirm`]), so lease renewals keep running while it writes;
 //! - on SQLite `BEGIN IMMEDIATE` already serializes every writer; the check is the same.
 //!
-//! The publication also records its attempt in `scan_jobs.published_scan_id` (schema v7): a
+//! The publication also records its attempt in `scan_jobs.published_scan_id` (schema v9): a
 //! completion replayed by a Node, or delivered to two Cores, finds it and publishes nothing,
 //! instead of publishing an emptied staging area (which would mark every asset unavailable).
 //!

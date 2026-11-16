@@ -47,7 +47,9 @@ pub(crate) async fn queue_scanned_assets(
     options: &LibraryOptions,
     refresh_mode: &str,
     now: i64,
-) -> Result<u64, sqlx::Error> {
+) -> Result<(u64, u64), sqlx::Error> {
+    let want_trickplay = options.trickplay_enabled && options.trickplay_during_scan;
+    let want_chapters = options.chapter_images_enabled && options.chapter_images_during_scan;
     queue_previews(
         tx,
         library,
@@ -55,15 +57,52 @@ pub(crate) async fn queue_scanned_assets(
         options,
         refresh_mode == "full",
         false,
+        want_trickplay,
+        want_chapters,
         now,
     )
     .await
 }
 
-/// Queue the previews (trickplay sheets, chapter images) of the files in `scope`.
+fn probe_json_f64(value: &serde_json::Value) -> Option<f64> {
+    value
+        .as_str()
+        .and_then(|s| s.parse::<f64>().ok())
+        .or_else(|| value.as_f64())
+        .filter(|v| v.is_finite())
+}
+
+fn probe_has_chapters(probe_json: &str) -> bool {
+    if probe_json.trim().is_empty() {
+        return true;
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(probe_json) else {
+        return false;
+    };
+    let duration = value
+        .get("format")
+        .and_then(|f| f.get("duration"))
+        .and_then(probe_json_f64)
+        .filter(|d| *d > 0.0);
+    value
+        .get("chapters")
+        .and_then(|chapters| chapters.as_array())
+        .is_some_and(|arr| {
+            arr.iter().any(|ch| {
+                ch.get("start_time")
+                    .and_then(probe_json_f64)
+                    .or_else(|| ch.get("start_seconds").and_then(probe_json_f64))
+                    .is_some_and(|s| s >= 0.0 && duration.is_none_or(|d| s < d))
+            })
+        })
+}
+
+/// Queue the previews (trickplay sheets and/or chapter images) of the files in `scope`.
 /// With `rearm`, a warm-up that already finished (or failed) is queued again; the Node
-/// skips a file whose prepared cache is still present. `manual` runs ignore the
-/// "during scans" switches but never the library's on/off switches.
+/// skips a file whose prepared cache is still present. `manual` separates scheduler owner keys;
+/// `want_trickplay` and `want_chapters` explicitly select which preview kinds are queued while
+/// still respecting the library's on/off switches.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn queue_previews(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     library: &str,
@@ -71,13 +110,15 @@ pub(crate) async fn queue_previews(
     options: &LibraryOptions,
     rearm: bool,
     manual: bool,
+    want_trickplay: bool,
+    want_chapters: bool,
     now: i64,
-) -> Result<u64, sqlx::Error> {
+) -> Result<(u64, u64), sqlx::Error> {
     use sha2::{Digest, Sha256};
-    let previews = options.trickplay_enabled && (manual || options.trickplay_during_scan);
-    let chapters = options.chapter_images_enabled && (manual || options.chapter_images_during_scan);
+    let previews = want_trickplay && options.trickplay_enabled;
+    let chapters = want_chapters && options.chapter_images_enabled;
     if !previews && !chapters {
-        return Ok(0);
+        return Ok((0, 0));
     }
     let [preview_owner, chapter_owner] = if manual { MANUAL_OWNERS } else { SCAN_OWNERS };
     // Share admission's cross-Core capacity lock only for this final queue step.
@@ -94,18 +135,19 @@ pub(crate) async fn queue_previews(
     .await?;
     let capacity = (100_000 - pending).max(0);
     if capacity == 0 {
-        return Ok(0);
+        return Ok((0, 0));
     }
-    let mut inserted = 0_u64;
+    let mut inserted_trickplay = 0_u64;
+    let mut inserted_chapters = 0_u64;
     let mut last_asset = String::new();
     // Reused probes are included: enabling previews or changing their profile
     // must also warm existing videos. Compare indexed idempotency keys in batches,
     // rather than rewriting one task for every file on every monitoring scan.
     loop {
-        let assets: Vec<(String, i64, String, String, String)> = match scope {
+        let assets: Vec<(String, i64, String, String, String, String)> = match scope {
             PreviewScope::Scan(scan) => {
                 crate::database::query_as(
-                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id \
+                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id,a.probe_json \
                         FROM scan_staging_files f \
                         JOIN inventory_assets a ON a.library_id=f.library_id \
                         AND a.relative_path=f.relative_path \
@@ -123,7 +165,7 @@ pub(crate) async fn queue_previews(
             }
             PreviewScope::Library => {
                 crate::database::query_as(
-                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id \
+                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id,a.probe_json \
                         FROM inventory_assets a \
                         JOIN inventory_sources s ON s.id=a.source_id \
                         JOIN libraries l ON l.id=a.library_id \
@@ -146,7 +188,7 @@ pub(crate) async fn queue_previews(
             }
             PreviewScope::Asset(asset) => {
                 crate::database::query_as(
-                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id \
+                    "SELECT a.id,a.size,a.modified_ns,l.node_id,a.library_id,a.probe_json \
                         FROM inventory_assets a \
                         JOIN inventory_sources s ON s.id=a.source_id \
                         JOIN libraries l ON l.id=a.library_id \
@@ -167,7 +209,7 @@ pub(crate) async fn queue_previews(
         }
         last_asset = assets.last().map(|row| row.0.clone()).unwrap_or_default();
         let mut candidates = Vec::with_capacity(assets.len() * 2);
-        for (asset, size, modified, node, asset_library) in assets {
+        for (asset, size, modified, node, asset_library, probe_json) in assets {
             // Chapter images reuse the on-demand profile (width/quality, no
             // interval) so the player hits the prepared cache directly.
             if previews {
@@ -195,7 +237,7 @@ pub(crate) async fn queue_previews(
                     "",
                 ));
             }
-            if chapters {
+            if chapters && probe_has_chapters(&probe_json) {
                 let key = format!(
                     "chapters:{:x}",
                     Sha256::digest(format!(
@@ -205,6 +247,9 @@ pub(crate) async fn queue_previews(
                 );
                 candidates.push((asset, node, asset_library, key, chapter_owner, "chapters"));
             }
+        }
+        if candidates.is_empty() {
+            continue;
         }
         let placeholders = vec!["?"; candidates.len()].join(",");
         let statement = format!(
@@ -225,6 +270,11 @@ pub(crate) async fn queue_previews(
             .map(|(owner, key, status, leased)| ((owner, key), (status, leased)))
             .collect();
         for (asset, node, asset_library, key, owner, component) in candidates {
+            let counter = if component == "chapters" {
+                &mut inserted_chapters
+            } else {
+                &mut inserted_trickplay
+            };
             if let Some((status, leased)) = existing.get(&(owner.to_owned(), key.clone())) {
                 // A finished warm-up says nothing about the cache today (it may have been
                 // deleted or evicted): an explicit full pass queues it again.
@@ -232,29 +282,34 @@ pub(crate) async fn queue_previews(
                     && *leased == 0
                     && matches!(status.as_str(), "completed" | "error" | "cancelled")
                 {
-                    inserted += query("UPDATE durable_tasks SET status='queued',error='',failure_count=0,available_at=?,updated_at=?,finished_at=NULL WHERE owner=? AND idempotency_key=? AND status IN ('completed','error','cancelled') AND lease_until IS NULL")
+                    *counter += query("UPDATE durable_tasks SET status='queued',error='',failure_count=0,available_at=?,updated_at=?,finished_at=NULL WHERE owner=? AND idempotency_key=? AND status IN ('completed','error','cancelled') AND lease_until IS NULL")
                         .bind(now).bind(now).bind(owner).bind(&key)
                         .execute(&mut **tx).await?.rows_affected();
-                    if inserted >= capacity as u64 {
-                        return Ok(inserted);
+                    if inserted_trickplay + inserted_chapters >= capacity as u64 {
+                        return Ok((inserted_trickplay, inserted_chapters));
                     }
                 }
                 continue;
             }
-            inserted += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,50,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE \
+            let priority = if component == "chapters" {
+                crate::task_engine::pipeline::CHAPTER_IMAGES
+            } else {
+                crate::task_engine::pipeline::TRICKPLAY
+            };
+            *counter += query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,priority,created_at,updated_at,available_at,category,target_id,component,width) VALUES(?,?,?,?,?,?,?,?,?,'trickplay',?,?,?) ON CONFLICT(owner,idempotency_key) DO UPDATE \
                     SET status='queued',error='',priority=excluded.priority,available_at=excluded.available_at,updated_at=excluded.updated_at,finished_at=NULL \
                     WHERE durable_tasks.error IN \
                     ('library_trickplay_disabled','library_chapter_images_disabled') \
                     AND durable_tasks.lease_until IS NULL")
-                .bind(uuid::Uuid::new_v4().to_string()).bind(&asset_library).bind(owner).bind(key).bind(node)
+                .bind(uuid::Uuid::new_v4().to_string()).bind(&asset_library).bind(owner).bind(key).bind(node).bind(priority)
                 .bind(now).bind(now).bind(now).bind(asset).bind(component).bind(i64::from(options.trickplay_width))
                 .execute(&mut **tx).await?.rows_affected();
-            if inserted >= capacity as u64 {
-                return Ok(inserted);
+            if inserted_trickplay + inserted_chapters >= capacity as u64 {
+                return Ok((inserted_trickplay, inserted_chapters));
             }
         }
     }
-    Ok(inserted)
+    Ok((inserted_trickplay, inserted_chapters))
 }
 
 pub(crate) struct AssetSource {
@@ -455,32 +510,14 @@ pub async fn manifest(store: &IdentityStore, asset_id: &str, request: Request) -
             "columns": cached.columns,
             "rows": cached.rows,
             "sheetCount": cached.sheet_count,
-                "mime": cached.mime,
+            "mime": cached.mime,
             "thumbnailCount": cached.thumbnail_count,
             "urlPrefix": format!("/api/v1/assets/{asset_id}/trickplay/")
         }))
         .into_response();
     }
 
-    // 2. Jellyfin read-only fallback
-    if let Some(jellyfin) = mgr.check_jellyfin(&req).await {
-        return Json(json!({
-            "status": "ready",
-            "source": "jellyfin",
-            "intervalMs": jellyfin.interval_ms,
-            "width": jellyfin.width,
-            "height": jellyfin.height,
-            "columns": jellyfin.columns,
-            "rows": jellyfin.rows,
-            "sheetCount": jellyfin.sheet_count,
-                "mime": jellyfin.mime,
-            "thumbnailCount": jellyfin.thumbnail_count,
-            "urlPrefix": format!("/api/v1/assets/{asset_id}/trickplay/")
-        }))
-        .into_response();
-    }
-
-    // 3. Enqueue background generation
+    // 2. Enqueue background generation
     let queue_status = mgr.enqueue(req);
     let (state, http) = match queue_status {
         media_node::trickplay::QueueStatus::Queued => ("generating", StatusCode::ACCEPTED),

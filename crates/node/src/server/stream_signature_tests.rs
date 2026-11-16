@@ -10,6 +10,7 @@ use super::routes::app_with_state;
 use super::scans::cancel_remote_scan;
 use super::scans::cancel_scan;
 use super::scans::register_scan;
+use super::scans::register_task;
 use super::scans::scan_with_playback_priority;
 use super::scans::start_node_task;
 use super::scans::task_grant;
@@ -181,6 +182,41 @@ async fn scan_admission_preserves_worker_ownership_and_playback_priority() {
     assert!(register_scan(&state, "second").is_err());
     state.active_scans.lock().unwrap().remove("first");
     assert!(register_scan(&state, "second").is_ok());
+}
+
+#[tokio::test]
+async fn trickplay_tasks_allow_two_concurrent_slots_unless_scan_or_playback_active() {
+    let (_data, state) = state().await;
+    assert!(register_task(&state, "tp-1:1", "trickplay").is_ok());
+    assert!(register_task(&state, "tp-2:1", "trickplay").is_ok());
+    assert_eq!(
+        register_task(&state, "tp-3:1", "trickplay").unwrap_err(),
+        "node_busy_playback_priority"
+    );
+    assert_eq!(
+        register_task(&state, "fp-1:1", "analyze").unwrap_err(),
+        "node_busy_playback_priority"
+    );
+    assert_eq!(
+        register_scan(&state, "scan-1").unwrap_err(),
+        "node_busy_playback_priority"
+    );
+
+    state.active_scans.lock().unwrap().remove("tp-2:1");
+    state.active_streams.store(1, Ordering::Release);
+    assert_eq!(
+        register_task(&state, "tp-3:1", "trickplay").unwrap_err(),
+        "node_busy_playback_priority"
+    );
+    state.active_streams.store(0, Ordering::Release);
+    assert!(register_task(&state, "tp-3:1", "trickplay").is_ok());
+
+    state.active_scans.lock().unwrap().clear();
+    assert!(register_task(&state, "fp-1:1", "analyze").is_ok());
+    assert_eq!(
+        register_task(&state, "tp-4:1", "trickplay").unwrap_err(),
+        "node_busy_playback_priority"
+    );
 }
 
 #[tokio::test]

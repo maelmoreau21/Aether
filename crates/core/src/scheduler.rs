@@ -806,18 +806,45 @@ pub async fn dispatch_once(
         }
         ready.push(node);
     }
-    for job in crate::task_engine::claim_batch(&auth.store, &ready, timestamp, 60).await? {
-        let node = job.node_id.clone();
-        jobs.engine_busy
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        let scan = format!("{}:{}", job.id, job.attempt);
-        if crate::automation_execution::dispatch(auth, jobs, &job).await? {
-            continue;
-        }
-        if job.category != "scan" {
-            if crate::task_execution::dispatch(auth, root, jobs, &job)
-                .await
-                .is_err()
+    for _ in 0..2 {
+        let claimed = crate::task_engine::claim_batch(&auth.store, &ready, timestamp, 60).await?;
+        let has_trickplay = claimed.iter().any(|job| job.category == "trickplay");
+        for job in claimed {
+            let node = job.node_id.clone();
+            jobs.engine_busy
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            let scan = format!("{}:{}", job.id, job.attempt);
+            if crate::automation_execution::dispatch(auth, jobs, &job).await? {
+                continue;
+            }
+            if job.category != "scan" {
+                if crate::task_execution::dispatch(auth, root, jobs, &job)
+                    .await
+                    .is_err()
+                {
+                    crate::task_engine::finish(
+                        &auth.store,
+                        &job.id,
+                        job.attempt,
+                        &node,
+                        timestamp,
+                        Some("Task operation admission failed"),
+                    )
+                    .await?;
+                }
+                continue;
+            }
+            if crate::scans::execute_leased(
+                auth,
+                root.to_owned(),
+                jobs.clone(),
+                job.library_id.clone(),
+                scan,
+                serde_json::from_value(serde_json::Value::String(job.refresh_mode.clone()))
+                    .map_err(|_| sqlx::Error::Protocol("Invalid task refresh mode".into()))?,
+            )
+            .await
+            .is_err()
             {
                 crate::task_engine::finish(
                     &auth.store,
@@ -825,33 +852,13 @@ pub async fn dispatch_once(
                     job.attempt,
                     &node,
                     timestamp,
-                    Some("Task operation admission failed"),
+                    Some("Scan admission failed"),
                 )
                 .await?;
             }
-            continue;
         }
-        if crate::scans::execute_leased(
-            auth,
-            root.to_owned(),
-            jobs.clone(),
-            job.library_id.clone(),
-            scan,
-            serde_json::from_value(serde_json::Value::String(job.refresh_mode.clone()))
-                .map_err(|_| sqlx::Error::Protocol("Invalid task refresh mode".into()))?,
-        )
-        .await
-        .is_err()
-        {
-            crate::task_engine::finish(
-                &auth.store,
-                &job.id,
-                job.attempt,
-                &node,
-                timestamp,
-                Some("Scan admission failed"),
-            )
-            .await?;
+        if !has_trickplay {
+            break;
         }
     }
     Ok(())

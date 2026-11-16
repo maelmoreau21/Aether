@@ -80,6 +80,7 @@ describe('library media sub-tasks', () => {
   });
   it('names sub-tasks after their library and summarises their counts', () => {
     expect(taskName({ kind: 'trickplay', name: 'server', libraryId: 'films' }, 'Films', fr)).toBe('Générer les aperçus de Films');
+    expect(taskName({ kind: 'chapters', name: 'server', libraryId: 'films' }, 'Films', fr)).toBe('Extraire les images de chapitres de Films');
     expect(taskName({ kind: 'intros', name: 'server', libraryId: 'films' }, 'Films', fr)).toBe('Détecter les intros et génériques de Films');
     expect(statsLabel({ kind: 'trickplay', stats: { done: 12, failed: 1, pending: 3, images: null } }, fr)).toBe('12 terminé(s) · 1 en échec · 3 en attente');
     expect(statsLabel({ kind: 'artwork', stats: { done: 4, failed: 0, pending: 0, images: 30 } }, fr)).toBe('4 œuvre(s) · 30 image(s)');

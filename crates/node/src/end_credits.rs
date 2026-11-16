@@ -191,7 +191,7 @@ fn filters(fps: Option<u32>, stats: bool) -> String {
         chain.push_str(&format!("fps={fps},"));
     }
     chain.push_str(&format!(
-        "scale=w='min({MEASURE_WIDTH},iw)':h=-2:flags=bilinear,format=yuv420p,blackframe=amount=0:threshold={PIXEL_THRESHOLD}"
+        "scale=w='min({MEASURE_WIDTH},iw)':h=-2:flags=fast_bilinear,format=yuv420p,blackframe=amount=0:threshold={PIXEL_THRESHOLD}"
     ));
     if stats {
         chain.push_str(",signalstats");
@@ -200,18 +200,31 @@ fn filters(fps: Option<u32>, stats: bool) -> String {
     chain
 }
 
+#[derive(Clone, Copy)]
+enum InputMode {
+    FdProtocol,
+    #[cfg(unix)]
+    ProcFd,
+    Stdin,
+}
+
 /// One measurement decode from `seek` (for `duration` seconds, or to the end of the file).
-/// The file is ffmpeg's standard input, read through `fd:` when `seekable` (ffmpeg 6.1 and
-/// later), through the pipe otherwise, as for the audio fingerprint.
+/// The file is ffmpeg's standard input, read through `fd:` when supported (ffmpeg 6.1 and
+/// later), `/proc/self/fd/0` on Unix when seekable without `fd:`, or the pipe otherwise.
 async fn measure(
     opened: &crate::files::OpenedFile,
     seek: f64,
     duration: Option<f64>,
     keyframes_only: bool,
-    seekable: bool,
+    mode: InputMode,
 ) -> io::Result<Vec<Page>> {
     let mut file = opened.try_clone_std()?;
     std::io::Seek::rewind(&mut file)?;
+    let whitelist = match mode {
+        InputMode::FdProtocol | InputMode::Stdin => "fd,pipe",
+        #[cfg(unix)]
+        InputMode::ProcFd => "file",
+    };
     let mut cmd = tokio::process::Command::new("ffmpeg");
     cmd.args([
         "-nostdin",
@@ -220,11 +233,13 @@ async fn measure(
         "-v",
         "info",
         "-protocol_whitelist",
-        "fd,pipe",
+        whitelist,
         "-probesize",
         "5000000",
         "-analyzeduration",
         "5000000",
+        "-threads",
+        "2",
     ]);
     if keyframes_only {
         cmd.args(["-skip_frame", "nokey"]);
@@ -232,10 +247,17 @@ async fn measure(
     if seek > 0.0 {
         cmd.args(["-ss", &format!("{seek:.3}")]);
     }
-    if seekable {
-        cmd.args(["-fd", "0", "-i", "fd:"]);
-    } else {
-        cmd.args(["-i", "-"]);
+    match mode {
+        InputMode::FdProtocol => {
+            cmd.args(["-fd", "0", "-i", "fd:"]);
+        }
+        #[cfg(unix)]
+        InputMode::ProcFd => {
+            cmd.args(["-i", "/proc/self/fd/0"]);
+        }
+        InputMode::Stdin => {
+            cmd.args(["-i", "-"]);
+        }
     }
     if let Some(duration) = duration {
         cmd.args(["-t", &format!("{duration:.3}")]);
@@ -302,16 +324,31 @@ pub async fn scan(opened: &crate::files::OpenedFile) -> io::Result<Value> {
         .await
         .ok_or_else(|| io::Error::other("credits_scan_duration_unknown"))?;
     let window_start = (duration - WINDOW_SECONDS).max(0.0);
-    let (pages, seekable) = match measure(opened, window_start, None, true, true).await {
-        Ok(pages) if !pages.is_empty() => (pages, true),
-        Ok(_) | Err(_) => (
-            measure(opened, window_start, None, true, false).await?,
-            false,
-        ),
-    };
-    if pages.is_empty() {
-        return Err(io::Error::other("credits_scan_no_video"));
+    let modes: &[InputMode] = &[
+        InputMode::FdProtocol,
+        #[cfg(unix)]
+        InputMode::ProcFd,
+        InputMode::Stdin,
+    ];
+    let mut initial = None;
+    let mut last_err = None;
+    for &mode in modes {
+        match measure(opened, window_start, None, true, mode).await {
+            Ok(pages) if !pages.is_empty() => {
+                initial = Some((pages, mode));
+                break;
+            }
+            Ok(_) => {
+                last_err = None;
+            }
+            Err(err) => {
+                last_err = Some(err);
+            }
+        }
     }
+    let Some((pages, input_mode)) = initial else {
+        return Err(last_err.unwrap_or_else(|| io::Error::other("credits_scan_no_video")));
+    };
     let mut runs = black_runs(&pages, duration);
     // The exact start of the latest long runs: the frame where the black begins inside the
     // keyframe gap before the run. A failed decode keeps the keyframe's time.
@@ -330,7 +367,7 @@ pub async fn scan(opened: &crate::files::OpenedFile) -> io::Result<Value> {
             .max(run.start - MAX_REFINE_GAP)
             .max(window_start);
         let length = run.start - from + 0.5;
-        if let Ok(frames) = measure(opened, from, Some(length), false, seekable).await
+        if let Ok(frames) = measure(opened, from, Some(length), false, input_mode).await
             && let Some(start) = black_from(&frames)
             && start < run.start
         {
@@ -518,5 +555,18 @@ mod tests {
         assert_eq!(black_from(&frames), Some(10.375));
         assert_eq!(black_from(&frames[..3]), None);
         assert_eq!(black_from(&[]), None);
+    }
+
+    #[test]
+    fn filters_use_fast_bilinear_scaling() {
+        let scan_chain = filters(None, true);
+        assert!(scan_chain.contains("flags=fast_bilinear"), "{scan_chain}");
+        assert!(scan_chain.contains(",signalstats"), "{scan_chain}");
+        let refine_chain = filters(Some(REFINE_FPS), false);
+        assert!(
+            refine_chain.contains("flags=fast_bilinear"),
+            "{refine_chain}"
+        );
+        assert!(!refine_chain.contains("signalstats"), "{refine_chain}");
     }
 }

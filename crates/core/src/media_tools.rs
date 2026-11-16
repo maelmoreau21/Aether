@@ -216,13 +216,15 @@ async fn requeue(
     let mut tx = begin_write(&mut conn)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let queued = queue_previews(
+    let (queued_sheets, queued_chapters) = queue_previews(
         &mut tx,
         &library,
         PreviewScope::Asset(asset),
         &options,
         true,
         true,
+        sheets,
+        chapters,
         now,
     )
     .await
@@ -231,7 +233,7 @@ async fn requeue(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     crate::task_engine::WAKE.notify_one();
-    Ok(queued)
+    Ok(queued_sheets + queued_chapters)
 }
 
 /// Delete the prepared sheets of this file and queue them again. On a remote Node the cache

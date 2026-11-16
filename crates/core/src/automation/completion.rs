@@ -77,7 +77,16 @@ pub(crate) async fn complete_with_marker_sources(
         0
     };
     if link.operation == "intro.parse_chapters" && is_episode == 0 {
-        queue_film_credits_scan(&mut tx, job, now).await?;
+        let has_named_credits: i64 = query_scalar(
+            "SELECT COUNT(*) FROM automatic_timeline_markers \
+             WHERE asset_id=? AND marker_type='credits' AND confidence>=0.96",
+        )
+        .bind(&job.target_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if has_named_credits == 0 {
+            queue_film_credits_scan(&mut tx, job, now).await?;
+        }
     }
     if link.operation == "intro.parse_chapters" && is_episode > 0 {
         let source: Option<String> =

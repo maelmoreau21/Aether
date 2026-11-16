@@ -1840,12 +1840,12 @@ async fn test_sqlite_pool_audit_and_concurrent_reads_during_publication() {
         .await
         .unwrap();
 
-    // Audit pool configuration: assert pool max_connections == 8
+    // Audit pool configuration: assert pool max_connections == 24
     let pool_options = store.pool().options();
     assert_eq!(
         pool_options.get_max_connections(),
-        8,
-        "IdentityStore pool must be configured with 8 connections for concurrent readers in WAL mode"
+        24,
+        "IdentityStore pool must be configured with 24 connections for concurrent readers in WAL mode"
     );
 
     let (app, cookie, csrf) = setup_app(&root, &store).await;

@@ -27,12 +27,12 @@ Core. Cette base n'est pas à refaire.
 
 | État | Où | Pourquoi il bloque deux Core | Section |
 |---|---|---|---|
-| `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | en partie levé (schémas v5 et v6) : la propriété du canal et son époque sont en base, le Node refuse les commandes d'un ancien propriétaire, les commandes de contrôle passent par la boîte d'envoi durable et peuvent être émises depuis n'importe quel Core ; seules les demandes de relais restent en mémoire, chez le propriétaire | §2 |
+| `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | en partie levé (schémas v7 et v8) : la propriété du canal et son époque sont en base, le Node refuse les commandes d'un ancien propriétaire, les commandes de contrôle passent par la boîte d'envoi durable et peuvent être émises depuis n'importe quel Core ; seules les demandes de relais restent en mémoire, chez le propriétaire | §2 |
 | `PENDING_STREAMS` | `nodes/channel.rs` | le relais exige que la requête navigateur et le flux montant du Node arrivent sur le **même** Core | §2.4 |
-| `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | levé (schéma v8, étape 6) : avec d'autres Core vivants, la vue est relue en base (fiches et instantané `node_health` écrit par le Core qui reçoit les battements) au plus toutes les 2 s ; seul, aucune relecture | §4.1 |
+| `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | levé (schéma v10, étape 6) : avec d'autres Core vivants, la vue est relue en base (fiches et instantané `node_health` écrit par le Core qui reçoit les battements) au plus toutes les 2 s ; seul, aucune relecture | §4.1 |
 | `ReplayWindow` (nonces) | `shared/protocol.rs` | un message signé rejoué sur l'autre Core passe la fenêtre anti-rejeu | §4.3 |
-| `EFFECT_GATE`, `WAKE` | `task_engine.rs` | en partie levé (schéma v7) : publication, lots et statut final d'un scan sont fencés dans leur transaction (tentative, bail, propriétaire, verrou par bibliothèque) ; `EFFECT_GATE` ne fait plus qu'ordonner les effets dans un processus ; `WAKE` reste local | §3 |
-| Nettoyage au démarrage de `scans::router` | `scans.rs`, `core_instances.rs` | levé (schéma v4) : le nettoyage ne touche plus que le travail sans bail vivant ; voir §3.3 | §3.3 |
+| `EFFECT_GATE`, `WAKE` | `task_engine.rs` | en partie levé (schéma v9) : publication, lots et statut final d'un scan sont fencés dans leur transaction (tentative, bail, propriétaire, verrou par bibliothèque) ; `EFFECT_GATE` ne fait plus qu'ordonner les effets dans un processus ; `WAKE` reste local | §3 |
+| Nettoyage au démarrage de `scans::router` | `scans.rs`, `core_instances.rs` | levé (schéma v6) : le nettoyage ne touche plus que le travail sans bail vivant ; voir §3.3 | §3.3 |
 | `CATALOGUE_CACHE` | `inventory/catalogue/cache.rs` | levé (étape 6) : les écritures PostgreSQL avancent la génération partagée `inventory_cache_generation`, déjà lue par l'empreinte de chaque requête ; aucune lecture ajoutée | §4.2 |
 | Cache de sessions / `touch` | `auth/state.rs`, `auth/touch.rs` | levé (vérifié à l'étape 6) : sessions, comptes désactivés et droits sont relus en base à chaque requête, sans cache ; `touch` ne diffère que `last_seen_at` | §4.4 |
 | `MUTATIONS`, paquets d'extension locaux, `AssetStore` | `extensions/`, `assets.rs` | installations non sérialisées, fichiers locaux | §4.5 |
@@ -61,7 +61,7 @@ core_id = excluded.core_id OR lease_until < now` (comparer-et-échanger). L'épo
 que lors d'un **changement** de propriétaire. Le Core perdant constate zéro ligne modifiée et
 répond au Node par un refus « autre propriétaire » (le Node se reconnecte à l'URL logique).
 
-**Réalisé (étape 3, schéma v5, migration `0005_node_channel_owner`)** :
+**Réalisé (étape 3, schéma v7, migration `0007_node_channel_owner`)** :
 
 - table `node_channel_owner(node_id → media_nodes ON DELETE CASCADE, core_id, epoch, lease_until,
   uplink_url DEFAULT '')`. `core_id` est `IdentityStore::instance_id()` ;
@@ -122,7 +122,7 @@ node_commands(id, node_id, epoch, type, payload, expires_at, state, attempts, cr
 L'échéance (`expiresAt`) du protocole actuel est exactement le champ dont cette table a besoin ;
 le passage au durable ne casse pas le fil.
 
-**Réalisé (étape 4, schéma v6, migration `0006_node_commands`)** :
+**Réalisé (étape 4, schéma v8, migration `0008_node_commands`)** :
 
 - table `node_commands(id, node_id → media_nodes ON DELETE CASCADE, command_type, payload_json,
   state, epoch, attempts, idempotent, expires_at, created_at, seq, delivered_at, acked_at,
@@ -232,7 +232,7 @@ son bail) ne peut plus agir sur ce Node dès que le nouveau propriétaire a parl
   testent l'état sous le même verrou : une commande poussée juste avant la perte du canal est
   refusée à l'émetteur, jamais acceptée puis perdue en silence.
 
-**Réalisé — rotation de secret en deux temps** (même étape de schéma v6, colonnes
+**Réalisé — rotation de secret en deux temps** (même étape de schéma v8, colonnes
 `media_nodes.pending_key_id`, `pending_secret`, `pending_since`) :
 
 - par le canal, `rotate_node_secret` n'écrit plus la nouvelle clé comme clé courante : elle est
@@ -290,7 +290,7 @@ perdue puis relivrée puis périmée sans déconnexion, nouvelle rotation qui re
 non livrée, refus tant qu'une rotation livrée n'est pas réglée, rotation périmée ou remplacée
 jamais livrée, révocation qui efface la clé en attente, promotions concurrentes, second Core au
 cache périmé), test Node (`server::outbound::tests` : rotation idempotente pour la clé en usage),
-migration v5 → v6, un test de bout en bout avec un vrai Node et son vrai `start_channel_worker`
+migration v7 → v8, un test de bout en bout avec un vrai Node et son vrai `start_channel_worker`
 (`a_rotation_over_the_channel_is_promoted_by_the_nodes_first_use_of_the_new_key` : rotation,
 application par le Node, promotion, accusé, ancienne clé refusée, canal toujours actif), un test
 de la rotation directe (`a_direct_rotation_is_confirmed_by_the_node_and_current_at_once`) et un
@@ -376,7 +376,7 @@ c'est à étendre aux effets listés ci-dessous.
      verrou consultatif transactionnel par bibliothèque sur PostgreSQL (portée `scan-publish`), puis
      verrouillage de la ligne `durable_tasks` de la tentative par une mise à jour neutre exigeant
      `id`, `attempt`, `node_id`, `library_id`, `status='running'`, `lease_until > now` et, pour
-     `node_id='local'`, `lease_owner` = ce Core (ou NULL, bail antérieur au schéma v4) ; puis la
+     `node_id='local'`, `lease_owner` = ce Core (ou NULL, bail antérieur au schéma v6) ; puis la
      barrière `active_scan_runs` (bibliothèque active, Node non révoqué). Une réclamation, une
      expiration ou une annulation validée entre-temps est vue après le verrou ; aucune ne peut être
      validée avant la fin de la transaction. La **publication**, longue, vérifie d'abord sans
@@ -387,7 +387,7 @@ c'est à étendre aux effets listés ci-dessous.
      publication réussie). Bail perdu entre-temps : rollback complet. Sur SQLite, `BEGIN IMMEDIATE` sérialise déjà et la
      même vérification est faite. En cas d'échec : rollback, rien d'écrit, issue `Fenced`
      (`stale_scan_attempt` 409 côté Node, « Tentative de scan expirée » en local) ;
-   - **jamais deux fois** (schéma v7, `scan_jobs.published_scan_id`) : la publication inscrit sa
+   - **jamais deux fois** (schéma v9, `scan_jobs.published_scan_id`) : la publication inscrit sa
      tentative dans la même transaction. Une complétion rejouée par le Node, ou reçue par deux Core,
      trouve le marqueur et ne publie rien (`AlreadyPublished`, réponse 200 inchangée). Sans lui, la
      seconde publication aurait publié une zone de staging vidée et masqué tous les assets d'une
@@ -462,7 +462,7 @@ Tant que ce n'est pas fait, démarrer un second Core détruit le travail en vol 
 le premier bloqueur à lever, et il est testable seul (deux Core, un scan en cours, démarrage du
 second).
 
-**Réalisé (schéma v4, migration `0004_core_instances`)** :
+**Réalisé (schéma v6, migration `0006_core_instances`)** :
 
 - chaque ouverture de base (`IdentityStore`) est une instance de Core identifiée par un UUID
   aléatoire ; elle s'inscrit dans `core_instances` au montage des routes et rafraîchit
@@ -540,7 +540,7 @@ porte que `last_seen_at`. À éprouver à deux Core : changement de droits et su
 propagés en moins de la durée maximale de vie d'un cache de lecture (cible : ≤ 5 s), sinon
 lecture directe sans cache pour les contrôles de sécurité.
 
-**Réalisé (étape 6, schéma v8, migration `0008_node_health`)** — module `coherence.rs` :
+**Réalisé (étape 6, schéma v10, migration `0010_node_health`)** — module `coherence.rs` :
 
 - **mode multi-Core** (`IdentityStore::shared_with_other_cores`) : vrai quand `core_instances`
   contient un autre Core vivant (battement frais, hors prédécesseur planté du même hôte, même règle
@@ -659,8 +659,8 @@ avant la suivante.
 | 2 | Tâches système et sauvegardes via `durable_tasks` (§3.2.4) | deux Core, une seule exécution par échéance, sur 1 000 échéances |
 | 3 | Propriété des canaux + époque (§2.1, §2.3) — fait pour le canal, appels directs non fencés ; preuve de sortie à écrire | arrêt brutal du propriétaire : le Node est repris par l'autre Core en moins de 3 baux, aucune commande d'époque ancienne exécutée |
 | 4 | Boîte d'envoi durable (§2.2) — fait ; preuve dans un seul processus avec Node simulé (10 000 commandes, 3 changements de propriétaire, zéro perte, zéro double exécution), preuve à deux processus à écrire ; rotation de secret en deux temps faite (§2.3) | commandes émises depuis le Core non propriétaire ; aucune perte, aucun doublon sur 10 000 commandes avec 3 arrêts brutaux |
-| 5 | Fencing des publications et lots (§3.2.1-2) — fait (schéma v7) ; preuve dans un seul processus (deux stores PostgreSQL, connexion du Core A tuée en pleine publication, point d'arrêt de test), preuve à deux processus avec arrêt réel à écrire | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
-| 6 | Caches : génération de catalogue, santé de Node (§4) — fait (schéma v8) ; mesuré à deux stores dans un processus (100 itérations, 25 pour les Nodes, build de test) : édition de catalogue p50 11,7 / p95 11,9 / max 34,8 ms ; retrait de droit p50 157 / p95 175 / max 195 ms (= une requête sans cache : 153 / 171 / 203 ms) ; révocation de session p50 2,7 / p95 2,8 / max 6,4 ms ; révocation de Node et télémétrie p50 ≈ p95 ≈ max ≈ 2,0 s (intervalle de relecture) ; mesure à deux processus à écrire | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |
+| 5 | Fencing des publications et lots (§3.2.1-2) — fait (schéma v9) ; preuve dans un seul processus (deux stores PostgreSQL, connexion du Core A tuée en pleine publication, point d'arrêt de test), preuve à deux processus avec arrêt réel à écrire | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
+| 6 | Caches : génération de catalogue, santé de Node (§4) — fait (schéma v10) ; mesuré à deux stores dans un processus (100 itérations, 25 pour les Nodes, build de test) : édition de catalogue p50 11,7 / p95 11,9 / max 34,8 ms ; retrait de droit p50 157 / p95 175 / max 195 ms (= une requête sans cache : 153 / 171 / 203 ms) ; révocation de session p50 2,7 / p95 2,8 / max 6,4 ms ; révocation de Node et télémétrie p50 ≈ p95 ≈ max ≈ 2,0 s (intervalle de relecture) ; mesure à deux processus à écrire | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |
 | 7 | Effets externes (§5) | injection de pannes entre appel et confirmation : état `unknown` observé, jamais de rejeu non idempotent |
 | 8 | Chaos à deux Core | scénarios de `MULTI_NODE_RELIABILITY.md` rejoués à deux Core avec coupures réseau, redémarrages, tâches concurrentes, droits différents |
 

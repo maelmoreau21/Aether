@@ -71,6 +71,7 @@ pub(super) async fn mock(kind: &str, replies: Vec<(&str, Vec<(StatusCode, Value)
         root_folder: "/movies".into(),
         quality_profile_id: 1,
         quality_profiles_json: "[]".into(),
+        settings_json: "{}".into(),
         metadata_profile_id: None,
         is_default: 1,
         enabled: 1,
@@ -230,4 +231,62 @@ async fn stored_numeric_id_cannot_target_a_different_remote_work() {
         "remote_content_identity_changed"
     );
     assert_eq!(mock.state.lock().await.calls.len(), 1);
+}
+#[tokio::test]
+async fn ensure_and_search_apply_seerr_server_settings_and_anime_overrides() {
+    let mut mock = mock(
+        "sonarr",
+        vec![
+            ("GET /api/v3/series", vec![(StatusCode::OK, json!([]))]),
+            (
+                "POST /api/v3/series",
+                vec![(StatusCode::CREATED, json!({"id":55,"tvdbId":123}))],
+            ),
+            (
+                "GET /api/v3/series/55",
+                vec![(StatusCode::OK, json!({"id":55,"seasons":[]}))],
+            ),
+            (
+                "PUT /api/v3/series/55",
+                vec![(StatusCode::OK, json!({"id":55}))],
+            ),
+        ],
+    )
+    .await;
+    let settings = ServerSettings {
+        tags: vec![1],
+        search_on_add: false,
+        series_type: "standard".into(),
+        season_folder: false,
+        language_profile_id: Some(2),
+        anime_quality_profile_id: Some(9),
+        anime_root_folder: Some("/anime".into()),
+        anime_language_profile_id: Some(4),
+        anime_tags: vec![7, 8],
+        ..ServerSettings::default()
+    };
+    mock.server.settings_json = serde_json::to_string(&settings).unwrap();
+    let canonical = json!({"tvdbId":123,"title":"Anime Show","genres":["Animation","Anime"]});
+    let id = remote::ensure(&mock.server, &input("series"), &canonical)
+        .await
+        .unwrap();
+    assert_eq!(id, "55");
+    remote::search_missing(&mock.server, &input("series"), &id)
+        .await
+        .unwrap();
+    let calls = mock.state.lock().await.calls.clone();
+    let post = calls
+        .iter()
+        .find(|(k, _)| k == "POST /api/v3/series")
+        .unwrap();
+    assert_eq!(post.1["rootFolderPath"], "/anime");
+    assert_eq!(post.1["qualityProfileId"], 9);
+    assert_eq!(post.1["languageProfileId"], 4);
+    assert_eq!(post.1["tags"], json!([7, 8]));
+    assert_eq!(post.1["seriesType"], "anime");
+    assert_eq!(post.1["seasonFolder"], false);
+    assert!(
+        !calls.iter().any(|(k, _)| k == "POST /api/v3/command"),
+        "search_on_add=false must skip automatic command search"
+    );
 }

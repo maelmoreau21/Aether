@@ -68,7 +68,7 @@ impl Default for ScanJobs {
             scheduler_tick: tokio::sync::Mutex::new(()),
             cancel: Arc::new(AtomicBool::new(false)),
             draining: AtomicBool::new(false),
-            slots: Arc::new(Semaphore::new(1)),
+            slots: Arc::new(Semaphore::new(2)),
             preparations: Arc::new(media_node::packaging::Preparations::default()),
             tasks: Mutex::new(Vec::new()),
             cancellations: Mutex::new(Default::default()),
@@ -893,8 +893,13 @@ mod tests {
             login["csrfToken"].as_str().unwrap().parse().unwrap(),
         );
         let jobs = Arc::new(ScanJobs::default());
-        // Hold the only probe slot to prove queued jobs cannot race a second launch.
-        let permit = jobs.slots.clone().acquire_owned().await.unwrap();
+        // Hold all probe slots to prove queued jobs cannot race a second launch.
+        let permits = jobs
+            .slots
+            .clone()
+            .acquire_many_owned(u32::try_from(jobs.slots.available_permits()).unwrap())
+            .await
+            .unwrap();
         let state = ScanState {
             auth: auth.clone(),
             root: root.clone(),
@@ -932,7 +937,7 @@ mod tests {
             "queued"
         );
         jobs.shutdown().await;
-        drop(permit);
+        drop(permits);
         assert_eq!(
             status(State(state.clone()), Path("films".into()), headers.clone())
                 .await

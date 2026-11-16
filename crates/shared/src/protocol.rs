@@ -216,6 +216,12 @@ pub struct TrickplayTaskOptions {
     /// so a Node of the previous release, which denies unknown fields, keeps working.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_cache_mb: Option<u32>,
+    /// Asset duration pre-read from Core's inventory probe to skip redundant ffprobe calls.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_seconds: Option<f64>,
+    /// Chapter timestamps pre-read from Core's inventory probe for chapter thumbnail tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chapter_times: Option<Vec<f64>>,
 }
 
 /// Start window of an audio fingerprint, chosen by the administrator: `head_percent` of the

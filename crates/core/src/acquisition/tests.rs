@@ -995,3 +995,118 @@ async fn destinations_expose_quality_profiles_and_input_validates_profile_id() {
     valid_input.quality_profile_id = Some(0);
     assert!(!valid_input.valid());
 }
+#[tokio::test]
+async fn test_connection_discovers_arr_options_and_persists_server_settings() {
+    let (_dir, store, app, sessions) = fixture().await;
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('request-series','Series','series','local','/series',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (admin, csrf) = (&sessions[2].0, &sessions[2].1);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mock_arr = Router::new()
+        .route(
+            "/api/v3/system/status",
+            axum::routing::get(|| async {
+                Json(
+                    json!({"appName":"Sonarr","version":"4.0.9.2244","instanceName":"Sonarr Main"}),
+                )
+            }),
+        )
+        .route(
+            "/api/v3/rootfolder",
+            axum::routing::get(|| async {
+                Json(json!([{"id":1,"path":"/tv","accessible":true,"freeSpace":500000000000_i64}]))
+            }),
+        )
+        .route(
+            "/api/v3/qualityprofile",
+            axum::routing::get(|| async { Json(json!([{"id":1,"name":"HD-1080p"}])) }),
+        )
+        .route(
+            "/api/v3/tag",
+            axum::routing::get(|| async { Json(json!([{"id":3,"label":"aether"}])) }),
+        )
+        .route(
+            "/api/v3/languageprofile",
+            axum::routing::get(|| async { StatusCode::NOT_FOUND }),
+        );
+    let task = tokio::spawn(async move { axum::serve(listener, mock_arr).await.unwrap() });
+
+    let (status, body) = request(
+        &app,
+        "POST",
+        "/api/v1/admin/acquisition/servers/test",
+        admin,
+        csrf,
+        json!({
+            "kind": "sonarr",
+            "baseUrl": format!("http://{addr}"),
+            "apiKey": "test-key"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["system"]["appName"], "Sonarr");
+    assert_eq!(body["options"]["rootFolders"][0]["path"], "/tv");
+    assert_eq!(body["options"]["qualityProfiles"][0]["name"], "HD-1080p");
+    assert_eq!(body["options"]["tags"][0]["label"], "aether");
+    assert_eq!(body["options"]["languageProfiles"], json!([]));
+    task.abort();
+
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/v1/admin/acquisition/servers",
+        admin,
+        csrf,
+        json!({
+            "name": "Sonarr Main",
+            "kind": "sonarr",
+            "baseUrl": format!("http://{addr}"),
+            "apiKey": "test-key",
+            "libraryId": "request-series",
+            "rootFolder": "/tv",
+            "qualityProfileId": 1,
+            "qualityProfiles": [{"id":1,"name":"HD-1080p"}],
+            "settings": {
+                "tags": [3],
+                "availableTags": [{"id":3,"label":"aether"}],
+                "searchOnAdd": false,
+                "seriesType": "anime",
+                "seasonFolder": true,
+                "animeQualityProfileId": 1,
+                "animeRootFolder": "/anime",
+                "animeTags": [3]
+            },
+            "isDefault": false,
+            "enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, invalid) = request(
+        &app,
+        "POST",
+        "/api/v1/admin/acquisition/servers",
+        admin,
+        csrf,
+        json!({
+            "name": "Bad Radarr",
+            "kind": "radarr",
+            "baseUrl": format!("http://{addr}"),
+            "apiKey": "test-key",
+            "libraryId": "request-films",
+            "rootFolder": "/movies",
+            "qualityProfileId": 1,
+            "settings": { "minimumAvailability": "bogus" },
+            "enabled": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(invalid["error"], "invalid_acquisition_server");
+}

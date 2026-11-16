@@ -493,29 +493,7 @@ pub(super) async fn internal_trickplay_manifest(
         return sign_stream_response(res, &identity, &nonce);
     }
 
-    // 2. Check Jellyfin read-only sheets
-    if let Some(jellyfin) = state.trickplay.check_jellyfin(&trickplay_req).await {
-        let res = (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "status": "ready",
-                "source": "jellyfin",
-                "intervalMs": jellyfin.interval_ms,
-                "width": jellyfin.width,
-                "height": jellyfin.height,
-                "columns": jellyfin.columns,
-                "rows": jellyfin.rows,
-                "sheetCount": jellyfin.sheet_count,
-                "mime": jellyfin.mime,
-                "thumbnailCount": jellyfin.thumbnail_count,
-                "urlPrefix": format!("/api/v1/assets/{id}/trickplay/")
-            })),
-        )
-            .into_response();
-        return sign_stream_response(res, &identity, &nonce);
-    }
-
-    // 3. Request background generation
+    // 2. Request background generation
     let queue_status = state.trickplay.enqueue(trickplay_req);
     let (status, http) = match queue_status {
         crate::trickplay::QueueStatus::Queued => ("generating", StatusCode::ACCEPTED),

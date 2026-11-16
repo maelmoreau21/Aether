@@ -22,6 +22,10 @@ pub fn router(auth: AuthState) -> Router {
             get(servers).post(add_server),
         )
         .route(
+            "/api/v1/admin/acquisition/servers/test",
+            post(test_connection),
+        )
+        .route(
             "/api/v1/admin/acquisition/servers/{id}",
             axum::routing::put(update_server).delete(delete_server),
         )
@@ -162,6 +166,8 @@ struct ServerInput {
     #[serde(default)]
     quality_profiles: Vec<QualityProfile>,
     #[serde(default)]
+    settings: Option<ServerSettings>,
+    #[serde(default)]
     metadata_profile_id: Option<i64>,
     #[serde(default)]
     is_default: bool,
@@ -233,6 +239,13 @@ async fn save_server(
             "invalid_acquisition_server",
         )
     })?;
+    let settings = normalize_server_settings(input.settings.unwrap_or_default())?;
+    let settings_json = serde_json::to_string(&settings).map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_acquisition_server",
+        )
+    })?;
     let library:Option<String>=query_scalar("SELECT l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status!='revoked'").bind(&input.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
     let expected = match input.kind.as_str() {
         "radarr" => "films",
@@ -293,15 +306,16 @@ async fn save_server(
             .await
             .map_err(db)?;
     }
-    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,quality_profiles_json,metadata_profile_id,is_default,enabled,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE \
+    query("INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,quality_profiles_json,settings_json,metadata_profile_id,is_default,enabled,generation) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE \
             SET name=excluded.name,kind=excluded.kind,base_url=excluded.base_url,\
             api_key=excluded.api_key,allowed_ips_json=excluded.allowed_ips_json,\
             library_id=excluded.library_id,root_folder=excluded.root_folder,\
             quality_profile_id=excluded.quality_profile_id,\
             quality_profiles_json=excluded.quality_profiles_json,\
+            settings_json=excluded.settings_json,\
             metadata_profile_id=excluded.metadata_profile_id,is_default=excluded.is_default,\
             enabled=excluded.enabled,generation=excluded.generation")
-        .bind(&id).bind(input.name.trim()).bind(input.kind).bind(connection.base_url).bind(key).bind(json!(connection.allowed_ips).to_string()).bind(input.library_id).bind(input.root_folder).bind(input.quality_profile_id).bind(&quality_profiles_json).bind(input.metadata_profile_id).bind(i64::from(input.is_default)).bind(i64::from(input.enabled)).bind(generation).execute(&mut *tx).await.map_err(db)?;
+        .bind(&id).bind(input.name.trim()).bind(input.kind).bind(connection.base_url).bind(key).bind(json!(connection.allowed_ips).to_string()).bind(input.library_id).bind(input.root_folder).bind(input.quality_profile_id).bind(&quality_profiles_json).bind(&settings_json).bind(input.metadata_profile_id).bind(i64::from(input.is_default)).bind(i64::from(input.enabled)).bind(generation).execute(&mut *tx).await.map_err(db)?;
     crate::database::commit(tx).await.map_err(db)?;
     Ok(Json(
         json!({"server":server(&auth.store,&id).await?.public()}),
@@ -331,6 +345,258 @@ async fn delete_server(
         .map_err(db)?;
     Ok(StatusCode::NO_CONTENT)
 }
+fn normalize_tag_ids(ids: Vec<i64>) -> Result<Vec<i64>, Error> {
+    if ids.len() > 50 || ids.iter().any(|id| *id <= 0) {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_acquisition_server",
+        ));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    Ok(ids.into_iter().filter(|id| seen.insert(*id)).collect())
+}
+
+fn normalize_server_settings(mut settings: ServerSettings) -> Result<ServerSettings, Error> {
+    settings.external_url = match settings.external_url {
+        Some(url) if !url.trim().is_empty() => {
+            let trimmed = url.trim();
+            let parsed = url::Url::parse(trimmed)
+                .map_err(|_| err(StatusCode::UNPROCESSABLE_ENTITY, "invalid_connection_url"))?;
+            if trimmed.len() > 2048
+                || trimmed.chars().any(char::is_control)
+                || !matches!(parsed.scheme(), "http" | "https")
+                || parsed.host_str().is_none()
+            {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_connection_url",
+                ));
+            }
+            Some(trimmed.to_owned())
+        }
+        _ => None,
+    };
+    if !matches!(
+        settings.minimum_availability.as_str(),
+        "announced" | "inCinemas" | "released" | "preDB"
+    ) || !matches!(
+        settings.series_type.as_str(),
+        "standard" | "daily" | "anime"
+    ) || !matches!(settings.monitor_new_items.as_str(), "none" | "all" | "new")
+        || settings.language_profile_id.is_some_and(|id| id <= 0)
+        || settings.anime_quality_profile_id.is_some_and(|id| id <= 0)
+        || settings.anime_language_profile_id.is_some_and(|id| id <= 0)
+        || settings.available_tags.len() > 200
+        || settings.available_tags.iter().any(|tag| {
+            tag.id <= 0
+                || tag.label.trim().is_empty()
+                || tag.label.len() > 128
+                || tag.label.chars().any(char::is_control)
+        })
+    {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_acquisition_server",
+        ));
+    }
+    settings.anime_root_folder = match settings.anime_root_folder {
+        Some(path) if !path.trim().is_empty() => {
+            let trimmed = path.trim();
+            if trimmed.len() > 2048 || trimmed.chars().any(char::is_control) {
+                return Err(err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "invalid_acquisition_server",
+                ));
+            }
+            Some(trimmed.to_owned())
+        }
+        _ => None,
+    };
+    settings.tags = normalize_tag_ids(settings.tags)?;
+    settings.anime_tags = normalize_tag_ids(settings.anime_tags)?;
+    let mut seen_tags = std::collections::BTreeSet::new();
+    settings.available_tags = settings
+        .available_tags
+        .into_iter()
+        .filter(|t| seen_tags.insert(t.id))
+        .map(|t| ArrTag {
+            id: t.id,
+            label: t.label.trim().to_owned(),
+        })
+        .collect();
+    Ok(settings)
+}
+
+fn arr_api_prefix(kind: &str) -> &'static str {
+    if kind == "lidarr" { "api/v1" } else { "api/v3" }
+}
+
+fn normalize_root_folders(raw: &Value) -> Vec<Value> {
+    raw.as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let path = item["path"].as_str()?;
+                    Some(json!({
+                        "id": item["id"].as_i64(),
+                        "path": path,
+                        "accessible": item["accessible"].as_bool().unwrap_or(true),
+                        "freeSpace": item["freeSpace"].as_i64()
+                    }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_named_profiles(raw: &Value) -> Vec<Value> {
+    raw.as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item["id"].as_i64()?;
+                    let name = item["name"].as_str()?;
+                    Some(json!({ "id": id, "name": name }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_tags(raw: &Value) -> Vec<Value> {
+    raw.as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item["id"].as_i64()?;
+                    let label = item["label"].as_str()?;
+                    Some(json!({ "id": id, "label": label }))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+async fn fetch_arr_options(connection: &transport::Connection, kind: &str) -> Result<Value, Error> {
+    let prefix = arr_api_prefix(kind);
+    let roots_path = format!("{prefix}/rootfolder");
+    let profiles_path = format!("{prefix}/qualityprofile");
+    let tags_path = format!("{prefix}/tag");
+    let metadata_path = format!("{prefix}/metadataprofile");
+    let language_path = format!("{prefix}/languageprofile");
+    let roots_fut = transport::request(connection, "GET", &roots_path, &[], None);
+    let profiles_fut = transport::request(connection, "GET", &profiles_path, &[], None);
+    let tags_fut = transport::request(connection, "GET", &tags_path, &[], None);
+    let metadata_fut = async {
+        if kind == "lidarr" {
+            transport::request(connection, "GET", &metadata_path, &[], None).await
+        } else {
+            Ok(json!([]))
+        }
+    };
+    let language_fut = async {
+        if kind == "sonarr" {
+            // Sonarr v4 removed /languageprofile; treat absence as empty list.
+            transport::request(connection, "GET", &language_path, &[], None)
+                .await
+                .unwrap_or_else(|_| json!([]))
+        } else {
+            json!([])
+        }
+    };
+    let (roots, profiles, tags, metadata, languages) = tokio::join!(
+        roots_fut,
+        profiles_fut,
+        tags_fut,
+        metadata_fut,
+        language_fut
+    );
+    let roots = roots?;
+    let profiles = profiles?;
+    let metadata = metadata?;
+    let tags = tags.unwrap_or_else(|_| json!([]));
+    Ok(json!({
+        "rootFolders": normalize_root_folders(&roots),
+        "qualityProfiles": normalize_named_profiles(&profiles),
+        "metadataProfiles": normalize_named_profiles(&metadata),
+        "languageProfiles": normalize_named_profiles(&languages),
+        "tags": normalize_tags(&tags),
+    }))
+}
+
+async fn discover_arr(connection: &transport::Connection, kind: &str) -> Result<Value, Error> {
+    let prefix = arr_api_prefix(kind);
+    let status = transport::request(
+        connection,
+        "GET",
+        &format!("{prefix}/system/status"),
+        &[],
+        None,
+    )
+    .await?;
+    let options = fetch_arr_options(connection, kind).await?;
+    Ok(json!({
+        "ok": true,
+        "version": status["version"],
+        "appName": status["appName"],
+        "instanceName": status["instanceName"],
+        "system": {
+            "appName": status["appName"],
+            "version": status["version"],
+            "instanceName": status["instanceName"]
+        },
+        "options": options
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TestConnectionInput {
+    #[serde(default)]
+    id: Option<String>,
+    kind: String,
+    base_url: String,
+    #[serde(default)]
+    api_key: Option<String>,
+}
+
+async fn test_connection(
+    State(auth): State<AuthState>,
+    headers: HeaderMap,
+    Json(input): Json<TestConnectionInput>,
+) -> Result<Json<Value>, Error> {
+    admin(&auth, &headers, true).await?;
+    if !matches!(input.kind.as_str(), "radarr" | "sonarr" | "lidarr") {
+        return Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_acquisition_server",
+        ));
+    }
+    let key = match input.api_key.filter(|s| !s.is_empty()) {
+        Some(key) => key,
+        None => {
+            let previous = match input.id.as_deref() {
+                Some(id) => Some(server(&auth.store, id).await?),
+                None => None,
+            };
+            previous
+                .filter(|old| {
+                    old.kind == input.kind
+                        && old.base_url.trim_end_matches('/')
+                            == input.base_url.trim_end_matches('/')
+                })
+                .map(|s| s.api_key)
+                .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "api_key_required"))?
+        }
+    };
+    let connection = transport::configure(&input.base_url, &key).await?;
+    let payload = discover_arr(&connection, &input.kind).await?;
+    Ok(Json(payload))
+}
+
 async fn test_server(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -338,10 +604,9 @@ async fn test_server(
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, true).await?;
     let server = server(&auth.store, &id).await?;
-    let status = server.call("GET", "system/status", &[], None).await?;
-    Ok(Json(
-        json!({"ok":true,"version":status["version"],"appName":status["appName"]}),
-    ))
+    let connection = server.connection()?;
+    let payload = discover_arr(&connection, &server.kind).await?;
+    Ok(Json(payload))
 }
 async fn options(
     State(auth): State<AuthState>,
@@ -350,16 +615,9 @@ async fn options(
 ) -> Result<Json<Value>, Error> {
     admin(&auth, &headers, false).await?;
     let server = server(&auth.store, &id).await?;
-    let roots = server.call("GET", "rootfolder", &[], None).await?;
-    let profiles = server.call("GET", "qualityprofile", &[], None).await?;
-    let metadata = if server.kind == "lidarr" {
-        server.call("GET", "metadataprofile", &[], None).await?
-    } else {
-        json!([])
-    };
-    Ok(Json(
-        json!({"rootFolders":roots,"qualityProfiles":profiles,"metadataProfiles":metadata}),
-    ))
+    let connection = server.connection()?;
+    let payload = fetch_arr_options(&connection, &server.kind).await?;
+    Ok(Json(payload))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

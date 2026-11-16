@@ -102,7 +102,7 @@ Après : une boîte aux lettres par Node (`NodeChannel`) qui survit aux polls :
 Compatibilité : `expiresAt` est facultatif. Un ancien Core n'en envoie pas (jamais périmé) ; un
 ancien Node l'ignore. Tests : `command_envelope_without_deadline_stays_wire_compatible`.
 
-Depuis le schéma v6 (§3.6), la boîte aux lettres en mémoire ne porte plus que les demandes de
+Depuis le schéma v8 (§3.6), la boîte aux lettres en mémoire ne porte plus que les demandes de
 **relais** : scan, annulation, tâche, synchronisation d'inventaire, rotation de secret et révocation
 passent par la boîte d'envoi durable, avec accusé de réception. Pour le relais, la livraison reste
 « au plus une fois » : une réponse perdue sur le réseau perd la demande, qui expire côté navigateur.
@@ -166,7 +166,7 @@ Node et son vrai `start_channel_worker`,
 
 ### 3.6 Boîte d'envoi durable et accusés (multi-Core, étape 4)
 
-Table `node_commands` (schéma v6, migration `0006_node_commands`). Détail et preuves dans
+Table `node_commands` (schéma v8, migration `0008_node_commands`). Détail et preuves dans
 [`MULTI_CORE_ROADMAP.md`](MULTI_CORE_ROADMAP.md) §2.2 ; effets visibles :
 
 - **émission** : les émetteurs (scan, annulation de scan, tâche, synchronisation d'inventaire,
@@ -209,7 +209,7 @@ Tests : `nodes::outbox::tests` (SQLite), `server::commands::tests` (Node),
 
 ### 3.7 Rotation de secret en deux temps
 
-Une rotation par le canal enregistre la nouvelle clé **en attente** (schéma v6 :
+Une rotation par le canal enregistre la nouvelle clé **en attente** (schéma v8 :
 `media_nodes.pending_key_id`, `pending_secret`, `pending_since`) ; la clé courante reste valide
 et sert aux appels directs du Core. La première requête signée par le Node avec la nouvelle clé
 la promeut atomiquement ; l'ancienne est refusée ensuite, sur tous les Core (clés relues en base

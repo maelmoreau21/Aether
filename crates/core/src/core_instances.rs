@@ -129,7 +129,7 @@ pub async fn deregister(store: &IdentityStore) -> Result<(), sqlx::Error> {
 ///    by construction) every local lease belongs to a stopped process at `startup`; periodic
 ///    passes leave them to the lease expiry of the dispatcher. On PostgreSQL only leases owned by
 ///    another Core whose heartbeat is stale or missing are expired; leases without an owner
-///    (taken before schema v4, possibly by a Core still running) expire on their own.
+///    (taken before schema v6, possibly by a Core still running) expire on their own.
 /// 2. `scan_jobs` still queued/running without any leased scan task of their library end in error.
 /// 3. Run fences (`active_scan_runs`, `active_task_runs`) and scan staging rows whose
 ///    `id:attempt` matches no leased durable task are removed.
@@ -630,7 +630,7 @@ mod tests {
             .await
             .unwrap();
         leased_scan(&a, Some(a.instance_id())).await;
-        // A lease taken before schema v4 has no owner: it is left to expire on its own.
+        // A lease taken before schema v6 has no owner: it is left to expire on its own.
         query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('legacy','Legacy','films','local','/media/legacy',1)")
             .execute(a.pool()).await.unwrap();
         query("INSERT INTO durable_tasks(id,library_id,owner,idempotency_key,node_id,category,status,attempt,lease_until,started_at,created_at,updated_at,available_at) VALUES('legacy','legacy','admin','legacy','local','scan','running',1,?,1,1,1,1)")

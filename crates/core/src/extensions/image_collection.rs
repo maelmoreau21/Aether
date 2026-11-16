@@ -80,6 +80,30 @@ fn kind(value: ImageType) -> &'static str {
     }
 }
 
+pub(super) const IMAGE_KINDS: [&str; 6] = ["poster", "backdrop", "logo", "thumb", "banner", "disc"];
+
+fn kind_present(
+    image_kind: &str,
+    local_kinds: &HashSet<String>,
+    counts: &std::collections::HashMap<String, i64>,
+    legacy_poster: i64,
+) -> bool {
+    local_kinds.contains(image_kind)
+        || counts.get(image_kind).copied().unwrap_or(0) > 0
+        || (image_kind == "poster" && legacy_poster > 0)
+}
+
+fn enabled_kinds_present(
+    options: &crate::library_options::LibraryOptions,
+    local_kinds: &HashSet<String>,
+    counts: &std::collections::HashMap<String, i64>,
+    legacy_poster: i64,
+) -> bool {
+    IMAGE_KINDS
+        .iter()
+        .all(|k| !options.image_enabled(k) || kind_present(k, local_kinds, counts, legacy_poster))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SearchCandidates {
@@ -738,17 +762,16 @@ pub(super) async fn collect_with_context(
         .await
         .map_err(db)?;
     for (provider, image) in queue {
+        if one_per_kind && enabled_kinds_present(&options, &local_kinds, &counts, legacy_poster) {
+            break;
+        }
         let image_kind = kind(image.image_type);
         // Kinds switched off in the library settings (Images) are never fetched.
         if !options.image_enabled(image_kind) {
             skipped += 1;
             continue;
         }
-        if one_per_kind
-            && (local_kinds.contains(image_kind)
-                || counts.get(image_kind).copied().unwrap_or(0) > 0
-                || (image_kind == "poster" && legacy_poster > 0))
-        {
+        if one_per_kind && kind_present(image_kind, &local_kinds, &counts, legacy_poster) {
             skipped += 1;
             continue;
         }
@@ -851,5 +874,18 @@ mod tests {
         assert_eq!(settings["fallbackLanguages"], json!(["en"]));
         assert_eq!(settings["includeNeutral"], false);
         assert!(languages(&json!({"languages":[]})).is_err());
+    }
+    #[test]
+    fn single_image_mode_detects_when_all_enabled_kinds_are_present() {
+        let options = crate::library_options::LibraryOptions::default();
+        let mut local = HashSet::from(["poster".into(), "backdrop".into()]);
+        let mut counts = std::collections::HashMap::new();
+        assert!(!enabled_kinds_present(&options, &local, &counts, 0));
+        counts.insert("logo".into(), 1);
+        assert!(enabled_kinds_present(&options, &local, &counts, 0));
+        local.clear();
+        assert!(!enabled_kinds_present(&options, &local, &counts, 1));
+        local.insert("backdrop".into());
+        assert!(enabled_kinds_present(&options, &local, &counts, 1));
     }
 }

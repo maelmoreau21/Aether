@@ -25,28 +25,37 @@ pub enum MediaTask {
     Identify,
     /// The images of the identified works (one per kind, or the multi-image pool).
     Artwork,
-    /// Trickplay sheets and chapter images.
+    /// Timeline preview sprite sheets (trickplay).
     Trickplay,
+    /// Video chapter preview thumbnails.
+    ChapterImages,
     /// Intros and end credits (chapters, audio fingerprints, picture of a film's end).
     Intros,
 }
 
 impl MediaTask {
-    /// In pipeline order: each phase waits for the previous ones of its library
-    /// (`task_engine::pipeline`).
-    pub const ALL: [Self; 4] = [Self::Identify, Self::Artwork, Self::Trickplay, Self::Intros];
+    /// In scheduler display order (`Identify`/`Artwork` metadata, `Trickplay`/`ChapterImages`
+    /// local extraction, then `Intros`).
+    pub const ALL: [Self; 5] = [
+        Self::Identify,
+        Self::Artwork,
+        Self::Trickplay,
+        Self::ChapterImages,
+        Self::Intros,
+    ];
 
     /// Prefix of the public task identifier and value of `library_media_task_runs.task`.
     pub fn key(self) -> &'static str {
         match self {
             Self::Identify => "identify",
             Self::Trickplay => "trickplay",
+            Self::ChapterImages => "chapters",
             Self::Intros => "intros",
             Self::Artwork => "artwork",
         }
     }
 
-    /// `trickplay-<library>`, `intros-<library>`, `artwork-<library>` → sub-task.
+    /// `trickplay-<library>`, `chapters-<library>`, `intros-<library>`, `artwork-<library>` → sub-task.
     pub fn parse_id(id: &str) -> Option<(Self, String)> {
         Self::ALL.into_iter().find_map(|task| {
             id.strip_prefix(task.key())
@@ -66,7 +75,8 @@ impl MediaTask {
             Self::Identify => Some(
                 "category='analyze' AND id IN (SELECT task_id FROM automation_task_links WHERE operation NOT LIKE 'intro.%' AND operation<>'metadata.images')",
             ),
-            Self::Trickplay => Some("category='trickplay'"),
+            Self::Trickplay => Some("category='trickplay' AND COALESCE(component,'')=''"),
+            Self::ChapterImages => Some("category='trickplay' AND component='chapters'"),
             Self::Intros => Some(
                 "category='analyze' AND (component IN ('fingerprint','credits') OR id IN (SELECT task_id FROM automation_task_links WHERE operation LIKE 'intro.%'))",
             ),
@@ -78,6 +88,7 @@ impl MediaTask {
         match self {
             Self::Identify => format!("Identifier les médias de {library}"),
             Self::Trickplay => format!("Générer les aperçus de {library}"),
+            Self::ChapterImages => format!("Extraire les images de chapitres de {library}"),
             Self::Intros => format!("Détecter les intros et génériques de {library}"),
             Self::Artwork => format!("Récupérer les images de {library}"),
         }
@@ -86,10 +97,13 @@ impl MediaTask {
     fn description(self) -> &'static str {
         match self {
             Self::Identify => {
-                "Reconnaît chaque film, série et épisode auprès des fournisseurs de métadonnées (titre, résumé, identifiants). Les images, les aperçus puis les intros suivent une fois l'identification terminée."
+                "Reconnaît chaque film, série et épisode auprès des fournisseurs de métadonnées (titre, résumé, identifiants). Les images et les intros suivent une fois l'identification terminée."
             }
             Self::Trickplay => {
-                "Prépare les vignettes de la barre de lecture (trickplay) et les images de chapitres de chaque vidéo. Les aperçus déjà présents sont conservés, ceux qui manquent sont recréés."
+                "Prépare les planches de vignettes de la barre de lecture (trickplay) de chaque vidéo. Les planches déjà présentes sont conservées, celles qui manquent sont recréées."
+            }
+            Self::ChapterImages => {
+                "Extrait les vignettes associées aux chapitres de chaque vidéo. Les images déjà présentes sont conservées, celles qui manquent sont recréées."
             }
             Self::Intros => {
                 "Lit les chapitres, calcule les empreintes audio des épisodes et mesure la fin des films pour placer les intros et génériques."
@@ -100,13 +114,13 @@ impl MediaTask {
         }
     }
 
-    /// Whether the sub-task also runs on its own after each scan (previews follow the
-    /// library's "during scans" switches; intros and images always follow a scan).
+    /// Whether the sub-task also runs on its own after each scan (previews and chapter images
+    /// follow the library's "during scans" switches; intros and images follow scans/identification).
     fn after_scan(self, options: &LibraryOptions) -> bool {
         match self {
-            Self::Trickplay => {
-                (options.trickplay_enabled && options.trickplay_during_scan)
-                    || (options.chapter_images_enabled && options.chapter_images_during_scan)
+            Self::Trickplay => options.trickplay_enabled && options.trickplay_during_scan,
+            Self::ChapterImages => {
+                options.chapter_images_enabled && options.chapter_images_during_scan
             }
             Self::Intros => options.intro_detection_enabled,
             Self::Identify | Self::Artwork => true,
@@ -120,11 +134,12 @@ impl MediaTask {
         marker_extension: bool,
     ) -> Option<&'static str> {
         match self {
-            Self::Trickplay if !options.trickplay_enabled && !options.chapter_images_enabled => {
-                Some(
-                    "Les aperçus et les images de chapitres sont désactivés dans les réglages de la bibliothèque.",
-                )
-            }
+            Self::Trickplay if !options.trickplay_enabled => Some(
+                "Les aperçus de lecture (trickplay) sont désactivés dans les réglages de la bibliothèque.",
+            ),
+            Self::ChapterImages if !options.chapter_images_enabled => Some(
+                "Les images de chapitres sont désactivées dans les réglages de la bibliothèque.",
+            ),
             Self::Intros if !options.intro_detection_enabled => {
                 Some("La détection des intros est désactivée dans les réglages de la bibliothèque.")
             }
@@ -272,16 +287,28 @@ pub(crate) async fn views(
         .collect())
 }
 
-/// A queued phase that an earlier phase of the same library still holds back names that
+/// A queued phase that an earlier blocking phase of the same library holds back names that
 /// phase (`waiting_for`), so the scheduler can say why it has not started.
 fn mark_waiting(views: &mut [TaskView]) {
-    let mut ahead: Option<&'static str> = None;
+    let active = |kind: &str| {
+        views
+            .iter()
+            .find(|view| view.kind == kind)
+            .is_some_and(|view| matches!(view.state, "queued" | "running"))
+    };
+    let artwork_wait = active("identify").then_some("identify");
+    let chapters_wait = active("trickplay").then_some("trickplay");
+    let intros_wait = ["identify", "artwork", "trickplay", "chapters"]
+        .into_iter()
+        .find(|kind| active(kind));
     for view in views.iter_mut() {
         if view.state == "queued" {
-            view.waiting_for = ahead;
-        }
-        if ahead.is_none() && matches!(view.state, "queued" | "running") {
-            ahead = Some(view.kind);
+            view.waiting_for = match view.kind {
+                "artwork" => artwork_wait,
+                "chapters" => chapters_wait,
+                "intros" => intros_wait,
+                _ => None,
+            };
         }
     }
 }
@@ -509,6 +536,31 @@ pub(crate) async fn admit(
                 &options,
                 true,
                 true,
+                true,
+                false,
+                now,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            record_run(&mut tx, library, task, now, "manual", false)
+                .await
+                .map_err(|e| e.to_string())?;
+            commit(tx).await.map_err(|e| e.to_string())?;
+            crate::task_engine::WAKE.notify_one();
+        }
+        MediaTask::ChapterImages => {
+            let _writer = store.task_writes.lock().await;
+            let mut conn = store.pool().acquire().await.map_err(|e| e.to_string())?;
+            let mut tx = begin_write(&mut conn).await.map_err(|e| e.to_string())?;
+            crate::trickplay::queue_previews(
+                &mut tx,
+                library,
+                crate::trickplay::PreviewScope::Library,
+                &options,
+                true,
+                true,
+                false,
+                true,
                 now,
             )
             .await
@@ -603,14 +655,30 @@ mod tests {
                 .all(|task| task.disabled_reason(&options, true).is_none())
         );
         options.trickplay_enabled = false;
-        options.chapter_images_enabled = false;
         assert!(
             MediaTask::Trickplay
                 .disabled_reason(&options, true)
                 .is_some()
         );
+        assert!(
+            MediaTask::ChapterImages
+                .disabled_reason(&options, true)
+                .is_none()
+        );
         assert!(MediaTask::Intros.disabled_reason(&options, true).is_none());
         assert!(MediaTask::Artwork.disabled_reason(&options, true).is_none());
+        options.trickplay_enabled = true;
+        options.chapter_images_enabled = false;
+        assert!(
+            MediaTask::Trickplay
+                .disabled_reason(&options, true)
+                .is_none()
+        );
+        assert!(
+            MediaTask::ChapterImages
+                .disabled_reason(&options, true)
+                .is_some()
+        );
         let mut options = LibraryOptions {
             intro_detection_enabled: false,
             ..Default::default()

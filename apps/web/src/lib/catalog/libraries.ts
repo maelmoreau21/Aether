@@ -12,7 +12,7 @@ export async function loadLibraries(force=false):Promise<void> {
   if(!force&&Date.now()-loadedAt<30000)return;
   const generation=getSessionGeneration();
   const current=(async()=>{
-    const response=await fetch('/api/v1/libraries',{cache:'no-store',signal:AbortSignal.timeout(8000)});
+    const response=await fetch('/api/v1/libraries',{cache:'no-store',signal:AbortSignal.timeout(20000)});
     if(!response.ok)throw new Error(tr('libraries_unavailable'));
     const data=await response.json();
     if(generation===getSessionGeneration()){

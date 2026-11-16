@@ -38,6 +38,57 @@ pub struct QualityProfile {
     pub id: i64,
     pub name: String,
 }
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ArrTag {
+    pub id: i64,
+    pub label: String,
+}
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ServerSystemStatus {
+    pub app_name: Option<String>,
+    pub version: Option<String>,
+    pub instance_name: Option<String>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ServerSettings {
+    pub external_url: Option<String>,
+    pub tags: Vec<i64>,
+    pub available_tags: Vec<ArrTag>,
+    pub search_on_add: bool,
+    pub minimum_availability: String,
+    pub series_type: String,
+    pub season_folder: bool,
+    pub language_profile_id: Option<i64>,
+    pub anime_quality_profile_id: Option<i64>,
+    pub anime_root_folder: Option<String>,
+    pub anime_language_profile_id: Option<i64>,
+    pub anime_tags: Vec<i64>,
+    pub monitor_new_items: String,
+    pub last_status: Option<ServerSystemStatus>,
+}
+impl Default for ServerSettings {
+    fn default() -> Self {
+        Self {
+            external_url: None,
+            tags: vec![],
+            available_tags: vec![],
+            search_on_add: true,
+            minimum_availability: "released".into(),
+            series_type: "standard".into(),
+            season_folder: true,
+            language_profile_id: None,
+            anime_quality_profile_id: None,
+            anime_root_folder: None,
+            anime_language_profile_id: None,
+            anime_tags: vec![],
+            monitor_new_items: "none".into(),
+            last_status: None,
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RequestInput {
@@ -128,6 +179,7 @@ pub(crate) struct Server {
     pub root_folder: String,
     pub quality_profile_id: i64,
     pub quality_profiles_json: String,
+    pub settings_json: String,
     pub metadata_profile_id: Option<i64>,
     pub is_default: i64,
     pub enabled: i64,
@@ -151,8 +203,11 @@ impl Server {
     pub(crate) fn quality_profiles(&self) -> Vec<QualityProfile> {
         serde_json::from_str::<Vec<QualityProfile>>(&self.quality_profiles_json).unwrap_or_default()
     }
+    pub(crate) fn settings(&self) -> ServerSettings {
+        serde_json::from_str::<ServerSettings>(&self.settings_json).unwrap_or_default()
+    }
     fn public(&self) -> Value {
-        json!({"id":self.id,"name":self.name,"kind":self.kind,"baseUrl":self.base_url,"hasApiKey":!self.api_key.is_empty(),"libraryId":self.library_id,"rootFolder":self.root_folder,"qualityProfileId":self.quality_profile_id,"qualityProfiles":self.quality_profiles(),"metadataProfileId":self.metadata_profile_id,"isDefault":self.is_default==1,"enabled":self.enabled==1})
+        json!({"id":self.id,"name":self.name,"kind":self.kind,"baseUrl":self.base_url,"hasApiKey":!self.api_key.is_empty(),"libraryId":self.library_id,"rootFolder":self.root_folder,"qualityProfileId":self.quality_profile_id,"qualityProfiles":self.quality_profiles(),"metadataProfileId":self.metadata_profile_id,"settings":self.settings(),"isDefault":self.is_default==1,"enabled":self.enabled==1})
     }
     fn api(&self) -> &str {
         if self.kind == "lidarr" {
@@ -181,7 +236,7 @@ impl Server {
         .await
     }
 }
-const SERVER_COLUMNS: &str = "id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,quality_profiles_json,metadata_profile_id,is_default,enabled,generation";
+const SERVER_COLUMNS: &str = "id,name,kind,base_url,api_key,allowed_ips_json,library_id,root_folder,quality_profile_id,quality_profiles_json,settings_json,metadata_profile_id,is_default,enabled,generation";
 pub(crate) async fn server(store: &IdentityStore, id: &str) -> Result<Server, Error> {
     let sql = format!("SELECT {SERVER_COLUMNS} FROM acquisition_servers WHERE id=?");
     query_as(sqlx::AssertSqlSafe(sql))

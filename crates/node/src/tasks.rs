@@ -431,19 +431,6 @@ pub async fn run_task_with_trickplay_options(
             Ok(json!({"width":width,"size":image.bytes.len(),"mime":image.mime,"cacheWarm":true}))
         }
         ("trickplay", ReadTarget::Asset(asset_id)) => {
-            let probe = crate::probe::probe_opened(&opened)
-                .await
-                .map_err(io::Error::other)?;
-            let duration = probe
-                .format
-                .get("duration")
-                .and_then(|v| {
-                    v.as_str()
-                        .and_then(|s| s.parse::<f64>().ok())
-                        .or_else(|| v.as_f64())
-                })
-                .filter(|v| v.is_finite() && *v > 0.0)
-                .ok_or_else(|| io::Error::other("invalid_duration"))?;
             let fallback;
             let mgr = if let Some(manager) = manager {
                 manager
@@ -454,44 +441,86 @@ pub async fn run_task_with_trickplay_options(
             if let Some(mb) = trickplay.and_then(|options| options.max_cache_mb) {
                 mgr.set_max_cache_mb(mb);
             }
+            let hinted_duration = trickplay
+                .and_then(|options| options.duration_seconds)
+                .filter(|v| v.is_finite() && *v > 0.0);
             if component == Some("chapters") {
                 // Same profile and boundaries as the on-demand chapter route,
                 // so the player is served from this cache afterwards.
-                let mut times: Vec<f64> = probe
-                    .chapters
-                    .iter()
-                    .take(1000)
-                    .filter_map(|chapter| chapter["start_time"].as_str()?.parse::<f64>().ok())
-                    .filter(|start| start.is_finite() && *start >= 0.0 && *start < duration)
-                    .collect();
-                times.sort_by(f64::total_cmp);
-                times.dedup();
-                let mut prepared = 0_u64;
-                for time in times.into_iter().take(MAX_PREPARED_CHAPTERS) {
-                    let req = crate::trickplay::TrickplayRequest {
-                        asset_id: asset_id.as_str().to_owned(),
-                        media_root: root.to_path_buf(),
-                        relative_path: relative.to_path_buf(),
-                        duration,
-                        size: opened.size(),
-                        modified_ns: opened.modified_ns().to_owned(),
-                        interval_ms: None,
-                        width,
-                        quality: trickplay.map(|options| options.quality),
-                        columns: None,
-                        rows: None,
-                        chapter_time: Some(time),
-                    };
-                    if mgr.check_native_cache(&req).await.is_none() {
-                        let key = mgr.fingerprint(&req);
-                        mgr.generate_background(&req, &key)
+                let hinted_chapters = trickplay.and_then(|options| options.chapter_times.clone());
+                let (duration, mut times) = match (hinted_duration, hinted_chapters) {
+                    (Some(duration), Some(times)) => (duration, times),
+                    _ => {
+                        let probe = crate::probe::probe_opened(&opened)
                             .await
                             .map_err(io::Error::other)?;
+                        let duration = probe_duration(&probe)?;
+                        let times = probe
+                            .chapters
+                            .iter()
+                            .take(1000)
+                            .filter_map(|chapter| {
+                                chapter["start_time"].as_str()?.parse::<f64>().ok()
+                            })
+                            .collect();
+                        (duration, times)
                     }
+                };
+                times.retain(|start| start.is_finite() && *start >= 0.0 && *start < duration);
+                times.sort_by(f64::total_cmp);
+                times.dedup();
+                let mut pending = times.into_iter().take(MAX_PREPARED_CHAPTERS);
+                let mut join_set = tokio::task::JoinSet::new();
+                let mut prepared = 0_u64;
+                loop {
+                    let max_concurrency = if mgr.active_streams() == 0 { 2 } else { 1 };
+                    while join_set.len() < max_concurrency {
+                        let Some(time) = pending.next() else {
+                            break;
+                        };
+                        let req = crate::trickplay::TrickplayRequest {
+                            asset_id: asset_id.as_str().to_owned(),
+                            media_root: root.to_path_buf(),
+                            relative_path: relative.to_path_buf(),
+                            duration,
+                            size: opened.size(),
+                            modified_ns: opened.modified_ns().to_owned(),
+                            interval_ms: None,
+                            width,
+                            quality: trickplay.map(|options| options.quality),
+                            columns: None,
+                            rows: None,
+                            chapter_time: Some(time),
+                        };
+                        let task_mgr = mgr.clone();
+                        join_set.spawn(async move {
+                            if task_mgr.check_native_cache(&req).await.is_none() {
+                                let key = task_mgr.fingerprint(&req);
+                                task_mgr
+                                    .generate_background(&req, &key)
+                                    .await
+                                    .map_err(io::Error::other)?;
+                            }
+                            Ok::<(), io::Error>(())
+                        });
+                    }
+                    let Some(joined) = join_set.join_next().await else {
+                        break;
+                    };
+                    joined.map_err(io::Error::other)??;
                     prepared += 1;
                 }
                 return Ok(json!({"assetId": asset_id.as_str(), "chapterImages": prepared}));
             }
+            let duration = match hinted_duration {
+                Some(duration) => duration,
+                None => {
+                    let probe = crate::probe::probe_opened(&opened)
+                        .await
+                        .map_err(io::Error::other)?;
+                    probe_duration(&probe)?
+                }
+            };
             let req = crate::trickplay::TrickplayRequest {
                 asset_id: asset_id.as_str().to_owned(),
                 media_root: root.to_path_buf(),
@@ -507,9 +536,11 @@ pub async fn run_task_with_trickplay_options(
                 chapter_time: None,
             };
             let key = mgr.fingerprint(&req);
-            mgr.generate_background(&req, &key)
-                .await
-                .map_err(io::Error::other)?;
+            if mgr.check_native_cache(&req).await.is_none() {
+                mgr.generate_background(&req, &key)
+                    .await
+                    .map_err(io::Error::other)?;
+            }
             let manifest = mgr
                 .check_native_cache(&req)
                 .await
@@ -525,6 +556,19 @@ pub async fn run_task_with_trickplay_options(
         }
         _ => Err(invalid()),
     }
+}
+
+fn probe_duration(probe: &crate::probe::Probe) -> io::Result<f64> {
+    probe
+        .format
+        .get("duration")
+        .and_then(|v| {
+            v.as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .or_else(|| v.as_f64())
+        })
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .ok_or_else(|| io::Error::other("invalid_duration"))
 }
 
 #[cfg(test)]
@@ -614,6 +658,8 @@ mod tests {
             columns: 10,
             rows: 10,
             max_cache_mb: None,
+            duration_seconds: None,
+            chapter_times: None,
         };
         let result = run_task_with_trickplay_options(
             "trickplay",
@@ -632,11 +678,14 @@ mod tests {
         assert_eq!(result["width"], 240);
         assert_eq!(result["intervalMs"], 2000);
         assert!(result["thumbnailCount"].as_u64().unwrap() > 1);
+        let probed_duration =
+            probe_duration(&crate::probe::probe_opened(&opened).await.unwrap()).unwrap();
+        assert!((probed_duration - 12.0).abs() < 0.1);
         let request = crate::trickplay::TrickplayRequest {
             asset_id: "library-profile".into(),
             media_root: root.clone(),
             relative_path: "video.mp4".into(),
-            duration: 12.0,
+            duration: probed_duration,
             size: opened.size(),
             modified_ns: opened.modified_ns().into(),
             interval_ms: Some(2000),

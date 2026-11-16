@@ -604,6 +604,11 @@ pub async fn dispatch_once(
     let statuses: Vec<(String,String,String)> = crate::database::query_as(
         "SELECT r.scan_id,s.status,s.errors_json FROM active_scan_runs r JOIN scan_jobs s ON s.library_id=r.library_id WHERE EXISTS(SELECT 1 FROM durable_tasks j WHERE j.library_id=r.library_id AND j.lease_until IS NOT NULL) UNION ALL SELECT t.run_id,t.status,t.error FROM active_task_runs t")
         .fetch_all(&auth.store.pool).await?;
+    // Other live Cores receive the heartbeats of the Nodes they own: read their telemetry.
+    if auth.store.shared_with_other_cores() {
+        let _ = crate::nodes::ensure_node_registry_warm(&auth.store).await;
+    }
+    let shared = auth.store.shared_with_other_cores();
     let registry = auth.store.node_registry.snapshot_all();
     let expired: Vec<_> = leased
         .iter()
@@ -639,8 +644,11 @@ pub async fn dispatch_once(
             } else {
                 // Results are fenced immediately. The slot stays reserved until lease
                 // expiry, since transport delivery is not proof that a probe stopped.
+                // Multi-Core: `last_seen_at` comes from the database (any Core) while the scan
+                // list may be another Core's older snapshot: it must postdate the stop request.
                 if registry.get(&job.node_id).is_some_and(|n| {
                     n.record.last_seen_at.is_some_and(|t| t > job.updated_at)
+                        && (!shared || n.telemetry.sampled_at > job.updated_at)
                         && !n.telemetry.active_scan_ids.contains(&scan)
                 }) {
                     crate::task_engine::finish(
@@ -850,7 +858,7 @@ pub async fn dispatch_once(
 }
 
 /// Missing/stale telemetry is unknown, never fabricated as free capacity.
-fn resource_pressure_blocks(
+pub(crate) fn resource_pressure_blocks(
     r: &media_contracts::protocol::ResourcePressure,
     timestamp: i64,
 ) -> bool {

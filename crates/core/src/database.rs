@@ -250,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 7;
+pub const CURRENT_SCHEMA_VERSION: i64 = 8;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -311,7 +311,24 @@ UPDATE statistics_settings SET event_retention_days = 0 WHERE singleton = 1 AND 
         sqlite_sql: SCAN_PUBLICATION_MARKER_SQL,
         postgres_sql: SCAN_PUBLICATION_MARKER_SQL,
     },
+    // Multi-Core: last telemetry of each Media Node (load, latency, active scans and streams),
+    // written by the Core receiving its heartbeats while other Cores are live, read by those
+    // Cores to rank sources (`nodes::health`).
+    MigrationStep {
+        version: 8,
+        name: "0008_node_health",
+        sqlite_sql: NODE_HEALTH_SQL,
+        postgres_sql: NODE_HEALTH_SQL,
+    },
 ];
+
+const NODE_HEALTH_SQL: &str = "CREATE TABLE node_health (
+ node_id TEXT PRIMARY KEY NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
+ core_id TEXT NOT NULL,
+ epoch BIGINT NOT NULL DEFAULT 0,
+ sampled_at BIGINT NOT NULL,
+ telemetry_json TEXT NOT NULL
+);";
 
 const SCAN_PUBLICATION_MARKER_SQL: &str =
     "ALTER TABLE scan_jobs ADD COLUMN published_scan_id TEXT;";

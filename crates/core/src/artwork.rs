@@ -79,6 +79,12 @@ fn invalidate_artwork_cache(cache_scope: u64, work: &str) {
         .order
         .retain(|(s, w, _, _)| *s != cache_scope || w != work);
 }
+/// Forget every cached artwork of one opened database (`cache_scope`).
+pub(crate) fn forget_artwork_scope(cache_scope: u64) {
+    let mut cache = ARTWORK_SHA_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    cache.entries.retain(|(s, _, _, _), _| *s != cache_scope);
+    cache.order.retain(|(s, _, _, _)| *s != cache_scope);
+}
 pub(crate) const ROLES: &[&str] = &[
     "poster",
     "thumb",
@@ -380,7 +386,7 @@ async fn pin(
         .bind(&work).bind(&id).bind(&image.kind).bind(i64::from(input.pinned)).execute(&mut *tx).await.map_err(db)?;
     tx.commit().await.map_err(db)?;
     invalidate_artwork_cache(auth.store.cache_scope, &work);
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn list(
@@ -432,7 +438,7 @@ async fn lock_artwork(
         .execute(auth.store.pool())
         .await
         .map_err(db)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn artwork_locked(store: &IdentityStore, work: &str) -> Result<bool, sqlx::Error> {
@@ -497,7 +503,11 @@ async fn read(
     if ![0, 320, 640, 1280].contains(&width) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    if let Some(sha256) = cached_artwork_sha(auth.store.cache_scope, &work, &id, width) {
+    // Another Core may have replaced or removed this image: read it live while one shares the
+    // database (multi-Core mode), from the in-process cache otherwise.
+    if !auth.store.shared_with_other_cores()
+        && let Some(sha256) = cached_artwork_sha(auth.store.cache_scope, &work, &id, width)
+    {
         if let Ok(response) = auth
             .store
             .assets
@@ -1110,7 +1120,7 @@ pub(crate) async fn upload_internal(
         .execute(&mut *tx).await.map_err(db)?;
     tx.commit().await.map_err(db)?;
     invalidate_artwork_cache(store.cache_scope, &work);
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(store).await;
     Ok((
         StatusCode::CREATED,
         Json(json!({"id":id,"duplicate":false})),
@@ -1164,7 +1174,7 @@ async fn remove(
         .map_err(db)?;
     tx.commit().await.map_err(db)?;
     invalidate_artwork_cache(auth.store.cache_scope, &work);
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 #[derive(Deserialize)]
@@ -1195,6 +1205,9 @@ async fn order(
         query("INSERT INTO work_image_order(work_id,image_id,position) VALUES(?,?,?) ON CONFLICT(work_id,image_id) DO UPDATE SET position=excluded.position").bind(&work).bind(id).bind(position as i64).execute(&mut *tx).await.map_err(db)?;
     }
     tx.commit().await.map_err(db)?;
+    // A permutation keeps every aggregate of the fingerprints: invalidate explicitly, here and
+    // on the other Cores.
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

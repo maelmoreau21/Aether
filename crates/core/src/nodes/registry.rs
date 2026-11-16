@@ -6,6 +6,10 @@ use media_contracts::protocol::unix_now;
 use serde::Serialize;
 use sqlx::Row;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
+
+use super::health::{HEALTH_MIN_INTERVAL, HealthSnapshot};
 
 #[derive(Clone, Debug, sqlx::FromRow)]
 pub struct MediaNodeRecord {
@@ -93,6 +97,9 @@ pub struct NodeRuntimeTelemetry {
     pub core_active_relays: u32,
     pub indexed_assets: usize,
     pub consecutive_failures: u32,
+    /// Unix time of this telemetry: the last heartbeat this Core received, or the `node_health`
+    /// snapshot of the Core that received it (multi-Core). 0: none yet.
+    pub sampled_at: i64,
 }
 
 #[derive(Clone, Debug)]
@@ -105,14 +112,128 @@ pub struct NodeRuntimeEntry {
 pub struct NodeRuntimeRegistry {
     entries: std::sync::RwLock<HashMap<String, NodeRuntimeEntry>>,
     populated: std::sync::atomic::AtomicBool,
+    /// While other Cores are live: elects the request that re-reads records and shared telemetry.
+    shared_refresh: crate::coherence::RefreshGate,
+    /// Re-reads done for other Cores (multi-Core mode only).
+    shared_refreshes: AtomicU64,
+    /// Last `node_health` snapshot this Core wrote per Node, and when.
+    health_published: std::sync::Mutex<HashMap<String, (Instant, HealthSnapshot)>>,
+    /// Sequence of this Core's own record writes ([`Self::upsert_record`]), and the last one per
+    /// Node: a shared re-read whose SELECT started before a local write (a revocation, a key
+    /// rotation) never puts the older database row back over it.
+    local_writes: AtomicU64,
+    written_at: std::sync::Mutex<HashMap<String, u64>>,
 }
 
 impl NodeRuntimeRegistry {
     pub fn new() -> Self {
-        Self {
-            entries: std::sync::RwLock::new(HashMap::new()),
-            populated: std::sync::atomic::AtomicBool::new(false),
+        Self::default()
+    }
+
+    /// Re-reads of the shared view done by this registry (none while the Core is alone).
+    pub fn shared_refreshes(&self) -> u64 {
+        self.shared_refreshes.load(Ordering::Relaxed)
+    }
+
+    /// The next registry read re-reads the shared view (tests, and after this Core wrote).
+    pub fn expire_shared_view(&self) {
+        self.shared_refresh.expire();
+    }
+
+    /// Whether this Core should write `snapshot` of `node_id` now (recorded as written if so):
+    /// first snapshot, or a significant change at least [`HEALTH_MIN_INTERVAL`] after the last.
+    pub(crate) fn claim_health_publication(
+        &self,
+        node_id: &str,
+        snapshot: &HealthSnapshot,
+    ) -> bool {
+        let mut published = self
+            .health_published
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // A stable Node is still republished now and then: peers compare its `sampled_at` with
+        // their own deadlines (an administrator's stop request, for instance).
+        let due = published.get(node_id).is_none_or(|(at, previous)| {
+            at.elapsed() >= HEALTH_MIN_INTERVAL
+                && (previous.significant_change(snapshot)
+                    || at.elapsed() >= 2 * HEALTH_MIN_INTERVAL)
+        });
+        if due {
+            published.insert(node_id.to_owned(), (Instant::now(), snapshot.clone()));
         }
+        due
+    }
+
+    /// Forget every published snapshot: the next heartbeat of each Node publishes again (multi-
+    /// Core mode left, peers will need a fresh snapshot when it is entered again).
+    pub(crate) fn forget_health_publications(&self) {
+        self.health_published
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+
+    /// Mark taken before a shared re-read: local record writes after it win over that read.
+    pub(crate) fn write_mark(&self) -> u64 {
+        self.local_writes.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn forget_health_publication(&self, node_id: &str) {
+        self.health_published
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(node_id);
+    }
+
+    /// Records and telemetry as stored by every Core: the record is the database's (status,
+    /// keys), keeping the most recent `last_seen_at`; telemetry is replaced by a snapshot newer
+    /// than this Core's own.
+    fn merge_shared(&self, rows: Vec<SharedNodeRow>, since: u64) {
+        let written_at = self
+            .written_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let newer_locally = |id: &str| written_at.get(id).is_some_and(|seq| *seq > since);
+        let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
+        let mut seen = std::collections::HashSet::with_capacity(rows.len());
+        for row in rows {
+            let SharedNodeRow {
+                mut record,
+                health_sampled_at,
+                health_json,
+            } = row;
+            seen.insert(record.id.clone());
+            let entry = match guard.entry(record.id.clone()) {
+                std::collections::hash_map::Entry::Occupied(slot) => {
+                    let existing = slot.into_mut();
+                    if !newer_locally(&record.id) {
+                        record.last_seen_at = record.last_seen_at.max(existing.record.last_seen_at);
+                        existing.record = record;
+                    }
+                    existing
+                }
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    let is_local = record.id == "local";
+                    slot.insert(NodeRuntimeEntry {
+                        record,
+                        telemetry: NodeRuntimeTelemetry {
+                            latency_ms: if is_local { Some(0) } else { None },
+                            ..NodeRuntimeTelemetry::default()
+                        },
+                    })
+                }
+            };
+            if let (Some(sampled_at), Some(json)) = (health_sampled_at, health_json)
+                && sampled_at > entry.telemetry.sampled_at
+                && let Ok(snapshot) = serde_json::from_str::<HealthSnapshot>(&json)
+            {
+                snapshot.apply(&mut entry.telemetry, sampled_at);
+            }
+        }
+        guard.retain(|id, _| seen.contains(id) || newer_locally(id));
+        self.populated
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     pub fn is_populated(&self) -> bool {
@@ -130,6 +251,11 @@ impl NodeRuntimeRegistry {
     }
 
     pub fn upsert_record(&self, record: MediaNodeRecord) {
+        let seq = self.local_writes.fetch_add(1, Ordering::AcqRel) + 1;
+        self.written_at
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(record.id.clone(), seq);
         let mut guard = self.entries.write().unwrap_or_else(|e| e.into_inner());
         match guard.get_mut(&record.id) {
             Some(existing) => {
@@ -205,6 +331,7 @@ impl NodeRuntimeRegistry {
             entry.telemetry.reported_active_streams = hb.active_streams;
             entry.telemetry.indexed_assets = hb.indexed_assets;
             entry.telemetry.consecutive_failures = 0;
+            entry.telemetry.sampled_at = now;
             if let Some(sample) = rtt_ms {
                 entry.telemetry.latency_ms = Some(match entry.telemetry.latency_ms {
                     Some(prev) => ((prev as u64 * 3 + sample as u64) / 4) as u32,
@@ -429,9 +556,69 @@ pub fn score_node_entry(
     (effective_status.to_owned(), conn_mode.to_owned(), score)
 }
 
-pub async fn ensure_node_registry_warm(store: &IdentityStore) -> Result<(), sqlx::Error> {
-    if store.node_registry.is_populated() {
+/// A Node record with the shared telemetry snapshot of the Core that receives its heartbeats.
+#[derive(sqlx::FromRow)]
+struct SharedNodeRow {
+    #[sqlx(flatten)]
+    record: MediaNodeRecord,
+    health_sampled_at: Option<i64>,
+    health_json: Option<String>,
+}
+
+/// Re-read every Node record and its `node_health` snapshot: one query, run only while other
+/// Cores are live, at most every [`crate::coherence::SHARED_REFRESH`] (multi-Core §4.1, §4.4).
+async fn load_shared_view(store: &IdentityStore) -> Result<(), sqlx::Error> {
+    store
+        .node_registry
+        .shared_refreshes
+        .fetch_add(1, Ordering::Relaxed);
+    let since = store.node_registry.write_mark();
+    let rows: Vec<SharedNodeRow> = crate::database::query_as(
+        "SELECT n.id, n.name, n.kind, n.base_url, n.public_url, n.status, n.key_id, n.shared_secret, n.roots_json, n.paired_at, n.last_seen_at, n.revoked_at, n.version, n.connection_mode, h.sampled_at AS health_sampled_at, h.telemetry_json AS health_json FROM media_nodes n LEFT JOIN node_health h ON h.node_id=n.id",
+    )
+    .fetch_all(&store.pool)
+    .await?;
+    store.node_registry.merge_shared(rows, since);
+    Ok(())
+}
+
+/// Re-read records and shared telemetry now, whatever the mode (multi-Core mode just left).
+pub(crate) async fn reload_shared_view(store: &IdentityStore) -> Result<(), sqlx::Error> {
+    if !store.node_registry.is_populated() {
         return Ok(());
+    }
+    store
+        .node_registry
+        .shared_refresh
+        .due(std::time::Duration::ZERO);
+    load_shared_view(store).await
+}
+
+/// Make the registry usable. Alone, it is loaded once and then kept up to date by this Core's
+/// own writes and heartbeats: no query on the hot path. While other Cores are live (they write
+/// statuses, keys and telemetry this Core never sees), one request at most every
+/// [`crate::coherence::SHARED_REFRESH`] re-reads it; the others use the current copy.
+pub async fn ensure_node_registry_warm(store: &IdentityStore) -> Result<(), sqlx::Error> {
+    let shared = store.shared_with_other_cores();
+    if store.node_registry.is_populated() {
+        if shared
+            && store
+                .node_registry
+                .shared_refresh
+                .due(crate::coherence::SHARED_REFRESH)
+            && let Err(error) = load_shared_view(store).await
+        {
+            // The current copy stays; signed Node calls still verify keys and status live.
+            eprintln!("Node registry not refreshed from the database ({error})");
+        }
+        return Ok(());
+    }
+    if shared {
+        store
+            .node_registry
+            .shared_refresh
+            .due(std::time::Duration::ZERO);
+        return load_shared_view(store).await;
     }
     let records: Vec<MediaNodeRecord> = crate::database::query_as(
         "SELECT id, name, kind, base_url, public_url, status, key_id, shared_secret, roots_json, paired_at, last_seen_at, revoked_at, version, connection_mode FROM media_nodes",
@@ -462,10 +649,13 @@ pub async fn load_node(
     store: &IdentityStore,
     node_id: &str,
 ) -> Result<Option<MediaNodeRecord>, sqlx::Error> {
-    if store.node_registry.is_populated()
-        && let Some(entry) = store.node_registry.get(node_id)
-    {
-        return Ok(Some(entry.record));
+    if store.node_registry.is_populated() {
+        if store.shared_with_other_cores() {
+            ensure_node_registry_warm(store).await?;
+        }
+        if let Some(entry) = store.node_registry.get(node_id) {
+            return Ok(Some(entry.record));
+        }
     }
     refresh_node_in_registry(store, node_id).await
 }
@@ -691,5 +881,65 @@ mod staleness_tests {
             score_node_entry(&fresh, Some("video/mp4"), None, now).0,
             "connected"
         );
+    }
+}
+
+#[cfg(test)]
+mod shared_view_tests {
+    use super::*;
+
+    fn record(status: &str, key: &str) -> MediaNodeRecord {
+        MediaNodeRecord {
+            id: "nas".into(),
+            name: "NAS".into(),
+            kind: "remote".into(),
+            base_url: None,
+            public_url: None,
+            status: status.into(),
+            version: None,
+            connection_mode: "outbound".into(),
+            key_id: key.into(),
+            shared_secret: "secret".into(),
+            roots_json: "[]".into(),
+            paired_at: 1,
+            last_seen_at: Some(10),
+            revoked_at: None,
+        }
+    }
+
+    fn row(status: &str, key: &str) -> SharedNodeRow {
+        SharedNodeRow {
+            record: record(status, key),
+            health_sampled_at: None,
+            health_json: None,
+        }
+    }
+
+    #[test]
+    fn a_shared_reread_never_overwrites_a_newer_local_write() {
+        let registry = NodeRuntimeRegistry::new();
+        registry.upsert_record(record("connected", "k1"));
+        // A re-read starts (its SELECT sees the database before the revocation)...
+        let since = registry.write_mark();
+        // ...this Core revokes the Node meanwhile...
+        registry.upsert_record(record("revoked", "k1"));
+        // ...then the older rows are merged: the revocation stays.
+        registry.merge_shared(vec![row("connected", "k1")], since);
+        assert_eq!(registry.get("nas").unwrap().record.status, "revoked");
+        // A re-read that started after the local write applies the database's state.
+        let since = registry.write_mark();
+        registry.merge_shared(vec![row("connected", "k2")], since);
+        let entry = registry.get("nas").unwrap();
+        assert_eq!(
+            (entry.record.status.as_str(), entry.record.key_id.as_str()),
+            ("connected", "k2")
+        );
+        // A Node written locally after the read started is not dropped for missing from it.
+        let since = registry.write_mark();
+        let mut other = record("connected", "k1");
+        other.id = "new".into();
+        registry.upsert_record(other);
+        registry.merge_shared(vec![row("connected", "k2")], since);
+        assert!(registry.get("new").is_some());
     }
 }

@@ -142,6 +142,22 @@ impl<V> LruBucket<V> {
         self.current_bytes = 0;
     }
 
+    /// Keep only the entries whose key satisfies `keep` (stale LRU slots are skipped later).
+    fn retain_keys(&mut self, keep: impl Fn(&str) -> bool) {
+        let mut freed = 0usize;
+        self.entries.retain(|key, entry| {
+            let kept = keep(key);
+            if !kept {
+                freed = freed.saturating_add(entry.size_bytes);
+            }
+            kept
+        });
+        self.current_bytes = self.current_bytes.saturating_sub(freed);
+        if self.lru.len() > self.entries.len().saturating_mul(4).max(64) {
+            self.compact_lru();
+        }
+    }
+
     fn len(&self) -> usize {
         self.entries.len()
     }
@@ -359,6 +375,17 @@ impl BoundedCatalogueCache {
         self.fts_tables.insert(scope, use_fts);
     }
 
+    /// Drop every entry of one opened database (`cache_scope`), leaving the others' entries.
+    pub(super) fn clear_scope(&mut self, scope: u64) {
+        let other = |key: &str| key_scope(key) != Some(scope);
+        self.pages.retain_keys(other);
+        self.decorated_works.retain_keys(other);
+        self.locale_chains.retain_keys(other);
+        self.valid_libs.retain_keys(other);
+        self.meta_flags.retain_keys(other);
+        self.fts_tables.remove(&scope);
+    }
+
     pub fn clear(&mut self) {
         self.pages.clear();
         self.decorated_works.clear();
@@ -375,6 +402,20 @@ impl BoundedCatalogueCache {
             self.pages.len(),
         )
     }
+}
+
+/// Database scope of a cache key: `{scope}:…` (works, locale chains) or `{kind}|{scope}|…`
+/// (pages, pools, valid libraries, metadata flags).
+fn key_scope(key: &str) -> Option<u64> {
+    let rest = if key.starts_with(|c: char| c.is_ascii_digit()) {
+        key
+    } else {
+        key.split_once('|')?.1
+    };
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
 }
 
 fn write_work_prefix(buf: &mut String, scope: u64, locale_key: &str) {
@@ -434,6 +475,47 @@ pub fn invalidate_catalogue_cache() {
         guard.clear();
     }
     crate::permissions::invalidate_permissions_cache();
+}
+
+/// A committed write changed what the catalogue of `store` shows.
+///
+/// This Core drops the cached entries of that database at once (its own epoch, mixed into every
+/// fingerprint, moves; other databases opened in the process keep theirs). On PostgreSQL the
+/// shared `inventory_cache_generation` moves too, after the commit: every Core reads it in the
+/// fingerprint of each catalogue request, so the next request on any Core misses. SQLite is
+/// single-Core and its `cache_gen_*` triggers already moved it in the write itself.
+///
+/// The shared move follows the commit: a Core stopped in between leaves the other Cores on their
+/// cached pages until the next catalogue write. Writers that can, move it inside their own
+/// transaction ([`bump_shared_generation`]).
+pub async fn catalogue_changed(store: &crate::identity::IdentityStore) {
+    store.coherence.bump_catalogue_epoch();
+    if let Some(lock) = CATALOGUE_CACHE.get() {
+        let mut guard = lock.lock().unwrap_or_else(PoisonError::into_inner);
+        guard.clear_scope(store.cache_scope);
+    }
+    crate::permissions::invalidate_permissions_cache();
+    if store.is_postgres() {
+        let shared = async {
+            let mut conn = store.pool().acquire().await?;
+            bump_shared_generation(&mut conn).await
+        };
+        if let Err(error) = shared.await {
+            eprintln!("Catalogue generation not shared with the other Cores ({error})");
+        }
+    }
+}
+
+/// Move the catalogue generation every Core validates its cache against, inside the caller's
+/// transaction: PostgreSQL only (it has no `cache_gen_*` triggers). Call it last before the
+/// commit: the generation row stays locked from this update to the end of the transaction.
+pub async fn bump_shared_generation(conn: &mut sqlx::AnyConnection) -> Result<(), sqlx::Error> {
+    if conn.backend_name() == "PostgreSQL" {
+        crate::database::query("UPDATE inventory_cache_generation SET gen=gen+1 WHERE id=1")
+            .execute(&mut *conn)
+            .await?;
+    }
+    Ok(())
 }
 
 pub fn catalogue_cache_stats() -> (usize, usize, usize) {
@@ -536,6 +618,40 @@ mod tests {
         assert_eq!(cache.decorated_work_stats().2, 0);
         assert_eq!(cache.locale_chain_len(), 0);
         assert!(cache.get_use_fts(1).is_none());
+    }
+
+    #[test]
+    fn clearing_one_database_keeps_the_entries_of_the_others() {
+        assert_eq!(key_scope("page|12|[\"lib\"]"), Some(12));
+        assert_eq!(key_scope("12:2:fr:w1"), Some(12));
+        assert_eq!(key_scope("mf|3|Some(\"u\")|None"), Some(3));
+        let mut cache = BoundedCatalogueCache::new(1024 * 1024);
+        for scope in [7_u64, 8] {
+            cache.insert(format!("page|{scope}|x"), 1, json!({"items": []}));
+            cache.insert(format!("pool|{scope}|x"), 1, json!([]));
+            cache.insert_decorated_work(scope, 1, "en", "w1", json!({"id": "w1"}));
+            cache.insert_locale_chain(scope, 1, "u1", None, vec!["en".to_owned()]);
+            cache.insert_valid_libs(format!("vl|{scope}|x"), 1, vec!["l".to_owned()], true);
+            cache.insert_meta_flags(format!("mf|{scope}|x"), 1, true, true, true);
+            cache.insert_use_fts(scope, true);
+        }
+        let bytes = cache.stats().0;
+        cache.clear_scope(7);
+        assert!(cache.get("page|7|x", 1).is_none());
+        assert!(cache.get("pool|7|x", 1).is_none());
+        assert!(cache.get_decorated_work(7, 1, "en", "w1").is_none());
+        assert!(cache.get_locale_chain(7, 1, "u1", None).is_none());
+        assert!(cache.get_valid_libs("vl|7|x", 1).is_none());
+        assert!(cache.get_meta_flags("mf|7|x", 1).is_none());
+        assert!(cache.get_use_fts(7).is_none());
+        assert!(cache.stats().0 < bytes, "freed bytes are accounted");
+        assert!(cache.get("page|8|x", 1).is_some());
+        assert!(cache.get("pool|8|x", 1).is_some());
+        assert!(cache.get_decorated_work(8, 1, "en", "w1").is_some());
+        assert!(cache.get_locale_chain(8, 1, "u1", None).is_some());
+        assert!(cache.get_valid_libs("vl|8|x", 1).is_some());
+        assert!(cache.get_meta_flags("mf|8|x", 1).is_some());
+        assert_eq!(cache.get_use_fts(8), Some(true));
     }
 
     #[test]

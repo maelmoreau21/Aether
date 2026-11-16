@@ -22,9 +22,10 @@ pub use crate::{
     node::scanner::{CachedFile, InventoryBatch, ScanReport, ScannedFile},
 };
 pub use catalogue::{
-    BoundedCatalogueCache, CatalogueFilter, EpisodePage, catalogue, catalogue_cache_stats,
-    catalogue_filtered, catalogue_page, detail, detail_window, detail_window_localized,
-    estimate_json_bytes, invalidate_catalogue_cache, resource_library,
+    BoundedCatalogueCache, CatalogueFilter, EpisodePage, bump_shared_generation, catalogue,
+    catalogue_cache_stats, catalogue_changed, catalogue_filtered, catalogue_page, detail,
+    detail_window, detail_window_localized, estimate_json_bytes, invalidate_catalogue_cache,
+    resource_library,
 };
 pub(crate) use catalogue::{
     refresh_work_availability_from_editions, sort_edition_sources_by_score,

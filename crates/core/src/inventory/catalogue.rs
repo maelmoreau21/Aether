@@ -5,7 +5,8 @@ mod cache;
 use crate::database::{query, query_scalar};
 use crate::identity::IdentityStore;
 pub use cache::{
-    BoundedCatalogueCache, catalogue_cache_stats, estimate_json_bytes, invalidate_catalogue_cache,
+    BoundedCatalogueCache, bump_shared_generation, catalogue_cache_stats, catalogue_changed,
+    estimate_json_bytes, invalidate_catalogue_cache,
 };
 use serde_json::{Value, json};
 use sqlx::{Execute, Row};
@@ -552,7 +553,9 @@ async fn compute_state_fingerprints(
     user_id: Option<&str>,
     include_progress: bool,
 ) -> StateFingerprints {
-    let epoch = cache::catalogue_epoch();
+    // The process-wide epoch (`invalidate_catalogue_cache`) and this database's own epoch
+    // (`catalogue_changed`): a write to one database never invalidates another's pages.
+    let epoch = cache::catalogue_epoch() ^ store.coherence.catalogue_epoch().rotate_left(32);
     let has_user = i64::from(user_id.is_some());
     let uid = user_id.unwrap_or("");
     let check_progress = i64::from(include_progress && user_id.is_some());
@@ -2400,7 +2403,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalidate_catalogue_cache_bumps_epoch_even_without_db_gen_change() {
+    async fn catalogue_changed_bumps_epoch_even_without_db_gen_change() {
         let _cache_guard = crate::permissions::CACHE_TEST_LOCK.lock().await;
         let dir = tempfile::tempdir().unwrap();
         let (store, works) = setup_test_store(
@@ -2428,7 +2431,8 @@ mod tests {
         assert_eq!(first["total"], 1);
         let fp_before = compute_state_fingerprints(&store, None, false).await;
 
-        invalidate_catalogue_cache();
+        // This database's own epoch: parallel tests on other databases keep their pages.
+        catalogue_changed(&store).await;
         let fp_after = compute_state_fingerprints(&store, None, false).await;
         assert_ne!(fp_before.inv_fp, fp_after.inv_fp);
         assert_ne!(fp_before.page_fp, fp_after.page_fp);

@@ -3,6 +3,7 @@
 
 mod channel;
 mod channel_owner;
+pub(crate) mod health;
 mod management;
 pub mod outbox;
 mod playback;
@@ -29,6 +30,7 @@ use management::{
 use media_contracts::protocol::ReplayWindow;
 use playback::authorize_playback;
 pub use playback::{build_direct_playback_url, relay_from_remote_node};
+pub(crate) use registry::reload_shared_view;
 pub use registry::{
     AdminNodeView, MediaNodeRecord, NodeLibraryRef, NodeRuntimeEntry, NodeRuntimeRegistry,
     NodeRuntimeTelemetry, NodeScanSummary, effective_connection_mode, ensure_node_registry_warm,

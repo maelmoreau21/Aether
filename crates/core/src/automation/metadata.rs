@@ -435,6 +435,10 @@ pub async fn apply_missing_metadata(
             });
         }
     }
+    // No shared generation bump here: this runs once per result, also inside the long scan and
+    // publication transactions (editorial refresh), which bump once just before their commit.
+    // Holding the generation row from the first result to the end of such a transaction would
+    // block every other catalogue writer. The drain path bumps once per task result.
     Ok(())
 }
 

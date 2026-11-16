@@ -66,7 +66,7 @@ pub(crate) async fn group(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(Json(json!({"id": id, "mergeId": merge_id})))
 }
 
@@ -91,7 +91,7 @@ pub(crate) async fn ungroup(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -143,7 +143,7 @@ pub(crate) async fn confirm_candidate(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(Json(json!({
         "id": group_id,
         "mergeId": merge_id
@@ -201,7 +201,7 @@ pub(crate) async fn undo_merge(
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

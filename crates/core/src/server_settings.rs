@@ -546,8 +546,23 @@ pub async fn ensure_cors_origins_warm(store: &IdentityStore) {
         .read()
         .map(|g| g.is_empty())
         .unwrap_or(true);
-    if empty
+    // Another live Core may have changed the trusted origins: re-read them at most every
+    // `SHARED_REFRESH` (multi-Core); alone, this Core's own saves keep the copy exact.
+    let stale = store.shared_with_other_cores()
+        && store
+            .coherence
+            .cors_refresh
+            .due(crate::coherence::SHARED_REFRESH);
+    if (empty || stale)
         && let Ok(settings) = load(store).await
+        && let Ok(mut guard) = store.cors_origins.write()
+    {
+        *guard = settings.cors_hosts;
+    }
+}
+/// Re-read the trusted origins now (multi-Core mode left: the copy may predate a peer's save).
+pub(crate) async fn reload_cors_origins(store: &IdentityStore) {
+    if let Ok(settings) = load(store).await
         && let Ok(mut guard) = store.cors_origins.write()
     {
         *guard = settings.cors_hosts;

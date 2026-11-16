@@ -615,6 +615,7 @@ pub(super) async fn reconnect_node(
                     .store
                     .node_registry
                     .record_heartbeat(&id, &hb, Some(hb_rtt_ms), now);
+                super::health::publish(&state.auth.store, &id, now).await;
             } else {
                 crate::database::query(
                     "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=?",

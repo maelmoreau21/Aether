@@ -1314,9 +1314,9 @@ mod tests {
         assert!(before_stats.visible_entries >= 1);
         assert!(before_stats.resource_entries >= 1);
 
-        // Invalidating the catalogue cache clears permissions caches and bumps PERMISSIONS_EPOCH
-        // even without any database `inventory_cache_generation.gen` mutation.
-        crate::inventory::invalidate_catalogue_cache();
+        // A catalogue change clears permissions caches and bumps PERMISSIONS_EPOCH even without
+        // any database `inventory_cache_generation.gen` mutation.
+        crate::inventory::catalogue_changed(&store).await;
 
         let after_invalidation = scope_permissions_cache_stats(store.cache_scope);
         assert_eq!(after_invalidation.visible_entries, 0);

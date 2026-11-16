@@ -95,6 +95,8 @@ pub struct IdentityStore {
     /// One backup at a time per opened database, shared by manual and scheduled backups of every
     /// clone. Across Cores (PostgreSQL) a session advisory lock adds the same exclusion.
     pub(crate) backup_gate: std::sync::Arc<tokio::sync::Semaphore>,
+    /// Multi-Core state of process-local caches: other live Cores, in-process catalogue epoch.
+    pub(crate) coherence: std::sync::Arc<crate::coherence::Coherence>,
 }
 
 static NEXT_CACHE_SCOPE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -249,6 +251,11 @@ impl IdentityStore {
     pub fn is_postgres(&self) -> bool {
         self.postgres
     }
+    /// Whether another live Core shares this database (multi-Core mode, PostgreSQL only), as
+    /// of this Core's last heartbeat. Process-local caches validate against the database then.
+    pub fn shared_with_other_cores(&self) -> bool {
+        self.coherence.shared()
+    }
     /// Explicit external PostgreSQL connection; never transfers SQLite data.
     pub async fn open_postgres(url: &str) -> Result<Self, IdentityError> {
         sqlx::any::install_default_drivers();
@@ -284,6 +291,7 @@ impl IdentityStore {
             instance_id: new_instance_id(),
             postgres: true,
             backup_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            coherence: std::sync::Arc::new(crate::coherence::Coherence::new()),
         };
         register_active_store(&store);
         Ok(store)
@@ -425,6 +433,7 @@ impl IdentityStore {
             instance_id: new_instance_id(),
             postgres: false,
             backup_gate: std::sync::Arc::new(tokio::sync::Semaphore::new(1)),
+            coherence: std::sync::Arc::new(crate::coherence::Coherence::new()),
         };
         register_active_store(&store);
         Ok(store)

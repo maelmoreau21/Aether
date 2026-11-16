@@ -25,6 +25,7 @@ pub mod automation_http;
 pub mod avatars;
 pub mod backup;
 pub mod backup_bundle;
+pub mod coherence;
 pub mod core_instances;
 pub mod database;
 pub mod dlna;

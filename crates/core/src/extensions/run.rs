@@ -103,6 +103,9 @@ pub(super) async fn apply_metadata(
         .await
         .map_err(db)?;
     audit(&mut tx, &actor.user.id, &id, "metadata.applied").await?;
+    crate::inventory::bump_shared_generation(&mut tx)
+        .await
+        .map_err(db)?;
     tx.commit().await.map_err(db)?;
 
     Ok(StatusCode::NO_CONTENT)

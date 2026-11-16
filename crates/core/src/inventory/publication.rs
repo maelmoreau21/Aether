@@ -1375,6 +1375,9 @@ async fn publish(
         tx.rollback().await?;
         return Ok(Publication::Fenced);
     }
+    // Catalogue caches of every Core (this one included) are keyed by this generation. Last
+    // statement: on PostgreSQL its row stays locked only until the commit below.
+    super::bump_shared_generation(&mut tx).await?;
     tx.commit().await?;
     crate::task_engine::WAKE.notify_one();
     crate::system_memory::trim_memory();

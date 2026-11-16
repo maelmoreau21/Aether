@@ -78,7 +78,37 @@ pub async fn heartbeat(store: &IdentityStore, now: i64) -> Result<(), sqlx::Erro
         .bind(now.saturating_sub(PRUNE_AFTER_SECONDS))
         .execute(store.pool())
         .await?;
+    refresh_peers(store, now).await?;
     Ok(())
+}
+
+/// Live Cores other than this one on the database: a fresh heartbeat, and not this Core's own
+/// crashed predecessor (same rule as [`alive_sql`]).
+pub(crate) async fn count_live_peers(store: &IdentityStore, now: i64) -> Result<i64, sqlx::Error> {
+    query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM core_instances p WHERE p.id<>? AND {}",
+        alive_sql("p.id")
+    )))
+    .bind(store.instance_id())
+    .bind(now.saturating_sub(HEARTBEAT_STALE_SECONDS))
+    .bind(hostname())
+    .bind(store.instance_id())
+    .fetch_one(store.pool())
+    .await
+}
+
+/// Multi-Core mode ([`crate::coherence::Coherence::shared`]), refreshed by every heartbeat: a
+/// Core appearing is seen within [`HEARTBEAT_INTERVAL`] (it counts the Cores already running as
+/// soon as it registers), a dead one after [`HEARTBEAT_STALE_SECONDS`]. SQLite is single-Core
+/// by construction and never reads it.
+pub(crate) async fn refresh_peers(store: &IdentityStore, now: i64) -> Result<bool, sqlx::Error> {
+    let shared = store.is_postgres() && count_live_peers(store, now).await? > 0;
+    let was_shared = store.coherence.shared();
+    store.coherence.set_shared(shared);
+    if was_shared && !shared {
+        crate::coherence::left_shared_mode(store).await;
+    }
+    Ok(shared)
 }
 
 /// Remove this Core's row on graceful shutdown (after its heartbeat loop stopped): the other
@@ -509,6 +539,63 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(rows, vec![(store.instance_id().to_owned(), NOW, NOW + 10)]);
+        store.close().await;
+    }
+
+    /// Multi-Core mode detection: alone, a peer appears, the peer dies, and a crashed
+    /// predecessor on the same host never counts as a peer.
+    #[tokio::test]
+    async fn live_peers_are_counted_from_fresh_heartbeats_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        heartbeat(&store, NOW).await.unwrap();
+        assert_eq!(count_live_peers(&store, NOW).await.unwrap(), 0, "alone");
+        assert!(!store.shared_with_other_cores());
+
+        query("INSERT INTO core_instances(id,started_at,heartbeat_at,hostname) VALUES('peer',?,?,'other-host')")
+            .bind(NOW)
+            .bind(NOW)
+            .execute(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            count_live_peers(&store, NOW + 5).await.unwrap(),
+            1,
+            "peer appears"
+        );
+        // SQLite is single-Core by construction: the mode never switches on.
+        assert!(!refresh_peers(&store, NOW + 5).await.unwrap());
+        assert!(!store.shared_with_other_cores());
+
+        assert_eq!(
+            count_live_peers(&store, NOW + HEARTBEAT_STALE_SECONDS + 1)
+                .await
+                .unwrap(),
+            0,
+            "peer silent for longer than the stale limit: dead"
+        );
+
+        query("UPDATE core_instances SET hostname=? WHERE id=?")
+            .bind(hostname())
+            .bind(store.instance_id())
+            .execute(store.pool())
+            .await
+            .unwrap();
+        query("INSERT INTO core_instances(id,started_at,heartbeat_at,hostname) VALUES('predecessor',?,?,?)")
+            .bind(NOW - 100)
+            .bind(NOW)
+            .bind(hostname())
+            .execute(store.pool())
+            .await
+            .unwrap();
+        let expected = if hostname().is_empty() { 2 } else { 1 };
+        assert_eq!(
+            count_live_peers(&store, NOW + 5).await.unwrap(),
+            expected,
+            "a crashed predecessor on this host is not a peer"
+        );
         store.close().await;
     }
 

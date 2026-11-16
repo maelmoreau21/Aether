@@ -1827,3 +1827,13 @@ ALTER TABLE media_nodes ADD COLUMN pending_since INTEGER;
 -- Schema v7 (database.rs MIGRATIONS, 0007_scan_publication_marker): scan attempt whose staged
 -- inventory the library job last published (multi-Core publication fencing).
 ALTER TABLE scan_jobs ADD COLUMN published_scan_id TEXT;
+
+-- Schema v8 (database.rs MIGRATIONS, 0008_node_health): last telemetry of each Media Node,
+-- written by the Core receiving its heartbeats while other Cores are live (multi-Core).
+CREATE TABLE node_health (
+ node_id TEXT PRIMARY KEY NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,
+ core_id TEXT NOT NULL,
+ epoch BIGINT NOT NULL DEFAULT 0,
+ sampled_at BIGINT NOT NULL,
+ telemetry_json TEXT NOT NULL
+);

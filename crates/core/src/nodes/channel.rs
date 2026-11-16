@@ -435,6 +435,7 @@ pub(super) async fn node_channel(
             .store
             .node_registry
             .record_heartbeat(&id, h, Some(1), now);
+        super::health::publish(&state.auth.store, &id, now).await;
     } else {
         let _ = crate::database::query(
             "UPDATE media_nodes SET status='connected', last_seen_at=? WHERE id=? AND status != 'revoked'",
@@ -677,6 +678,7 @@ pub(super) async fn receive_node_heartbeat(
             .store
             .node_registry
             .record_heartbeat(&rec.id, &hb, Some(1), now);
+        super::health::publish(&state.auth.store, &rec.id, now).await;
     }
     signed_core_response(
         &rec,

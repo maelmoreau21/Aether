@@ -357,6 +357,8 @@ async fn save(
         .await?;
     }
     tx.commit().await.map_err(database)?;
+    // Permission tables are fingerprinted by aggregates that a swap of rows can leave unchanged: invalidate here and on the other Cores (shared generation).
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(())
 }
 async fn remove(
@@ -383,6 +385,8 @@ async fn remove(
         return Err(StatusCode::NOT_FOUND);
     }
     tx.commit().await.map_err(database)?;
+    // Permission tables are fingerprinted by aggregates that a swap of rows can leave unchanged: invalidate here and on the other Cores (shared generation).
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -542,7 +546,7 @@ async fn save_parental(
     )
     .await?;
     tx.commit().await.map_err(database)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn delete_parental(
@@ -581,6 +585,6 @@ async fn delete_parental(
             .map_err(database)?;
     }
     tx.commit().await.map_err(database)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }

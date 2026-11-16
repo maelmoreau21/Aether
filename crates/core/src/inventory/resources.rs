@@ -937,7 +937,7 @@ pub async fn image(
                     .bind(image_id).bind(&grant.root_snapshot).bind(&grant.relative_path)
                     .execute(&store.pool).await.ok()?;
                 invalidate_image_meta(store.cache_scope, image_id);
-                super::invalidate_catalogue_cache();
+                super::catalogue_changed(store).await;
                 grant.target = ReadTarget::Image {
                     id: ImageId::from(image_id), expected_size: image.size_bytes,
                     expected_modified_ns: image.modified_ns.clone(),

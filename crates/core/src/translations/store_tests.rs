@@ -98,8 +98,8 @@ async fn film(store: &IdentityStore) -> String {
         .unwrap()
 }
 
-/// Direct writes to the work row, as scans and edit endpoints do. Those code paths clear
-/// the in-memory catalogue cache themselves (PostgreSQL has no triggers to do it).
+/// Direct writes to the work row, as scans and edit endpoints do. Those code paths report the
+/// change themselves (PostgreSQL has no triggers to do it).
 async fn set_json(store: &IdentityStore, work: &str, column: &str, value: Value) {
     let sql = format!("UPDATE inventory_works SET {column}=? WHERE id=?");
     query(sqlx::AssertSqlSafe(sql))
@@ -108,7 +108,7 @@ async fn set_json(store: &IdentityStore, work: &str, column: &str, value: Value)
         .execute(&store.pool)
         .await
         .unwrap();
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(store).await;
 }
 
 async fn account(store: &IdentityStore, id: &str, prefs: Value) {

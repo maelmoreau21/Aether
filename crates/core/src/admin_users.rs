@@ -234,6 +234,8 @@ async fn create(
         }
     }
     tx.commit().await.map_err(db)?;
+    // Permission tables are fingerprinted by aggregates that a swap of rows can leave unchanged: invalidate here and on the other Cores (shared generation).
+    crate::inventory::catalogue_changed(&auth.store).await;
     drop(conn);
     if crate::extensions::collections::assign_new_user(&auth, &id)
         .await
@@ -330,6 +332,8 @@ async fn update(
         }
     }
     tx.commit().await.map_err(db)?;
+    // Permission tables are fingerprinted by aggregates that a swap of rows can leave unchanged: invalidate here and on the other Cores (shared generation).
+    crate::inventory::catalogue_changed(&auth.store).await;
     Ok(StatusCode::NO_CONTENT)
 }
 async fn password(

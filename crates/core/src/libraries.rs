@@ -883,6 +883,8 @@ async fn delete_library(state: &LibraryState, id: &str) -> Result<(), StatusCode
         .await
         .map_err(database)?;
     tx.commit().await.map_err(database)?;
+    // Permission tables are fingerprinted by aggregates that a swap of rows can leave unchanged: invalidate here and on the other Cores (shared generation).
+    crate::inventory::catalogue_changed(&state.auth.store).await;
     Ok(())
 }
 async fn validate_folder(
@@ -1160,6 +1162,8 @@ async fn save(
         .map_err(database)?;
     }
     tx.commit().await.map_err(database)?;
+    // Permission tables are fingerprinted by aggregates that a swap of rows can leave unchanged: invalidate here and on the other Cores (shared generation).
+    crate::inventory::catalogue_changed(&state.auth.store).await;
     Ok(Library {
         id,
         name: input.name,

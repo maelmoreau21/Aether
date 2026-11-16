@@ -368,6 +368,7 @@ pub async fn ingest(
         }
     }
     refresh_editorial(&mut tx, library_id).await?;
+    super::bump_shared_generation(&mut tx).await?;
     tx.commit().await?;
     crate::system_memory::trim_memory();
     Ok(())

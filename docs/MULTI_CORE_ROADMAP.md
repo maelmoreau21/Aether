@@ -29,12 +29,12 @@ Core. Cette base n'est pas à refaire.
 |---|---|---|---|
 | `ACTIVE_CHANNELS` (boîtes aux lettres) | `nodes/channel.rs` | en partie levé (schémas v5 et v6) : la propriété du canal et son époque sont en base, le Node refuse les commandes d'un ancien propriétaire, les commandes de contrôle passent par la boîte d'envoi durable et peuvent être émises depuis n'importe quel Core ; seules les demandes de relais restent en mémoire, chez le propriétaire | §2 |
 | `PENDING_STREAMS` | `nodes/channel.rs` | le relais exige que la requête navigateur et le flux montant du Node arrivent sur le **même** Core | §2.4 |
-| `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | chaque Core ne voit que les battements qu'il reçoit : la sélection de source et le failover divergent | §4.1 |
+| `NodeRuntimeRegistry` (télémétrie, latence, flux actifs) | `nodes/registry.rs` | levé (schéma v8, étape 6) : avec d'autres Core vivants, la vue est relue en base (fiches et instantané `node_health` écrit par le Core qui reçoit les battements) au plus toutes les 2 s ; seul, aucune relecture | §4.1 |
 | `ReplayWindow` (nonces) | `shared/protocol.rs` | un message signé rejoué sur l'autre Core passe la fenêtre anti-rejeu | §4.3 |
 | `EFFECT_GATE`, `WAKE` | `task_engine.rs` | en partie levé (schéma v7) : publication, lots et statut final d'un scan sont fencés dans leur transaction (tentative, bail, propriétaire, verrou par bibliothèque) ; `EFFECT_GATE` ne fait plus qu'ordonner les effets dans un processus ; `WAKE` reste local | §3 |
 | Nettoyage au démarrage de `scans::router` | `scans.rs`, `core_instances.rs` | levé (schéma v4) : le nettoyage ne touche plus que le travail sans bail vivant ; voir §3.3 | §3.3 |
-| `CATALOGUE_CACHE` | `inventory/catalogue/cache.rs` | cache périmé après une écriture sur l'autre Core | §4.2 |
-| Cache de sessions / `touch` | `auth/state.rs`, `auth/touch.rs` | une révocation n'est vue qu'après expiration du cache de l'autre Core | §4.4 |
+| `CATALOGUE_CACHE` | `inventory/catalogue/cache.rs` | levé (étape 6) : les écritures PostgreSQL avancent la génération partagée `inventory_cache_generation`, déjà lue par l'empreinte de chaque requête ; aucune lecture ajoutée | §4.2 |
+| Cache de sessions / `touch` | `auth/state.rs`, `auth/touch.rs` | levé (vérifié à l'étape 6) : sessions, comptes désactivés et droits sont relus en base à chaque requête, sans cache ; `touch` ne diffère que `last_seen_at` | §4.4 |
 | `MUTATIONS`, paquets d'extension locaux, `AssetStore` | `extensions/`, `assets.rs` | installations non sérialisées, fichiers locaux | §4.5 |
 | Tâches système et sauvegardes planifiées | `system_task_queue.rs`, `admin_backups.rs`, `task_scheduler.rs` | levé : file et bail en base sous verrous consultatifs PostgreSQL ; voir §3.2 (point 4) | §3.2 |
 
@@ -540,6 +540,82 @@ porte que `last_seen_at`. À éprouver à deux Core : changement de droits et su
 propagés en moins de la durée maximale de vie d'un cache de lecture (cible : ≤ 5 s), sinon
 lecture directe sans cache pour les contrôles de sécurité.
 
+**Réalisé (étape 6, schéma v8, migration `0008_node_health`)** — module `coherence.rs` :
+
+- **mode multi-Core** (`IdentityStore::shared_with_other_cores`) : vrai quand `core_instances`
+  contient un autre Core vivant (battement frais, hors prédécesseur planté du même hôte, même règle
+  que `alive_sql`). Recalculé par chaque battement (`core_instances::refresh_peers`, toutes les
+  10 s, une requête `COUNT` dans la boucle de battement, jamais dans une requête HTTP) et gardé en
+  mémoire (`AtomicBool`). SQLite ne l'active jamais et n'exécute pas la requête. Seul (SQLite, ou
+  PostgreSQL avec un seul Core vivant), aucun chemin de cache n'ajoute de lecture : vérifié par
+  `postgres_a_lone_core_adds_nothing_to_its_hot_path` (50 requêtes de catalogue chaudes et 50
+  lectures de fiche de Node : 50 instructions seul, 50 avec un pair, compteur `query-metrics`) et
+  par les tests SQLite du module ;
+- **inventaire des caches** : sessions, comptes désactivés, droits (`PERMISSIONS_CACHE`, clé =
+  empreinte en ligne de toutes les tables de droits) et catalogue (`CATALOGUE_CACHE`,
+  `IMAGE_META_CACHE`, clé = empreinte en ligne qui inclut `inventory_cache_generation`) étaient
+  déjà validés en base à chaque requête : ils ne dépendent pas du mode. Dépendent du mode : la vue
+  `NodeRuntimeRegistry`, les origines CORS (`IdentityStore::cors_origins`) et `ARTWORK_SHA_CACHE` ;
+- **catalogue (§4.2)** : PostgreSQL n'a pas de déclencheurs `cache_gen_*` ; ce Core s'appuyait sur
+  `invalidate_catalogue_cache()`, purement locale. Écart par rapport au plan : pas de lecture
+  supplémentaire de la génération, l'empreinte la lit déjà. Les écritures avancent la génération
+  partagée : dans leur transaction (`bump_shared_generation`, **une fois**, en dernière
+  instruction avant le commit : publication et lots de scan, résultat d'une tâche de métadonnées
+  automatiques, métadonnées d'extension — jamais par résultat au milieu d'une longue transaction,
+  ce qui garderait la ligne de génération verrouillée et bloquerait les autres écrivains), sinon
+  juste après le commit (`catalogue_changed`, qui remplace les appels à
+  `invalidate_catalogue_cache()` des éditions manuelles, regroupements, contrôle parental,
+  illustrations, ordre des fonds). Les écritures de **droits** (bibliothèques d'un compte à la
+  création et à la modification, membres et bibliothèques d'un groupe, suppression d'un groupe,
+  enregistrement et suppression d'une bibliothèque) appellent aussi `catalogue_changed` : leurs
+  tables sont résumées par des agrégats (nombre, sommes de longueurs, min/max) qu'un échange de
+  lignes laisse inchangés, en PostgreSQL même à un seul Core (SQLite a ses déclencheurs). Un arrêt du Core entre
+  ce commit et l'avancement laisse les autres Core sur leurs pages jusqu'à l'écriture suivante.
+  `catalogue_changed` ne vide que les entrées de la base concernée (époque par base) : les tests
+  parallèles ne s'invalident plus les uns les autres (cause de l'instabilité de
+  `hide_watched_caches_*`). Coût en mono-Core PostgreSQL : un `UPDATE` d'une ligne par écriture
+  de catalogue, aucun par lecture ;
+- **Nodes (§4.1)** : le Core qui reçoit les battements d'un Node écrit, seulement si d'autres Core
+  sont vivants, un instantané `node_health(node_id, core_id, epoch, sampled_at, telemetry_json)`
+  au plus toutes les 14 s par Node et seulement si une valeur lue par le classement ou la
+  répartition change (flux, scans, présence de latence ou écart > 25 %, échecs, pression
+  bloquante, renouvelée tant qu'elle bloque). Un instantané d'époque de canal inférieure ne
+  remplace pas celui du propriétaire courant (sauf s'il a plus de 60 s). Seul, aucune écriture :
+  après une reprise, le nouveau propriétaire reçoit le premier battement en une période (15 s) et
+  personne d'autre ne lit l'instantané. Les autres Core relisent fiches (statut, clés,
+  `last_seen_at` le plus récent) et instantanés en une requête, au plus toutes les 2 s
+  (`SHARED_REFRESH`), déclenchée par la première requête qui consulte le registre après
+  l'intervalle (les autres gardent la copie, sans attendre) ; aucune E/S réseau. Une relecture
+  dont le `SELECT` a commencé avant une écriture locale de fiche (révocation, rotation) ne
+  l'écrase jamais (séquence d'écritures locales). Un Node stable est republié au moins toutes les
+  28 s, pour que les autres Core voient un `sampled_at` récent (arrêt d'un scan par
+  l'administrateur), et tout est republié après une sortie du mode multi-Core. Les appels signés
+  d'un Node relisent toujours statut et clés en base ;
+- **origines CORS et illustrations** : relues au plus toutes les 2 s en mode multi-Core ; le cache
+  de SHA d'illustration est contourné dans ce mode ;
+- **transitions** : un Core qui démarre voit les Core existants dès son premier battement ; eux le
+  voient à leur battement suivant (≤ 10 s). Une fiche de Node, une origine CORS ou une
+  illustration modifiée par le nouveau Core dans cet intervalle atteint les anciens en ≤ 12 s au
+  lieu de ≤ 2 s ; sessions, comptes, droits, catalogue et appels signés de Node ne sont pas
+  concernés. Quand le dernier pair disparaît (vu au battement suivant après un arrêt propre,
+  après 45 s de silence en cas de panne), le battement relit une fois le registre et les
+  origines CORS et oublie les SHA d'illustration de la base : les copies faites pendant le mode
+  multi-Core ne restent pas figées.
+
+Preuves (PostgreSQL 18 jetable, deux `IdentityStore` dans **un seul processus**, noms d'hôte
+distincts, boucles de battement réelles ; build de test non optimisé) :
+`postgres_writes_and_revocations_of_one_core_reach_the_other` (édition et scan de catalogue,
+retrait d'un droit de bibliothèque, révocation de session, compte désactivé, révocation de Node,
+télémétrie) et `postgres_cross_core_propagation_latency` (`COHERENCE_ITERATIONS`, 100 par défaut ;
+délai entre le début de l'écriture sur A et la première requête de B qui l'observe, sondée chaque
+milliseconde) : voir §6, ligne 6. Non mesuré : deux vrais processus Core, charge concurrente,
+réseau entre Core et base.
+
+Mono-Core PostgreSQL inchangé : `postgres_catalogue_bench` (taille complète, build de test,
+`pg_stat_statements`) compte 168 / 106 / 106 instructions SQL pour les 10 requêtes des tours
+froid / tiède / chaud, avant comme après l'étape ; les temps restent dans le bruit (tour chaud
+44-54 ms contre 48-89 ms, 200 accueils simultanés p50 517 contre 506 ms).
+
 ### 4.5 Fichiers locaux
 
 Les paquets d'extension sont déjà reconstruits depuis la base (empreinte vérifiée). Les fichiers
@@ -584,7 +660,7 @@ avant la suivante.
 | 3 | Propriété des canaux + époque (§2.1, §2.3) — fait pour le canal, appels directs non fencés ; preuve de sortie à écrire | arrêt brutal du propriétaire : le Node est repris par l'autre Core en moins de 3 baux, aucune commande d'époque ancienne exécutée |
 | 4 | Boîte d'envoi durable (§2.2) — fait ; preuve dans un seul processus avec Node simulé (10 000 commandes, 3 changements de propriétaire, zéro perte, zéro double exécution), preuve à deux processus à écrire ; rotation de secret en deux temps faite (§2.3) | commandes émises depuis le Core non propriétaire ; aucune perte, aucun doublon sur 10 000 commandes avec 3 arrêts brutaux |
 | 5 | Fencing des publications et lots (§3.2.1-2) — fait (schéma v7) ; preuve dans un seul processus (deux stores PostgreSQL, connexion du Core A tuée en pleine publication, point d'arrêt de test), preuve à deux processus avec arrêt réel à écrire | arrêt brutal pendant la publication : zéro publication partielle, zéro double publication |
-| 6 | Caches : génération de catalogue, santé de Node (§4) | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |
+| 6 | Caches : génération de catalogue, santé de Node (§4) — fait (schéma v8) ; mesuré à deux stores dans un processus (100 itérations, 25 pour les Nodes, build de test) : édition de catalogue p50 11,7 / p95 11,9 / max 34,8 ms ; retrait de droit p50 157 / p95 175 / max 195 ms (= une requête sans cache : 153 / 171 / 203 ms) ; révocation de session p50 2,7 / p95 2,8 / max 6,4 ms ; révocation de Node et télémétrie p50 ≈ p95 ≈ max ≈ 2,0 s (intervalle de relecture) ; mesure à deux processus à écrire | latence de propagation d'une écriture et d'une révocation, p50/p95/max mesurés à deux Core |
 | 7 | Effets externes (§5) | injection de pannes entre appel et confirmation : état `unknown` observé, jamais de rejeu non idempotent |
 | 8 | Chaos à deux Core | scénarios de `MULTI_NODE_RELIABILITY.md` rejoués à deux Core avec coupures réseau, redémarrages, tâches concurrentes, droits différents |
 

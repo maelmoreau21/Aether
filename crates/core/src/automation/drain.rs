@@ -567,6 +567,9 @@ pub async fn persist_result(
                 now,
             )
             .await?;
+            // Once per task result, last catalogue write of this transaction: catalogue caches
+            // of every Core are keyed by this generation (PostgreSQL has no triggers).
+            crate::inventory::bump_shared_generation(tx).await?;
         }
     }
     Ok(true)

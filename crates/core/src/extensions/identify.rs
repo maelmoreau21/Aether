@@ -516,6 +516,9 @@ pub(super) async fn apply(
         "metadata.identified",
     )
     .await?;
+    crate::inventory::bump_shared_generation(&mut tx)
+        .await
+        .map_err(db)?;
     tx.commit().await.map_err(db)?;
 
     // Optional image import (Poster and Backdrop)

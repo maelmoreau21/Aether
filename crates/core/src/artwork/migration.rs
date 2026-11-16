@@ -160,7 +160,7 @@ async fn migrate_entry(
     query("INSERT INTO artwork_annotations(work_id,image_id,kind,source_sha256,encoding) VALUES(?,?,?,?,?) ON CONFLICT(work_id,image_id) DO UPDATE SET encoding=excluded.encoding")
         .bind(work).bind(id).bind(kind).bind(sha).bind(crate::image_import::ENCODING).execute(&mut *tx).await.map_err(db)?;
     tx.commit().await.map_err(db)?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(store).await;
     Ok(())
 }
 
@@ -254,7 +254,7 @@ async fn migrate_object(store: &IdentityStore, sha: &str) -> Result<(), StatusCo
             .as_secs() as i64,
     )
     .await?;
-    crate::inventory::invalidate_catalogue_cache();
+    crate::inventory::catalogue_changed(store).await;
     // No deletion: AssetStore's two-phase GC retains the former objects for its grace period.
     Ok(())
 }

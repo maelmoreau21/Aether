@@ -253,7 +253,7 @@ class AetherReleasePolicyTests(unittest.TestCase):
         ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         publish = (root / ".github/workflows/publish.yml").read_text(encoding="utf-8")
         release_wf = (root / ".github/workflows/release.yml").read_text(encoding="utf-8")
-        self.assertEqual(ci.count("uses: docker/bake-action@v6"), 1)
+        self.assertEqual(ci.count("uses: docker/bake-action@v7"), 1)
         self.assertRegex(ci, r"(?m)^ +source: \.\s*$")
         self.assertIn("ref: ${{ github.sha }}", ci)
         self.assertIn("docker-bake.ci.hcl", ci)

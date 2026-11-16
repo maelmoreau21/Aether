@@ -40,10 +40,10 @@ jobs:
       next_tag: ${{ steps.calc.outputs.next_tag }}
       series: ${{ steps.calc.outputs.series }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - id: calc
@@ -76,9 +76,9 @@ jobs:
     name: Validation des workflows
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker://rhysd/actionlint:1.7.12
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Check active documentation and Halo references
@@ -128,7 +128,7 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - name: Récupérer le code source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Installer la toolchain Rust
         uses: dtolnay/rust-toolchain@stable
@@ -160,7 +160,7 @@ jobs:
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/fixtures/generated
           key: fixtures-p0-full-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py', 'scripts/validate-prepared-fixtures.py') }}
@@ -267,7 +267,7 @@ jobs:
 
       - name: Conserver les temps de compilation Cargo
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cargo-timings-${{ matrix.shard }}
           overwrite: true
@@ -301,7 +301,7 @@ jobs:
       contents: read
     steps:
       - name: Récupérer le code source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # cargo audit direct : échoue sur une vulnérabilité ; les crates non
       # maintenues (liaisons GTK de l'application de bureau) restent des avertissements. L'action
@@ -332,10 +332,10 @@ jobs:
         working-directory: apps/web
     steps:
       - name: Récupérer le code source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Installer Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: "npm"
@@ -371,7 +371,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Récupérer le code source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Purger les preuves navigateur préexistantes
         run: |
@@ -388,7 +388,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Installer Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: "npm"
@@ -417,7 +417,7 @@ jobs:
 
       - name: Cache des fixtures synthétiques
         id: cache-fixtures
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/fixtures/generated
           key: fixtures-p1-browser-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/generate-dual-opus-fixture.py', 'scripts/prepare-p1.py') }}
@@ -505,7 +505,7 @@ jobs:
         # Keep partial failure reports, but do not mask a fixture/setup failure
         # with a second error when no browser scenario could run.
         if: ${{ always() && hashFiles('docs/evidence/2026-10-16/scanner/**', 'docs/evidence/2026-10-17/series/**', 'docs/evidence/2026-10-22/nas-preparation/ci/**', 'docs/evidence/2026-10-22/separated-media/ci/**', 'docs/evidence/2026-10-22/playlists/ci/**') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-evidence-films-series
           if-no-files-found: error
@@ -533,11 +533,11 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/bake-action@v6
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/bake-action@v7
         with:
           # Bake v6 otherwise refetches the event's ephemeral PR merge ref.
           source: .
@@ -570,7 +570,7 @@ jobs:
           fi
       - name: Réutiliser la fixture AV1/Opus des tests Rust
         id: image-fixtures
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: tests/fixtures/generated
           key: fixtures-p0-full-v2-ffmpeg-9.0.2-${{ hashFiles('scripts/build-ffmpeg.sh', 'scripts/generate-fixtures.ps1', 'scripts/prepare-language-remux.ps1', 'scripts/generate-representative-fixtures.py', 'scripts/prepare-mse.py', 'scripts/prepare-dash.py', 'scripts/prepare-p1.py', 'scripts/validate-prepared-fixtures.py') }}
@@ -608,7 +608,7 @@ jobs:
           python3 scripts/ci-image-archive.py load --directory verified-images \
             --revision "$REVISION" --arch "$ARCH" --version "$VERSION" --source "$SOURCE"
       - name: Transférer les images validées sans nouvelle compilation
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: verified-images-${{ matrix.arch }}
           overwrite: true
@@ -618,7 +618,7 @@ jobs:
           retention-days: 1
       - name: Conserver les mesures et aperçus Docker
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: docker-smoke-${{ matrix.arch }}
           overwrite: true
@@ -638,7 +638,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
       - name: Poser le tag bêta
@@ -672,7 +672,7 @@ jobs:
       contents: write
     steps:
       - name: Récupérer les applications
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: aether-*
           path: dist

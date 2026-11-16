@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Récupérer le code source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Installer la toolchain Rust et les cibles Apple
         uses: dtolnay/rust-toolchain@stable
@@ -103,7 +103,7 @@ jobs:
           ls -l dist
 
       - name: Publier les apps non signées
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aether-apple
           path: dist/*.ipa

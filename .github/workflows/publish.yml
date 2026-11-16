@@ -47,20 +47,20 @@ jobs:
           - arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: inputs.push
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta-standalone
         with:
           bake-target: runtime
@@ -73,7 +73,7 @@ jobs:
             type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta-core
         with:
           bake-target: runtime-core
@@ -86,7 +86,7 @@ jobs:
             type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: meta-node
         with:
           bake-target: runtime-node
@@ -99,7 +99,7 @@ jobs:
             type=raw,value=${{ inputs.series }},enable=${{ inputs.series != '' && inputs.is_release }}
             type=sha,format=long
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: verified-images-${{ matrix.arch }}
           path: verified-images
@@ -182,7 +182,7 @@ jobs:
 
       - name: Sauvegarder les digests en artifact
         if: inputs.push
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digest-images-${{ matrix.arch }}
           overwrite: true
@@ -196,16 +196,16 @@ jobs:
     if: inputs.push && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: digest-images-*
           path: digests
@@ -216,7 +216,7 @@ jobs:
           REVISION: ${{ github.sha }}
         run: python3 scripts/publish-multiarch-manifests.py --directory digests --owner "$OWNER" --revision "$REVISION" --publish
       - name: Conserver les digests des manifests pour la release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digest-manifests
           overwrite: true

@@ -27,7 +27,7 @@ jobs:
       CARGO_BUILD_JOBS: ${{ matrix.cargo-jobs }}
       CARGO_INCREMENTAL: '0'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       # Deliberately no target cache: all cohorts build identical locked sources.
       - name: Install native build prerequisites
@@ -50,7 +50,7 @@ jobs:
           /usr/bin/time -v -o measurements/warm-build-time.txt cargo build --release --locked \
             --bin aether-core --bin aether-node --bin media-bootstrap --bin media-backup \
             --bin media-restore --bin media-recover --bin media-extension-worker
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: rust-profile-${{ inputs.runner }}-cgu${{ matrix.codegen-units }}-jobs${{ matrix.cargo-jobs }}

@@ -49,6 +49,7 @@
   let loading = $state(true);
   let busy = $state(false);
   let testing = $state(false);
+  let loadingOptions = $state(false);
   let error = $state('');
   let message = $state('');
   let servers = $state<RemoteServer[]>([]);
@@ -59,21 +60,22 @@
   let autoApprove = $state(false);
   let maxPending = $state(20);
   let options = $state<ServerOptions | null>(null);
+  let optionsNotice = $state('');
   let connectionTested = $state(false);
   let connectionStatus = $state<ServerSystemStatus | null>(null);
   let connectionError = $state('');
   let showAnimeSettings = $state(false);
   let confirmingRemoval = $state<string | null>(null);
+  let extensionGrants = $state<{ allLibraries: boolean; libraryIds: string[] } | null>(null);
 
   let defaultRule = $state<PolicyRule>({
-    film: { allow: true, autoApprove: false },
-    series: { allow: true, autoApprove: false },
-    music: { allow: true, autoApprove: false }
+    film: {},
+    series: {},
+    music: {}
   });
 
   const administrator = $derived($session?.user.role === 'administrator');
   const matchingLocations = $derived(locations.filter(location => location.kind === (form.kind === 'radarr' ? 'films' : form.kind === 'sonarr' ? 'series' : 'music')));
-  const settingsUnlocked = $derived(Boolean(editing) || connectionTested);
   const availableTags = $derived<ArrTag[]>(options?.tags ?? form.settings.availableTags ?? []);
 
   function formatBytes(bytes: number | null | undefined): string {
@@ -101,11 +103,12 @@
   }
 
   async function refresh() {
-    const [list, settings, destinations, overview] = await Promise.all([
+    const [list, settings, destinations, overview, extensionsData] = await Promise.all([
       applicationRequest<{ servers: RemoteServer[] }>('/api/v1/admin/acquisition/servers'),
       applicationRequest<{ autoApprove: boolean; maxPendingPerUser: number }>('/api/v1/admin/acquisition/settings'),
       applicationRequest<{ locations: Location[] }>('/api/v1/admin/acquisition/locations'),
-      loadPolicyOverview().catch(() => null)
+      loadPolicyOverview().catch(() => null),
+      applicationRequest<{ extensions: { manifest: { id: string }; allLibraries?: boolean; libraryIds?: string[] }[] }>('/api/v1/admin/extensions').catch(() => null)
     ]);
     servers = list.servers;
     locations = destinations.locations;
@@ -113,11 +116,15 @@
     maxPending = settings.maxPendingPerUser;
     if (overview) {
       defaultRule = {
-        film: { allow: overview.default.film?.allow ?? true, autoApprove: overview.default.film?.autoApprove ?? autoApprove, quota: overview.default.film?.quota },
-        series: { allow: overview.default.series?.allow ?? true, autoApprove: overview.default.series?.autoApprove ?? autoApprove, quota: overview.default.series?.quota },
-        music: { allow: overview.default.music?.allow ?? true, autoApprove: overview.default.music?.autoApprove ?? autoApprove, quota: overview.default.music?.quota }
+        film: { ...(overview.default.film ?? {}) },
+        series: { ...(overview.default.series ?? {}) },
+        music: { ...(overview.default.music ?? {}) }
       };
     }
+    const reqExt = extensionsData?.extensions?.find(e => e.manifest.id === 'media-requests');
+    extensionGrants = reqExt
+      ? { allLibraries: reqExt.allLibraries !== false, libraryIds: reqExt.libraryIds ?? [] }
+      : null;
   }
 
   onMount(() => {
@@ -133,6 +140,24 @@
       }
     })();
   });
+
+  async function fetchServerOptions(id: string) {
+    loadingOptions = true;
+    optionsNotice = '';
+    try {
+      const discovered = await applicationRequest<ServerOptions>(
+        `/api/v1/admin/acquisition/servers/${encodeURIComponent(id)}/options`
+      );
+      if (editing !== id) return;
+      applyDiscoveredOptions(discovered, connectionStatus);
+    } catch {
+      if (editing === id) {
+        optionsNotice = $t('arr_sync_options_failed');
+      }
+    } finally {
+      if (editing === id) loadingOptions = false;
+    }
+  }
 
   function edit(server: RemoteServer) {
     editing = server.id;
@@ -152,6 +177,7 @@
     };
     key = '';
     options = null;
+    optionsNotice = '';
     connectionTested = false;
     connectionStatus = merged.lastStatus ?? null;
     connectionError = '';
@@ -160,6 +186,36 @@
     );
     message = '';
     activeTab = 'services';
+    void fetchServerOptions(server.id);
+  }
+
+  function duplicate(server: RemoteServer) {
+    editing = null;
+    const merged = mergeSettings(server.settings);
+    form = {
+      name: '',
+      kind: server.kind,
+      baseUrl: server.baseUrl,
+      libraryId: '',
+      rootFolder: server.rootFolder,
+      qualityProfileId: server.qualityProfileId,
+      qualityProfiles: [...(server.qualityProfiles ?? [])],
+      metadataProfileId: server.metadataProfileId,
+      settings: merged,
+      isDefault: false,
+      enabled: true
+    };
+    key = '';
+    options = null;
+    optionsNotice = '';
+    connectionTested = true;
+    connectionStatus = merged.lastStatus ?? null;
+    connectionError = '';
+    showAnimeSettings = Boolean(
+      merged.animeQualityProfileId || merged.animeRootFolder || merged.animeLanguageProfileId || merged.animeTags.length > 0
+    );
+    message = $t('arr_duplicate_notice');
+    activeTab = 'services';
   }
 
   function clear() {
@@ -167,6 +223,8 @@
     form = blank();
     key = '';
     options = null;
+    optionsNotice = '';
+    loadingOptions = false;
     connectionTested = false;
     connectionStatus = null;
     connectionError = '';
@@ -221,15 +279,31 @@
     return (form.qualityProfiles ?? []).some(p => p.id === id);
   }
 
+  function selectAllProfiles() {
+    if (!options?.qualityProfiles.length) return;
+    form.qualityProfiles = options.qualityProfiles.map(p => ({ id: p.id, name: p.name }));
+  }
+
+  function onlyDefaultProfile() {
+    const source = (options?.qualityProfiles ?? form.qualityProfiles ?? []).find(p => p.id === form.qualityProfileId);
+    form.qualityProfiles = source ? [{ id: source.id, name: source.name }] : [];
+  }
+
   function defaultProfileLabel(server: RemoteServer): string {
     const found = server.qualityProfiles?.find(p => p.id === server.qualityProfileId);
-    return found ? found.name : `#${server.qualityProfileId}`;
+    return found ? found.name : $t('rq_quality_profile_default_name', { id: server.qualityProfileId });
+  }
+
+  function locationNameFor(libraryId: string): string {
+    const found = locations.find(l => l.id === libraryId);
+    return found ? `${found.name}${found.nodeName ? ` · ${found.nodeName}` : ''}` : libraryId;
   }
 
   function applyDiscoveredOptions(discovered: ServerOptions, system?: ServerSystemStatus | null) {
     options = discovered;
+    optionsNotice = '';
     connectionTested = true;
-    connectionStatus = system ?? null;
+    connectionStatus = system ?? connectionStatus;
     connectionError = '';
     form.settings = {
       ...form.settings,
@@ -245,6 +319,15 @@
     }
     if ((!form.qualityProfileId || form.qualityProfileId <= 0) && discovered.qualityProfiles.length > 0) {
       form.qualityProfileId = discovered.qualityProfiles[0].id;
+    }
+    if ((form.qualityProfiles?.length ?? 0) === 0 && discovered.qualityProfiles.length > 0) {
+      form.qualityProfiles = discovered.qualityProfiles.map(p => ({ id: p.id, name: p.name }));
+    } else {
+      const liveNames = new Map(discovered.qualityProfiles.map(p => [p.id, p.name]));
+      form.qualityProfiles = (form.qualityProfiles ?? []).map(p => ({
+        id: p.id,
+        name: liveNames.get(p.id) ?? p.name
+      }));
     }
     if (form.qualityProfileId > 0) {
       ensureDefaultInProfiles();
@@ -325,6 +408,7 @@
       const app = result.system?.appName ?? result.appName;
       const version = result.system?.version ?? result.version;
       message = app && version ? $t('arr_connected_banner', { app, version }) : $t('connection_successful');
+      await refresh();
       if (editing === id && result.options) {
         applyDiscoveredOptions(result.options, result.system ?? { appName: app, version });
       }
@@ -350,6 +434,16 @@
     } finally {
       busy = false;
     }
+  }
+
+  function setDefaultBool(mediaClass: 'film' | 'series' | 'music', field: 'allow' | 'autoApprove' | 'advanced', raw: string) {
+    const target = { ...(defaultRule[mediaClass] ?? {}) };
+    if (raw === 'inherit') {
+      delete target[field];
+    } else {
+      target[field] = raw === 'true';
+    }
+    defaultRule = { ...defaultRule, [mediaClass]: target };
   }
 
   async function saveGeneralAndDefault(event: SubmitEvent) {
@@ -424,6 +518,7 @@
                     </small>
                     <p class="muted small">
                       {server.baseUrl}
+                      · <strong>{locationNameFor(server.libraryId)}</strong>
                       {#if server.rootFolder} · <code>{server.rootFolder}</code>{/if}
                       · {$t('default_quality_profile')}: <strong>{defaultProfileLabel(server)}</strong>
                       {#if (server.qualityProfiles?.length ?? 0) > 1}
@@ -444,6 +539,7 @@
                       <a class="button-link" href={server.settings.externalUrl} target="_blank" rel="noopener noreferrer">{$t('arr_open_service', { service: server.kind })}</a>
                     {/if}
                     <button disabled={busy} onclick={() => edit(server)}>{$t('edit')}</button>
+                    <button disabled={busy} onclick={() => duplicate(server)}>{$t('arr_duplicate_destination')}</button>
                     <button disabled={busy} onclick={() => test(server.id)}>{$t('test')}</button>
                     <button class="danger" disabled={busy} onclick={() => confirmingRemoval = server.id}>{$t('remove')}</button>
                   </div>
@@ -509,48 +605,59 @@
 
             <hr class="seerr-divider" />
 
-            <div class="arr-step" class:arr-step-locked={!settingsUnlocked}>
+            <div class="arr-step">
               <h3>{$t('arr_step_settings')}</h3>
-              {#if !settingsUnlocked}
-                <p class="muted">{$t('arr_connect_first_hint')}</p>
-              {:else}
-                <div class="fields">
-                  <label>{$t('destination_location')}
-                    <select required bind:value={form.libraryId}>
-                      <option value="">{$t('choose_a_library_folder')}</option>
-                      {#each matchingLocations as location (location.id)}
-                        <option value={location.id}>{location.name} · {location.nodeName ?? location.nodeId} · {location.root}</option>
+              {#if loadingOptions}
+                <p class="muted small" role="status">{$t('arr_loading_options')}</p>
+              {:else if optionsNotice}
+                <p class="feedback">{optionsNotice}</p>
+              {:else if !options && !connectionTested}
+                <p class="muted small">{$t('arr_connect_first_hint')}</p>
+              {/if}
+              {#if matchingLocations.length === 0}
+                <p class="feedback error">{$t('arr_no_matching_locations')}</p>
+              {/if}
+              <div class="fields">
+                <label>{$t('destination_location')}
+                  <select required bind:value={form.libraryId}>
+                    <option value="">{$t('choose_a_library_folder')}</option>
+                    {#each matchingLocations as location (location.id)}
+                      <option value={location.id}>{location.name} · {location.nodeName ?? location.nodeId} · {location.root}</option>
+                    {/each}
+                  </select>
+                </label>
+
+                <label>{$t('remote_folder')}
+                  {#if options?.rootFolders.length}
+                    <select required={form.enabled} bind:value={form.rootFolder}>
+                      <option value="">{$t('choose_a_folder')}</option>
+                      {#each options.rootFolders as folder (folder.path)}
+                        <option value={folder.path}>
+                          {folder.path}{folder.freeSpace != null ? ` (${$t('arr_free_space', { size: formatBytes(folder.freeSpace) })})` : ''}{folder.accessible === false ? ` · ${$t('arr_folder_inaccessible')}` : ''}
+                        </option>
                       {/each}
                     </select>
-                  </label>
+                  {:else}
+                    <input required={form.enabled} bind:value={form.rootFolder} maxlength="1024" placeholder={form.kind === 'radarr' ? '/movies' : form.kind === 'sonarr' ? '/tv' : '/music'} />
+                  {/if}
+                </label>
 
-                  <label>{$t('remote_folder')}
-                    {#if options}
-                      <select required={form.enabled} bind:value={form.rootFolder}>
-                        <option value="">{$t('choose_a_folder')}</option>
-                        {#each options.rootFolders as folder (folder.path)}
-                          <option value={folder.path}>
-                            {folder.path}{folder.freeSpace != null ? ` (${$t('arr_free_space', { size: formatBytes(folder.freeSpace) })})` : ''}{folder.accessible === false ? ` · ${$t('arr_folder_inaccessible')}` : ''}
-                          </option>
-                        {/each}
-                      </select>
-                    {:else}
-                      <input required={form.enabled} bind:value={form.rootFolder} maxlength="1024" />
-                    {/if}
-                  </label>
-
-                  <label>{$t('default_quality_profile')}
-                    {#if options}
-                      <select required={form.enabled} bind:value={form.qualityProfileId} onchange={ensureDefaultInProfiles}>
-                        <option value={0}>{$t('choose_a_profile')}</option>
-                        {#each options.qualityProfiles as profile (profile.id)}
-                          <option value={profile.id}>{profile.name}</option>
-                        {/each}
-                      </select>
-                    {:else}
-                      <input type="number" min="0" bind:value={form.qualityProfileId} />
-                    {/if}
-                  </label>
+                <label>{$t('default_quality_profile')}
+                  {#if options?.qualityProfiles.length || (form.qualityProfiles?.length ?? 0) > 0}
+                    {@const profileChoices = options?.qualityProfiles.length ? options.qualityProfiles : (form.qualityProfiles ?? [])}
+                    <select required={form.enabled} bind:value={form.qualityProfileId} onchange={ensureDefaultInProfiles}>
+                      <option value={0}>{$t('choose_a_profile')}</option>
+                      {#each profileChoices as profile (profile.id)}
+                        <option value={profile.id}>{profile.name}</option>
+                      {/each}
+                      {#if form.qualityProfileId > 0 && !profileChoices.some(p => p.id === form.qualityProfileId)}
+                        <option value={form.qualityProfileId}>{$t('rq_quality_profile_unsynced', { id: form.qualityProfileId })}</option>
+                      {/if}
+                    </select>
+                  {:else}
+                    <input type="number" min="0" bind:value={form.qualityProfileId} />
+                  {/if}
+                </label>
 
                   {#if form.kind === 'lidarr'}
                     <label>{$t('metadata_profile')}
@@ -616,8 +723,18 @@
 
                 {#if options?.qualityProfiles?.length || (form.qualityProfiles?.length ?? 0) > 0}
                   <div class="quality-profiles-box">
-                    <h4>{$t('available_quality_profiles')}</h4>
-                    <p class="muted small">{$t('available_quality_profiles_hint')}</p>
+                    <div class="record-header">
+                      <div>
+                        <h4>{$t('available_quality_profiles')}</h4>
+                        <p class="muted small">{$t('available_quality_profiles_hint')}</p>
+                      </div>
+                      {#if (options?.qualityProfiles?.length ?? 0) > 1}
+                        <div class="row">
+                          <button type="button" disabled={busy} onclick={selectAllProfiles}>{$t('arr_select_all_profiles')}</button>
+                          <button type="button" disabled={busy} onclick={onlyDefaultProfile}>{$t('arr_only_default_profile')}</button>
+                        </div>
+                      {/if}
+                    </div>
                     <div class="quality-profiles-grid">
                       {#each (options?.qualityProfiles ?? form.qualityProfiles ?? []) as profile (profile.id)}
                         {@const isDef = profile.id === form.qualityProfileId}
@@ -743,7 +860,6 @@
                   <button class="primary" disabled={busy}>{$t('save')}</button>
                   {#if editing}<button type="button" disabled={busy} onclick={clear}>{$t('finish_editing')}</button>{/if}
                 </div>
-              {/if}
             </div>
           </form>
         </section>
@@ -776,18 +892,36 @@
 
           <div class="policy-classes-grid">
             {#each ['film', 'series', 'music'] as const as mediaClass (mediaClass)}
-              {@const classRule = defaultRule[mediaClass] ?? { allow: true, autoApprove: false }}
+              {@const classRule = defaultRule[mediaClass] ?? {}}
               <div class="policy-card">
                 <h4>{$t(mediaClass === 'film' ? 'kind_movie' : mediaClass === 'series' ? 'kind_series' : 'audio')}</h4>
                 <label class="check">
-                  <input type="checkbox" bind:checked={classRule.allow} />
+                  <input
+                    type="checkbox"
+                    checked={classRule.allow !== false}
+                    onchange={e => setDefaultBool(mediaClass, 'allow', e.currentTarget.checked ? 'true' : 'false')}
+                  />
                   <span>{$t('rq_policy_allow')}</span>
                 </label>
                 <label>
                   <span>{$t('rq_policy_auto')}</span>
-                  <select bind:value={classRule.autoApprove}>
-                    <option value={false}>{$t('rq_policy_auto_review')}</option>
-                    <option value={true}>{$t('rq_policy_auto_direct')}</option>
+                  <select
+                    value={classRule.autoApprove === true ? 'true' : classRule.autoApprove === false ? 'false' : 'inherit'}
+                    onchange={e => setDefaultBool(mediaClass, 'autoApprove', e.currentTarget.value)}
+                  >
+                    <option value="inherit">{$t('rq_policy_inherit_global')}</option>
+                    <option value="false">{$t('rq_policy_auto_review')}</option>
+                    <option value="true">{$t('rq_policy_auto_direct')}</option>
+                  </select>
+                </label>
+                <label>
+                  <span>{$t('rq_policy_advanced')}</span>
+                  <select
+                    value={classRule.advanced === false ? 'false' : 'true'}
+                    onchange={e => setDefaultBool(mediaClass, 'advanced', e.currentTarget.value)}
+                  >
+                    <option value="true">{$t('ext_allow')}</option>
+                    <option value="false">{$t('ext_deny')}</option>
                   </select>
                 </label>
                 <div class="quota-field">
@@ -799,10 +933,13 @@
                         value={classRule.quota?.limit ?? ''}
                         oninput={e => {
                           const val = Number((e.target as HTMLInputElement).value);
-                          if (!val) classRule.quota = undefined;
-                          else classRule.quota = { limit: val, days: classRule.quota?.days ?? 7 };
+                          const target = { ...(defaultRule[mediaClass] ?? {}) };
+                          if (!val) delete target.quota;
+                          else target.quota = { limit: val, days: target.quota?.days ?? 7 };
+                          defaultRule = { ...defaultRule, [mediaClass]: target };
                         }}
                       />
+                      <span class="small muted">{$t('rq_policy_unit_requests')}</span>
                     </label>
                     {#if classRule.quota?.limit}
                       <label class="inline">
@@ -810,9 +947,12 @@
                         <input type="number" min="1" max="365"
                           value={classRule.quota.days}
                           oninput={e => {
-                            if (classRule.quota) classRule.quota.days = Math.max(1, Number((e.target as HTMLInputElement).value) || 7);
+                            const target = { ...(defaultRule[mediaClass] ?? {}) };
+                            if (target.quota) target.quota = { limit: target.quota.limit, days: Math.max(1, Number((e.target as HTMLInputElement).value) || 7) };
+                            defaultRule = { ...defaultRule, [mediaClass]: target };
                           }}
                         />
+                        <span class="small muted">{$t('rq_policy_unit_days')}</span>
                       </label>
                     {/if}
                   </div>
@@ -825,6 +965,19 @@
             <button class="primary" disabled={busy}>{$t('rq_policy_save_default')}</button>
           </div>
         </form>
+
+        {#if extensionGrants}
+          <section class="panel stack">
+            <div>
+              <h3>{$t('ext_library_access_title')}</h3>
+              <p class="muted">
+                {extensionGrants.allLibraries
+                  ? $t('ext_library_access_all_hint')
+                  : $t('ext_library_access_restricted_hint', { count: extensionGrants.libraryIds.length })}
+              </p>
+            </div>
+          </section>
+        {/if}
 
         <section class="panel stack">
           <div>
@@ -903,9 +1056,6 @@
   }
   .arr-step h3 {
     margin: 0;
-  }
-  .arr-step-locked {
-    opacity: 0.65;
   }
   .arr-status-banner {
     border: 1px solid var(--ok, #4ade80);

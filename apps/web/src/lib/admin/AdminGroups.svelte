@@ -67,7 +67,7 @@
   function hasPolicyOverrides(rule: PolicyRule): boolean {
     return (['film', 'series', 'music'] as const).some(c => {
       const cr = rule[c];
-      return cr !== undefined && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.quota !== undefined);
+      return cr !== undefined && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.advanced !== undefined || cr.quota !== undefined);
     });
   }
 

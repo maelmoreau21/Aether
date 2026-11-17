@@ -59,7 +59,7 @@
   function hasPolicyOverrides(rule: PolicyRule): boolean {
     return (['film', 'series', 'music'] as const).some(c => {
       const cr = rule[c];
-      return cr !== undefined && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.quota !== undefined);
+      return cr !== undefined && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.advanced !== undefined || cr.quota !== undefined);
     });
   }
 
@@ -357,7 +357,7 @@
                 <label class="form-row">
                   <span class="row-label">{$t('privilege')}</span>
                   <div class="row-field">
-                    <select bind:value={role} disabled={editing?.id === currentUserId}>
+                    <select bind:value={role} disabled={editing?.id === currentUserId} onchange={() => { if (editing && role !== 'administrator' && !requestsEffective) void loadUserExtensionPermissions(editing.id, role); }}>
                       <option value="user">{$t('standard_user')}</option>
                       <option value="administrator">{$t('administrator')}</option>
                     </select>
@@ -469,7 +469,7 @@
                     </thead>
                     <tbody>
                       {#each libraries as lib (lib.id)}
-                        {@const inherited = editing ? groups.filter(g => (g.isDefault || g.userIds.includes(editing?.id ?? '')) && g.libraryIds.includes(lib.id)) : []}
+                        {@const inherited = editing ? groups.filter(g => (g.isDefault || (g.systemRole ? g.systemRole === role : g.userIds.includes(editing?.id ?? ''))) && g.libraryIds.includes(lib.id)) : []}
                         <tr>
                           <td>
                             <input

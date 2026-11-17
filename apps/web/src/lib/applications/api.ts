@@ -40,6 +40,7 @@ const errors: Readonly<Record<string, string>> = translatedLabels({
   remote_unavailable: 'err_remote_unavailable', connection_unavailable: 'err_connection_unavailable', not_found: 'err_not_found',
   invalid_reject_reason: 'err_invalid_reject_reason', empty_selection: 'err_empty_selection', invalid_request_selection: 'err_empty_selection', invalid_priority: 'err_invalid_priority',
   request_permission_denied: 'err_request_permission', request_period_quota_exceeded: 'err_request_period_quota',
+  request_advanced_permission_denied: 'err_request_advanced_permission',
   invalid_request_policy: 'err_invalid_policy', policy_target_is_profile: 'err_policy_profile', group_not_found: 'err_not_found', user_not_found: 'err_not_found',
   invalid_quality_profile: 'err_invalid_quality_profile'
 });
@@ -128,7 +129,8 @@ export interface RequestSelection { seasons?: number[]; episodes?: { season: num
 export interface RequestEvent { status?: string; action?: string; createdAt: number; message?: string; code?: string | null; actorLabel?: string | null }
 export interface DownloadProgress { percent: number; totalBytes: number; remainingBytes: number; status: string; timeleft?: string | null; items: number }
 export interface MediaRequest extends SearchResult { id: string; status: string; createdAt: number; updatedAt?: number; userId?: string; own?: boolean; workId?: string | null; error?: string; errorCode?: string | null; selection?: RequestSelection; progress?: DownloadProgress | null; events?: RequestEvent[]; authorLabel?: string | null; sourceStatus?: string | null }
-export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; rootFolder: string; qualityProfileId: number; qualityProfiles?: QualityProfile[]; metadataProfileId?: number; settings?: ServerSettings; isDefault: boolean; enabled: boolean }
+export interface RemoteServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; baseUrl: string; hasApiKey?: boolean; libraryId: string; libraryName?: string; rootFolder: string; qualityProfileId: number; qualityProfiles?: QualityProfile[]; metadataProfileId?: number; settings?: ServerSettings; isDefault: boolean; enabled: boolean }
+export interface DestinationServer { id: string; name: string; kind: 'radarr' | 'sonarr' | 'lidarr'; libraryId: string; libraryName?: string; isDefault?: boolean; qualityProfileId: number; qualityProfiles?: QualityProfile[] }
 export interface ReportContext { engine?: string; errorCode?: string; audioTrackId?: string; subtitleTrackId?: string }
 export interface ReportInput { category: string; description: string; workId?: string; trackId?: string; assetId?: string; positionSeconds?: number; endSeconds?: number; context?: ReportContext }
 export interface ReportSubject { kind: string; title: string; year?: number | null; artist?: string; album?: string; workId?: string; trackId?: string; image?: string }
@@ -230,10 +232,10 @@ export function reportPayload(input: ReportInput): ReportInput {
 }
 
 export interface QuotaRule { limit: number; days: number }
-export interface ClassRule { allow?: boolean; autoApprove?: boolean; quota?: QuotaRule }
+export interface ClassRule { allow?: boolean; autoApprove?: boolean; advanced?: boolean; quota?: QuotaRule }
 export interface PolicyRule { film?: ClassRule; series?: ClassRule; music?: ClassRule }
 export interface EffectiveQuota { limit: number; days: number; used: number; remaining: number; resetsAt?: number | null }
-export interface EffectiveClassPolicy { allow: boolean; autoApprove: boolean; destination?: boolean; quota: EffectiveQuota | null }
+export interface EffectiveClassPolicy { allow: boolean; autoApprove: boolean; advanced?: boolean; configured?: boolean; destination?: boolean; quota: EffectiveQuota | null }
 export interface MyPolicy {
   administrator: boolean;
   pending: number;

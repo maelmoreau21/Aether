@@ -43,6 +43,8 @@ pub struct Quota {
 pub struct ClassRule {
     pub allow: Option<bool>,
     pub auto_approve: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub advanced: Option<bool>,
     pub quota: Option<Quota>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -77,6 +79,7 @@ impl Rule {
 pub(super) struct Grant {
     pub allow: bool,
     pub auto_approve: bool,
+    pub advanced: bool,
     pub quota: Option<Quota>,
 }
 
@@ -134,6 +137,7 @@ pub(super) fn resolve(
     Grant {
         allow: pick(|rule| rule.allow).unwrap_or(true),
         auto_approve: pick(|rule| rule.auto_approve).unwrap_or(global_auto),
+        advanced: pick(|rule| rule.advanced).unwrap_or(true),
         quota,
     }
 }
@@ -202,6 +206,7 @@ pub(super) async fn effective(
             grants: [Grant {
                 allow: true,
                 auto_approve: true,
+                advanced: true,
                 quota: None,
             }; 3],
         });
@@ -328,30 +333,52 @@ async fn describe(
         };
         classes.insert(
             class.to_owned(),
-            json!({"allow":grant.allow,"autoApprove":grant.auto_approve,"quota":quota}),
+            json!({"allow":grant.allow,"autoApprove":grant.auto_approve,"advanced":grant.advanced,"quota":quota}),
         );
     }
     Ok(
         json!({"administrator":effective.administrator,"pending":pending,"maxPending":effective.max_pending,"classes":classes}),
     )
 }
-/// Whether this person may reach at least one enabled destination for a media class.
-async fn has_destination(
-    auth: &AuthState,
-    actor: &Authenticated,
+/// Whether any server is enabled for a media class, and whether this account may reach one.
+async fn destination_status(
+    store: &IdentityStore,
+    user_id: &str,
+    role: &str,
     class: &str,
-) -> Result<bool, Error> {
+) -> Result<(bool, bool), Error> {
     let libraries: Vec<String> = query_scalar("SELECT library_id FROM acquisition_servers WHERE kind=? AND enabled=1 ORDER BY is_default DESC,name,id LIMIT 100")
         .bind(service_of(class))
-        .fetch_all(auth.store.pool())
+        .fetch_all(store.pool())
         .await
         .map_err(db)?;
+    let configured = !libraries.is_empty();
     for library in libraries {
-        if authorize(auth, actor, &library).await.is_ok() {
-            return Ok(true);
+        if crate::applications::authorize_library_for(store, user_id, role, "requests", &library)
+            .await
+            .is_ok()
+        {
+            return Ok((configured, true));
         }
     }
-    Ok(false)
+    Ok((configured, false))
+}
+
+async fn attach_reachability(
+    store: &IdentityStore,
+    user_id: &str,
+    role: &str,
+    value: &mut Value,
+) -> Result<(), Error> {
+    // External results carry no trusted classification: restricted accounts cannot request.
+    let restricted = unrestricted(store, user_id).await.is_err();
+    value["restricted"] = json!(restricted);
+    for class in CLASSES {
+        let (configured, reachable) = destination_status(store, user_id, role, class).await?;
+        value["classes"][class]["configured"] = json!(configured);
+        value["classes"][class]["destination"] = json!(!restricted && reachable);
+    }
+    Ok(())
 }
 
 /// `GET /api/v1/requests/policy`: what the caller may request and how much is left.
@@ -363,13 +390,13 @@ pub(super) async fn mine(
     let administrator = actor.user.role == Role::Administrator;
     let effective = effective(&auth.store, &actor.user.id, administrator).await?;
     let mut value = describe(&auth.store, &actor.user.id, &effective).await?;
-    // External results carry no trusted classification: restricted accounts cannot request.
-    let restricted = unrestricted(&auth.store, &actor.user.id).await.is_err();
-    value["restricted"] = json!(restricted);
-    for class in CLASSES {
-        let reachable = !restricted && has_destination(&auth, &actor, class).await?;
-        value["classes"][class]["destination"] = json!(reachable);
-    }
+    attach_reachability(
+        &auth.store,
+        &actor.user.id,
+        actor.user.role.as_str(),
+        &mut value,
+    )
+    .await?;
     Ok(Json(value))
 }
 
@@ -601,7 +628,8 @@ async fn user_effective(
             .await
             .map_err(db)?;
     let own = own.map(|json| parse(&json)).transpose()?;
-    let described = describe(&auth.store, &id, &effective).await?;
+    let mut described = describe(&auth.store, &id, &effective).await?;
+    attach_reachability(&auth.store, &id, &role, &mut described).await?;
     Ok(Json(json!({"rule":own,"effective":described})))
 }
 
@@ -718,5 +746,30 @@ mod tests {
         for kind in ["artist", "album", "track"] {
             assert_eq!(class_of(kind), "music");
         }
+    }
+    #[test]
+    fn advanced_option_inherits_and_combines_additively() {
+        let none = Rule::default();
+        assert!(resolve("film", &none, &[], &none, false).advanced);
+        let deny_adv = rule(ClassRule {
+            advanced: Some(false),
+            ..ClassRule::default()
+        });
+        let allow_adv = rule(ClassRule {
+            advanced: Some(true),
+            ..ClassRule::default()
+        });
+        assert!(!resolve("film", &none, &[], &deny_adv, false).advanced);
+        assert!(
+            resolve(
+                "film",
+                &none,
+                &[deny_adv.clone(), allow_adv.clone()],
+                &deny_adv,
+                false
+            )
+            .advanced
+        );
+        assert!(!resolve("film", &deny_adv, &[allow_adv], &none, false).advanced);
     }
 }

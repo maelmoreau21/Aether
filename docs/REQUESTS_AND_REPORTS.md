@@ -129,6 +129,7 @@ Chaque compte hérite d'une politique de demandes résolue par couches successiv
 Chaque classe de média définit indépendamment :
 - `allow` (booléen) : droit de soumettre des demandes pour cette classe.
 - `autoApprove` (booléen) : approbation automatique directe sans intervention d'un administrateur.
+- `advanced` (booléen, `true` par défaut) : droit de choisir une bibliothèque de destination ou un profil de qualité personnalisé.
 - `quota` (`limit` sur une fenêtre glissante en `days`) : nombre maximum de demandes autorisées sur la période.
 
 L'administrateur peut visualiser et éditer ces règles sur `/requests/admin`, et tester les droits effectifs

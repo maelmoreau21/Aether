@@ -1110,3 +1110,245 @@ async fn test_connection_discovers_arr_options_and_persists_server_settings() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(invalid["error"], "invalid_acquisition_server");
 }
+#[tokio::test]
+async fn locations_keep_primary_and_child_folders_and_test_server_syncs_profiles() {
+    let (_dir, store, app, sessions) = fixture().await;
+    let (admin, admin_csrf) = &sessions[2];
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('child-films','Films','films','local','/media-2',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO library_folders(library_id,parent_id,active) VALUES('child-films','request-films',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, locs) = request(
+        &app,
+        "GET",
+        "/api/v1/admin/acquisition/locations",
+        admin,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = locs["locations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["id"].as_str().unwrap())
+        .collect();
+    assert!(
+        ids.contains(&"request-films"),
+        "primary folder must remain selectable: {ids:?}"
+    );
+    assert!(
+        ids.contains(&"child-films"),
+        "child folder must be selectable: {ids:?}"
+    );
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let mock_arr = Router::new()
+        .route(
+            "/api/v3/system/status",
+            axum::routing::get(|| async {
+                Json(json!({"appName":"Radarr","version":"5.14.0","instanceName":"Radarr"}))
+            }),
+        )
+        .route(
+            "/api/v3/rootfolder",
+            axum::routing::get(|| async {
+                Json(json!([{"id":1,"path":"/movies","accessible":true}]))
+            }),
+        )
+        .route(
+            "/api/v3/qualityprofile",
+            axum::routing::get(|| async {
+                Json(json!([{"id":1,"name":"HD-1080p"},{"id":6,"name":"Ultra-HD"}]))
+            }),
+        )
+        .route(
+            "/api/v3/tag",
+            axum::routing::get(|| async { Json(json!([{"id":2,"label":"4k"}])) }),
+        );
+    let task = tokio::spawn(async move { axum::serve(listener, mock_arr).await.unwrap() });
+    query("UPDATE acquisition_servers SET base_url=?,quality_profile_id=6,quality_profiles_json='[]' WHERE id='radarr-a'")
+        .bind(format!("http://{addr}/"))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, _) = request(
+        &app,
+        "POST",
+        "/api/v1/admin/acquisition/servers/radarr-a/test",
+        admin,
+        admin_csrf,
+        Value::Null,
+    )
+    .await;
+    task.abort();
+    assert_eq!(status, StatusCode::OK);
+    let synced = server(&store, "radarr-a").await.unwrap();
+    assert_eq!(
+        synced.quality_profiles(),
+        vec![
+            QualityProfile {
+                id: 1,
+                name: "HD-1080p".into()
+            },
+            QualityProfile {
+                id: 6,
+                name: "Ultra-HD".into()
+            },
+        ]
+    );
+}
+#[tokio::test]
+async fn authorization_picks_authorized_destination_and_enforces_advanced_and_author_access() {
+    let (_dir, store, app, sessions) = fixture().await;
+    let (owner, owner_csrf) = &sessions[0];
+    let (other, _) = &sessions[1];
+    let (admin, admin_csrf) = &sessions[2];
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films-4k','Films 4K','films','local','/media-4k',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query(
+        "INSERT INTO acquisition_servers(id,name,kind,base_url,api_key,allowed_ips_json,\
+            library_id,root_folder,quality_profile_id,quality_profiles_json,is_default,enabled,generation) \
+            VALUES('radarr-4k','Radarr 4K','radarr','http://127.0.0.1:7879/','test-key',\
+            '[\"127.0.0.1\"]','films-4k','/movies-4k',6,'[{\"id\":6,\"name\":\"Ultra-HD\"},{\"id\":7,\"name\":\"REMUX\"}]',1,1,'g2')",
+    )
+    .execute(store.pool())
+    .await
+    .unwrap();
+    query("UPDATE acquisition_servers SET is_default=0 WHERE id='radarr-a'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    // `owner` only has access to `request-films` (radarr-a), NOT `films-4k` (the default radarr-4k).
+    let (status, dests) = request(
+        &app,
+        "GET",
+        "/api/v1/requests/destinations",
+        owner,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(dests["servers"].as_array().unwrap().len(), 1);
+    assert_eq!(dests["servers"][0]["id"], "radarr-a");
+    assert_eq!(dests["servers"][0]["libraryName"], "Films");
+    // `choose(None)` inside `discover` / `policy` must pick `radarr-a` instead of failing on `radarr-4k`.
+    let (_, mine) = request(
+        &app,
+        "GET",
+        "/api/v1/requests/policy",
+        owner,
+        "",
+        Value::Null,
+    )
+    .await;
+    assert_eq!(mine["classes"]["film"]["destination"], true);
+    assert_eq!(mine["classes"]["film"]["advanced"], true);
+
+    // Grant `owner` access to `films-4k` too, then test `advanced: false` enforcement.
+    query("INSERT INTO library_permissions(user_id,library_id) VALUES('owner','films-4k')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, _) = request(
+        &app,
+        "PUT",
+        "/api/v1/admin/acquisition/policies/users/owner",
+        admin,
+        admin_csrf,
+        json!({"film":{"advanced":false}}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, denied_server) = request(
+        &app,
+        "POST",
+        "/api/v1/requests",
+        owner,
+        owner_csrf,
+        json!({"kind":"film","title":"X","externalId":"10","externalProvider":"tmdb","serverId":"radarr-a"}),
+    )
+    .await;
+    assert_eq!(
+        (status, &denied_server["error"]),
+        (
+            StatusCode::FORBIDDEN,
+            &json!("request_advanced_permission_denied")
+        )
+    );
+    let (status, denied_profile) = request(
+        &app,
+        "POST",
+        "/api/v1/requests",
+        owner,
+        owner_csrf,
+        json!({"kind":"film","title":"X","externalId":"10","externalProvider":"tmdb","qualityProfileId":7}),
+    )
+    .await;
+    assert_eq!(
+        (status, &denied_profile["error"]),
+        (
+            StatusCode::FORBIDDEN,
+            &json!("request_advanced_permission_denied")
+        )
+    );
+
+    // An admin cannot route a pending request to a library the requester cannot access.
+    query("DELETE FROM library_permissions WHERE user_id='owner' AND library_id='films-4k'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let input = json!({"kind":"film","title":"Pending","externalId":"77","externalProvider":"tmdb","serverId":"radarr-a"});
+    query("INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,created_at,updated_at) VALUES('req-perm','owner','radarr-a','request-films','film','Pending','77','tmdb',?,'pending',?,?)")
+        .bind(input.to_string())
+        .bind(now())
+        .bind(now())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (status, err_body) = request(
+        &app,
+        "POST",
+        "/api/v1/requests/req-perm/action",
+        admin,
+        admin_csrf,
+        json!({"action":"approve","serverId":"radarr-4k"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{err_body}");
+    assert_eq!(err_body["error"], "library_permission_denied");
+
+    // Duplicate films on the same server are rejected even if qualityProfileId differs.
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+    let eff = policy::effective(&store, "owner", false).await.unwrap();
+    let srv = server(&store, "radarr-a").await.unwrap();
+    let mut dup = film("77");
+    dup.quality_profile_id = Some(9);
+    let dup_err = http::insert_request(&auth, "owner", &eff, &srv, &dup)
+        .await
+        .unwrap_err();
+    assert_eq!(error_code(&dup_err), "request_already_exists");
+
+    // `list()` counts must ignore requests in unauthorized libraries.
+    query("INSERT INTO media_requests(id,user_id,server_id,library_id,kind,title,external_id,external_provider,input_json,status,created_at,updated_at) VALUES('req-other','other','radarr-4k','films-4k','film','Other','88','tmdb',?,'pending',?,?)")
+        .bind(input.to_string())
+        .bind(now())
+        .bind(now())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let (_, other_list) = request(&app, "GET", "/api/v1/requests", other, "", Value::Null).await;
+    assert_eq!(other_list["requests"], json!([]));
+    assert_eq!(other_list["counts"], json!({}));
+}

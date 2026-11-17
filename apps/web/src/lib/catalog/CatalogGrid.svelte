@@ -10,9 +10,11 @@
   import Poster from './Poster.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
+  import { session } from '../auth/session';
   import {
-    features, loadFeatures, discoverRequests, posterUrl, requestPayload,
-    statusLabels, statusTone, applicationRequest, type SearchResult, type MediaRequest
+    features, loadFeatures, discoverRequests, loadMyPolicy, posterUrl, requestPayload,
+    statusLabels, statusTone, applicationRequest,
+    type DestinationServer, type MediaRequest, type MyPolicy, type SearchResult
   } from '../applications/api';
 
   let {
@@ -196,8 +198,38 @@
   let requestingItem = $state<SearchResult | null>(null);
   let requestingScope = $state<'all' | 'pick'>('all');
   let chosenSeasons = $state<number[]>([]);
+  let requestingMonitorFuture = $state(false);
+  let requestingServerId = $state('');
+  let requestingQualityProfileId = $state(0);
   let requestingBusy = $state(false);
+  let requestError = $state('');
   let requestSuccessMessage = $state('');
+  let destinations = $state<DestinationServer[]>([]);
+  let myPolicy = $state<MyPolicy | null>(null);
+
+  const isAdmin = $derived($session?.user.role === 'administrator');
+  const serviceFor = (kind: string | undefined) => kind === 'film' ? 'radarr' : kind === 'series' ? 'sonarr' : 'lidarr';
+  const destinationsFor = (kind: string | undefined) => destinations.filter(d => d.kind === serviceFor(kind));
+  const destinationLabel = (dest: DestinationServer) => dest.libraryName ? `${dest.libraryName} (${dest.name})` : dest.name;
+  const requestingGrant = $derived(
+    requestingItem ? myPolicy?.classes?.[requestingItem.kind === 'film' ? 'film' : 'series'] : undefined
+  );
+  const canCustomizeRequest = $derived(isAdmin || (requestingGrant?.advanced ?? true));
+  const requestingDestination = $derived.by(() => {
+    if (!requestingItem) return undefined;
+    const list = destinationsFor(requestingItem.kind);
+    const id = requestingServerId || requestingItem.serverId;
+    return (id ? list.find(d => d.id === id) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
+  });
+  const requestingQualityProfiles = $derived.by(() => {
+    const dest = requestingDestination;
+    if (!dest) return [];
+    const list = [...(dest.qualityProfiles ?? [])];
+    if (dest.qualityProfileId && !list.some(p => p.id === dest.qualityProfileId)) {
+      list.unshift({ id: dest.qualityProfileId, name: $t('rq_quality_profile_default_name', { id: dest.qualityProfileId }) });
+    }
+    return list;
+  });
 
   $effect(() => {
     const trimmed = query.trim();
@@ -208,13 +240,21 @@
       return;
     }
     const controller = new AbortController();
-    void discoverRequests(trimmed, controller.signal)
-      .then(data => {
-        discoverResults = data.results ?? [];
-      })
-      .catch(() => {
-        discoverResults = [];
-      });
+    void Promise.all([
+      discoverRequests(trimmed, controller.signal)
+        .then(data => { discoverResults = data.results ?? []; })
+        .catch(() => { discoverResults = []; }),
+      destinations.length
+        ? Promise.resolve()
+        : applicationRequest<{ servers: DestinationServer[] }>('/api/v1/requests/destinations', { signal: controller.signal })
+            .then(d => { destinations = d.servers ?? []; })
+            .catch(() => {}),
+      myPolicy
+        ? Promise.resolve()
+        : loadMyPolicy()
+            .then(p => { myPolicy = p; })
+            .catch(() => {})
+    ]);
     return () => controller.abort();
   });
 
@@ -222,18 +262,36 @@
     requestingItem = item;
     requestingScope = 'all';
     chosenSeasons = [];
+    requestingMonitorFuture = false;
+    requestError = '';
+    const list = destinationsFor(item.kind);
+    const dest = (item.serverId ? list.find(d => d.id === item.serverId) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
+    requestingServerId = dest?.id ?? '';
+    requestingQualityProfileId = dest?.qualityProfileId ?? 0;
     requestDialog?.showModal();
+  }
+
+  function onDiscoverDestinationChange() {
+    requestingQualityProfileId = requestingDestination?.qualityProfileId ?? 0;
   }
 
   async function submitRequest(event: SubmitEvent) {
     event.preventDefault();
     if (!requestingItem || requestingBusy) return;
     const target = requestingItem;
+    const defaultProfile = requestingDestination?.qualityProfileId ?? 0;
+    const qualityProfileId = canCustomizeRequest && requestingQualityProfileId > 0 && requestingQualityProfileId !== defaultProfile
+      ? requestingQualityProfileId
+      : undefined;
+    const serverId = canCustomizeRequest ? (requestingServerId || target.serverId || undefined) : undefined;
     requestingBusy = true;
+    requestError = '';
     try {
       const payload = requestPayload(target, {
+        serverId,
+        qualityProfileId,
         seasons: requestingScope === 'all' ? [] : chosenSeasons,
-        monitorFuture: false
+        monitorFuture: target.kind === 'series' ? requestingMonitorFuture : false
       });
       const created = await applicationRequest<MediaRequest>('/api/v1/requests', {
         method: 'POST',
@@ -248,8 +306,9 @@
         ...r,
         request: { status: created.status, mine: true, id: created.id }
       } : r);
-    } catch {
-      // Ignored or handled
+      myPolicy = await loadMyPolicy().catch(() => myPolicy);
+    } catch (cause) {
+      requestError = cause instanceof Error ? cause.message : $t('request_impossible');
     } finally {
       requestingBusy = false;
     }
@@ -641,9 +700,49 @@
         </p>
       </header>
 
+      {#if requestError}
+        <p role="alert" class="dialog-error">{requestError}</p>
+      {/if}
+
       <p class="dialog-mode-hint" class:auto={requestingItem.autoApprove}>
         {requestingItem.autoApprove ? $t('rq_confirm_dialog_auto') : $t('rq_confirm_dialog_manual')}
       </p>
+
+      {#if requestingGrant?.quota}
+        <p class="muted small">
+          {$t('rq_quota_remaining_label', { remaining: requestingGrant.quota.remaining, limit: requestingGrant.quota.limit, days: requestingGrant.quota.days })}
+        </p>
+      {/if}
+
+      {#if destinationsFor(requestingItem.kind).length > 1 && canCustomizeRequest}
+        <label class="dialog-field">
+          <span>{$t('rq_destination_library')}</span>
+          <select bind:value={requestingServerId} onchange={onDiscoverDestinationChange}>
+            {#each destinationsFor(requestingItem.kind) as dest (dest.id)}
+              <option value={dest.id}>
+                {destinationLabel(dest)}{dest.isDefault ? ` (${$t('quality_profile_default_badge')})` : ''}
+              </option>
+            {/each}
+          </select>
+        </label>
+      {:else if requestingDestination}
+        <p class="dialog-summary-line">{$t('rq_destination_library')} : <strong>{destinationLabel(requestingDestination)}</strong></p>
+      {/if}
+
+      {#if requestingQualityProfiles.length > 1 && canCustomizeRequest}
+        <label class="dialog-field">
+          <span>{$t('quality_profile')}</span>
+          <select bind:value={requestingQualityProfileId}>
+            {#each requestingQualityProfiles as profile (profile.id)}
+              <option value={profile.id}>
+                {profile.name}{profile.id === requestingDestination?.qualityProfileId ? ` (${$t('quality_profile_default_badge')})` : ''}
+              </option>
+            {/each}
+          </select>
+        </label>
+      {:else if requestingQualityProfiles.length === 1}
+        <p class="dialog-summary-line">{$t('quality_profile')} : <strong>{requestingQualityProfiles[0].name}</strong></p>
+      {/if}
 
       {#if requestingItem.kind === 'series' && requestingItem.seasons?.length}
         <fieldset class="dialog-fieldset">
@@ -669,10 +768,16 @@
           {/if}
         </fieldset>
       {/if}
+      {#if requestingItem.kind === 'series'}
+        <label class="dialog-radio">
+          <input type="checkbox" bind:checked={requestingMonitorFuture} />
+          <span>{$t('monitor_future_episodes')}</span>
+        </label>
+      {/if}
 
       <footer class="dialog-footer">
         <button type="button" class="cancel-btn" onclick={() => requestDialog?.close()}>{$t('cancel')}</button>
-        <button type="submit" class="submit-btn" disabled={requestingBusy}>
+        <button type="submit" class="submit-btn" disabled={requestingBusy || (requestingItem.kind === 'series' && requestingScope === 'pick' && chosenSeasons.length === 0)}>
           <Icon name="download" size={15} />
           <span>{$t('confirm_request')}</span>
         </button>
@@ -795,6 +900,10 @@
   .dialog-header h2 { margin: 0; font-size: 20px; font-weight: 800; color: var(--tx); }
   .dialog-mode-hint { margin: 0; font-size: 14px; color: var(--mu); padding: 10px 14px; border-radius: var(--r-sm); background: var(--pn); }
   .dialog-mode-hint.auto { color: var(--ok); background: var(--ok-soft, rgba(34, 197, 94, 0.1)); }
+  .dialog-error { margin: 0; font-size: 13px; color: var(--err); padding: 10px 14px; border-radius: var(--r-sm); background: var(--err-soft, rgba(239, 68, 68, 0.12)); }
+  .dialog-summary-line { margin: 0; font-size: 13px; color: var(--mu); padding: 8px 12px; border-radius: var(--r-sm); background: var(--pn); }
+  .dialog-field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--mu); }
+  .dialog-field select { height: 42px; padding: 0 12px; border-radius: var(--r-sm); border: 1px solid var(--line); background: var(--bg-3); color: var(--tx); font: inherit; }
   .dialog-fieldset { border: 1px solid var(--line); border-radius: var(--r-sm); padding: 14px; margin: 0; display: flex; flex-direction: column; gap: 10px; }
   .dialog-fieldset legend { font-size: 13px; font-weight: 700; color: var(--tx); padding: 0 6px; }
   .dialog-radio { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--tx); cursor: pointer; }

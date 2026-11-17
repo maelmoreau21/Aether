@@ -69,7 +69,9 @@ describe('demandes et signalements', () => {
     expect(workHref('series', 'x')).toBe('series/?work=x');
     expect(workHref('episode', 'x')).toBeNull();
     expect(errorMessage('request_already_exists')).toBe(errorMessage('duplicate_request'));
+    expect(errorMessage('request_advanced_permission_denied')).toContain('profil de qualité');
     expect(errorMessage('unknown_code')).toContain('unknown_code');
+    expect(requestPayload({ kind: 'film', title: 'X', externalId: '1', externalProvider: 'tmdb' }, { serverId: 'radarr-4k', qualityProfileId: 6 })).toEqual({ kind: 'film', title: 'X', externalId: '1', externalProvider: 'tmdb', serverId: 'radarr-4k', qualityProfileId: 6, seasons: [], episodes: [], albumIds: [], monitorFuture: false });
   });
   it('builds safe proxied artwork URLs for missing media posters', () => {
     expect(posterUrl(undefined)).toBe('');

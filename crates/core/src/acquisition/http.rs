@@ -112,13 +112,11 @@ async fn locations(
         "SELECT l.id,COALESCE(parent.name,l.name),l.kind,n.id,n.name,l.root \
             FROM libraries l \
             JOIN media_nodes n ON n.id=l.node_id \
-            LEFT \
-            JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
-            LEFT \
-            JOIN libraries parent ON parent.id=f.parent_id \
-            WHERE l.enabled=1 AND n.status!='revoked' AND (parent.id IS NULL OR parent.enabled=1) \
-            AND NOT EXISTS(SELECT 1 FROM library_folders child WHERE child.parent_id=l.id \
-            AND child.active=1) \
+            LEFT JOIN library_folders f ON f.library_id=l.id \
+            LEFT JOIN libraries parent ON parent.id=f.parent_id \
+            WHERE l.enabled=1 AND n.status!='revoked' \
+            AND (f.library_id IS NULL OR (f.active=1 AND parent.enabled=1)) \
+            AND NOT EXISTS(SELECT 1 FROM deleted_libraries d WHERE d.library_id=l.id) \
             ORDER BY COALESCE(parent.name,l.name),l.root,l.id",
     )
     .fetch_all(auth.store.pool())
@@ -134,6 +132,16 @@ async fn destinations(
 ) -> Result<Json<Value>, Error> {
     let actor = crate::applications::require(&auth, &headers, "requests", false).await?;
     let values:Vec<Server>=query_as(sqlx::AssertSqlSafe(format!("SELECT {SERVER_COLUMNS} FROM acquisition_servers WHERE enabled=1 ORDER BY name,id LIMIT 100"))).fetch_all(auth.store.pool()).await.map_err(db)?;
+    let lib_names: Vec<(String, String)> = query_as(
+        "SELECT l.id,COALESCE(parent.name,l.name) \
+            FROM libraries l \
+            LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
+            LEFT JOIN libraries parent ON parent.id=f.parent_id",
+    )
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
+    let lib_map: std::collections::BTreeMap<String, String> = lib_names.into_iter().collect();
     let mut out = vec![];
     for server in values {
         if authorize(&auth, &actor, &server.library_id).await.is_ok() {
@@ -142,6 +150,7 @@ async fn destinations(
                 "name": server.name,
                 "kind": server.kind,
                 "libraryId": server.library_id,
+                "libraryName": lib_map.get(&server.library_id),
                 "isDefault": server.is_default == 1,
                 "qualityProfileId": server.quality_profile_id,
                 "qualityProfiles": server.quality_profiles()
@@ -246,7 +255,18 @@ async fn save_server(
             "invalid_acquisition_server",
         )
     })?;
-    let library:Option<String>=query_scalar("SELECT l.kind FROM libraries l JOIN media_nodes n ON n.id=l.node_id WHERE l.id=? AND l.enabled=1 AND n.status!='revoked'").bind(&input.library_id).fetch_optional(auth.store.pool()).await.map_err(db)?;
+    let library: Option<String> = query_scalar(
+        "SELECT l.kind FROM libraries l \
+            JOIN media_nodes n ON n.id=l.node_id \
+            LEFT JOIN library_folders f ON f.library_id=l.id \
+            LEFT JOIN libraries parent ON parent.id=f.parent_id \
+            WHERE l.id=? AND l.enabled=1 AND n.status!='revoked' \
+            AND (f.library_id IS NULL OR (f.active=1 AND parent.enabled=1))",
+    )
+    .bind(&input.library_id)
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(db)?;
     let expected = match input.kind.as_str() {
         "radarr" => "films",
         "sonarr" => "series",
@@ -597,6 +617,71 @@ async fn test_connection(
     Ok(Json(payload))
 }
 
+async fn sync_server_metadata(
+    store: &IdentityStore,
+    server: &Server,
+    discovered: &Value,
+) -> Result<(), Error> {
+    let mut settings = server.settings();
+    if let Ok(status) = serde_json::from_value::<ServerSystemStatus>(discovered["system"].clone()) {
+        settings.last_status = Some(status);
+    }
+    if let Ok(tags) = serde_json::from_value::<Vec<ArrTag>>(discovered["options"]["tags"].clone()) {
+        settings.available_tags = tags;
+    }
+    let live_profiles: Vec<QualityProfile> =
+        serde_json::from_value(discovered["options"]["qualityProfiles"].clone())
+            .unwrap_or_default();
+    let existing = server.quality_profiles();
+    let profiles: Vec<QualityProfile> = if existing.is_empty() {
+        live_profiles
+    } else {
+        let live_names: std::collections::BTreeMap<i64, String> = live_profiles
+            .iter()
+            .map(|p| (p.id, p.name.clone()))
+            .collect();
+        let mut updated: Vec<QualityProfile> = existing
+            .into_iter()
+            .map(|p| QualityProfile {
+                id: p.id,
+                name: live_names.get(&p.id).cloned().unwrap_or(p.name),
+            })
+            .collect();
+        if !updated.iter().any(|p| p.id == server.quality_profile_id)
+            && let Some(name) = live_names.get(&server.quality_profile_id)
+        {
+            updated.insert(
+                0,
+                QualityProfile {
+                    id: server.quality_profile_id,
+                    name: name.clone(),
+                },
+            );
+        }
+        updated
+    };
+    let settings_json = serde_json::to_string(&settings).map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_acquisition_server",
+        )
+    })?;
+    let profiles_json = serde_json::to_string(&profiles).map_err(|_| {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "invalid_acquisition_server",
+        )
+    })?;
+    query("UPDATE acquisition_servers SET settings_json=?,quality_profiles_json=? WHERE id=?")
+        .bind(settings_json)
+        .bind(profiles_json)
+        .bind(&server.id)
+        .execute(store.pool())
+        .await
+        .map_err(db)?;
+    Ok(())
+}
+
 async fn test_server(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -606,6 +691,7 @@ async fn test_server(
     let server = server(&auth.store, &id).await?;
     let connection = server.connection()?;
     let payload = discover_arr(&connection, &server.kind).await?;
+    sync_server_metadata(&auth.store, &server, &payload).await?;
     Ok(Json(payload))
 }
 async fn options(
@@ -643,24 +729,34 @@ async fn choose(
             ));
         }
     };
-    let server = if let Some(id) = id {
-        server(&auth.store, id).await?
-    } else {
-        let sql = format!(
-            "SELECT {SERVER_COLUMNS} FROM acquisition_servers WHERE kind=? AND enabled=1 ORDER BY is_default DESC,name,id LIMIT 1"
-        );
-        query_as(sqlx::AssertSqlSafe(sql))
-            .bind(service)
-            .fetch_optional(auth.store.pool())
-            .await
-            .map_err(db)?
-            .ok_or_else(|| err(StatusCode::CONFLICT, "acquisition_server_not_configured"))?
-    };
-    if server.enabled != 1 || server.kind != service {
-        return Err(err(StatusCode::CONFLICT, "acquisition_server_incompatible"));
+    if let Some(id) = id {
+        let server = server(&auth.store, id).await?;
+        if server.enabled != 1 || server.kind != service {
+            return Err(err(StatusCode::CONFLICT, "acquisition_server_incompatible"));
+        }
+        authorize(auth, actor, &server.library_id).await?;
+        return Ok(server);
     }
-    authorize(auth, actor, &server.library_id).await?;
-    Ok(server)
+    let sql = format!(
+        "SELECT {SERVER_COLUMNS} FROM acquisition_servers WHERE kind=? AND enabled=1 ORDER BY is_default DESC,name,id LIMIT 100"
+    );
+    let candidates: Vec<Server> = query_as(sqlx::AssertSqlSafe(sql))
+        .bind(service)
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(db)?;
+    if candidates.is_empty() {
+        return Err(err(
+            StatusCode::CONFLICT,
+            "acquisition_server_not_configured",
+        ));
+    }
+    for server in candidates {
+        if authorize(auth, actor, &server.library_id).await.is_ok() {
+            return Ok(server);
+        }
+    }
+    Err(err(StatusCode::FORBIDDEN, "library_permission_denied"))
 }
 async fn search(
     State(auth): State<AuthState>,
@@ -901,11 +997,12 @@ async fn annotate(
     }
     let marks = vec!["?"; ids.len()].join(",");
     let sql = format!(
-        "SELECT external_id,id,status,user_id FROM media_requests WHERE kind=? AND external_id IN ({marks}) AND status NOT IN ('rejected','cancelled','failed') ORDER BY created_at DESC,id"
+        "SELECT external_id,id,status,user_id,server_id FROM media_requests WHERE kind=? AND external_id IN ({marks}) AND status NOT IN ('rejected','cancelled','failed') ORDER BY created_at DESC,id"
     );
-    let mut statement =
-        query_as::<_, (String, String, String, Option<String>)>(sqlx::AssertSqlSafe(sql))
-            .bind(kind);
+    let mut statement = query_as::<_, (String, String, String, Option<String>, Option<String>)>(
+        sqlx::AssertSqlSafe(sql),
+    )
+    .bind(kind);
     for id in &ids {
         statement = statement.bind(id);
     }
@@ -956,14 +1053,55 @@ async fn annotate(
         if let Some(work) = readable.get(&external) {
             result["inLibrary"] = json!({"workId":work});
         }
-        if let Some((_, id, status, owner)) = requests.iter().find(|r| r.0 == external) {
+        let target_server = result["serverId"].as_str();
+        let matched = target_server
+            .and_then(|sid| {
+                requests
+                    .iter()
+                    .find(|r| r.0 == external && r.4.as_deref() == Some(sid))
+            })
+            .or_else(|| requests.iter().find(|r| r.0 == external));
+        if let Some((_, id, status, owner, server_id)) = matched {
             let mine = owner.as_deref() == Some(actor.user.id.as_str());
-            result["request"] = json!({"status":status,"mine":mine,
-                "id":(mine || administrator).then_some(id)});
+            result["request"] = json!({
+                "status": status,
+                "mine": mine,
+                "serverId": server_id,
+                "id": (mine || administrator).then_some(id)
+            });
         }
     }
     Ok(())
 }
+fn same_scope(a: &RequestInput, b: &RequestInput) -> bool {
+    if a.kind != b.kind || a.external_id != b.external_id {
+        return false;
+    }
+    match a.kind.as_str() {
+        "series" => {
+            let mut sa = a.seasons.clone();
+            let mut sb = b.seasons.clone();
+            sa.sort_unstable();
+            sb.sort_unstable();
+            let mut ea: Vec<(i64, i64)> =
+                a.episodes.iter().map(|e| (e.season, e.episode)).collect();
+            let mut eb: Vec<(i64, i64)> =
+                b.episodes.iter().map(|e| (e.season, e.episode)).collect();
+            ea.sort_unstable();
+            eb.sort_unstable();
+            sa == sb && ea == eb && a.monitor_future == b.monitor_future
+        }
+        "artist" => {
+            let mut aa = a.album_ids.clone();
+            let mut ab = b.album_ids.clone();
+            aa.sort();
+            ab.sort();
+            aa == ab && a.monitor_future == b.monitor_future
+        }
+        _ => true,
+    }
+}
+
 async fn create(
     State(auth): State<AuthState>,
     headers: HeaderMap,
@@ -981,10 +1119,28 @@ async fn create(
     }
     let administrator = actor.user.role == Role::Administrator;
     let effective = policy::effective(&auth.store, &actor.user.id, administrator).await?;
-    if !effective.grant(&input.kind).allow {
+    let grant = effective.grant(&input.kind);
+    if !grant.allow {
         return Err(err(StatusCode::FORBIDDEN, "request_permission_denied"));
     }
     let server = choose(&auth, &actor, &input.kind, input.server_id.as_deref()).await?;
+    if !administrator && !grant.advanced {
+        let default_server = choose(&auth, &actor, &input.kind, None).await?;
+        if server.id != default_server.id {
+            return Err(err(
+                StatusCode::FORBIDDEN,
+                "request_advanced_permission_denied",
+            ));
+        }
+        if let Some(profile_id) = input.quality_profile_id
+            && profile_id != server.quality_profile_id
+        {
+            return Err(err(
+                StatusCode::FORBIDDEN,
+                "request_advanced_permission_denied",
+            ));
+        }
+    }
     if let Some(profile_id) = input.quality_profile_id {
         let allowed = profile_id == server.quality_profile_id
             || server.quality_profiles().iter().any(|p| p.id == profile_id);
@@ -994,8 +1150,6 @@ async fn create(
                 "invalid_quality_profile",
             ));
         }
-    } else {
-        input.quality_profile_id = Some(server.quality_profile_id);
     }
     let validation =
         crate::applications::invoke(&auth.store, "requests", "requests.validate", json!(input))
@@ -1030,9 +1184,14 @@ pub(super) async fn insert_request(
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)
         .await
         .map_err(db)?;
-    let duplicate:Option<String>=query_scalar("SELECT id FROM media_requests WHERE server_id=? AND kind=? AND external_id=? AND input_json=? AND status NOT IN ('rejected','cancelled','failed') LIMIT 1")
-        .bind(&server.id).bind(&input.kind).bind(&input.external_id).bind(json!(input).to_string()).fetch_optional(&mut *tx).await.map_err(db)?;
-    if duplicate.is_some() {
+    let existing_inputs: Vec<String> = query_scalar("SELECT input_json FROM media_requests WHERE server_id=? AND kind=? AND external_id=? AND status NOT IN ('rejected','cancelled','failed') LIMIT 50")
+        .bind(&server.id).bind(&input.kind).bind(&input.external_id).fetch_all(&mut *tx).await.map_err(db)?;
+    let is_duplicate = existing_inputs.iter().any(|raw| {
+        serde_json::from_str::<RequestInput>(raw)
+            .map(|other| same_scope(input, &other))
+            .unwrap_or(true)
+    });
+    if is_duplicate {
         return Err(err(StatusCode::CONFLICT, "request_already_exists"));
     }
     let pending: i64 = query_scalar(sqlx::AssertSqlSafe(format!(
@@ -1167,17 +1326,27 @@ async fn list(
         rows.iter().filter_map(|r| r.user_id.as_deref()),
     )
     .await?;
+    let mut allowed_libraries = std::collections::BTreeMap::<String, bool>::new();
     let mut visible = vec![];
     for row in rows {
-        if match &row.library_id {
-            Some(library) => authorize(&auth, &actor, library).await.is_ok(),
+        let can_see = match &row.library_id {
+            Some(library) => {
+                if let Some(&cached) = allowed_libraries.get(library) {
+                    cached
+                } else {
+                    let ok = authorize(&auth, &actor, library).await.is_ok();
+                    allowed_libraries.insert(library.clone(), ok);
+                    ok
+                }
+            }
             None => row.imported == 1,
-        } {
+        };
+        if can_see {
             visible.push(present(&row, &actor, &labels));
         }
     }
-    let grouped: Vec<(String, i64)> = query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT status,COUNT(*) FROM media_requests WHERE {scope} GROUP BY status"
+    let grouped: Vec<(String, Option<String>, i64, i64)> = query_as(sqlx::AssertSqlSafe(format!(
+        "SELECT status,library_id,imported,COUNT(*) FROM media_requests WHERE {scope} GROUP BY status,library_id,imported"
     )))
     .bind(actor.user.role.as_str())
     .bind(&actor.user.id)
@@ -1186,7 +1355,25 @@ async fn list(
     .fetch_all(auth.store.pool())
     .await
     .map_err(db)?;
-    let counts: serde_json::Map<String, Value> = grouped
+    let mut counts_map = std::collections::BTreeMap::<String, i64>::new();
+    for (status, library_id, imported, count) in grouped {
+        let can_see = match library_id {
+            Some(library) => {
+                if let Some(&cached) = allowed_libraries.get(&library) {
+                    cached
+                } else {
+                    let ok = authorize(&auth, &actor, &library).await.is_ok();
+                    allowed_libraries.insert(library, ok);
+                    ok
+                }
+            }
+            None => imported == 1,
+        };
+        if can_see {
+            *counts_map.entry(status).or_default() += count;
+        }
+    }
+    let counts: serde_json::Map<String, Value> = counts_map
         .into_iter()
         .map(|(status, count)| (status, json!(count)))
         .collect();
@@ -1274,6 +1461,8 @@ struct Action {
     action: String,
     server_id: Option<String>,
     #[serde(default)]
+    quality_profile_id: Option<i64>,
+    #[serde(default)]
     reason: Option<String>,
 }
 async fn action(
@@ -1307,6 +1496,9 @@ async fn action(
     let mut selection: RequestInput = serde_json::from_str(&row.input_json)
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_request_state"))?;
     if let Some(server_id) = input.server_id.as_deref() {
+        if !administrator {
+            return Err(err(StatusCode::FORBIDDEN, "administrator_required"));
+        }
         if row.remote_id.is_some() {
             return Err(err(StatusCode::CONFLICT, "request_already_dispatched"));
         }
@@ -1320,12 +1512,36 @@ async fn action(
         selection.server_id.as_deref(),
     )
     .await?;
+    if let Some(profile_id) = input.quality_profile_id {
+        if !administrator {
+            return Err(err(StatusCode::FORBIDDEN, "administrator_required"));
+        }
+        if row.remote_id.is_some() {
+            return Err(err(StatusCode::CONFLICT, "request_already_dispatched"));
+        }
+        let allowed = profile_id == server.quality_profile_id
+            || server.quality_profiles().iter().any(|p| p.id == profile_id);
+        if !allowed {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_quality_profile",
+            ));
+        }
+        selection.quality_profile_id = Some(profile_id);
+    }
     if status == "approved" {
         let owner = row
             .user_id
             .as_deref()
             .ok_or_else(|| err(StatusCode::CONFLICT, "historical_author_mapping_required"))?;
         unrestricted(&auth.store, owner).await?;
+        crate::applications::authorize_background(
+            &auth.store,
+            "requests",
+            &server.library_id,
+            owner,
+        )
+        .await?;
     }
     let mut conn = auth.store.pool().acquire().await.map_err(db)?;
     let mut tx = crate::database::begin_write_serialized(&mut conn, LOCK)

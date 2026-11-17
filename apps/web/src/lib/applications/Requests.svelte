@@ -5,20 +5,19 @@
   import {
     applicationRequest, dateLabel, errorMessage, features, groupCount, kindLabels, loadFeatures, parseSelection,
     rejectReasonLabels, rejectReasons, requestGroups, requestPayload, requestStep, requestSteps, seasonRanges,
-    statusLabels, statusTone, workHref, loadMyPolicy, posterUrl, type MediaRequest, type QualityProfile, type RequestGroup, type RequestKind, type RequestSelection,
+    statusLabels, statusTone, workHref, loadMyPolicy, posterUrl, type DestinationServer, type MediaRequest, type RequestGroup, type RequestKind, type RequestSelection,
     type SearchResult, type MyPolicy
   } from './api';
   import './applications.css';
   import { t } from '../i18n';
 
   let { embedded = false }: { embedded?: boolean } = $props();
-  type Destination = { id: string; name: string; kind: string; isDefault?: boolean; qualityProfileId?: number; qualityProfiles?: QualityProfile[] };
 
   let loading = $state(true);
   let busy = $state(false);
   let error = $state('');
   let message = $state('');
-  let destinations = $state<Destination[]>([]);
+  let destinations = $state<DestinationServer[]>([]);
 
   // Search
   let query = $state('');
@@ -37,6 +36,7 @@
   let seasonsText = $state('');
   let episodesText = $state('');
   let monitorFuture = $state(false);
+  let selectedServerId = $state('');
   let selectedQualityProfileId = $state<number>(0);
 
   // List
@@ -48,6 +48,7 @@
   let mineOnly = $state(false);
   let detail = $state<MediaRequest | null>(null);
   let actionDestination = $state('');
+  let actionQualityProfileId = $state<number>(0);
   let picked = $state<string[]>([]);
   let rejecting = $state<{ ids: string[]; reason: string } | null>(null);
   let brokenArt = $state<string[]>([]);
@@ -55,25 +56,56 @@
 
   const isAdmin = $derived($session?.user.role === 'administrator');
   const kinds = Object.keys(kindLabels) as RequestKind[];
-  const currentClass = $derived(kind === 'film' ? 'film' : kind === 'series' ? 'series' : 'music');
+  const classOfKind = (value: string | undefined) => value === 'film' ? 'film' : value === 'series' ? 'series' : 'music';
+  const currentClass = $derived(classOfKind(kind));
   const currentGrant = $derived(myPolicy?.classes?.[currentClass]);
+  const selectedGrant = $derived(selected ? myPolicy?.classes?.[classOfKind(selected.kind)] : currentGrant);
+  const canCustomize = $derived(isAdmin || (selectedGrant?.advanced ?? true));
+  const canSearch = $derived(!myPolicy?.restricted && currentGrant?.allow !== false && currentGrant?.destination !== false);
   const service = (value: string | undefined) => value === 'film' ? 'radarr' : value === 'series' ? 'sonarr' : 'lidarr';
   const destinationsFor = (value: string | undefined) => destinations.filter(server => server.kind === service(value));
+  const destinationLabel = (dest: DestinationServer) => dest.libraryName ? `${dest.libraryName} (${dest.name})` : dest.name;
   const selectedDestination = $derived.by(() => {
     if (!selected) return undefined;
     const list = destinationsFor(selected.kind);
-    const id = selected.serverId || serverId;
+    const id = selectedServerId || selected.serverId || serverId;
     return (id ? list.find(d => d.id === id) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
   });
   const availableQualityProfiles = $derived.by(() => {
     const dest = selectedDestination;
-    if (!dest?.qualityProfiles?.length) return [];
-    const list = [...dest.qualityProfiles];
+    if (!dest) return [];
+    const list = [...(dest.qualityProfiles ?? [])];
     if (dest.qualityProfileId && !list.some(p => p.id === dest.qualityProfileId)) {
-      list.unshift({ id: dest.qualityProfileId, name: `#${dest.qualityProfileId}` });
+      list.unshift({ id: dest.qualityProfileId, name: $t('rq_quality_profile_default_name', { id: dest.qualityProfileId }) });
     }
     return list;
   });
+  const detailDestination = $derived.by(() => {
+    if (!detail) return undefined;
+    const list = destinationsFor(detail.kind);
+    const id = actionDestination || detail.serverId;
+    return (id ? list.find(d => d.id === id) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
+  });
+  const detailQualityProfiles = $derived.by(() => {
+    const dest = detailDestination;
+    if (!dest) return [];
+    const list = [...(dest.qualityProfiles ?? [])];
+    if (dest.qualityProfileId && !list.some(p => p.id === dest.qualityProfileId)) {
+      list.unshift({ id: dest.qualityProfileId, name: $t('rq_quality_profile_default_name', { id: dest.qualityProfileId }) });
+    }
+    return list;
+  });
+  function requestMetaLabel(item: MediaRequest): string {
+    const parts: string[] = [];
+    const dest = item.serverId ? destinations.find(d => d.id === item.serverId) : undefined;
+    if (dest) parts.push(destinationLabel(dest));
+    const profileId = item.selection?.qualityProfileId ?? dest?.qualityProfileId;
+    if (profileId) {
+      const profile = dest?.qualityProfiles?.find(p => p.id === profileId);
+      if (profile) parts.push(profile.name);
+    }
+    return parts.join(' · ');
+  }
   const pendingIds = $derived(requests.filter(item => item.status === 'pending').map(item => item.id));
   const allPicked = $derived(pendingIds.length > 0 && pendingIds.every(id => picked.includes(id)));
   const groupLabels: Record<RequestGroup, string> = $derived({
@@ -115,7 +147,7 @@
           const [policyData] = await Promise.all([
             loadMyPolicy().catch(() => null),
             refresh(),
-            applicationRequest<{ servers: Destination[] }>('/api/v1/requests/destinations').then(d => { destinations = d.servers; })
+            applicationRequest<{ servers: DestinationServer[] }>('/api/v1/requests/destinations').then(d => { destinations = d.servers; })
           ]);
           myPolicy = policyData;
         }
@@ -151,7 +183,10 @@
   function blocked(result: SearchResult): string {
     if (result.kind === 'film' && result.inLibrary) return $t('rq_already_available');
     if (result.request && result.kind !== 'series') return $t('rq_already_requested_short');
+    if (myPolicy?.restricted) return $t('err_parental_unverified');
     if (result.canRequest === false || currentGrant?.allow === false) return $t('err_request_permission');
+    if (currentGrant?.destination === false) return $t('err_library_permission_denied');
+    if (myPolicy && myPolicy.pending >= myPolicy.maxPending) return $t('err_request_quota');
     if (currentGrant?.quota && currentGrant.quota.remaining <= 0) return $t('rq_quota_depleted');
     return '';
   }
@@ -161,13 +196,21 @@
     const list = destinationsFor(result.kind);
     const id = result.serverId || serverId;
     const dest = (id ? list.find(d => d.id === id) : undefined) ?? list.find(d => d.isDefault) ?? list[0];
+    selectedServerId = dest?.id ?? '';
     selectedQualityProfileId = dest?.qualityProfileId ?? 0;
     await tick();
     dialog?.showModal();
   }
+  function onDestinationChange() {
+    const dest = selectedDestination;
+    selectedQualityProfileId = dest?.qualityProfileId ?? 0;
+  }
   function closeDialog() { if (dialog?.open) dialog.close(); }
   function selection(): RequestSelection {
-    const qualityProfileId = selectedQualityProfileId > 0 ? selectedQualityProfileId : undefined;
+    const defaultProfile = selectedDestination?.qualityProfileId ?? 0;
+    const qualityProfileId = canCustomize && selectedQualityProfileId > 0 && selectedQualityProfileId !== defaultProfile
+      ? selectedQualityProfileId
+      : undefined;
     if (selected?.kind !== 'series') return { monitorFuture: selected?.kind === 'artist' ? monitorFuture : false, qualityProfileId };
     if (seriesScope === 'all') return { seasons: [], episodes: [], monitorFuture, qualityProfileId };
     const typed = parseSelection(selected.seasons?.length ? '' : seasonsText, episodesText);
@@ -188,8 +231,9 @@
     event.preventDefault();
     if (!selected || !canSubmit) return;
     const target = selected;
+    const chosenServer = canCustomize ? (selectedServerId || serverId || undefined) : undefined;
     await run(async () => {
-      const created = await applicationRequest<MediaRequest>('/api/v1/requests', { method: 'POST', body: JSON.stringify(requestPayload(target, { ...selection(), serverId: serverId || undefined })) });
+      const created = await applicationRequest<MediaRequest>('/api/v1/requests', { method: 'POST', body: JSON.stringify(requestPayload(target, { ...selection(), serverId: chosenServer })) });
       closeDialog();
       message = $t('rq_request_created', { title: created.title ?? target.title, status: statusLabels[created.status] ?? created.status });
       results = results.map(item => item === target ? { ...item, request: { status: created.status, mine: true, id: created.id } } : item);
@@ -220,10 +264,10 @@
     group = value; detail = null;
     await run(() => refresh(), $t('loading_impossible'));
   }
-  async function act(id: string, value: string, extra: Record<string, string> = {}) {
+  async function act(id: string, value: string, extra: Record<string, string | number> = {}) {
     await applicationRequest(`/api/v1/requests/${encodeURIComponent(id)}/action`, { method: 'POST', body: JSON.stringify({ action: value, ...extra }) });
   }
-  async function action(id: string, value: string, extra: Record<string, string> = {}) {
+  async function action(id: string, value: string, extra: Record<string, string | number> = {}) {
     message = '';
     await run(async () => {
       await act(id, value, extra);
@@ -257,6 +301,8 @@
     await run(async () => {
       detail = await applicationRequest<MediaRequest>(`/api/v1/requests/${encodeURIComponent(id)}`);
       actionDestination = detail.serverId ?? '';
+      const dest = destinations.find(d => d.id === actionDestination);
+      actionQualityProfileId = detail.selection?.qualityProfileId ?? dest?.qualityProfileId ?? 0;
     }, $t('detail_unavailable'));
   }
   function art(workId: string | null | undefined) {
@@ -299,34 +345,45 @@
       </div>
       <form class="search-row" onsubmit={search} role="search">
         <label class="grow"><span class="sr-only">{$t('your_search')}</span>
-          <input type="search" required minlength="2" maxlength="200" bind:value={query} disabled={searching} placeholder={$t('rq_search_placeholder', { kind: (kindLabels[kind] ?? '').toLowerCase() })} />
+          <input type="search" required minlength="2" maxlength="200" bind:value={query} disabled={searching || !canSearch} placeholder={$t('rq_search_placeholder', { kind: (kindLabels[kind] ?? '').toLowerCase() })} />
         </label>
-        {#if destinationsFor(kind).length > 1}
+        {#if destinationsFor(kind).length > 1 && (isAdmin || (currentGrant?.advanced ?? true))}
           <label><span class="sr-only">{$t('destination')}</span>
-            <select bind:value={serverId} disabled={searching} onchange={() => { results = []; searched = false; }}>
+            <select bind:value={serverId} disabled={searching || !canSearch} onchange={() => { results = []; searched = false; }}>
               <option value="">{$t('default_destination')}</option>
-              {#each destinationsFor(kind) as server (server.id)}<option value={server.id}>{server.name}</option>{/each}
+              {#each destinationsFor(kind) as server (server.id)}<option value={server.id}>{destinationLabel(server)}</option>{/each}
             </select>
           </label>
         {/if}
-        <button type="submit" class="primary" disabled={searching} aria-busy={searching}>{searching ? $t('searching') : $t('search_action')}</button>
+        <button type="submit" class="primary" disabled={searching || !canSearch} aria-busy={searching}>{searching ? $t('searching') : $t('search_action')}</button>
       </form>
-      {#if currentGrant}
+      {#if myPolicy}
         <div class="rights-banner">
-          <span class="rights-tag" class:auto={currentGrant.autoApprove} class:denied={!currentGrant.allow}>
-            {#if !currentGrant.allow}
-              {$t('rq_banner_denied', { kind: kindLabels[kind] })}
-            {:else if currentGrant.autoApprove}
-              {$t('rq_banner_auto_approved', { kind: kindLabels[kind] })}
-            {:else}
-              {$t('rq_banner_needs_review', { kind: kindLabels[kind] })}
-            {/if}
-          </span>
-          {#if currentGrant.quota}
-            <span class="quota-tag" class:depleted={currentGrant.quota.remaining <= 0}>
-              {$t('rq_quota_remaining_label', { remaining: currentGrant.quota.remaining, limit: currentGrant.quota.limit, days: currentGrant.quota.days })}
+          {#if myPolicy.restricted}
+            <span class="rights-tag denied">{$t('rq_banner_restricted')}</span>
+          {:else if currentGrant}
+            <span class="rights-tag" class:auto={currentGrant.allow && currentGrant.destination !== false && currentGrant.autoApprove} class:denied={!currentGrant.allow || currentGrant.destination === false}>
+              {#if !currentGrant.allow}
+                {$t('rq_banner_denied', { kind: kindLabels[kind] })}
+              {:else if currentGrant.destination === false}
+                {currentGrant.configured === false
+                  ? $t('rq_banner_no_server', { kind: kindLabels[kind] })
+                  : $t('rq_banner_no_library_access', { kind: kindLabels[kind] })}
+              {:else if currentGrant.autoApprove}
+                {$t('rq_banner_auto_approved', { kind: kindLabels[kind] })}
+              {:else}
+                {$t('rq_banner_needs_review', { kind: kindLabels[kind] })}
+              {/if}
             </span>
+            {#if currentGrant.quota}
+              <span class="quota-tag" class:depleted={currentGrant.quota.remaining <= 0}>
+                {$t('rq_quota_remaining_label', { remaining: currentGrant.quota.remaining, limit: currentGrant.quota.limit, days: currentGrant.quota.days })}
+              </span>
+            {/if}
           {/if}
+          <span class="quota-tag" class:depleted={myPolicy.pending >= myPolicy.maxPending}>
+            {$t('rq_open_requests_count', { pending: myPolicy.pending, max: myPolicy.maxPending })}
+          </span>
         </div>
       {/if}
       {#if kind === 'track'}<p class="muted small">{$t('request_failed_lidarr')}</p>{/if}
@@ -401,6 +458,7 @@
         {#each requests as item (item.id)}
           {@const step = requestStep(item.status)}
           {@const scope = scopeLabel(item.kind, item.selection)}
+          {@const itemMeta = requestMetaLabel(item)}
           <li class="record request-record">
             <div class="record-main">
               {#if isAdmin && item.status === 'pending'}<input class="pick" type="checkbox" aria-label={$t('rq_select_request', { title: item.title })} checked={picked.includes(item.id)} onchange={() => togglePick(item.id)} />{/if}
@@ -409,7 +467,7 @@
               </div>
               <div class="record-text">
                 <h3>{item.title}</h3>
-                <small>{kindLabels[item.kind] ?? item.kind} · {dateLabel(item.createdAt)}{#if isAdmin && item.authorLabel && !item.own} · {$t('rq_requested_by', { name: item.authorLabel })}{/if}</small>
+                <small>{kindLabels[item.kind] ?? item.kind} · {dateLabel(item.createdAt)}{#if itemMeta} · {itemMeta}{/if}{#if isAdmin && item.authorLabel && !item.own} · {$t('rq_requested_by', { name: item.authorLabel })}{/if}</small>
                 {#if scope}<p class="muted small">{scope}</p>{/if}
                 {#if item.status === 'rejected' && item.errorCode}<p class="note">{$t('rq_reject_reason_label')} : {rejectReasonLabels[item.errorCode] ?? errorMessage(item.errorCode)}</p>
                 {:else if item.error || item.errorCode}<p class="error small">{item.error ?? errorMessage(item.errorCode)}</p>{/if}
@@ -448,15 +506,24 @@
             {#if rejecting && rejecting.ids.length === 1 && rejecting.ids[0] === item.id}{@render rejectForm()}{/if}
             {#if detail?.id === item.id}
               <div class="detail stack">
-                {#if isAdmin && ['pending', 'suspended', 'failed'].includes(detail.status) && destinationsFor(detail.kind).length > 1}
+                {#if isAdmin && ['pending', 'suspended', 'failed'].includes(detail.status) && (destinationsFor(detail.kind).length > 1 || detailQualityProfiles.length > 1)}
                   <div class="row">
-                    <label class="inline">{$t('request_destination')}
-                      <select bind:value={actionDestination}>
-                        <option value="">{$t('default_destination')}</option>
-                        {#each destinationsFor(detail.kind) as server (server.id)}<option value={server.id}>{server.name}</option>{/each}
-                      </select>
-                    </label>
-                    <button disabled={busy} onclick={() => action(item.id, detail?.status === 'pending' ? 'approve' : 'retry', actionDestination ? { serverId: actionDestination } : {})}>{detail.status === 'pending' ? $t('approve_destination') : $t('resume_destination')}</button>
+                    {#if destinationsFor(detail.kind).length > 1}
+                      <label class="inline">{$t('request_destination')}
+                        <select bind:value={actionDestination} onchange={() => { actionQualityProfileId = detailDestination?.qualityProfileId ?? 0; }}>
+                          <option value="">{$t('default_destination')}</option>
+                          {#each destinationsFor(detail.kind) as server (server.id)}<option value={server.id}>{destinationLabel(server)}</option>{/each}
+                        </select>
+                      </label>
+                    {/if}
+                    {#if detailQualityProfiles.length > 1}
+                      <label class="inline">{$t('quality_profile')}
+                        <select bind:value={actionQualityProfileId}>
+                          {#each detailQualityProfiles as profile (profile.id)}<option value={profile.id}>{profile.name}</option>{/each}
+                        </select>
+                      </label>
+                    {/if}
+                    <button disabled={busy} onclick={() => action(item.id, detail?.status === 'pending' ? 'approve' : 'retry', { ...(actionDestination ? { serverId: actionDestination } : {}), ...(actionQualityProfileId > 0 ? { qualityProfileId: actionQualityProfileId } : {}) })}>{detail.status === 'pending' ? $t('approve_destination') : $t('resume_destination')}</button>
                   </div>
                 {/if}
                 {#if detail.sourceStatus}<p class="muted">{$t('previous_app_status')} : {detail.sourceStatus}</p>{/if}
@@ -493,21 +560,40 @@
 <dialog bind:this={dialog} class="application-dialog" aria-labelledby="request-dialog-title" onclose={() => selected = null}>
   {#if selected}
     <form class="stack" onsubmit={submit}>
-      <header>
-        <h2 id="request-dialog-title">{$t('confirm_request_for', { title: selected.title })}</h2>
-        <p class="muted small">{metaLine(selected)}{#if selected.year} · {selected.year}{/if}</p>
+      <header class="dialog-media-header">
+        {#if selected.poster}
+          <img class="dialog-poster" src={posterUrl(selected.poster)} alt="" />
+        {/if}
+        <div>
+          <h2 id="request-dialog-title">{$t('confirm_request_for', { title: selected.title })}</h2>
+          <p class="muted small">{metaLine(selected)}{#if selected.year} · {selected.year}{/if}</p>
+        </div>
       </header>
       {#if error}<p role="alert" class="feedback error">{error}</p>{/if}
-      <p class="dialog-mode-hint" class:auto={selected.autoApprove ?? currentGrant?.autoApprove}>
-        {(selected.autoApprove ?? currentGrant?.autoApprove) ? $t('rq_confirm_dialog_auto') : $t('rq_confirm_dialog_manual')}
+      <p class="dialog-mode-hint" class:auto={selected.autoApprove ?? selectedGrant?.autoApprove}>
+        {(selected.autoApprove ?? selectedGrant?.autoApprove) ? $t('rq_confirm_dialog_auto') : $t('rq_confirm_dialog_manual')}
       </p>
-      {#if currentGrant?.quota}
+      {#if selectedGrant?.quota}
         <p class="muted small">
-          {$t('rq_quota_remaining_label', { remaining: currentGrant.quota.remaining, limit: currentGrant.quota.limit, days: currentGrant.quota.days })}
+          {$t('rq_quota_remaining_label', { remaining: selectedGrant.quota.remaining, limit: selectedGrant.quota.limit, days: selectedGrant.quota.days })}
         </p>
       {/if}
       {#if selected.inLibrary}<p class="feedback">{$t('rq_dialog_in_library')}</p>{/if}
-      {#if availableQualityProfiles.length > 1}
+      {#if destinationsFor(selected.kind).length > 1 && canCustomize}
+        <label>
+          <span>{$t('rq_destination_library')}</span>
+          <select bind:value={selectedServerId} onchange={onDestinationChange}>
+            {#each destinationsFor(selected.kind) as dest (dest.id)}
+              <option value={dest.id}>
+                {destinationLabel(dest)}{dest.isDefault ? ` (${$t('quality_profile_default_badge')})` : ''}
+              </option>
+            {/each}
+          </select>
+        </label>
+      {:else if selectedDestination}
+        <p class="scope-summary">{$t('rq_destination_library')} : <strong>{destinationLabel(selectedDestination)}</strong></p>
+      {/if}
+      {#if availableQualityProfiles.length > 1 && canCustomize}
         <label>
           <span>{$t('quality_profile')}</span>
           <select bind:value={selectedQualityProfileId}>
@@ -518,6 +604,8 @@
             {/each}
           </select>
         </label>
+      {:else if availableQualityProfiles.length === 1}
+        <p class="scope-summary">{$t('quality_profile')} : <strong>{availableQualityProfiles[0].name}</strong></p>
       {/if}
       {#if selected.kind === 'series'}
         <fieldset class="stack">
@@ -561,6 +649,18 @@
 </dialog>
 
 <style>
+  .dialog-media-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .dialog-poster {
+    width: 56px;
+    aspect-ratio: 2 / 3;
+    object-fit: cover;
+    border-radius: var(--r-xs, 6px);
+    flex: none;
+  }
   .download-progress {
     display: flex;
     flex-direction: column;

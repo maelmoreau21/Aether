@@ -33,7 +33,7 @@
     return v === true ? 'true' : v === false ? 'false' : 'inherit';
   }
 
-  function setBool(mediaClass: MediaClass, field: 'allow' | 'autoApprove', value: string) {
+  function setBool(mediaClass: MediaClass, field: 'allow' | 'autoApprove' | 'advanced', value: string) {
     const target = ensureClass(mediaClass);
     if (value === 'inherit') {
       delete target[field];
@@ -68,7 +68,7 @@
   const hasOverrides = $derived(
     classes.some(c => {
       const cr = rule[c];
-      return cr && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.quota !== undefined);
+      return cr && (cr.allow !== undefined || cr.autoApprove !== undefined || cr.advanced !== undefined || cr.quota !== undefined);
     })
   );
 
@@ -115,11 +115,16 @@
               <div class="ext-effective-pills">
                 {#each classes as mc (mc)}
                   {@const g = effective.classes[mc]}
-                  <span class="ext-eff-pill" class:denied={!g.allow}>
+                  <span class="ext-eff-pill" class:denied={!g.allow || g.destination === false}>
                     <strong>{classLabel(mc)} :</strong>
                     {g.allow ? $t('rq_policy_badge_allowed') : $t('rq_policy_badge_denied')}
-                    {#if g.allow}
+                    {#if g.allow && g.destination === false}
+                      · {$t('rq_policy_no_destination_warning', { kind: classLabel(mc) })}
+                    {:else if g.allow}
                       · {g.autoApprove ? $t('rq_policy_badge_auto') : $t('rq_policy_badge_review')}
+                      {#if g.advanced === false}
+                        · {$t('rq_policy_advanced_short')}: {$t('ext_deny')}
+                      {/if}
                       {#if g.quota}
                         · {g.quota.remaining}/{g.quota.limit} ({g.quota.days}j)
                       {/if}
@@ -162,31 +167,51 @@
                 </select>
               </label>
 
+              <label class="ext-field">
+                <span>{$t('rq_policy_advanced')}</span>
+                <select
+                  {disabled}
+                  value={boolValue(cr.advanced)}
+                  onchange={e => setBool(mc, 'advanced', e.currentTarget.value)}
+                >
+                  <option value="inherit">{$t('ext_inherit')}</option>
+                  <option value="true">{$t('ext_allow')}</option>
+                  <option value="false">{$t('ext_deny')}</option>
+                </select>
+              </label>
+
               <div class="ext-field">
                 <span>{$t('rq_policy_quota')}</span>
                 <div class="ext-quota-row">
-                  <input
-                    type="number"
-                    min="0"
-                    max="10000"
-                    {disabled}
-                    placeholder={$t('ext_inherit')}
-                    aria-label={$t('rq_policy_quota_limit_label')}
-                    value={cr.quota?.limit ?? ''}
-                    oninput={e => setQuotaLimit(mc, e.currentTarget.value)}
-                  />
-                  {#if cr.quota !== undefined}
+                  <label class="ext-quota-unit">
                     <input
                       type="number"
-                      min="1"
-                      max="365"
+                      min="0"
+                      max="10000"
                       {disabled}
-                      aria-label={$t('rq_policy_quota_days_label')}
-                      value={cr.quota.days}
-                      oninput={e => setQuotaDays(mc, e.currentTarget.value)}
+                      placeholder={$t('ext_inherit')}
+                      aria-label={$t('rq_policy_quota_limit_label')}
+                      value={cr.quota?.limit ?? ''}
+                      oninput={e => setQuotaLimit(mc, e.currentTarget.value)}
                     />
+                    <small>{$t('rq_policy_unit_requests')}</small>
+                  </label>
+                  {#if cr.quota !== undefined}
+                    <label class="ext-quota-unit">
+                      <input
+                        type="number"
+                        min="1"
+                        max="365"
+                        {disabled}
+                        aria-label={$t('rq_policy_quota_days_label')}
+                        value={cr.quota.days}
+                        oninput={e => setQuotaDays(mc, e.currentTarget.value)}
+                      />
+                      <small>{$t('rq_policy_unit_days')}</small>
+                    </label>
                   {/if}
                 </div>
+                <small class="ext-quota-hint">{$t('rq_policy_quota_hint')}</small>
               </div>
             </div>
           {/each}
@@ -294,6 +319,18 @@
   .ext-quota-row {
     display: flex;
     gap: 0.4rem;
+  }
+  .ext-quota-unit {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex: 1;
+    min-width: 0;
+  }
+  .ext-quota-unit small, .ext-quota-hint {
+    opacity: 0.7;
+    font-size: 0.76rem;
+    white-space: nowrap;
   }
   .ext-quota-row input {
     width: 100%;

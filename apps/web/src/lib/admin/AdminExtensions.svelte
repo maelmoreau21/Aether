@@ -120,6 +120,8 @@
   };
   const changelogLines = (text?: string | null) => (text ?? '').split('\n').map(line => line.trim()).filter(Boolean);
   let installed = $state<Installed[]>([]);
+  let libraries = $state<{ id: string; name: string; kind: string; enabled: boolean }[]>([]);
+  let grantDraft = $state<Record<string, { allLibraries: boolean; libraryIds: string[] }>>({});
   const categories = $derived([...new Set([...catalogue.map(entry => categoryOf(entry.manifest)), ...installed.map(entry => categoryOf(entry.manifest))])].sort());
   let editingSettings = $state<Record<string, ExtensionSettings>>({});
   const managed=$derived(installed.find(extension=>extension.manifest.id===managedId));
@@ -204,17 +206,23 @@
     if (failures.length) error = $t('unreachable_repositories', { repositories: failures.join(', ') });
   }
   async function refresh(loadArtwork = true) {
-    const [extensions, sources, available] = await Promise.all([
+    const [extensions, sources, available, libs] = await Promise.all([
       adminRequest<{ extensions: Installed[] }>('/api/v1/admin/extensions'),
       adminRequest<{ repositories: Repository[] }>('/api/v1/admin/extensions/repositories'),
-      adminRequest<{ entries: CatalogueEntry[] }>('/api/v1/admin/extensions/catalogue')
+      adminRequest<{ entries: CatalogueEntry[] }>('/api/v1/admin/extensions/catalogue'),
+      adminRequest<{ libraries: { id: string; name: string; kind: string; enabled: boolean }[] }>('/api/v1/admin/libraries').catch(() => ({ libraries: [] }))
     ]);
     installed = extensions.extensions.map(extension=>({...extension,manifest:displayManifest(extension.manifest)}));
+    libraries = (libs.libraries ?? []).filter(l => l.enabled);
     await loadFeatures(true).catch(() => {});
     repositories = sources.repositories; catalogue = available.entries.map(entry=>({...entry,manifest:displayManifest(entry.manifest)}));
     if (loadArtwork) void loadImages();
 
     for (const ext of installed) {
+      grantDraft[ext.manifest.id] = {
+        allLibraries: ext.allLibraries === true,
+        libraryIds: [...(ext.libraryIds ?? [])]
+      };
       if (!editingSettings[ext.manifest.id]) {
         const defaults = settingsDefaults(ext.manifest);
         editingSettings[ext.manifest.id] = { ...defaults, ...(ext.settings ?? {}) };
@@ -244,8 +252,19 @@
   }
   function configure(extension: Installed, enabled: boolean) {
     return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
-      method: 'PUT', body: JSON.stringify({ enabled, libraryIds: extension.libraryIds, allLibraries: extension.allLibraries === true || extension.libraryIds.length === 0 })
+      method: 'PUT', body: JSON.stringify({ enabled, libraryIds: extension.libraryIds, allLibraries: extension.allLibraries === true })
     }), enabled ? $t('extension_enabled_notice') : $t('extension_disabled_notice'));
+  }
+  function saveLibraryGrants(extension: Installed) {
+    const draft = grantDraft[extension.manifest.id] ?? { allLibraries: true, libraryIds: [] };
+    return perform(() => adminRequest(`/api/v1/admin/extensions/${encodeURIComponent(extension.manifest.id)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: extension.enabled,
+        allLibraries: draft.allLibraries,
+        libraryIds: draft.allLibraries ? [] : draft.libraryIds
+      })
+    }), $t('ext_library_access_saved'));
   }
   async function saveSettings(id: string) {
     await perform(async () => {
@@ -627,6 +646,47 @@
             <div><dt>{$t('permissions')}</dt><dd>{accessLabels(manifest.permissions) || $t('none')}</dd></div>
             <div><dt>{$t('services_contacted')}</dt><dd>{manifest.httpHosts?.join(', ') || $t('none').toLowerCase()}</dd></div>
           </dl>
+          {#if extension && libraries.length > 0 && grantDraft[extension.manifest.id]}
+            {@const draft = grantDraft[extension.manifest.id]}
+            <section class="library-grants-card" aria-label={$t('ext_library_access_title')}>
+              <h3>{$t('ext_library_access_title')}</h3>
+              <p>{$t('ext_library_access_desc')}</p>
+              <label class="grant-toggle">
+                <input
+                  type="checkbox"
+                  checked={draft.allLibraries}
+                  disabled={busy}
+                  onchange={e => {
+                    grantDraft[extension.manifest.id] = { ...draft, allLibraries: e.currentTarget.checked };
+                  }}
+                />
+                <span>{$t('automation_all_libraries')}</span>
+              </label>
+              {#if !draft.allLibraries}
+                <div class="grant-library-list">
+                  {#each libraries as lib (lib.id)}
+                    <label class="grant-toggle">
+                      <input
+                        type="checkbox"
+                        checked={draft.libraryIds.includes(lib.id)}
+                        disabled={busy}
+                        onchange={e => {
+                          const next = e.currentTarget.checked
+                            ? [...draft.libraryIds, lib.id]
+                            : draft.libraryIds.filter(id => id !== lib.id);
+                          grantDraft[extension.manifest.id] = { ...draft, libraryIds: next };
+                        }}
+                      />
+                      <span>{lib.name} <small>({lib.kind})</small></span>
+                    </label>
+                  {/each}
+                </div>
+              {/if}
+              <div class="actions">
+                <button type="button" disabled={busy} onclick={() => void saveLibraryGrants(extension)}>{$t('ext_library_access_save')}</button>
+              </div>
+            </section>
+          {/if}
         </div>
       </div>
       {/if}
@@ -873,6 +933,10 @@
   .enable-toggle.is-enabled .switch-track::after { transform: translateX(16px); }
 
   .detail-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0 24px; margin: 0; padding: 4px 18px; background: var(--color-surface); border-radius: var(--radius-md); }
+  .library-grants-card { display: grid; gap: 10px; padding: 16px 18px; background: var(--color-surface); border-radius: var(--radius-md); }
+  .library-grants-card p { margin: 0; font-size: 13px; }
+  .grant-library-list { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+  .grant-toggle { display: inline-flex; align-items: center; gap: 8px; color: var(--color-text); font-size: 13px; cursor: pointer; }
   .detail-meta > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-top: 1px solid var(--color-line-subtle); font-size: 14px; }
   .detail-meta > div:nth-child(-n+2) { border-top: 0; }
   dt { color: var(--color-muted); }

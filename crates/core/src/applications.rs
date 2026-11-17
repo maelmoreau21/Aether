@@ -81,6 +81,15 @@ pub async fn authorize_library(
     )
     .await
 }
+pub async fn authorize_library_for(
+    store: &IdentityStore,
+    user_id: &str,
+    role: &str,
+    cap: &str,
+    library: &str,
+) -> Result<(), Error> {
+    library_allowed(store, user_id, role, cap, library).await
+}
 pub async fn authorize_background(
     store: &IdentityStore,
     cap: &str,

@@ -246,4 +246,11 @@ Aether applique les exigences du standard **OWASP ASVS 5.0.0 Niveau 2** pour les
 - **Atténuation** : l'exploitation suppose qu'un attaquant puisse déposer un fichier `.sqlite3` et un `.wal` forgés à l'emplacement exact où le Core ouvre sa base interne. En fonctionnement normal, le chemin de la base SQLite d'Aether est interne, non contrôlé par les utilisateurs et protégé par les permissions du conteneur/système.
 - **Action de suivi** : la CI exécute `cargo audit --ignore RUSTSEC-2026-0459` (`.github/workflows/ci.yml`). Dès qu'une version de `sqlx` accepte `libsqlite3-sys >= 0.39.0` (embarquant SQLite `>= 3.54.0`), mettre à jour `sqlx` et retirer `--ignore RUSTSEC-2026-0459` de la CI.
 
+### `GHSA-fc5q-39xc-vjpf` (`picomatch <= 4.0.7`, outils `devDependencies` frontend)
+
+- **Avis** : ReDoS potentiel dans `picomatch <= 4.0.7` via des motifs *extglob* répétés à une seule branche.
+- **Blocage amont** : `apps/web/package-lock.json` verrouille déjà la dernière version publiée sur npm (`picomatch 4.0.7`) et aucune version corrective (`> 4.0.7`) n'a encore été publiée en amont.
+- **Atténuation** : `picomatch` n'est utilisé qu'indirectement par des outils de développement et de build (`vite`, `vitest`, `svelte-check`, `@typescript-eslint`), exclusivement dans `devDependencies` ; il n'est ni embarqué dans le bundle client statique ni présent dans `dependencies` de production.
+- **Action de suivi** : la CI exécute `npm audit --omit=dev --audit-level=high` sur les dépendances de production puis filtre uniquement `GHSA-fc5q-39xc-vjpf` (`picomatch`) dans `devDependencies` (`.github/workflows/ci.yml`). Dès qu'une version corrective de `picomatch` est publiée, mettre à jour `apps/web/package-lock.json` et restaurer `npm audit --audit-level=high` brut.
+
 

@@ -354,36 +354,35 @@ jobs:
           AUDIT_JSON="$(npm audit --json)"
           AUDIT_RC=$?
           set -e
-          export AUDIT_RC
-          printf '%s' "$AUDIT_JSON" | node -e '
-            const fs = require("node:fs");
-            const raw = fs.readFileSync(0, "utf8").trim();
-            if (!raw) process.exit(1);
-            const report = JSON.parse(raw);
-            if (report.error || !report.vulnerabilities || typeof report.vulnerabilities !== "object") {
-              console.error(report.error || "Unexpected npm audit JSON format");
-              process.exit(1);
+          export AUDIT_JSON AUDIT_RC
+          node <<'NODE'
+          const raw = (process.env.AUDIT_JSON || "").trim();
+          if (!raw) process.exit(1);
+          const report = JSON.parse(raw);
+          if (report.error || !report.vulnerabilities || typeof report.vulnerabilities !== "object") {
+            console.error(report.error || "Unexpected npm audit JSON format");
+            process.exit(1);
+          }
+          const vulns = Object.values(report.vulnerabilities);
+          const disallowed = [];
+          for (const entry of vulns) {
+            for (const via of (entry.via || [])) {
+              if (!via || typeof via !== "object") continue;
+              const sev = via.severity;
+              if (sev !== "high" && sev !== "critical") continue;
+              if (via.url === "https://github.com/advisories/GHSA-fc5q-39xc-vjpf" && via.name === "picomatch") continue;
+              disallowed.push(via.name + "@" + (via.range || "*") + " (" + sev + "): " + (via.url || via.title));
             }
-            const vulns = Object.values(report.vulnerabilities);
-            const disallowed = [];
-            for (const entry of vulns) {
-              for (const via of (entry.via || [])) {
-                if (!via || typeof via !== "object") continue;
-                const sev = via.severity;
-                if (sev !== "high" && sev !== "critical") continue;
-                if (via.url === "https://github.com/advisories/GHSA-fc5q-39xc-vjpf" && via.name === "picomatch") continue;
-                disallowed.push(`${via.name}@${via.range || "*"} (${sev}): ${via.url || via.title}`);
-              }
-            }
-            if (disallowed.length > 0) {
-              console.error("Disallowed high/critical npm advisories:\n" + disallowed.join("\n"));
-              process.exit(1);
-            }
-            if (Number(process.env.AUDIT_RC) !== 0 && vulns.length === 0) {
-              console.error("npm audit exited non-zero without parseable vulnerability details");
-              process.exit(1);
-            }
-          '
+          }
+          if (disallowed.length > 0) {
+            console.error("Disallowed high/critical npm advisories:\n" + disallowed.join("\n"));
+            process.exit(1);
+          }
+          if (Number(process.env.AUDIT_RC) !== 0 && vulns.length === 0) {
+            console.error("npm audit exited non-zero without parseable vulnerability details");
+            process.exit(1);
+          }
+          NODE
 
       - name: Vérification TypeScript & Svelte (svelte-check)
         run: npm run check

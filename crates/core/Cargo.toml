@@ -32,7 +32,7 @@ socket2 = { version = "0.6", features = ["all"] }
 bytes = "1"
 http-body-util = "0.1"
 httpdate = "1"
-lettre = { version = "=0.11.23", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
+lettre = { version = "=0.11.24", default-features = false, features = ["smtp-transport", "builder", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
 time = { version = "0.3", features = ["parsing"] }
 jiff = { version = "0.2", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo", "tzdb-bundle-always"] }
 hyper = { version = "1", features = ["client", "http1"] }

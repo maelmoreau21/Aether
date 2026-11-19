@@ -11,6 +11,7 @@ async fn main() {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut allow_replace = false;
     let mut full = false;
+    let mut assets_mode_arg: Option<aether_core::assets::BackupAssetsMode> = None;
     let mut target_arg = None;
 
     for arg in std::env::args_os().skip(1) {
@@ -18,10 +19,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             full = true;
         } else if arg == "--replace" {
             allow_replace = true;
+        } else if let Some(value) = arg.to_str().and_then(|s| s.strip_prefix("--assets-mode=")) {
+            assets_mode_arg = Some(
+                aether_core::assets::BackupAssetsMode::parse_str(value)
+                    .ok_or("--assets-mode must be none, essential, or full")?,
+            );
         } else if target_arg.is_none() {
             target_arg = Some(PathBuf::from(arg));
         } else {
-            return Err("usage: media-backup [--full | --replace] [TARGET_PATH]".into());
+            return Err(
+                "usage: media-backup [--full [--assets-mode=none|essential|full] | --replace] [TARGET_PATH]"
+                    .into(),
+            );
         }
     }
 
@@ -40,7 +49,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             return Err("full backups never overwrite an archive".into());
         }
         let target = target_arg.ok_or("full backup requires a new archive path")?;
-        full_backup(&target, &media_root).await?;
+        full_backup(&target, &media_root, assets_mode_arg).await?;
         println!("Server backup completed: database and runtime configuration.");
         return Ok(());
     }
@@ -100,6 +109,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 async fn full_backup(
     target: &std::path::Path,
     media_root: &std::path::Path,
+    assets_mode_arg: Option<aether_core::assets::BackupAssetsMode>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Fail closed before any snapshot is written: no key means no plaintext copy of the secrets.
     let protection = aether_core::backup_bundle::protection_from_settings(&|name: &str| {
@@ -113,6 +123,16 @@ async fn full_backup(
             "WARNING: MEDIA_BACKUP_ALLOW_UNENCRYPTED is set: the archive will contain secrets in clear text."
         );
     }
+    let assets_mode = match assets_mode_arg {
+        Some(mode) => mode,
+        None => match std::env::var("MEDIA_BACKUP_ASSETS_MODE") {
+            Ok(val) if !val.trim().is_empty() => {
+                aether_core::assets::BackupAssetsMode::parse_str(&val)
+                    .ok_or("MEDIA_BACKUP_ASSETS_MODE must be none, essential, or full")?
+            }
+            _ => aether_core::assets::BackupAssetsMode::None,
+        },
+    };
     aether_core::backup::check_path_safety(target, "full backup")?;
     aether_core::backup::check_not_in_media_root(target, Some(media_root), "full backup")?;
     if target.exists() {
@@ -166,7 +186,22 @@ async fn full_backup(
         _ => return Err("MEDIA_DB_ENGINE must be sqlite or postgres".into()),
     }
     config.insert("MEDIA_DB_ENGINE".into(), engine.clone());
-    aether_core::backup_bundle::create(&snapshot, config, target, &engine, protection).await?;
+    config.insert(
+        "MEDIA_BACKUP_ASSETS_MODE".into(),
+        assets_mode.as_str().into(),
+    );
+    let assets = if assets_mode == aether_core::assets::BackupAssetsMode::None {
+        None
+    } else {
+        let store = aether_core::identity::IdentityStore::open_configured(media_root).await?;
+        let exported = store.assets().export_source_for_mode(assets_mode).await?;
+        store.close().await;
+        Some(exported)
+    };
+    aether_core::backup_bundle::create_with_assets(
+        &snapshot, config, target, &engine, assets, protection,
+    )
+    .await?;
     Ok(())
 }
 

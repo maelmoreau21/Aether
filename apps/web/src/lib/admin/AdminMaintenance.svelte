@@ -5,8 +5,26 @@
   import { t } from '../i18n';
   let { visible = true }: { visible?: boolean } = $props();
   interface Archive { id: string; size: number; createdAt: number }
+  type BackupAssetsMode = 'none' | 'essential' | 'full';
+  interface PolicyView { assetsMode: BackupAssetsMode; retentionCount: number }
+  interface SizeBreakdown {
+    databaseBytes: number;
+    essentialAssetsBytes: number;
+    essentialAssetsCount: number;
+    catalogueAssetsBytes: number;
+    catalogueAssetsCount: number;
+    totalAssetsBytes: number;
+    totalAssetsCount: number;
+  }
   // The automatic schedule is the "backup" scheduled task (Tâches planifiées), not edited here.
-  interface Listing { available: boolean; reason: string | null; running: boolean; archives: Archive[] }
+  interface Listing {
+    available: boolean;
+    reason: string | null;
+    running: boolean;
+    archives: Archive[];
+    policy?: PolicyView;
+    breakdown?: SizeBreakdown;
+  }
   
   interface MemoryReport {
     core: {
@@ -42,6 +60,9 @@
   let memoryLoading = $state(false);
   let memoryTrimming = $state(false);
   let creating = $state(false);
+  let savingPolicy = $state(false);
+  let selectedAssetsMode = $state<BackupAssetsMode>('full');
+  let retentionCount = $state<number>(0);
   let error = $state('');
   let success = $state('');
   let active = true;
@@ -53,7 +74,13 @@
       const response = await fetch('/api/v1/admin/backups', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
       if (!response.ok) throw new Error($t('loading_failed_http', { status: response.status }));
       const data: Listing = await response.json();
-      if (active) listing = data;
+      if (active) {
+        listing = data;
+        if (data.policy) {
+          selectedAssetsMode = data.policy.assetsMode;
+          retentionCount = data.policy.retentionCount;
+        }
+      }
     } catch (cause) {
       if (active) error = cause instanceof Error ? cause.message : $t('loading_impossible');
     } finally { if (active) loading = false; }
@@ -96,13 +123,59 @@
     }
   }
 
+  async function savePolicy() {
+    if (!$session || savingPolicy) return;
+    savingPolicy = true;
+    error = '';
+    success = '';
+    const clampedRetention = Math.max(0, Math.min(1000, Math.trunc(Number(retentionCount) || 0)));
+    retentionCount = clampedRetention;
+    try {
+      const response = await fetch('/api/v1/admin/backups/policy', {
+        method: 'PUT',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': $session.csrfToken,
+        },
+        body: JSON.stringify({
+          assetsMode: selectedAssetsMode,
+          retentionCount: clampedRetention,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        throw new Error($t('backup_failed_http', { status: response.status }));
+      }
+      if (active) {
+        success = $t('backup_policy_saved');
+        await refresh();
+      }
+    } catch (cause) {
+      if (active) error = cause instanceof Error ? cause.message : $t('backup_failed');
+    } finally {
+      if (active) savingPolicy = false;
+    }
+  }
+
   async function create() {
     if (!$session || creating) return;
     creating = true;
     error = '';
     success = '';
     try {
-      const response = await fetch('/api/v1/admin/backups', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'x-csrf-token': $session.csrfToken }, signal: AbortSignal.timeout(300000) });
+      const response = await fetch('/api/v1/admin/backups', {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          'content-type': 'application/json',
+          'x-csrf-token': $session.csrfToken,
+        },
+        body: JSON.stringify({ assetsMode: selectedAssetsMode }),
+        signal: AbortSignal.timeout(300000),
+      });
       if (!response.ok) {
         const detail = await response.json().catch(() => null);
         throw new Error(typeof detail?.code === 'string' && detail.code.startsWith('backup_') && typeof detail.message === 'string'
@@ -116,6 +189,13 @@
   }
 
   const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1);
+  const estimatedBackupBytes = $derived.by(() => {
+    const b = listing?.breakdown;
+    if (!b) return 0;
+    if (selectedAssetsMode === 'none') return b.databaseBytes;
+    if (selectedAssetsMode === 'essential') return b.databaseBytes + b.essentialAssetsBytes;
+    return b.databaseBytes + b.totalAssetsBytes;
+  });
 
   onMount(() => { active = true; return () => { active = false; }; });
   $effect(() => { if (visible) void refresh(); });
@@ -174,6 +254,50 @@
 
   {#if loading}<p role="status">{$t('loading_archives')}</p>{:else if listing}
     {#if !listing.available}<div class="notice"><strong>{$t('backup_unavailable')}</strong><p>{listing.reason ?? $t('backup_service_unavailable')}</p></div>{:else}
+      <article class="policy-card">
+        <h3>{$t('backup_policy_heading')}</h3>
+        <p>{$t('backup_policy_note')}</p>
+        {#if listing.breakdown}
+          <div class="memory-grid">
+            <div class="metric">
+              <small>{$t('backup_size_db')}</small>
+              <strong>{$t('size_mb', { value: mb(listing.breakdown.databaseBytes) })}</strong>
+            </div>
+            <div class="metric">
+              <small>{$t('backup_size_essential', { count: listing.breakdown.essentialAssetsCount })}</small>
+              <strong>{$t('size_mb', { value: mb(listing.breakdown.essentialAssetsBytes) })}</strong>
+            </div>
+            <div class="metric">
+              <small>{$t('backup_size_catalogue', { count: listing.breakdown.catalogueAssetsCount })}</small>
+              <strong>{$t('size_mb', { value: mb(listing.breakdown.catalogueAssetsBytes) })}</strong>
+            </div>
+            <div class="metric highlight">
+              <small>{$t('backup_size_estimated')}</small>
+              <strong>{$t('size_mb', { value: mb(estimatedBackupBytes) })}</strong>
+            </div>
+          </div>
+        {/if}
+        <div class="policy-form">
+          <label class="field">
+            <span>{$t('backup_assets_mode_label')}</span>
+            <select bind:value={selectedAssetsMode}>
+              <option value="essential">{$t('backup_assets_mode_essential')}</option>
+              <option value="none">{$t('backup_assets_mode_none')}</option>
+              <option value="full">{$t('backup_assets_mode_full')}</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>{$t('backup_retention_count_label')}</span>
+            <input type="number" min="0" max="1000" step="1" bind:value={retentionCount} />
+            <small>{$t('backup_retention_hint')}</small>
+          </label>
+          <div class="actions">
+            <button onclick={savePolicy} disabled={savingPolicy || creating}>
+              {$t('backup_save_policy')}
+            </button>
+          </div>
+        </div>
+      </article>
       <article><h3>{$t('automatic_schedule')}</h3>
         <p>{$t('sched_backup_schedule_hint')}</p>
         <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied; the hash carries the task id. -->
@@ -213,6 +337,11 @@
 
   /* Panneaux plats */
   article { display: grid; gap: 10px; min-width: 0; padding: 20px; border-radius: var(--radius-md); background: var(--color-surface); }
+  .policy-card { gap: 16px; }
+  .policy-form { display: grid; gap: 14px; min-width: 0; }
+  .field { display: grid; gap: 6px; min-width: 0; font-size: 13px; font-weight: 500; color: var(--color-text); }
+  .field select, .field input { width: 100%; max-width: 100%; min-width: 0; min-height: 40px; box-sizing: border-box; padding: 8px 12px; border: 1px solid var(--color-line); border-radius: var(--radius-sm); background: var(--color-raised); color: var(--color-text); font: inherit; font-size: 14px; }
+  .field select:focus-visible, .field input:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 
   .link { width: fit-content; }
 

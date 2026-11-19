@@ -104,6 +104,12 @@ pub struct Settings {
     /// Offline downloads of original files.
     #[serde(default = "default_true")]
     pub downloads_enabled: bool,
+    /// Which `/data/assets` blobs are embedded in `.media-backup` archives (`none`, `essential`, `full`).
+    #[serde(default)]
+    pub backup_assets_mode: crate::assets::BackupAssetsMode,
+    /// Maximum number of `.media-backup` archives kept in `MEDIA_BACKUP_DIR` (`0` = unlimited).
+    #[serde(default)]
+    pub backup_retention_count: u32,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -202,6 +208,8 @@ struct SettingsInput {
     max_transcode_kbps: Option<u32>,
     remote_control_enabled: Option<bool>,
     downloads_enabled: Option<bool>,
+    backup_assets_mode: Option<crate::assets::BackupAssetsMode>,
+    backup_retention_count: Option<u32>,
 }
 
 impl Default for Settings {
@@ -242,6 +250,8 @@ impl Default for Settings {
             max_transcode_kbps: 0,
             remote_control_enabled: true,
             downloads_enabled: true,
+            backup_assets_mode: crate::assets::BackupAssetsMode::default(),
+            backup_retention_count: 0,
         }
     }
 }
@@ -461,6 +471,13 @@ async fn write(
         downloads_enabled: input
             .downloads_enabled
             .unwrap_or(previous.downloads_enabled),
+        backup_assets_mode: input
+            .backup_assets_mode
+            .unwrap_or(previous.backup_assets_mode),
+        backup_retention_count: input
+            .backup_retention_count
+            .filter(|&count| count <= 1000)
+            .unwrap_or(previous.backup_retention_count),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)
@@ -532,6 +549,26 @@ pub async fn save_logging(
     let mut settings = load(store).await?;
     settings.log_level = level;
     settings.log_retention_days = retention_days;
+    let json = serde_json::to_string(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json")
+        .bind(json)
+        .execute(&store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(())
+}
+/// Persists the backup asset mode and archive retention limit without touching other settings.
+pub async fn save_backup_policy(
+    store: &IdentityStore,
+    assets_mode: crate::assets::BackupAssetsMode,
+    retention_count: u32,
+) -> Result<(), StatusCode> {
+    if retention_count > 1000 {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    let mut settings = load(store).await?;
+    settings.backup_assets_mode = assets_mode;
+    settings.backup_retention_count = retention_count;
     let json = serde_json::to_string(&settings).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     query("INSERT INTO server_settings(singleton,settings_json) VALUES(1,?) ON CONFLICT(singleton) DO UPDATE SET settings_json=excluded.settings_json")
         .bind(json)

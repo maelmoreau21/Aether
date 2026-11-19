@@ -81,12 +81,46 @@ impl IntoResponse for BackupFailure {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct PolicyView {
+    assets_mode: crate::assets::BackupAssetsMode,
+    retention_count: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PolicyInput {
+    assets_mode: crate::assets::BackupAssetsMode,
+    retention_count: u32,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreateInput {
+    assets_mode: Option<crate::assets::BackupAssetsMode>,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SizeBreakdown {
+    database_bytes: u64,
+    essential_assets_bytes: u64,
+    essential_assets_count: u64,
+    catalogue_assets_bytes: u64,
+    catalogue_assets_count: u64,
+    total_assets_bytes: u64,
+    total_assets_count: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Listing {
     available: bool,
     reason: Option<&'static str>,
     running: bool,
     archives: Vec<Archive>,
     schedule: Schedule,
+    policy: PolicyView,
+    breakdown: SizeBreakdown,
 }
 
 /// Configuration is resolved once from the actual open database, never from a request.
@@ -278,6 +312,10 @@ fn router_with_state(state: Backups) -> Router {
     start_worker(&state);
     Router::new()
         .route("/api/v1/admin/backups", get(list).post(create))
+        .route(
+            "/api/v1/admin/backups/policy",
+            axum::routing::put(update_policy),
+        )
         .route(
             "/api/v1/admin/backups/schedule",
             axum::routing::put(update_schedule),
@@ -499,6 +537,8 @@ async fn list(
         (available, reason)
     };
     let schedule = load_schedule(&state).await?;
+    let policy = load_policy(&state).await?;
+    let breakdown = load_breakdown(&state).await;
     let running = running(&state)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -510,9 +550,159 @@ async fn list(
             reason,
             running,
             archives,
+            policy,
+            breakdown,
         }),
     )
         .into_response())
+}
+
+async fn load_policy(state: &Backups) -> Result<PolicyView, StatusCode> {
+    let saved: Option<String> = crate::database::query_scalar(
+        "SELECT settings_json FROM server_settings WHERE singleton=1",
+    )
+    .fetch_optional(state.auth.store.pool())
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let value: Option<serde_json::Value> =
+        saved.as_deref().and_then(|s| serde_json::from_str(s).ok());
+    let has_saved_mode = value
+        .as_ref()
+        .and_then(|v| v.get("backupAssetsMode"))
+        .is_some();
+    let has_saved_retention = value
+        .as_ref()
+        .and_then(|v| v.get("backupRetentionCount"))
+        .is_some();
+
+    let settings = crate::server_settings::load(&state.auth.store).await?;
+    let assets_mode = if has_saved_mode {
+        settings.backup_assets_mode
+    } else {
+        state
+            .configuration
+            .get("MEDIA_BACKUP_ASSETS_MODE")
+            .and_then(|v| crate::assets::BackupAssetsMode::parse_str(v))
+            .unwrap_or(settings.backup_assets_mode)
+    };
+    let retention_count = if has_saved_retention {
+        settings.backup_retention_count
+    } else {
+        state
+            .configuration
+            .get("MEDIA_BACKUP_RETENTION_COUNT")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .filter(|&n| n <= 1000)
+            .unwrap_or(settings.backup_retention_count)
+    };
+    Ok(PolicyView {
+        assets_mode,
+        retention_count,
+    })
+}
+
+async fn load_breakdown(state: &Backups) -> SizeBreakdown {
+    let database_bytes = if let Some(source) = &state.source {
+        let source = source.clone();
+        tokio::task::spawn_blocking(move || {
+            let main = std::fs::metadata(&source).map_or(0, |m| m.len());
+            let wal = std::fs::metadata(format!("{}-wal", source.display())).map_or(0, |m| m.len());
+            main.saturating_add(wal)
+        })
+        .await
+        .unwrap_or(0)
+    } else if state.postgres_url.is_some() {
+        crate::database::query_scalar::<_, i64>("SELECT pg_database_size(current_database())")
+            .fetch_one(state.auth.store.pool())
+            .await
+            .map_or(0, |n| n.max(0) as u64)
+    } else {
+        0
+    };
+    let assets = state
+        .auth
+        .store
+        .assets()
+        .backup_breakdown()
+        .await
+        .unwrap_or_default();
+    SizeBreakdown {
+        database_bytes,
+        essential_assets_bytes: assets.essential_bytes,
+        essential_assets_count: assets.essential_objects,
+        catalogue_assets_bytes: assets.catalogue_bytes,
+        catalogue_assets_count: assets.catalogue_objects,
+        total_assets_bytes: assets.total_bytes,
+        total_assets_count: assets.total_objects,
+    }
+}
+
+async fn update_policy(
+    State(state): State<Arc<Backups>>,
+    headers: HeaderMap,
+    Json(input): Json<PolicyInput>,
+) -> Result<Response, StatusCode> {
+    administrator(&state, &headers, true).await?;
+    if input.retention_count > 1000 {
+        return Err(StatusCode::UNPROCESSABLE_ENTITY);
+    }
+    crate::server_settings::save_backup_policy(
+        &state.auth.store,
+        input.assets_mode,
+        input.retention_count,
+    )
+    .await?;
+    if input.retention_count > 0
+        && let Ok(directory) = validate_directory(&state).await
+    {
+        let keep = input.retention_count as usize;
+        let _ = tokio::task::spawn_blocking(move || prune_old_archives(&directory, keep)).await;
+    }
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(load_policy(&state).await?),
+    )
+        .into_response())
+}
+
+fn prune_old_archives(directory: &DiskPath, keep: usize) {
+    if keep == 0 || !directory.exists() {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    let mut archives: Vec<(u64, String, PathBuf)> = Vec::new();
+    for entry in entries.take(10_000).flatten() {
+        let name = entry.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|name| name.strip_suffix(".media-backup"))
+        else {
+            continue;
+        };
+        if !valid_id(id) {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            continue;
+        }
+        let created_at = metadata
+            .modified()
+            .ok()
+            .and_then(|date| date.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |duration| duration.as_secs());
+        archives.push((created_at, id.to_owned(), path));
+    }
+    archives.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+    for (_, _, old_path) in archives.into_iter().skip(keep) {
+        let _ = std::fs::remove_file(old_path);
+    }
 }
 
 /// Whether a backup runs: a scheduled run recorded in the database under a live lease (on any
@@ -532,12 +722,17 @@ async fn running(state: &Backups) -> Result<bool, sqlx::Error> {
     Ok(scheduled > 0)
 }
 
-async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
+async fn perform_backup(
+    state: &Backups,
+    mode_override: Option<crate::assets::BackupAssetsMode>,
+) -> Result<Archive, BackupFailure> {
     // Fail closed before any snapshot: no key means no plaintext copy of the secrets on disk.
     let protection = state
         .protection
         .clone()
         .ok_or_else(|| BackupFailure::new(StatusCode::CONFLICT, KEY_REQUIRED.0, KEY_REQUIRED.1))?;
+    let policy = load_policy(state).await?;
+    let assets_mode = mode_override.unwrap_or(policy.assets_mode);
     let directory = validate_directory(state).await?;
     let path = directory.clone();
     tokio::task::spawn_blocking(move || {
@@ -617,15 +812,20 @@ async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
         .auth
         .store
         .assets()
-        .export_source()
+        .export_source_for_mode(assets_mode)
         .await
         .map_err(|error| {
             eprintln!("backup: cannot list durable assets: {error}");
             BackupFailure::new(StatusCode::INTERNAL_SERVER_ERROR, "backup_assets_unavailable", "L’inventaire des fichiers durables est indisponible. La sauvegarde n’a pas été créée.")
         })?;
+    let mut configuration = state.configuration.clone();
+    configuration.insert(
+        "MEDIA_BACKUP_ASSETS_MODE".into(),
+        assets_mode.as_str().into(),
+    );
     let size = crate::backup_bundle::create_with_assets(
         &temporary.0,
-        state.configuration.clone(),
+        configuration,
         &directory.join(format!("{id}.media-backup")),
         engine,
         Some(assets),
@@ -641,6 +841,11 @@ async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
         };
         BackupFailure::new(StatusCode::INTERNAL_SERVER_ERROR, code, message)
     })?;
+    if policy.retention_count > 0 {
+        let dir = directory.clone();
+        let keep = policy.retention_count as usize;
+        let _ = tokio::task::spawn_blocking(move || prune_old_archives(&dir, keep)).await;
+    }
     Ok(Archive {
         id,
         size,
@@ -651,18 +856,24 @@ async fn perform_backup(state: &Backups) -> Result<Archive, BackupFailure> {
 async fn create(
     State(state): State<Arc<Backups>>,
     headers: HeaderMap,
+    body: axum::body::Bytes,
 ) -> Result<Response, BackupFailure> {
     administrator(&state, &headers, true).await?;
     if state.source.is_none() && state.postgres_url.is_none() {
         return Err(StatusCode::NOT_IMPLEMENTED.into());
     }
+    let input: CreateInput = if body.is_empty() {
+        CreateInput::default()
+    } else {
+        serde_json::from_slice(&body).map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?
+    };
     let guard = BackupGuard::try_acquire(&state.auth.store)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or_else(|| BackupFailure::new(StatusCode::CONFLICT, BACKUP_BUSY.0, BACKUP_BUSY.1))?;
     // Own the exclusion across disconnects; scheduled and manual backups share it.
     let result = tokio::spawn(async move {
-        let result = perform_backup(&state).await;
+        let result = perform_backup(&state, input.assets_mode).await;
         guard.release().await;
         result
     })
@@ -844,7 +1055,7 @@ async fn run_scheduled_exclusive(
         eprintln!("scheduled backup: lease lost before start");
         return Err(StatusCode::CONFLICT);
     }
-    let result = perform_backup(state).await;
+    let result = perform_backup(state, None).await;
     if let Err(error) = &result {
         eprintln!(
             "scheduled backup failed: {} HTTP {}",

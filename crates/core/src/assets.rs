@@ -370,6 +370,51 @@ pub struct AssetStats {
     pub orphaned: i64,
 }
 
+/// Which durable assets are embedded into a `.media-backup` archive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BackupAssetsMode {
+    /// Only database, runtime configuration and TLS certificates; no `/data/assets` blobs.
+    None,
+    /// Database, config, certs + user/gallery avatar images (`user_avatars`, `avatar_images`,
+    /// `extension_avatar_images`). Omits heavy catalogue artwork (posters, backdrops, actor photos).
+    Essential,
+    /// Complete backup including all `/data/assets` blobs (default for full backward compatibility).
+    #[default]
+    Full,
+}
+
+impl BackupAssetsMode {
+    pub fn parse_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "essential" => Some(Self::Essential),
+            "full" => Some(Self::Full),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Essential => "essential",
+            Self::Full => "full",
+        }
+    }
+}
+
+/// Breakdown of committed `/data/assets` objects by backup scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupAssetBreakdown {
+    pub essential_objects: u64,
+    pub essential_bytes: u64,
+    pub catalogue_objects: u64,
+    pub catalogue_bytes: u64,
+    pub total_objects: u64,
+    pub total_bytes: u64,
+}
+
 /// Prevents the collector from deleting an asset while a processing step or response uses it.
 pub struct Lease {
     store: Arc<LeaseTable>,
@@ -789,10 +834,35 @@ impl AssetStore {
     /// Everything a complete backup must embed: all committed rows plus a way to open each object.
     /// Rows come from SQL (the source of truth); bytes are re-hashed by the backup writer.
     pub async fn export_source(&self) -> Result<crate::backup_bundle::AssetSource, AssetError> {
-        let rows: Vec<AssetMeta> =
-            crate::database::query_as("SELECT sha256, size, mime FROM assets ORDER BY sha256")
+        self.export_source_for_mode(BackupAssetsMode::Full).await
+    }
+
+    /// SQL condition selecting assets belonging to user profiles and avatar galleries.
+    const ESSENTIAL_ASSETS_PREDICATE: &'static str = "(EXISTS (SELECT 1 FROM user_avatars u WHERE u.sha256 = assets.sha256) \
+        OR EXISTS (SELECT 1 FROM avatar_images ai WHERE ai.sha256 = assets.sha256) \
+        OR EXISTS (SELECT 1 FROM extension_avatar_images eai WHERE eai.sha256 = assets.sha256))";
+
+    /// Export assets according to [`BackupAssetsMode`].
+    pub async fn export_source_for_mode(
+        &self,
+        mode: BackupAssetsMode,
+    ) -> Result<crate::backup_bundle::AssetSource, AssetError> {
+        let rows: Vec<AssetMeta> = match mode {
+            BackupAssetsMode::None => Vec::new(),
+            BackupAssetsMode::Essential => {
+                crate::database::query_as(sqlx::AssertSqlSafe(format!(
+                    "SELECT sha256, size, mime FROM assets WHERE {} ORDER BY sha256",
+                    Self::ESSENTIAL_ASSETS_PREDICATE
+                )))
                 .fetch_all(&self.pool)
-                .await?;
+                .await?
+            }
+            BackupAssetsMode::Full => {
+                crate::database::query_as("SELECT sha256, size, mime FROM assets ORDER BY sha256")
+                    .fetch_all(&self.pool)
+                    .await?
+            }
+        };
         let backend = self.backend.clone();
         Ok(crate::backup_bundle::AssetSource {
             items: rows
@@ -800,6 +870,32 @@ impl AssetStore {
                 .map(|r| (r.sha256, r.size.max(0) as u64, r.mime))
                 .collect(),
             open: Box::new(move |sha| backend.open(sha)),
+        })
+    }
+
+    /// Compute the exact size breakdown between essential assets (avatars) and catalogue artwork.
+    pub async fn backup_breakdown(&self) -> Result<BackupAssetBreakdown, AssetError> {
+        let (total_objects, total_bytes, essential_objects, essential_bytes): (i64, i64, i64, i64) =
+            crate::database::query_as(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*), COALESCE(SUM(size), 0), \
+                 COALESCE(SUM(CASE WHEN {pred} THEN 1 ELSE 0 END), 0), \
+                 COALESCE(SUM(CASE WHEN {pred} THEN size ELSE 0 END), 0) \
+                 FROM assets",
+                pred = Self::ESSENTIAL_ASSETS_PREDICATE
+            )))
+            .fetch_one(&self.pool)
+            .await?;
+        let total_objects = total_objects.max(0) as u64;
+        let total_bytes = total_bytes.max(0) as u64;
+        let essential_objects = (essential_objects.max(0) as u64).min(total_objects);
+        let essential_bytes = (essential_bytes.max(0) as u64).min(total_bytes);
+        Ok(BackupAssetBreakdown {
+            essential_objects,
+            essential_bytes,
+            catalogue_objects: total_objects.saturating_sub(essential_objects),
+            catalogue_bytes: total_bytes.saturating_sub(essential_bytes),
+            total_objects,
+            total_bytes,
         })
     }
 
@@ -859,8 +955,10 @@ impl AssetStore {
     }
 
     /// Import every object listed in `<dir>/assets.json` (written by backup extraction), then audit
-    /// the whole store against SQL. The restore is only complete when the returned report has
-    /// `is_complete()`: rows without bytes, or altered bytes, are never reported as success.
+    /// the whole store against SQL. When `<dir>/config.json` records `MEDIA_BACKUP_ASSETS_MODE`
+    /// as `essential` or `none`, unbundled catalogue artwork (or avatar) SQL references without
+    /// bytes on disk are pruned first so that `verify_all()` and catalogue regeneration remain
+    /// consistent. The restore is only complete when the returned report has `is_complete()`.
     pub async fn restore_extracted(&self, dir: &Path) -> Result<RestoreReport, AssetError> {
         #[derive(serde::Deserialize)]
         struct Entry {
@@ -887,11 +985,156 @@ impl AssetStore {
                 already_present += 1;
             }
         }
+        let mode = match tokio::fs::read(dir.join("config.json")).await {
+            Ok(bytes) => {
+                serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&bytes)
+                    .ok()
+                    .and_then(|cfg| cfg.get("MEDIA_BACKUP_ASSETS_MODE").cloned())
+                    .and_then(|v| BackupAssetsMode::parse_str(&v))
+                    .unwrap_or(BackupAssetsMode::Full)
+            }
+            Err(_) => BackupAssetsMode::Full,
+        };
+        if mode != BackupAssetsMode::Full {
+            self.prune_unbundled_after_restore(mode).await?;
+        }
         Ok(RestoreReport {
             imported,
             already_present,
             audit: self.verify_all().await?,
         })
+    }
+
+    /// Remove SQL rows referencing assets that were intentionally omitted from a `none` or
+    /// `essential` backup and are not already present on disk, so catalogue artwork and auto-retry
+    /// markers can be cleanly regenerated without leaving broken image links.
+    async fn prune_unbundled_after_restore(
+        &self,
+        mode: BackupAssetsMode,
+    ) -> Result<(), AssetError> {
+        let audit = self.verify_all().await?;
+        if audit.missing.is_empty() {
+            return Ok(());
+        }
+        let _exclusive = self.gate.write().await;
+        let _commit = self.commit.lock().await;
+        let mut conn = self.pool.acquire().await?;
+        let mut tx = crate::database::begin_write(&mut conn).await?;
+        for sha in &audit.missing {
+            let is_essential: i64 = crate::database::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM assets WHERE sha256=? AND {}",
+                Self::ESSENTIAL_ASSETS_PREDICATE
+            )))
+            .bind(sha)
+            .fetch_one(&mut *tx)
+            .await?;
+            if mode == BackupAssetsMode::Essential && is_essential > 0 {
+                // An essential avatar was expected in the bundle: keep the row so verify_all fails closed.
+                continue;
+            }
+            crate::database::query("DELETE FROM poster_previews WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            crate::database::query(
+                "DELETE FROM poster_previews WHERE work_id IN (SELECT work_id FROM work_posters WHERE sha256=?)",
+            )
+            .bind(sha)
+            .execute(&mut *tx)
+            .await?;
+            crate::database::query("DELETE FROM work_posters WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            crate::database::query(
+                "DELETE FROM artwork_annotations WHERE (work_id, image_id) IN \
+                 (SELECT e.work_id, e.id FROM work_image_entries e JOIN work_image_data d ON d.image_id=e.id WHERE d.sha256=?)",
+            )
+            .bind(sha)
+            .execute(&mut *tx)
+            .await?;
+            crate::database::query(
+                "DELETE FROM work_image_order WHERE (work_id, image_id) IN \
+                 (SELECT e.work_id, e.id FROM work_image_entries e JOIN work_image_data d ON d.image_id=e.id WHERE d.sha256=?)",
+            )
+            .bind(sha)
+            .execute(&mut *tx)
+            .await?;
+            crate::database::query(
+                "DELETE FROM work_image_hidden WHERE (work_id, image_id) IN \
+                 (SELECT e.work_id, e.id FROM work_image_entries e JOIN work_image_data d ON d.image_id=e.id WHERE d.sha256=?)",
+            )
+            .bind(sha)
+            .execute(&mut *tx)
+            .await?;
+            crate::database::query("DELETE FROM work_image_data WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            crate::database::query(
+                "DELETE FROM work_image_entries WHERE NOT EXISTS (SELECT 1 FROM work_image_data d WHERE d.image_id = work_image_entries.id)",
+            )
+            .execute(&mut *tx)
+            .await?;
+            crate::database::query("DELETE FROM library_artwork_previews WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            crate::database::query(
+                "DELETE FROM library_artwork_previews WHERE (library_id, kind) IN \
+                 (SELECT library_id, kind FROM library_artwork WHERE sha256=?)",
+            )
+            .bind(sha)
+            .execute(&mut *tx)
+            .await?;
+            crate::database::query("DELETE FROM library_artwork WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            crate::database::query("DELETE FROM person_images WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            crate::database::query("DELETE FROM image_migration_attempts WHERE sha256=?")
+                .bind(sha)
+                .execute(&mut *tx)
+                .await?;
+            if mode == BackupAssetsMode::None {
+                crate::database::query("DELETE FROM user_avatars WHERE sha256=?")
+                    .bind(sha)
+                    .execute(&mut *tx)
+                    .await?;
+                crate::database::query("DELETE FROM avatar_images WHERE sha256=?")
+                    .bind(sha)
+                    .execute(&mut *tx)
+                    .await?;
+                crate::database::query("DELETE FROM extension_avatar_images WHERE sha256=?")
+                    .bind(sha)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+            let unref = self.unreferenced();
+            crate::database::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM assets WHERE sha256=? AND {unref}"
+            )))
+            .bind(sha)
+            .execute(&mut *tx)
+            .await?;
+        }
+        // Reset artwork auto-attempts so automatic artwork collection re-fetches omitted posters.
+        let _ = crate::database::query("DELETE FROM artwork_auto_attempts")
+            .execute(&mut *tx)
+            .await;
+        if mode == BackupAssetsMode::None {
+            let _ = crate::database::query("DELETE FROM avatar_gallery_initialization")
+                .execute(&mut *tx)
+                .await;
+            let _ = crate::database::query("DELETE FROM avatar_builtin_seeds")
+                .execute(&mut *tx)
+                .await;
+        }
+        crate::database::commit(tx).await?;
+        Ok(())
     }
 
     /// Audit every committed row against the store (streaming, bounded memory). A restore is only

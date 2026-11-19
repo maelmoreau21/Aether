@@ -9,13 +9,23 @@ Format courant `MDBK0003` : chiffré et authentifié avec la clé externe `MEDIA
 | Base SQL cohérente (SQLite snapshot / `pg_dump`) | oui | authentification AEAD de chaque record |
 | Configuration `MEDIA_*` / `OIDC_*` (sans la clé de sauvegarde) | oui | authentification AEAD de chaque record |
 | Certificats TLS référencés | oui | taille annoncée au manifeste |
-| **Assets durables** (`/data/assets`, avatars, affiches, variantes) | oui (format courant) | SHA-256 + taille recalculés à l'écriture **et** à l'extraction |
+| **Assets durables** (`/data/assets`, avatars, affiches, variantes) | configurable (`full`, `essential`, `none`) | SHA-256 + taille recalculés à l'écriture **et** à l'extraction |
 | Caches régénérables (miniatures temporaires, `tmp/`) | non | — |
 | Données durables des extensions (KV `extension_data`, objets `extension_objects` et leurs blocs) | oui (elles sont dans la base SQL) | via la base |
 | Paquets Wasm installés (`/data/plugins`) | via la base (`extensions.package_json`) | reconstruits et vérifiés sur disque par `media-restore-assets` (`sync_installed` / `check_health`) |
 | Médias originaux des NAS | jamais | — |
 
 Le manifeste porte `assets` (nombre) et `assetBytes` (octets) ; une archive dont le décompte ne correspond pas est rejetée.
+
+### Périmètre des fichiers `/data/assets` et conservation
+
+L'administrateur peut choisir le périmètre des fichiers `/data/assets` embarqués via l'interface **Administration > Maintenance > Sauvegardes** (`PUT /api/v1/admin/backups/policy`), par variable d'environnement `MEDIA_BACKUP_ASSETS_MODE`, ou lors d'un appel ponctuel (`POST /api/v1/admin/backups` avec `{"assetsMode": "..."}` ou `media-backup --full --assets-mode=...`) :
+
+- **`full`** (défaut) : embarque tous les objets de `/data/assets` (avatars + affiches, fonds d'écran et portraits d'acteurs du catalogue).
+- **`essential`** : embarque uniquement les avatars d'utilisateurs et les galeries d'avatars (`user_avatars`, `avatar_images`, `extension_avatar_images`), en excluant les illustrations volumineuses du catalogue (`work_posters`, `poster_previews`, `work_image_data`, `person_images`, `library_artwork`, `library_artwork_previews`). Lors de la restauration via `media-restore-assets`, les références SQL des illustrations de catalogue non embarquées sont nettoyées automatiquement afin qu'elles soient régénérées proprement au prochain scan/enrichissement, tandis que l'intégrité des avatars reste vérifiée de manière stricte (`verify_all`).
+- **`none`** : n'embarque aucun fichier de `/data/assets` (base SQL, configuration et certificats uniquement).
+
+Une limite de rétention (`backupRetentionCount` dans la politique ou `MEDIA_BACKUP_RETENTION_COUNT`, `0` = illimité) permet également de purger automatiquement les archives `.media-backup` les plus anciennes du dossier de sauvegardes.
 
 ## Garanties
 

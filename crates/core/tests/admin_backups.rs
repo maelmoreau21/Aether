@@ -576,3 +576,214 @@ async fn backups_list_returns_unavailable_when_directory_refused() {
     }
     store.close().await;
 }
+
+#[tokio::test]
+async fn backup_policy_modes_breakdown_retention_and_selective_restore() {
+    let temp = tempfile::tempdir().unwrap();
+    let media = temp.path().join("media");
+    std::fs::create_dir(&media).unwrap();
+    let store = IdentityStore::open(&temp.path().join("live.sqlite3"))
+        .await
+        .unwrap();
+    database::query("INSERT INTO users(id,role) VALUES('admin','administrator')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let token = "d".repeat(64);
+    database::query("INSERT INTO sessions(token_hash,user_id,created_at,last_seen_at,expires_at) VALUES(?, 'admin', unixepoch(), unixepoch(), unixepoch()+3600)")
+        .bind(format!("{:x}", Sha256::digest(token.as_bytes())))
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let cookie = format!("aether_session={token}");
+    let csrf = format!("{:x}", Sha256::digest(format!("csrf:{token}").as_bytes()));
+
+    let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+        .await
+        .unwrap();
+
+    // Seed an essential user avatar and a heavy catalogue poster + preview.
+    let seeded_avatars = store
+        .assets()
+        .backup_breakdown()
+        .await
+        .unwrap()
+        .essential_objects;
+    let avatar_bytes = b"USER_CUSTOM_AVATAR_BYTES_ESSENTIAL";
+    let avatar_meta = store
+        .assets()
+        .put_bytes(avatar_bytes, "image/png")
+        .await
+        .unwrap();
+    database::query(
+        "INSERT INTO user_avatars(user_id,sha256) VALUES('admin',?) ON CONFLICT(user_id) DO UPDATE SET sha256=excluded.sha256",
+    )
+    .bind(&avatar_meta.sha256)
+    .execute(store.pool())
+    .await
+    .unwrap();
+
+    database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)")
+        .bind(media.to_string_lossy().as_ref())
+        .execute(store.pool())
+        .await
+        .unwrap();
+    database::query("INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json) VALUES('work-1','films','w1','Film 1',2026,'{}')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    let poster_bytes = vec![42u8; 120_000];
+    let poster_meta = store
+        .assets()
+        .put_bytes(&poster_bytes, "image/webp")
+        .await
+        .unwrap();
+    database::query("INSERT INTO work_posters(work_id,sha256,revision) VALUES('work-1',?,'rev-1')")
+        .bind(&poster_meta.sha256)
+        .execute(store.pool())
+        .await
+        .unwrap();
+    database::query("INSERT INTO poster_previews(work_id,width,revision,mime,sha256) VALUES('work-1',320,'rev-1','image/webp',?)")
+        .bind(&poster_meta.sha256)
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    let backups_dir = temp.path().join("backups");
+    let app = admin_backups::router_with_configuration(
+        auth,
+        media.clone(),
+        Some(backups_dir.clone()),
+        test_key_configuration(),
+    )
+    .await
+    .unwrap();
+
+    // Check breakdown and default policy in GET /api/v1/admin/backups
+    let list_res = request(&app, "GET", "/api/v1/admin/backups", Some(&cookie), None).await;
+    assert_eq!(list_res.status(), StatusCode::OK);
+    let listing: serde_json::Value =
+        serde_json::from_slice(&to_bytes(list_res.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(listing["policy"]["assetsMode"], "full");
+    assert_eq!(listing["policy"]["retentionCount"], 0);
+    assert_eq!(
+        listing["breakdown"]["essentialAssetsCount"],
+        seeded_avatars + 1
+    );
+    assert_eq!(listing["breakdown"]["catalogueAssetsCount"], 1);
+    assert_eq!(
+        listing["breakdown"]["catalogueAssetsBytes"],
+        poster_bytes.len() as u64
+    );
+    assert!(listing["breakdown"]["databaseBytes"].as_u64().unwrap() > 0);
+
+    // Update policy to essential mode and retentionCount = 2
+    let policy_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/admin/backups/policy")
+                .header("origin", "http://127.0.0.1:3000")
+                .header("cookie", &cookie)
+                .header("x-csrf-token", &csrf)
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"assetsMode": "essential", "retentionCount": 2}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(policy_res.status(), StatusCode::OK);
+    let policy_body: serde_json::Value =
+        serde_json::from_slice(&to_bytes(policy_res.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(policy_body["assetsMode"], "essential");
+    assert_eq!(policy_body["retentionCount"], 2);
+
+    // Create 3 backups (1st default essential, 2nd explicit none, 3rd default essential)
+    // Retention count = 2 must keep only 2 archives in backups_dir.
+    for mode_override in [None, Some("none"), None] {
+        let body = match mode_override {
+            Some(m) => Body::from(serde_json::json!({"assetsMode": m}).to_string()),
+            None => Body::empty(),
+        };
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/backups")
+                    .header("origin", "http://127.0.0.1:3000")
+                    .header("cookie", &cookie)
+                    .header("x-csrf-token", &csrf)
+                    .header("content-type", "application/json")
+                    .body(body)
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+
+    let list_res = request(&app, "GET", "/api/v1/admin/backups", Some(&cookie), None).await;
+    let listing: serde_json::Value =
+        serde_json::from_slice(&to_bytes(list_res.into_body(), 65536).await.unwrap()).unwrap();
+    let archives = listing["archives"].as_array().unwrap();
+    assert_eq!(
+        archives.len(),
+        2,
+        "retentionCount=2 must prune oldest archive"
+    );
+
+    // Extract the latest (essential) backup and restore it onto a fresh store:
+    // the user avatar must be restored and verified, while the omitted catalogue poster
+    // is cleanly pruned from SQL so verify_all() succeeds.
+    let latest_id = archives[0]["id"].as_str().unwrap();
+    let archive_path = backups_dir.join(format!("{latest_id}.media-backup"));
+    let extracted_dir = temp.path().join("extracted-essential");
+    let key = aether_core::backup_bundle::BackupKey::parse(
+        "3f9a1c7e5b2d4086a1f3c5e7092b4d6f8a0c2e4619375b5d7f1a3c5e7b9d0f12",
+    )
+    .unwrap();
+    let summary = aether_core::backup_bundle::extract(&archive_path, &extracted_dir, Some(&key))
+        .await
+        .unwrap();
+    assert_eq!(summary.assets, seeded_avatars + 1);
+
+    let server_b = temp.path().join("server_b");
+    std::fs::create_dir(&server_b).unwrap();
+    let restored_db = server_b.join("core.sqlite3");
+    aether_core::backup::restore_database(
+        &extracted_dir.join("database.sqlite3"),
+        &restored_db,
+        None,
+    )
+    .await
+    .unwrap();
+    let restored_store = IdentityStore::open(&restored_db).await.unwrap();
+    let restore_report = restored_store
+        .assets()
+        .restore_extracted(&extracted_dir)
+        .await
+        .unwrap();
+    assert!(
+        restore_report.is_complete(),
+        "essential restore must prune omitted catalogue poster and pass verify_all"
+    );
+    let (_, read_avatar) = restored_store
+        .assets()
+        .read_all(&avatar_meta.sha256)
+        .await
+        .unwrap();
+    assert_eq!(read_avatar, avatar_bytes);
+    let poster_rows: i64 =
+        database::query_scalar("SELECT COUNT(*) FROM work_posters WHERE work_id='work-1'")
+            .fetch_one(restored_store.pool())
+            .await
+            .unwrap();
+    assert_eq!(poster_rows, 0);
+
+    restored_store.close().await;
+    store.close().await;
+}

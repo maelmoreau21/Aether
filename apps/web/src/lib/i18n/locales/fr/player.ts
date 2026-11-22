@@ -298,6 +298,8 @@ export const player = {
   player_unavailable_during_the_source_change: 'Lecteur indisponible pendant le changement de source.',
   source_unreadable_network_container_or_codec: 'Source {value} illisible : réseau, conteneur ou codec non pris en charge.',
   failure_codec: 'Codec non pris en charge par ce navigateur : le fichier est lisible mais un flux ne peut pas être décodé. Aucun transcodage n’est imposé ; choisissez une autre version ou un autre navigateur.',
+  failure_video_codec_not_decoded: 'vidéo {codec} non décodée',
+  failure_video_no_decoded_frame: 'aucune image vidéo décodée',
   failure_container: 'Conteneur non pris en charge : ce navigateur refuse la structure du fichier. Aucun transcodage n’est imposé ; choisissez une autre version.',
   failure_network: 'Réseau : les données du média n’arrivent pas (connexion interrompue ou trop lente). Vérifiez la connexion puis réessayez.',
   failure_permission: 'Accès refusé : votre compte n’a pas le droit de lire ce média, ou le lien de lecture a expiré. Rechargez la page ou reconnectez-vous.',

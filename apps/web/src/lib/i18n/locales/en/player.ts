@@ -300,6 +300,8 @@ export const player: Readonly<Record<keyof typeof source, string>> = {
   player_unavailable_during_the_source_change: 'Player unavailable during the source change.',
   source_unreadable_network_container_or_codec: 'Source {value} unreadable: network, container or codec not supported.',
   failure_codec: 'Codec not supported by this browser: the file is readable but a stream cannot be decoded. No transcoding is forced; pick another version or another browser.',
+  failure_video_codec_not_decoded: '{codec} video not decoded',
+  failure_video_no_decoded_frame: 'no decoded video frame',
   failure_container: 'Container not supported: this browser rejects the file structure. No transcoding is forced; pick another version.',
   failure_network: 'Network: the media data is not arriving (connection dropped or too slow). Check the connection and try again.',
   failure_permission: 'Access denied: your account may not read this media, or the playback link expired. Reload the page or sign in again.',

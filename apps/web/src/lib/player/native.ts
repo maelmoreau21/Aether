@@ -23,7 +23,9 @@ function expectsVideoTrack(source: Source | undefined): boolean {
 function missingDecodedVideoFailure(source: Source | undefined): PlaybackFailure {
   const videoTrack = source?.tracks?.find(track => track.codec_type === 'video');
   const codec = videoTrack?.codec_name?.trim().toUpperCase();
-  const detail = codec ? `vidéo ${codec} non décodée` : 'aucune image vidéo décodée';
+  const detail = codec
+    ? tr('failure_video_codec_not_decoded', { codec })
+    : tr('failure_video_no_decoded_frame');
   return new PlaybackFailure('codec', failureMessage('codec', detail));
 }
 

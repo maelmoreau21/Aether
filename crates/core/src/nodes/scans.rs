@@ -614,9 +614,43 @@ pub(super) async fn receive_scan_complete(
     let conflicts = inventory::editorial_warnings(&state.auth.store, lib_id)
         .await
         .unwrap_or_default();
+    let staged_errors_count: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) FROM scan_staging_issues WHERE scan_id=? AND kind='error'",
+    )
+    .bind(&scan_id)
+    .fetch_one(&state.auth.store.pool)
+    .await
+    .unwrap_or(0);
+    let staged_warnings_count: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) FROM scan_staging_issues WHERE scan_id=? AND kind='warning'",
+    )
+    .bind(&scan_id)
+    .fetch_one(&state.auth.store.pool)
+    .await
+    .unwrap_or(0);
+    let staged_issues: Vec<(String, String)> = crate::database::query_as(
+        "SELECT relative_path, message FROM scan_staging_issues WHERE scan_id=? \
+         ORDER BY CASE kind WHEN 'error' THEN 0 ELSE 1 END, relative_path ASC LIMIT 100",
+    )
+    .bind(&scan_id)
+    .fetch_all(&state.auth.store.pool)
+    .await
+    .unwrap_or_default();
     let _ = inventory::clean_staging(&state.auth.store, &scan_id).await;
 
-    let errors_json = serde_json::to_string(&conflicts).unwrap_or_else(|_| "[]".to_owned());
+    let all_issues: Vec<String> = staged_issues
+        .into_iter()
+        .map(|(path, message)| {
+            if path.is_empty() {
+                message
+            } else {
+                format!("{path}: {message}")
+            }
+        })
+        .chain(conflicts.iter().cloned())
+        .take(100)
+        .collect();
+    let errors_json = serde_json::to_string(&all_issues).unwrap_or_else(|_| "[]".to_owned());
     let _ = inventory::fence::report(
         &state.auth.store,
         attempt,
@@ -635,8 +669,8 @@ pub(super) async fn receive_scan_complete(
             probed: comp.finished.probed as i64,
             reused: comp.finished.reused as i64,
             errors_json: &errors_json,
-            errors_count: conflicts.len() as i64,
-            warnings_count: 0,
+            errors_count: staged_errors_count + (conflicts.len() as i64),
+            warnings_count: staged_warnings_count,
         },
     )
     .await;

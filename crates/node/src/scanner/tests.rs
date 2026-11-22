@@ -795,3 +795,30 @@ async fn contradictory_nfo_identifiers_warn_and_are_not_used() {
     // The name keeps its own id for matching; the Core drops the contradicted provider.
     assert_eq!(report.files[0].external_ids["tmdb"], "777");
 }
+
+#[test]
+fn parse_series_episode_handles_mid_name_e_ep_and_dash_numbers() {
+    let ep = parse_series_episode(Path::new("The Show/Season 2/The Show - E03.mkv")).unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 3);
+
+    let ep = parse_series_episode(Path::new(
+        "Frieren/Season 2/Frieren - Ep 04 - After the Rain.mkv",
+    ))
+    .unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 4);
+    assert_eq!(ep.episode_title, "After the Rain");
+
+    let ep = parse_series_episode(Path::new(
+        "One Piece/Season 2/[SubGroup] One Piece - 05 [1080p].mkv",
+    ))
+    .unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 5);
+
+    // Years after a dash must not be mistaken for episode numbers.
+    let ep = parse_series_episode(Path::new("Wall-E/Wall-E - 2008.mkv")).unwrap();
+    assert_eq!(ep.season_number, 1);
+    assert_eq!(ep.episode_number, 1);
+}

@@ -371,3 +371,58 @@ async fn monitoring_polls_and_stale_markers_never_block_a_task() {
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_eq!(body["error"], "task_not_found");
 }
+
+#[tokio::test]
+async fn orphaned_scan_job_without_active_run_never_blocks_scheduled_scan() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+    let (store, auth) = open(&root).await;
+    let pool = store.pool();
+    add_library(&store, &root).await;
+    let app = task_app(&auth, &root).await;
+    let (cookie, csrf) = login(&app).await;
+    let now = media_contracts::protocol::unix_now();
+
+    // Simulate a scan_jobs row left in 'running' after active_scan_runs was cleared.
+    query(
+        "INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) \
+         VALUES('films','running',0,0,'incremental')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let (status, body, _) = call(
+        &app,
+        "POST",
+        "/api/v1/admin/tasks/scan-films/run",
+        &cookie,
+        Some(&csrf),
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+
+    // Ensure library-monitor priority is above background pipeline work.
+    let jobs = Arc::new(ScanJobs::default());
+    query("UPDATE libraries SET options_json='{\"realtimeMonitoring\":true}' WHERE id='films'")
+        .execute(pool)
+        .await
+        .unwrap();
+    query("UPDATE durable_tasks SET status='completed' WHERE category='scan'")
+        .execute(pool)
+        .await
+        .unwrap();
+    scheduler::run_due(&auth, &root, &jobs, now + 120)
+        .await
+        .unwrap();
+    let priority: i64 = query_scalar(
+        "SELECT priority FROM durable_tasks WHERE owner='library-monitor' ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        priority >= task_engine::pipeline::MONITOR_SCAN,
+        "monitoring poll priority {priority} must not be starved by background pipeline tasks"
+    );
+}

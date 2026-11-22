@@ -145,6 +145,21 @@ pub(crate) async fn admit(
                 .await?;
             if active == 0 {
                 crate::scans::preempt_monitoring_polls(&auth.store, None, library, now).await?;
+                // Clear any orphaned scan_jobs row whose durable lease ended or whose run fence
+                // was already removed, so a stale marker never causes scheduled scans to be skipped.
+                query(
+                    "UPDATE scan_jobs \
+                     SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
+                     WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+                     AND status IN ('queued','running') \
+                     AND (EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+                     OR NOT EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id)) \
+                     AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
+                )
+                .bind(library)
+                .bind(library)
+                .execute(pool)
+                .await?;
             }
             let legacy_running: i64 = query_scalar(
                 "SELECT COUNT(*) FROM scan_jobs WHERE library_id=? AND status IN ('queued','running')",

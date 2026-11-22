@@ -26,9 +26,11 @@ pub(crate) const TASK_ADMISSION_LOCK: i64 = 0x4d45444941544153;
 
 /// Library pipeline after a scan: identify every work, then fetch its images, then build the
 /// previews, then detect intros and credits. Each phase owns a band of queue priorities below
-/// scans (100 scheduled, 200 manual), so a scan is never starved by background work and the
-/// claim order follows the pipeline. Provider preference keeps its order inside a band.
+/// scans (100 scheduled/monitor, 200 manual), so a scan or real-time monitor poll is never
+/// starved by background work and the claim order follows the pipeline. Provider preference
+/// keeps its order inside a band.
 pub mod pipeline {
+    pub const MONITOR_SCAN: i64 = 100;
     pub const IDENTIFY: (i64, i64) = (80, 99);
     pub const IMAGES: (i64, i64) = (60, 79);
     pub const TRICKPLAY: i64 = 55;
@@ -141,6 +143,14 @@ pub async fn normalize_pipeline_priorities(store: &IdentityStore) -> Result<(), 
     )
     .bind(pipeline::CHAPTER_IMAGES)
     .bind(pipeline::CHAPTER_IMAGES)
+    .execute(store.pool())
+    .await?;
+    query(
+        "UPDATE durable_tasks SET priority=? WHERE category='scan' \
+         AND owner='library-monitor' AND status IN ('queued','paused') AND priority<?",
+    )
+    .bind(pipeline::MONITOR_SCAN)
+    .bind(pipeline::MONITOR_SCAN)
     .execute(store.pool())
     .await?;
     Ok(())

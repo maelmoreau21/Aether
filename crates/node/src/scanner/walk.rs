@@ -229,10 +229,16 @@ where
         report.discovered += 1;
         let opened = match OpenedFile::open_in_root(&root, relative).await {
             Ok(f) => f,
-            Err(_) => {
+            Err(err) => {
+                let message = if err.kind() == io::ErrorKind::PermissionDenied {
+                    "file unreadable: permission denied (check Docker UID 10001 / file permissions)"
+                        .into()
+                } else {
+                    "file failed confinement validation".into()
+                };
                 let issue = ScanIssue {
                     relative_path,
-                    message: "file failed confinement validation".into(),
+                    message,
                 };
                 record_error(&mut report, &mut current_batch_errors, issue);
                 continue;

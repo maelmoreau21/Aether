@@ -456,7 +456,7 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
         "SELECT l.id \
             FROM libraries l \
             JOIN media_nodes n ON n.id=l.node_id \
-            WHERE l.enabled=1 AND n.status!='revoked' \
+            WHERE l.enabled=1 AND (n.id='local' OR n.status='connected') AND n.status!='revoked' \
             AND l.id NOT IN ('fixture-films','fixture-series') AND NOT EXISTS(SELECT 1 \
             FROM library_folders f WHERE f.library_id=l.id) \
             AND CAST(COALESCE(json_extract(l.options_json,'$.realtimeMonitoring'),'0') AS TEXT) IN \
@@ -485,7 +485,7 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
             &format!("monitor:{}", timestamp / 60),
             timestamp,
             "library-monitor",
-            10,
+            crate::task_engine::pipeline::MONITOR_SCAN,
         )
         .await?;
         // A monitoring poll is periodic: a failed poll waits for the next one (after
@@ -756,8 +756,11 @@ pub async fn dispatch_once(
     crate::database::query(
         "UPDATE scan_jobs \
             SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
-            WHERE status IN ('queued','running') AND EXISTS(SELECT 1 FROM active_scan_runs r \
+            WHERE status IN ('queued','running') \
+            AND (EXISTS(SELECT 1 FROM active_scan_runs r \
             WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+            OR NOT EXISTS(SELECT 1 FROM active_scan_runs r \
+            WHERE r.library_id=scan_jobs.library_id)) \
             AND NOT EXISTS(SELECT 1 FROM durable_tasks j \
             WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
     )

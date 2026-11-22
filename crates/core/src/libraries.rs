@@ -98,7 +98,10 @@ struct LibraryInput {
 pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
     Router::new()
         .route("/api/v1/libraries", get(accessible))
-        .route("/api/v1/libraries/{id}/images/{kind}", get(accessible_image))
+        .route(
+            "/api/v1/libraries/{id}/images/{kind}",
+            get(accessible_image),
+        )
         .route("/api/v1/admin/libraries", get(list).post(create))
         .route(
             "/api/v1/admin/libraries/{id}",
@@ -1027,18 +1030,18 @@ pub(crate) async fn ensure_generated_library_artwork(
     if target_id.starts_with("fixture-") {
         return Ok(());
     }
-    let revisions: Vec<String> = crate::database::query_scalar(
-        "SELECT revision FROM library_artwork WHERE library_id=?",
-    )
-    .bind(&target_id)
-    .fetch_all(&store.pool)
-    .await
-    .map_err(database)?;
+    let revisions: Vec<String> =
+        crate::database::query_scalar("SELECT revision FROM library_artwork WHERE library_id=?")
+            .bind(&target_id)
+            .fetch_all(&store.pool)
+            .await
+            .map_err(database)?;
     // Never overwrite manual uploads (revisions that do not start with "auto-").
     if revisions.iter().any(|rev| !rev.starts_with("auto-")) {
         return Ok(());
     }
-    let has_collage = revisions.len() >= 2 && revisions.iter().all(|rev| rev.starts_with("auto-collage-"));
+    let has_collage =
+        revisions.len() >= 2 && revisions.iter().all(|rev| rev.starts_with("auto-collage-"));
     if has_collage {
         return Ok(());
     }
@@ -1339,7 +1342,11 @@ fn render_library_card(
         let cy = (height / 2) as i32;
         let card_w = (width.min(height) as i32 * 34 / 100).max(40);
         let card_h = (card_w * 135 / 100).max(56);
-        for (offset_x, offset_y, alpha) in [(-card_w / 2, 8, 0.22_f32), (card_w / 2, 8, 0.22), (0, -4, 0.38)] {
+        for (offset_x, offset_y, alpha) in [
+            (-card_w / 2, 8, 0.22_f32),
+            (card_w / 2, 8, 0.22),
+            (0, -4, 0.38),
+        ] {
             let x0 = (cx + offset_x - card_w / 2).max(12) as u32;
             let y0 = (cy + offset_y - card_h / 2).max(12) as u32;
             let x1 = (cx + offset_x + card_w / 2).min(width as i32 - 12) as u32;
@@ -1347,11 +1354,18 @@ fn render_library_card(
             for py in y0..y1 {
                 for px in x0..x1 {
                     let border = px == x0 || px + 1 == x1 || py == y0 || py + 1 == y1;
-                    let weight = if border { (alpha + 0.25).min(0.85) } else { alpha };
+                    let weight = if border {
+                        (alpha + 0.25).min(0.85)
+                    } else {
+                        alpha
+                    };
                     let cur = canvas.get_pixel(px, py);
-                    let r = (f32::from(cur[0]) * (1.0 - weight) + f32::from(accent[0]) * weight) as u8;
-                    let g = (f32::from(cur[1]) * (1.0 - weight) + f32::from(accent[1]) * weight) as u8;
-                    let b = (f32::from(cur[2]) * (1.0 - weight) + f32::from(accent[2]) * weight) as u8;
+                    let r =
+                        (f32::from(cur[0]) * (1.0 - weight) + f32::from(accent[0]) * weight) as u8;
+                    let g =
+                        (f32::from(cur[1]) * (1.0 - weight) + f32::from(accent[1]) * weight) as u8;
+                    let b =
+                        (f32::from(cur[2]) * (1.0 - weight) + f32::from(accent[2]) * weight) as u8;
                     canvas.put_pixel(px, py, Rgba([r, g, b, 255]));
                 }
             }
@@ -1363,9 +1377,12 @@ fn render_library_card(
     for py in (height - bar_h)..height {
         for px in 0..width {
             let t = px as f32 / w_f;
-            let r = (f32::from(accent[0]) * (1.0 - t * 0.25) + f32::from(bg_mid[0]) * (t * 0.25)) as u8;
-            let g = (f32::from(accent[1]) * (1.0 - t * 0.25) + f32::from(bg_mid[1]) * (t * 0.25)) as u8;
-            let b = (f32::from(accent[2]) * (1.0 - t * 0.25) + f32::from(bg_mid[2]) * (t * 0.25)) as u8;
+            let r =
+                (f32::from(accent[0]) * (1.0 - t * 0.25) + f32::from(bg_mid[0]) * (t * 0.25)) as u8;
+            let g =
+                (f32::from(accent[1]) * (1.0 - t * 0.25) + f32::from(bg_mid[1]) * (t * 0.25)) as u8;
+            let b =
+                (f32::from(accent[2]) * (1.0 - t * 0.25) + f32::from(bg_mid[2]) * (t * 0.25)) as u8;
             canvas.put_pixel(px, py, Rgba([r, g, b, 255]));
         }
     }
@@ -1758,6 +1775,8 @@ async fn save(
         cover_urls: vec![],
         image_kinds: vec![],
         image_versions: Default::default(),
+        works_count: 0,
+        episodes_count: 0,
     })
 }
 

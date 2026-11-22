@@ -727,12 +727,13 @@ async fn scan_view(
                 progress = Some(((discovered * 100) / known_assets).clamp(1, 99));
             }
         }
-        let stats = (discovered > 0 || probed > 0 || reused > 0 || errors_count > 0).then_some(TaskStats {
-            done: discovered,
-            failed: errors_count,
-            pending: reused,
-            images: Some(probed),
-        });
+        let stats =
+            (discovered > 0 || probed > 0 || reused > 0 || errors_count > 0).then_some(TaskStats {
+                done: discovered,
+                failed: errors_count,
+                pending: reused,
+                images: Some(probed),
+            });
         let (waiting_reason, waiting_detail) = if state == "queued" {
             crate::scans::waiting_reason(store, library, now())
                 .await?
@@ -1167,7 +1168,9 @@ async fn update_trigger(
         (spec, max_runtime)
     };
     let duplicate = existing.iter().any(|row| {
-        row.id != trigger && row.spec() == Some(spec) && row.max_runtime_seconds == max_runtime_seconds
+        row.id != trigger
+            && row.spec() == Some(spec)
+            && row.max_runtime_seconds == max_runtime_seconds
     });
     if duplicate {
         return Err(ApiError::coded(StatusCode::CONFLICT, "trigger_duplicate"));

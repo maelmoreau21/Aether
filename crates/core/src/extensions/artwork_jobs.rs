@@ -483,7 +483,8 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<bool, Error> {
     };
     let Some(work) = work.filter(|_| job.processed < parameters.max_works) else {
         query("UPDATE artwork_collection_jobs SET status='completed',cursor_work=?,lease_until=0,updated_at=? WHERE id=? AND lease_token=? AND status='running'").bind(&cursor).bind(now()).bind(id).bind(token).execute(auth.store.pool()).await.map_err(db)?;
-        let _ = crate::libraries::ensure_generated_library_artwork(&auth.store, &job.library_id).await;
+        let _ =
+            crate::libraries::ensure_generated_library_artwork(&auth.store, &job.library_id).await;
         return Ok(true);
     };
     let result = image_collection::collect_with_context(

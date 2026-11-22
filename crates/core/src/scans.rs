@@ -518,7 +518,16 @@ pub(crate) async fn execute_leased(
     is_monitor: bool,
 ) -> Result<(), StatusCode> {
     let _dispatch = jobs.dispatch.lock().await;
-    enqueue_one(auth, root, jobs.clone(), id, mode, Some(scan_id), is_monitor).await
+    enqueue_one(
+        auth,
+        root,
+        jobs.clone(),
+        id,
+        mode,
+        Some(scan_id),
+        is_monitor,
+    )
+    .await
 }
 async fn enqueue_one(
     auth: &AuthState,

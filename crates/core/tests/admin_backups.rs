@@ -724,6 +724,7 @@ async fn backup_policy_modes_breakdown_retention_and_selective_restore() {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::CREATED);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 
     let list_res = request(&app, "GET", "/api/v1/admin/backups", Some(&cookie), None).await;

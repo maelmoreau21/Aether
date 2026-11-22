@@ -469,24 +469,29 @@ async fn list(
                                 let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
                                     continue;
                                 };
-                                let created_at = metadata
+                                let modified = metadata
                                     .modified()
                                     .ok()
                                     .and_then(|date| {
                                         date.duration_since(std::time::UNIX_EPOCH).ok()
-                                    })
-                                    .map_or(0, |duration| duration.as_secs());
-                                archives.push(Archive {
-                                    id: id.into(),
-                                    size: file.size(),
-                                    created_at,
-                                });
+                                    });
+                                let created_at =
+                                    modified.map_or(0, |duration| duration.as_secs());
+                                let sort_ns = modified.map_or(0, |duration| duration.as_nanos());
+                                archives.push((
+                                    Archive {
+                                        id: id.into(),
+                                        size: file.size(),
+                                        created_at,
+                                    },
+                                    sort_ns,
+                                ));
                             }
                         }
                         archives
-                            .sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.id.cmp(&b.id)));
+                            .sort_by(|a, b| b.1.cmp(&a.1).then(a.0.id.cmp(&b.0.id)));
                         archives.truncate(1000);
-                        Ok(archives)
+                        Ok(archives.into_iter().map(|(archive, _)| archive).collect())
                     })
                     .await;
                 match listing_result {
@@ -673,7 +678,7 @@ fn prune_old_archives(directory: &DiskPath, keep: usize) {
     let Ok(entries) = std::fs::read_dir(directory) else {
         return;
     };
-    let mut archives: Vec<(u64, String, PathBuf)> = Vec::new();
+    let mut archives: Vec<(u128, String, PathBuf)> = Vec::new();
     for entry in entries.take(10_000).flatten() {
         let name = entry.file_name();
         let Some(id) = name
@@ -692,12 +697,12 @@ fn prune_old_archives(directory: &DiskPath, keep: usize) {
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             continue;
         }
-        let created_at = metadata
+        let created_ns = metadata
             .modified()
             .ok()
             .and_then(|date| date.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |duration| duration.as_secs());
-        archives.push((created_at, id.to_owned(), path));
+            .map_or(0, |duration| duration.as_nanos());
+        archives.push((created_ns, id.to_owned(), path));
     }
     archives.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
     for (_, _, old_path) in archives.into_iter().skip(keep) {

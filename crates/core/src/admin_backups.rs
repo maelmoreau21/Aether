@@ -469,14 +469,10 @@ async fn list(
                                 let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
                                     continue;
                                 };
-                                let modified = metadata
-                                    .modified()
-                                    .ok()
-                                    .and_then(|date| {
-                                        date.duration_since(std::time::UNIX_EPOCH).ok()
-                                    });
-                                let created_at =
-                                    modified.map_or(0, |duration| duration.as_secs());
+                                let modified = metadata.modified().ok().and_then(|date| {
+                                    date.duration_since(std::time::UNIX_EPOCH).ok()
+                                });
+                                let created_at = modified.map_or(0, |duration| duration.as_secs());
                                 let sort_ns = modified.map_or(0, |duration| duration.as_nanos());
                                 archives.push((
                                     Archive {
@@ -488,8 +484,7 @@ async fn list(
                                 ));
                             }
                         }
-                        archives
-                            .sort_by(|a, b| b.1.cmp(&a.1).then(a.0.id.cmp(&b.0.id)));
+                        archives.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.id.cmp(&b.0.id)));
                         archives.truncate(1000);
                         Ok(archives.into_iter().map(|(archive, _)| archive).collect())
                     })

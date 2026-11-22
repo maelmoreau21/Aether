@@ -114,6 +114,8 @@ async fn production_process_restart_keeps_session_and_logout_revokes_it() {
         obj.remove("coverUrls");
         obj.remove("imageKinds");
         obj.remove("imageVersions");
+        obj.remove("worksCount");
+        obj.remove("episodesCount");
     }
     library["enabled"] = serde_json::json!(false);
     library["name"] = serde_json::json!("Restart library");

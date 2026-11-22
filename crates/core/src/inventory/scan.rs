@@ -681,11 +681,17 @@ async fn stage(
              SET processed_items=processed_items+?, \
                  progress=CASE \
                      WHEN (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1)>0 \
-                     THEN MIN(99, MAX(1, ((processed_items+?) * 100) / (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1))) \
+                     THEN CASE \
+                         WHEN ((processed_items+?) * 100) / (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1) >= 99 THEN 99 \
+                         WHEN ((processed_items+?) * 100) / (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1) <= 1 THEN 1 \
+                         ELSE ((processed_items+?) * 100) / (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1) \
+                     END \
                      ELSE progress \
                  END \
              WHERE id=? AND attempt=? AND status='running'",
         )
+        .bind(batch_discovered)
+        .bind(batch_discovered)
         .bind(batch_discovered)
         .bind(batch_discovered)
         .bind(job)

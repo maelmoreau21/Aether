@@ -5,7 +5,7 @@
   import { containerLabel } from '../player/track-labels';
   import LanguageLabel from '../ui/LanguageLabel.svelte';
   import { t, fmt } from '../i18n';
-  import { audioSummary, codecLabel, formatBitrate, formatBytes, formatDuration, groupTracks, nodeKindLabel, nodeStatusLabel, trackRoles, versionLabel, videoSummary, type AssetDetails } from './media-details';
+  import { audioSummary, codecLabel, formatBitrate, formatBytes, formatDuration, formatMediaDetailsForCopy, groupTracks, nodeKindLabel, nodeStatusLabel, trackRoles, versionLabel, videoSummary, type AssetDetails } from './media-details';
 
   let { work, selectedMedia, copiedKey, detailsById, assetIds, closeInfo, copyText, loadDetails }: { work: Work; selectedMedia: Media | undefined; copiedKey: string; detailsById: Record<string, { status: 'loading' | 'ready' | 'error'; data?: AssetDetails; error?: string }>; assetIds: string[]; closeInfo: () => void; copyText: (key: string, text: string) => void; loadDetails: (id: string) => void } = $props();
 </script>
@@ -69,6 +69,17 @@
             {@const status = nodeStatusLabel(info.node.status)}
             {@const groups = groupTracks(info.tracks)}
             <div class="version-body">
+              <div class="version-actions">
+                <button
+                  type="button"
+                  class="copy-btn"
+                  aria-label={$t('copy_media_info')}
+                  onclick={() => copyText(`all-${id}`, formatMediaDetailsForCopy(info, position, work.title))}
+                >
+                  <Icon name={copiedKey === `all-${id}` ? 'check' : 'copy'} size={14} />
+                  <span>{copiedKey === `all-${id}` ? $t('media_info_copied') : $t('copy_media_info')}</span>
+                </button>
+              </div>
               <section class="info-section" aria-label={$t('file_location')}>
                 <h4>{$t('file_location')}</h4>
                 <dl class="info-grid">
@@ -529,6 +540,12 @@
     padding: 6px 16px 18px;
     border-top: 1px solid var(--line);
     background: var(--bg-3);
+  }
+
+  .version-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 8px;
   }
 
   .version-card > .info-note,

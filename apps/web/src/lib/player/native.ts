@@ -15,6 +15,18 @@ import { pageAudio, type AudioEnhancement } from './audio-enhancement';
 import { tr } from '../i18n';
 class VideoSeekTimeoutError extends Error {}
 
+function expectsVideoTrack(source: Source | undefined): boolean {
+  if (!source?.tracks?.length) return true;
+  return source.tracks.some(track => track.codec_type === 'video');
+}
+
+function missingDecodedVideoFailure(source: Source | undefined): PlaybackFailure {
+  const videoTrack = source?.tracks?.find(track => track.codec_type === 'video');
+  const codec = videoTrack?.codec_name?.trim().toUpperCase();
+  const detail = codec ? `vidéo ${codec} non décodée` : 'aucune image vidéo décodée';
+  return new PlaybackFailure('codec', failureMessage('codec', detail));
+}
+
 function assertSafeMediaUrl(url: string): string {
   const trimmed = url.trim();
   if (trimmed.startsWith('/')) return trimmed;
@@ -139,6 +151,11 @@ export class NativePlayer implements Player {
     catch (error) { if (!this.destroyed) this.onError(error instanceof Error ? error.message : String(error)); }
   }
   private transcodeCarriesAudio() { return this.transcoding?.audio !== undefined; }
+  private hasMissingDecodedVideo(source: Source | undefined): boolean {
+    if (!expectsVideoTrack(source)) return false;
+    if (typeof this.video.videoWidth !== 'number' || typeof this.video.videoHeight !== 'number') return false;
+    return this.video.videoWidth === 0 || this.video.videoHeight === 0;
+  }
   /** The active transcode and what the Node reported about it, `null` for direct play. */
   transcodeState() { return this.transcoding ? { plan: this.transcoding, ...this.transcodeHeaders } : null; }
   /**
@@ -437,12 +454,16 @@ export class NativePlayer implements Player {
     const loadVideo = async (url: string, timeoutMs: number) => {
       await loadCandidate(url, timeoutMs);
       this.timeline.mark('video-ready');
-      if (!source.preparedVideoUrl && !source.videoStreamUrl) return;
-      // Matroska acceptance must include decoded data at the requested position,
-      // not just a MIME hint or a successful container metadata parse.
-      const probe = new AbortController(); this.preparations.add(probe);
-      try { await waitForStartupBuffer(this.video, probe.signal); }
-      finally { this.preparations.delete(probe); }
+      if (source.preparedVideoUrl || source.videoStreamUrl || this.hasMissingDecodedVideo(source)) {
+        // Matroska acceptance must include decoded data at the requested position,
+        // not just a MIME hint or a successful container metadata parse.
+        const probe = new AbortController(); this.preparations.add(probe);
+        try { await waitForStartupBuffer(this.video, probe.signal); }
+        finally { this.preparations.delete(probe); }
+      }
+      if (this.hasMissingDecodedVideo(source)) {
+        throw missingDecodedVideoFailure(source);
+      }
     };
 
     try {
@@ -663,6 +684,9 @@ export class NativePlayer implements Player {
         this.status(tr('buffering'));
         await Promise.all([waitForStartupBuffer(this.video, startup.signal), this.externalAudio?.bufferForPlayback()]);
         if (startup.signal.aborted || this.destroyed) throw new Error(tr('start_cancelled'));
+        if (this.hasMissingDecodedVideo(this.source)) {
+          throw missingDecodedVideoFailure(this.source);
+        }
         this.timeline.mark('buffered');
         this.watchFirstOutput();
         // Wait until video leaves seeking/buffering before starting independent audio.
@@ -689,9 +713,31 @@ export class NativePlayer implements Player {
   // element has no audio event of its own: the media clock moving is the available proxy.
   private watchFirstOutput() {
     for (const stop of this.startupObservers) stop();
-    this.startupObservers = [observeFirstFrame(this.video, () => this.timeline.mark('first-frame'))];
+    let frameSeen = false;
+    this.startupObservers = [observeFirstFrame(this.video, () => { frameSeen = true; this.timeline.mark('first-frame'); })];
     if (!this.externalAudio) {
       this.startupObservers.push(observeClockAdvance(this.video, this.video.currentTime, () => this.timeline.mark('first-audio', 'media-clock')));
+    }
+    if (expectsVideoTrack(this.source) && typeof this.video.getVideoPlaybackQuality === 'function') {
+      const startTime = this.video.currentTime;
+      const source = this.source;
+      const checkFrames = () => {
+        if (frameSeen || this.destroyed || this.busy || this.video.paused) return;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        if (this.video.currentTime - startTime < 1.5) return;
+        const quality = this.video.getVideoPlaybackQuality();
+        if (quality.totalVideoFrames === 0) {
+          this.video.removeEventListener('timeupdate', checkFrames);
+          const failure = missingDecodedVideoFailure(source);
+          this.pause();
+          this.progressiveVideo?.destroy(); this.progressiveVideo = undefined;
+          this.externalAudio?.destroy(); this.externalAudio = undefined;
+          this.source = undefined;
+          this.onError(failure.message, failure.kind);
+        }
+      };
+      this.video.addEventListener('timeupdate', checkFrames);
+      this.startupObservers.push(() => this.video.removeEventListener('timeupdate', checkFrames));
     }
   }
   pause() { this.pauseRevision++; this.startup?.abort(); this.externalAudio?.pause(); this.pendingAudio?.pause(); this.video.pause(); clearInterval(this.stuckTimer); }

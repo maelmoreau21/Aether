@@ -127,11 +127,35 @@
   }
 
   function copyText(key: string, text: string) {
-    if (!navigator?.clipboard) return;
-    void navigator.clipboard.writeText(text).then(() => {
+    const markCopied = () => {
       copiedKey = key;
       setTimeout(() => { if (copiedKey === key) copiedKey = ''; }, 2000);
-    }).catch(() => {});
+    };
+    if (navigator?.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text).then(markCopied).catch(() => {
+        fallbackCopyText(text, markCopied);
+      });
+      return;
+    }
+    fallbackCopyText(text, markCopied);
+  }
+
+  function fallbackCopyText(text: string, onSuccess: () => void) {
+    if (typeof document === 'undefined') return;
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    try {
+      if (document.execCommand('copy')) onSuccess();
+    } catch {
+      // Ignore copy errors when clipboard access is blocked.
+    } finally {
+      area.remove();
+    }
   }
 
   function handleKeydown(event: KeyboardEvent) {

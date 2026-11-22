@@ -103,6 +103,8 @@ export const catalog: Readonly<Record<keyof typeof source, string>> = {
   file_location: 'File location',
   copy_full_path: 'Copy full path',
   copy_relative_path: 'Copy relative path',
+  copy_media_info: 'Copy media info',
+  media_info_copied: 'Copied',
   missing_file: 'File reported missing during the last scan.',
   other_streams: 'Other streams',
   create_playlist_hint: 'Create a playlist in “My playlists”.',

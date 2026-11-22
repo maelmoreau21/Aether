@@ -101,6 +101,8 @@ export const catalog = {
   file_location: 'Emplacement du fichier',
   copy_full_path: 'Copier le chemin complet',
   copy_relative_path: 'Copier le chemin relatif',
+  copy_media_info: 'Copier les informations',
+  media_info_copied: 'Copié',
   missing_file: 'Fichier signalé absent lors du dernier scan.',
   other_streams: 'Autres flux',
   create_playlist_hint: 'Créez une playlist dans « Mes playlists ».',

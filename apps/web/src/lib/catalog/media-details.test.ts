@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  audioSummary, fetchAssetDetails, formatBitrate, formatBytes, formatDuration, groupTracks,
-  nodeStatusLabel, trackRoles, versionLabel, videoSummary, type AssetDetails
+  audioSummary, codecLabel, fetchAssetDetails, formatBitrate, formatBytes, formatDuration,
+  formatMediaDetailsForCopy, groupTracks, nodeStatusLabel, trackRoles, versionLabel, videoSummary, type AssetDetails
 } from './media-details';
 
 const details = (overrides: Partial<AssetDetails> = {}): AssetDetails => ({
@@ -58,5 +58,17 @@ describe('media details formatting', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/assets/a%2F1/details', expect.anything());
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 403 })));
     await expect(fetchAssetDetails('a1', new AbortController().signal)).rejects.toThrow('accès');
+  });
+
+  it('omits unknown codec long names and formats a clean copyable summary', () => {
+    expect(codecLabel({ codecName: 'hevc', codecLongName: 'unknown' })).toBe('HEVC');
+    expect(codecLabel({ codecName: 'aac', codecLongName: 'AAC (Advanced Audio Coding)' })).toBe('AAC — AAC (Advanced Audio Coding)');
+
+    const summary = formatMediaDetailsForCopy(details(), 0, 'Demo Film');
+    expect(summary).toContain('Titre : Demo Film');
+    expect(summary).toContain('Version 1 · 4K Ultra HD · AV1 · MKV');
+    expect(summary).toContain('- #0 AV1 | 3840 × 2160 (4K Ultra HD) | 23,976 i/s | 10 bits | HDR10 (PQ)');
+    expect(summary).toContain('- #1 français | OPUS | 5.1 · 6 canaux | 48 kHz | Par défaut');
+    expect(summary).toContain('- Type MIME : video/x-matroska');
   });
 });

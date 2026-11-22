@@ -138,7 +138,10 @@ export function audioSummary(track: AssetTrack): string[] {
 export function codecLabel(track: Pick<AssetTrack, 'codecName' | 'codecLongName'>): string {
   const name = track.codecName?.toUpperCase();
   if (!name) return tr('unknown_codec');
-  return track.codecLongName && track.codecLongName.toUpperCase() !== name ? `${name} — ${track.codecLongName}` : name;
+  const longName = track.codecLongName?.trim();
+  return longName && longName.toUpperCase() !== name && longName.toLowerCase() !== 'unknown'
+    ? `${name} — ${longName}`
+    : name;
 }
 
 export function trackLanguage(track: Pick<AssetTrack, 'language'>): string {
@@ -176,4 +179,89 @@ export function nodeStatusLabel(status?: string): { label: string; tone: 'online
 
 export function nodeKindLabel(kind?: string): string {
   return kind === 'local' ? tr('local_media_node') : kind === 'remote' ? tr('remote_media_node') : tr('media_node');
+}
+
+/**
+ * Formats a clean, self-contained plain-text technical summary of an asset's
+ * media information for copying into bug reports or troubleshooting messages.
+ */
+export function formatMediaDetailsForCopy(details: AssetDetails, position: number, workTitle?: string): string {
+  const lines: string[] = [];
+  const status = nodeStatusLabel(details.node.status);
+  const groups = groupTracks(details.tracks);
+  const formatLine = (parts: (string | null | undefined)[]) => parts.filter(Boolean).join(' | ');
+
+  if (workTitle) lines.push(`${tr('title') || 'Titre'} : ${workTitle}`);
+  lines.push(versionLabel(details, position));
+  lines.push(`${tr('media_node')} : ${details.node.name} (${status.label} · ${nodeKindLabel(details.node.kind)} · ${details.node.id}${details.node.version ? ` · v${details.node.version}` : ''})`);
+  lines.push(`${tr('library')} : ${details.library.name}`);
+  if (!details.available) lines.push(tr('missing_file'));
+  if (details.pathsVisible) {
+    if (details.file.absolutePath) lines.push(`${tr('path_on_the_media_node')} : ${details.file.absolutePath}`);
+    if (details.file.relativePath) lines.push(`${tr('path_in_the_library')} : ${details.file.relativePath}`);
+  }
+  lines.push(`${tr('file_identifier')} : ${details.assetId}`);
+
+  lines.push('');
+  lines.push(tr('container_and_technical_details'));
+  const containerExtra = details.container.formatLongName && details.container.formatLongName.toLowerCase() !== 'unknown'
+    ? `${details.container.formatLongName}${details.container.formatName ? ` (${details.container.formatName})` : ''}`
+    : details.container.formatName;
+  lines.push(`- ${tr('container')} : ${containerLabel(details.file.mime)}${containerExtra ? ` (${containerExtra})` : ''}`);
+  if (details.file.mime) lines.push(`- ${tr('mime_type')} : ${details.file.mime}`);
+  lines.push(`- ${tr('size')} : ${formatBytes(details.file.size)}`);
+  lines.push(`- ${tr('sched_duration')} : ${formatDuration(details.container.durationSeconds) ?? '—'}`);
+  lines.push(`- ${tr('overall_bitrate')} : ${formatBitrate(details.container.bitRate) ?? '—'}`);
+  lines.push(`- ${tr('chapters')} : ${details.chapterCount || 'Aucun'}`);
+  if (details.file.modifiedAt) {
+    lines.push(`- ${tr('modified_on')} : ${currentFormat().dateTime(details.file.modifiedAt)}`);
+  }
+
+  lines.push('');
+  lines.push(tr('catalog_video', { count: groups.video.length }));
+  if (groups.video.length === 0) {
+    lines.push(`- ${tr('no_video_track_analysed')}`);
+  } else {
+    for (const track of groups.video) {
+      lines.push(`- #${track.index} ${formatLine([codecLabel(track), track.title, ...videoSummary(track), ...trackRoles(track.disposition)])}`);
+    }
+  }
+
+  lines.push('');
+  lines.push(tr('catalog_audio', { value: groups.audio.length + details.externalAudio.length }));
+  if (groups.audio.length + details.externalAudio.length === 0) {
+    lines.push(`- ${tr('no_audio_track_analysed')}`);
+  } else {
+    for (const track of groups.audio) {
+      lines.push(`- #${track.index} ${formatLine([trackLanguage(track), codecLabel(track), track.title, ...audioSummary(track), ...trackRoles(track.disposition)])}`);
+    }
+    for (const audio of details.externalAudio) {
+      const summary = audio.track ? [codecLabel(audio.track), ...audioSummary(audio.track)] : [];
+      lines.push(`- ${tr('external')} ${formatLine([languageLabel(audio.language), ...summary, formatBytes(audio.size), audio.absolutePath])}`);
+    }
+  }
+
+  lines.push('');
+  lines.push(tr('catalog_subtitles', { value: groups.subtitle.length + details.externalSubtitles.length }));
+  if (groups.subtitle.length + details.externalSubtitles.length === 0) {
+    lines.push(`- ${tr('no_subtitles')}`);
+  } else {
+    for (const track of groups.subtitle) {
+      lines.push(`- #${track.index} ${formatLine([trackLanguage(track), codecLabel(track), track.title, ...trackRoles(track.disposition)])}`);
+    }
+    for (const sub of details.externalSubtitles) {
+      const roles = [sub.forced ? tr('forced') : '', sub.sdh ? tr('hard_of_hearing_sdh') : ''].filter(Boolean);
+      lines.push(`- ${sub.origin === 'downloaded' ? 'Téléchargé' : tr('external')} ${formatLine([languageLabel(sub.language), sub.sourceFormat?.toUpperCase(), sub.label, ...roles])}`);
+    }
+  }
+
+  if (groups.other.length > 0) {
+    lines.push('');
+    lines.push(tr('catalog_other_streams', { count: groups.other.length }));
+    for (const track of groups.other) {
+      lines.push(`- #${track.index} ${formatLine([codecLabel(track), track.codecType, track.title])}`);
+    }
+  }
+
+  return lines.join('\n');
 }

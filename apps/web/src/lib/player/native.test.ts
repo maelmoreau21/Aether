@@ -488,5 +488,36 @@ describe('native source replacement', () => {
     replies[1](new Response(null,{status:200})); await loading;
     player.destroy();
   });
+  it('fails with a codec error instead of playing audio-only when a video track decodes to 0x0',async()=>{
+    const {video,player}=setup();
+    Object.assign(video,{videoWidth:0,videoHeight:0});
+    const hevcMedia:Media={...media,sources:[{id:'hevc',audioTrackId:'internal-1',language:'fr',mime:'video/x-matroska',url:'/hevc.mkv',tracks:[{index:0,codec_type:'video',codec_name:'hevc'},{index:1,codec_type:'audio',codec_name:'aac'}]}]};
+    await expect(player.load(hevcMedia)).rejects.toMatchObject({kind:'codec',message:expect.stringContaining('HEVC')});
+    player.destroy();
+  });
+  it('allows playback when video dimensions are decoded or the source has no video track',async()=>{
+    const {video,player}=setup();
+    Object.assign(video,{videoWidth:1920,videoHeight:960});
+    await player.load(media);
+    await player.play();
+    expect(video.paused).toBe(false);
+    Object.assign(video,{videoWidth:0,videoHeight:0});
+    const audioOnly:Media={...media,sources:[{id:'aud',audioTrackId:'internal-0',language:'fr',mime:'audio/mp4',url:'/audio.m4a',tracks:[{index:0,codec_type:'audio',codec_name:'aac'}]}]};
+    await player.load(audioOnly);
+    await player.play();
+    player.destroy();
+  });
+  it('reports a codec error if playback advances without any decoded video frame',async()=>{
+    const {video,error,player}=setup();
+    Object.assign(video,{videoWidth:1920,videoHeight:960,getVideoPlaybackQuality:()=>({totalVideoFrames:0,droppedVideoFrames:0})});
+    const hevcMedia:Media={...media,sources:[{id:'hevc',audioTrackId:'internal-1',language:'fr',mime:'video/x-matroska',url:'/hevc.mkv',tracks:[{index:0,codec_type:'video',codec_name:'hevc'},{index:1,codec_type:'audio',codec_name:'aac'}]}]};
+    await player.load(hevcMedia);
+    await player.play();
+    video.currentTime=2;
+    video.dispatchEvent(new Event('timeupdate'));
+    expect(video.paused).toBe(true);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('HEVC'),'codec');
+    player.destroy();
+  });
 
 });

@@ -330,6 +330,13 @@ pub struct TaskView {
     /// (`identify`, `artwork`, `trickplay`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_for: Option<&'static str>,
+    /// Why a queued library scan has not started yet (`node_busy`, `node_offline`, `retry`,
+    /// `prerequisite`, `dispatching`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<String>,
+    /// Additional detail for `waiting_reason` (busy task category or last retry error).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiting_detail: Option<String>,
 }
 
 /// Counts of a media sub-task run: files (or works) done, failed and still waiting, and for
@@ -407,7 +414,7 @@ pub fn router(auth: AuthState) -> Router {
         )
         .route(
             "/api/v1/admin/tasks/{id}/triggers/{trigger}",
-            delete(delete_trigger),
+            delete(delete_trigger).put(update_trigger),
         )
         .layer(DefaultBodyLimit::max(4096))
         .with_state(auth)
@@ -544,6 +551,8 @@ async fn collect(
             stats: None,
             after_scan: None,
             waiting_for: None,
+            waiting_reason: None,
+            waiting_detail: None,
         });
     }
 
@@ -588,7 +597,9 @@ async fn collect(
                 parent_id: None,
                 stats: None,
                 after_scan: None,
-            waiting_for: None,
+                waiting_for: None,
+                waiting_reason: None,
+                waiting_detail: None,
             });
         }
     }
@@ -678,8 +689,57 @@ async fn scan_view(
             })
             .collect();
         let state = active_state(current.iter().map(|(.., status, _)| status.as_str()));
-        let progress = (state == "running")
+        let mut progress = (state == "running")
             .then(|| current.iter().map(|(.., p)| *p).sum::<i64>() / current.len().max(1) as i64);
+        let counts: Option<(i64, i64, i64, i64)> = query_as(
+            "SELECT COALESCE(SUM(discovered),0),COALESCE(SUM(probed),0),COALESCE(SUM(reused),0),COALESCE(SUM(errors_count),0) \
+             FROM scan_jobs \
+             WHERE library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)",
+        )
+        .bind(library)
+        .bind(library)
+        .fetch_optional(pool)
+        .await?;
+        let (discovered, probed, reused, errors_count) = counts.unwrap_or((0, 0, 0, 0));
+        if state == "running" && progress.unwrap_or(0) <= 0 && discovered > 0 {
+            let known_assets: i64 = if library_kind == "music" {
+                query_scalar(
+                    "SELECT COUNT(*) FROM music_tracks \
+                     WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND available=1",
+                )
+                .bind(library)
+                .bind(library)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0)
+            } else {
+                query_scalar(
+                    "SELECT COUNT(*) FROM inventory_assets \
+                     WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND available=1",
+                )
+                .bind(library)
+                .bind(library)
+                .fetch_one(pool)
+                .await
+                .unwrap_or(0)
+            };
+            if known_assets > 0 {
+                progress = Some(((discovered * 100) / known_assets).clamp(1, 99));
+            }
+        }
+        let stats = (discovered > 0 || probed > 0 || reused > 0 || errors_count > 0).then_some(TaskStats {
+            done: discovered,
+            failed: errors_count,
+            pending: reused,
+            images: Some(probed),
+        });
+        let (waiting_reason, waiting_detail) = if state == "queued" {
+            crate::scans::waiting_reason(store, library, now())
+                .await?
+                .map_or((None, None), |(reason, detail)| (Some(reason), detail))
+        } else {
+            (None, None)
+        };
         // The most recent finished run over every scope of the library.
         let last: Option<(Option<i64>, Option<i64>, String, String)> = query_as(
             "SELECT started_at,finished_at,status,error \
@@ -763,9 +823,11 @@ async fn scan_view(
             issues,
             triggers: triggers_of("scan", library),
             parent_id: None,
-            stats: None,
+            stats,
             after_scan: None,
             waiting_for: None,
+            waiting_reason,
+            waiting_detail,
         })
     }
 }
@@ -918,15 +980,43 @@ async fn control(
             .bind(target).fetch_all(auth.store.pool()).await,
         TaskRef::Backup => query_scalar(sqlx::AssertSqlSafe(format!("SELECT id FROM durable_tasks WHERE category='system' AND target_id='backup' AND status IN {statuses}")))
             .fetch_all(auth.store.pool()).await,
-        TaskRef::Scan(library) => query_scalar(sqlx::AssertSqlSafe(format!("SELECT id FROM durable_tasks WHERE category='scan' AND owner<>'library-monitor' AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN {statuses}")))
-            .bind(library).bind(library).fetch_all(auth.store.pool()).await,
+        TaskRef::Scan(library) => {
+            let filter = if action == "cancel" {
+                ""
+            } else {
+                " AND owner<>'library-monitor'"
+            };
+            query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM durable_tasks WHERE category='scan'{filter} AND (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) AND status IN {statuses}"
+            )))
+            .bind(library)
+            .bind(library)
+            .fetch_all(auth.store.pool())
+            .await
+        }
     }
     .map_err(internal)?;
-    if crate::task_engine::control_many(&auth.store, &ids, action, now())
+    let mut changed = crate::task_engine::control_many(&auth.store, &ids, action, now())
+        .await
+        .map_err(internal)?;
+    if action == "cancel"
+        && let TaskRef::Scan(library) = &task
+    {
+        let reset = query(
+            "UPDATE scan_jobs SET status='error',errors_json='[\"Scan arrêté\"]',errors_count=1 \
+             WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=?)) \
+             AND status IN ('queued','running') \
+             AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.status='running' AND j.lease_until IS NOT NULL)",
+        )
+        .bind(library)
+        .bind(library)
+        .execute(auth.store.pool())
         .await
         .map_err(internal)?
-        > 0
-    {
+        .rows_affected();
+        changed += reset;
+    }
+    if changed > 0 {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(not_active())
@@ -1013,6 +1103,107 @@ async fn create_trigger(
         .ok_or_else(|| ApiError::from(StatusCode::INTERNAL_SERVER_ERROR))?;
     commit(tx).await.map_err(internal)?;
     Ok((StatusCode::CREATED, Json(TriggerView::from(&created))))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TriggerUpdateInput {
+    #[serde(rename = "type")]
+    trigger_type: Option<TriggerType>,
+    time_of_day_minutes: Option<i64>,
+    day_of_week: Option<i64>,
+    interval_minutes: Option<i64>,
+    max_runtime_seconds: Option<i64>,
+    enabled: Option<bool>,
+}
+
+async fn update_trigger(
+    State(auth): State<AuthState>,
+    Path((id, trigger)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(input): Json<TriggerUpdateInput>,
+) -> Result<Json<TriggerView>, ApiError> {
+    authorize(&auth, &headers, true).await?;
+    let (task, _) = find(&auth.store, &id).await?;
+    if matches!(task, TaskRef::Media(..)) {
+        return Err(ApiError::coded(StatusCode::CONFLICT, "trigger_unsupported"));
+    }
+    let invalid = || ApiError::coded(StatusCode::UNPROCESSABLE_ENTITY, "trigger_invalid");
+    let (kind, target) = (task.kind(), task.target());
+    let timestamp = now();
+    let _writer = auth.store.task_writes.lock().await;
+    let mut conn = auth.store.pool().acquire().await.map_err(internal)?;
+    let mut tx = begin_write(&mut conn).await.map_err(internal)?;
+    let existing = load(&mut tx, kind, target).await.map_err(internal)?;
+    let current = existing
+        .iter()
+        .find(|row| row.id == trigger)
+        .cloned()
+        .ok_or(ApiError::coded(StatusCode::NOT_FOUND, "trigger_not_found"))?;
+    let enabled = input.enabled.unwrap_or(current.enabled == 1);
+    let (spec, max_runtime_seconds) = if let Some(trigger_type) = input.trigger_type {
+        let spec = TriggerSpec {
+            kind: trigger_type,
+            time_of_day_minutes: input.time_of_day_minutes,
+            day_of_week: input.day_of_week,
+            interval_minutes: input.interval_minutes,
+        }
+        .normalized(task.min_interval())
+        .map_err(|_| invalid())?;
+        if input
+            .max_runtime_seconds
+            .is_some_and(|limit| !(60..=604_800).contains(&limit))
+        {
+            return Err(invalid());
+        }
+        (spec, input.max_runtime_seconds)
+    } else {
+        let spec = current.spec().ok_or_else(invalid)?;
+        let max_runtime = match input.max_runtime_seconds {
+            Some(limit) if !(60..=604_800).contains(&limit) => return Err(invalid()),
+            Some(limit) => Some(limit),
+            None => current.max_runtime_seconds,
+        };
+        (spec, max_runtime)
+    };
+    let duplicate = existing.iter().any(|row| {
+        row.id != trigger && row.spec() == Some(spec) && row.max_runtime_seconds == max_runtime_seconds
+    });
+    if duplicate {
+        return Err(ApiError::coded(StatusCode::CONFLICT, "trigger_duplicate"));
+    }
+    let next_fire_at = enabled
+        .then(|| next_fire(&spec, timestamp, &server_time_zone()))
+        .flatten();
+    query(
+        "UPDATE task_triggers \
+         SET trigger_type=?,time_of_day_minutes=?,day_of_week=?,interval_minutes=?,max_runtime_seconds=?,enabled=?,next_fire_at=? \
+         WHERE id=? AND task_kind=? AND task_id=?",
+    )
+    .bind(spec.kind.as_str())
+    .bind(spec.time_of_day_minutes)
+    .bind(spec.day_of_week)
+    .bind(spec.interval_minutes)
+    .bind(max_runtime_seconds)
+    .bind(i64::from(enabled))
+    .bind(next_fire_at)
+    .bind(&trigger)
+    .bind(kind)
+    .bind(target)
+    .execute(&mut *tx)
+    .await
+    .map_err(internal)?;
+    crate::task_scheduler::mirror(&mut tx, kind, target)
+        .await
+        .map_err(internal)?;
+    let updated = load(&mut tx, kind, target)
+        .await
+        .map_err(internal)?
+        .into_iter()
+        .find(|row| row.id == trigger)
+        .ok_or_else(|| ApiError::from(StatusCode::INTERNAL_SERVER_ERROR))?;
+    commit(tx).await.map_err(internal)?;
+    Ok(Json(TriggerView::from(&updated)))
 }
 
 async fn delete_trigger(

@@ -103,6 +103,8 @@ export interface Library {
   coverUrls?: string[];
   imageKinds?: string[];
   imageVersions?: Record<string,string>;
+  worksCount?: number;
+  episodesCount?: number;
   userIds: string[];
 }
 

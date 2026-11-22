@@ -38,8 +38,12 @@ describe('scheduled task summaries', () => {
     expect(lastRunSummary({ state: 'running', progress: 42, lastRun: null }, now, fr)).toEqual({ text: 'En cours : 42 %', tone: 'active' });
     expect(lastRunSummary({ state: 'queued', progress: null, lastRun: run({}) }, now, fr).tone).toBe('active');
   });
-  it('says which earlier phase a step waits for, and when it is paused', () => {
+  it('says which earlier phase a step waits for, why a scan is queued, and when it is paused', () => {
     expect(lastRunSummary({ state: 'queued', progress: null, lastRun: null, waitingFor: 'identify' }, now, fr).text).toBe('En attente : identification d’abord');
+    expect(lastRunSummary({ state: 'queued', progress: null, lastRun: null, waitingReason: 'node_busy', waitingDetail: 'scan' }, now, fr).text)
+      .toContain('Le Media Node termine une autre tâche (scan)');
+    expect(lastRunSummary({ state: 'queued', progress: null, lastRun: null, waitingReason: 'node_offline' }, now, fr))
+      .toEqual({ text: 'En attente… · Le Media Node de cette bibliothèque est déconnecté ; le scan démarrera à sa reconnexion.', tone: 'warning' });
     expect(lastRunSummary({ state: 'paused', progress: 30, lastRun: null }, now, fr)).toEqual({ text: 'En pause : 30 %', tone: 'warning' });
     expect(taskStatus({ state: 'paused', lastRun: null })).toBe('paused');
   });
@@ -84,6 +88,8 @@ describe('library media sub-tasks', () => {
     expect(taskName({ kind: 'intros', name: 'server', libraryId: 'films' }, 'Films', fr)).toBe('Détecter les intros et génériques de Films');
     expect(statsLabel({ kind: 'trickplay', stats: { done: 12, failed: 1, pending: 3, images: null } }, fr)).toBe('12 terminé(s) · 1 en échec · 3 en attente');
     expect(statsLabel({ kind: 'artwork', stats: { done: 4, failed: 0, pending: 0, images: 30 } }, fr)).toBe('4 œuvre(s) · 30 image(s)');
+    expect(statsLabel({ kind: 'scan', stats: { done: 8213, failed: 2, pending: 7848, images: 365 } }, fr))
+      .toBe('8213 fichier(s) découvert(s) · 365 analysé(s) · 7848 réutilisé(s) · 2 en échec');
     expect(statsLabel({ kind: 'trickplay', stats: null }, fr)).toBe('');
   });
 });

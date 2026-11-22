@@ -11,6 +11,7 @@
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
   import { session } from '../auth/session';
+  import { accessibleLibraries } from './libraries';
   import {
     features, loadFeatures, discoverRequests, loadMyPolicy, posterUrl, requestPayload,
     statusLabels, statusTone, applicationRequest,
@@ -162,6 +163,23 @@
 
   // Quick genre pill filters
   let activeGenre = $state<string | null>(null);
+  const activeLibraryId = $derived(page.url.searchParams.get('library') ?? '');
+  const sectionLibraries = $derived(
+    section === 'films' || section === 'series'
+      ? $accessibleLibraries.filter(lib => lib.kind === section)
+      : []
+  );
+  function chooseLibrary(id: string) {
+    const params = new URLSearchParams(page.url.search);
+    if (id) params.set('library', id);
+    else params.delete('library');
+    params.delete('offset');
+    const queryStr = params.toString();
+    const targetUrl = queryStr
+      ? resolve(`${section}/?${queryStr}` as `films/?${string}`)
+      : resolve(`${section}/` as 'films/');
+    void goto(targetUrl);
+  }
 
   const allAvailableGenres = $derived.by(() => {
     const works = [...films, ...series];
@@ -481,6 +499,46 @@
           </button>
         {/if}
       </div>
+    </div>
+  {/if}
+
+  {#if sectionLibraries.length > 1}
+    <div class="library-cards-bar" role="group" aria-label={$t('libraries')}>
+      <button
+        type="button"
+        class="library-switch-card"
+        class:active={!activeLibraryId}
+        onclick={() => chooseLibrary('')}
+      >
+        <span class="lib-card-thumb" data-kind={section}>
+          <Icon name={section === 'films' ? 'film' : 'tv'} size={16} />
+        </span>
+        <span class="lib-card-name">{$t('all')}</span>
+      </button>
+      {#each sectionLibraries as lib (lib.id)}
+        {@const visualKind = lib.kind === 'series' && lib.anime ? 'anime' : lib.kind}
+        <button
+          type="button"
+          class="library-switch-card"
+          class:active={activeLibraryId === lib.id}
+          onclick={() => chooseLibrary(lib.id)}
+        >
+          <span class="lib-card-thumb" data-kind={visualKind}>
+            {#if lib.imageUrl}
+              <img class="lib-card-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" />
+            {:else if lib.coverUrls?.length}
+              <span class="lib-card-collage" data-count={Math.min(lib.coverUrls.length, 4)} aria-hidden="true">
+                {#each lib.coverUrls.slice(0, 4) as url (url)}
+                  <img src={url} alt="" loading="lazy" decoding="async" />
+                {/each}
+              </span>
+            {:else}
+              <Icon name={lib.kind === 'films' ? 'film' : 'tv'} size={16} />
+            {/if}
+          </span>
+          <span class="lib-card-name">{lib.name}</span>
+        </button>
+      {/each}
     </div>
   {/if}
 
@@ -914,4 +972,18 @@
   .cancel-btn:hover { background: var(--pn); }
   .submit-btn { height: 40px; padding: 0 18px; border: 0; border-radius: var(--r-sm); background: var(--ac); color: var(--on-ac); font-size: 14px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
   .submit-btn:hover { opacity: 0.9; }
+  .library-cards-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .library-switch-card { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 4px 14px 4px 5px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-2); color: var(--tx); font-size: 14px; font-weight: 700; cursor: pointer; transition: border-color var(--t-fast) ease, background-color var(--t-fast) ease; }
+  .library-switch-card:hover { background: var(--bg-3); border-color: var(--line-2); }
+  .library-switch-card.active { border-color: var(--ac); background: color-mix(in srgb, var(--ac) 14%, var(--bg-2)); }
+  .lib-card-thumb { position: relative; overflow: hidden; display: grid; place-items: center; width: 52px; height: 32px; border-radius: 6px; background: linear-gradient(135deg, #1c1218 0%, #9a3412 100%); color: #fff; flex: none; }
+  .lib-card-thumb[data-kind='series'] { background: linear-gradient(135deg, #0c1426 0%, #1d4ed8 100%); }
+  .lib-card-thumb[data-kind='anime'] { background: linear-gradient(135deg, #1a0f2e 0%, #7e22ce 100%); }
+  .lib-card-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .lib-card-collage { display: grid; grid-template-columns: repeat(4, 1fr); width: 100%; height: 100%; gap: 1px; }
+  .lib-card-collage[data-count='1'] { grid-template-columns: 1fr; }
+  .lib-card-collage[data-count='2'] { grid-template-columns: repeat(2, 1fr); }
+  .lib-card-collage[data-count='3'] { grid-template-columns: repeat(3, 1fr); }
+  .lib-card-collage img { width: 100%; height: 100%; object-fit: cover; }
+  .lib-card-name { white-space: nowrap; }
 </style>

@@ -276,6 +276,8 @@ pub(crate) async fn views(
             stats,
             after_scan: Some(task.after_scan(&options)),
             waiting_for: None,
+            waiting_reason: None,
+            waiting_detail: None,
         });
     }
     mark_waiting(&mut views);

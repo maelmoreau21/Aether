@@ -184,7 +184,7 @@ struct Status {
 /// it. A queued scan whose library moved to another Media Node can never be leased (the engine
 /// requires both to match) and blocks every new scan with 409: it is moved to the library's
 /// current node first.
-async fn waiting_reason(
+pub(crate) async fn waiting_reason(
     store: &crate::identity::IdentityStore,
     library: &str,
     now: i64,
@@ -213,8 +213,8 @@ async fn waiting_reason(
                 LEFT \
                 JOIN media_nodes n ON n.id=j.node_id \
                 WHERE (j.library_id=? OR j.library_id IN (SELECT library_id FROM library_folders \
-                WHERE parent_id=? AND active=1)) AND j.category='scan' AND j.status='queued' \
-                AND j.lease_until IS NULL \
+                WHERE parent_id=? AND active=1)) AND j.category='scan' AND j.owner<>'library-monitor' \
+                AND j.status='queued' AND j.lease_until IS NULL \
                 ORDER BY j.created_at,j.id \
                 LIMIT 1",
         )
@@ -283,6 +283,21 @@ async fn status(
     if exists == 0 {
         return Err(StatusCode::NOT_FOUND);
     }
+    // Clean up any orphaned durable scan_jobs row whose lease has already ended so the UI
+    // never stays frozen on "En cours" when no task is active in the scheduler.
+    let _ = crate::database::query(
+        "UPDATE scan_jobs \
+            SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
+            WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+            AND status IN ('queued','running') \
+            AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
+    )
+    .bind(&id)
+    .bind(&id)
+    .execute(&state.auth.store.pool)
+    .await;
+
     let statuses: Vec<Status> = crate::database::query_as(
         "SELECT status,discovered,probed,reused,errors_json,errors_count,warnings_count FROM scan_jobs WHERE library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)",
     )
@@ -293,7 +308,7 @@ async fn status(
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     let pending: Option<String> = crate::database::query_scalar(
-        "SELECT status FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND category='scan' AND status IN ('running','queued','paused') ORDER BY CASE status WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END LIMIT 1"
+        "SELECT status FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND category='scan' AND owner<>'library-monitor' AND status IN ('running','queued','paused') ORDER BY CASE status WHEN 'running' THEN 1 WHEN 'queued' THEN 2 ELSE 3 END LIMIT 1"
     )
     .bind(&id)
     .bind(&id)
@@ -378,6 +393,64 @@ async fn start(
     ))
 }
 
+/// Cancel any background `library-monitor` poll on `library_id` (or its folders) so an explicit
+/// manual or scheduled scan can start immediately without a 409 conflict.
+pub(crate) async fn preempt_monitoring_polls(
+    store: &crate::identity::IdentityStore,
+    jobs: Option<&ScanJobs>,
+    library_id: &str,
+    now: i64,
+) -> Result<(), sqlx::Error> {
+    let active_monitors: Vec<(String, i64)> = crate::database::query_as(
+        "SELECT id,attempt FROM durable_tasks \
+         WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+         AND category='scan' AND owner='library-monitor' AND status IN ('queued','running','paused')",
+    )
+    .bind(library_id)
+    .bind(library_id)
+    .fetch_all(&store.pool)
+    .await?;
+    if active_monitors.is_empty() {
+        return Ok(());
+    }
+    if let Some(jobs) = jobs {
+        for (task_id, attempt) in &active_monitors {
+            jobs.cancel_scan(&format!("{task_id}:{attempt}"));
+        }
+    }
+    let _writer = store.task_writes.lock().await;
+    crate::database::query(
+        "UPDATE durable_tasks \
+         SET status='cancelled',lease_until=NULL,lease_owner=NULL,finished_at=?,updated_at=?,error='Preempted by library scan' \
+         WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+         AND category='scan' AND owner='library-monitor' AND status IN ('queued','running','paused')",
+    )
+    .bind(now)
+    .bind(now)
+    .bind(library_id)
+    .bind(library_id)
+    .execute(&store.pool)
+    .await?;
+    for (task_id, attempt) in &active_monitors {
+        let fence = format!("{task_id}:{attempt}");
+        crate::database::query("DELETE FROM active_scan_runs WHERE scan_id=?")
+            .bind(&fence)
+            .execute(&store.pool)
+            .await?;
+    }
+    crate::database::query(
+        "UPDATE scan_jobs SET status='idle' \
+         WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+         AND status IN ('queued','running') \
+         AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' AND j.owner<>'library-monitor' AND j.library_id=scan_jobs.library_id AND j.status IN ('queued','running','paused'))",
+    )
+    .bind(library_id)
+    .bind(library_id)
+    .execute(&store.pool)
+    .await?;
+    Ok(())
+}
+
 async fn enqueue_for_owner(
     auth: &AuthState,
     root: PathBuf,
@@ -398,14 +471,17 @@ async fn enqueue_for_owner(
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     scopes.push(id.clone());
-    // Only another scan conflicts: queued previews, chapter images or analyses
-    // must never block a rescan of the library.
-    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND category='scan' AND status IN ('queued','running','paused')")
+    // Only another real scan conflicts: queued previews, chapter images, analyses
+    // or background monitoring polls must never block a rescan of the library.
+    let active: i64 = crate::database::query_scalar("SELECT COUNT(*) FROM durable_tasks WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND category='scan' AND owner<>'library-monitor' AND status IN ('queued','running','paused')")
         .bind(&id).bind(&id).fetch_one(&auth.store.pool).await.map_err(|_|StatusCode::INTERNAL_SERVER_ERROR)?;
     if active != 0 {
         return Err(StatusCode::CONFLICT);
     }
     let timestamp = media_contracts::protocol::unix_now();
+    preempt_monitoring_polls(&auth.store, Some(&jobs), &id, timestamp)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     for scope in scopes {
         let key = uuid::Uuid::new_v4().to_string();
         crate::task_engine::enqueue_mode(
@@ -439,9 +515,10 @@ pub(crate) async fn execute_leased(
     id: String,
     scan_id: String,
     mode: RefreshMode,
+    is_monitor: bool,
 ) -> Result<(), StatusCode> {
     let _dispatch = jobs.dispatch.lock().await;
-    enqueue_one(auth, root, jobs.clone(), id, mode, Some(scan_id)).await
+    enqueue_one(auth, root, jobs.clone(), id, mode, Some(scan_id), is_monitor).await
 }
 async fn enqueue_one(
     auth: &AuthState,
@@ -450,6 +527,7 @@ async fn enqueue_one(
     id: String,
     mode: RefreshMode,
     supplied_scan_id: Option<String>,
+    is_monitor: bool,
 ) -> Result<(), StatusCode> {
     let state = ScanState {
         auth: auth.clone(),
@@ -484,12 +562,34 @@ async fn enqueue_one(
             .await
             .map_err(|_| StatusCode::BAD_REQUEST)?;
     }
-    let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) \
-            VALUES(?,'queued',0,0,?) ON CONFLICT(library_id) DO UPDATE \
-            SET refresh_mode=excluded.refresh_mode,status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 \
-            WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).bind(mode.as_str()).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if result.rows_affected() == 0 {
-        return Err(StatusCode::CONFLICT);
+    if is_monitor && node_id == "local" {
+        let active_job: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM scan_jobs WHERE library_id=? AND status IN ('queued','running')",
+        )
+        .bind(&id)
+        .fetch_one(&state.auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if active_job != 0 {
+            return Err(StatusCode::CONFLICT);
+        }
+        crate::database::query(
+            "INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) \
+             VALUES(?,'idle',0,0,?) ON CONFLICT(library_id) DO NOTHING",
+        )
+        .bind(&id)
+        .bind(mode.as_str())
+        .execute(&state.auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    } else {
+        let result = crate::database::query("INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) \
+                VALUES(?,'queued',0,0,?) ON CONFLICT(library_id) DO UPDATE \
+                SET refresh_mode=excluded.refresh_mode,status='queued',discovered=0,probed=0,reused=0,errors_json='[]',errors_count=0,warnings_count=0 \
+                WHERE scan_jobs.status NOT IN ('queued','running')").bind(&id).bind(mode.as_str()).execute(&state.auth.store.pool).await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if result.rows_affected() == 0 {
+            return Err(StatusCode::CONFLICT);
+        }
     }
     let scan_id = supplied_scan_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     crate::database::query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES(?,?,?) ON CONFLICT(library_id) DO UPDATE SET scan_id=excluded.scan_id,node_id=excluded.node_id")
@@ -564,7 +664,9 @@ async fn enqueue_one(
         let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = async {
             let _permit = slots.acquire().await?;
             if cancel.load(Ordering::Acquire) || runner_jobs.is_cancelled() { return Err("Scan arrêté".into()); }
-            crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
+            if !is_monitor {
+                crate::database::query("UPDATE scan_jobs SET status='running' WHERE library_id=? AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id=?)").bind(&job_id).bind(&scan_id).execute(&store.pool).await?;
+            }
             let root = crate::local_mounts::validate(std::path::Path::new(&root), &allowed_root).await?;
             if kind == "music" {
                 let count = crate::music::scan_fenced(&store, &job_id, &root, &cancel, Some(&scan_id)).await?;
@@ -643,23 +745,36 @@ async fn enqueue_one(
             // Purge staging tables to strictly bound SQLite storage growth
             let _ = inventory::clean_staging(&store, &scan_id).await;
 
-            let errors_json = serde_json::to_string(&errors)?;
-            inventory::fence::report(
-                &store,
-                attempt,
-                inventory::fence::JobReport::Finished {
-                    // Unreadable subfolders are warnings (publication stays partial via
-                    // `report.complete`); only an interrupted traversal fails the scan.
-                    status: if report.interrupted { "error" } else { "completed" },
-                    discovered: report.discovered as i64,
-                    probed: report.probed as i64,
-                    reused: report.reused as i64,
-                    errors_json: &errors_json,
-                    errors_count: total_errors,
-                    warnings_count: total_warnings,
-                },
-            )
-            .await?;
+            let should_report = if is_monitor {
+                let current_status: Option<String> = crate::database::query_scalar(
+                    "SELECT status FROM scan_jobs WHERE library_id=?",
+                )
+                .bind(&job_id)
+                .fetch_optional(&store.pool)
+                .await?;
+                report.probed > 0 || current_status.as_deref() == Some("idle")
+            } else {
+                true
+            };
+            if should_report {
+                let errors_json = serde_json::to_string(&errors)?;
+                inventory::fence::report(
+                    &store,
+                    attempt,
+                    inventory::fence::JobReport::Finished {
+                        // Unreadable subfolders are warnings (publication stays partial via
+                        // `report.complete`); only an interrupted traversal fails the scan.
+                        status: if report.interrupted { "error" } else { "completed" },
+                        discovered: report.discovered as i64,
+                        probed: report.probed as i64,
+                        reused: report.reused as i64,
+                        errors_json: &errors_json,
+                        errors_count: total_errors,
+                        warnings_count: total_warnings,
+                    },
+                )
+                .await?;
+            }
             if let Some((task_id, attempt_str)) = scan_id.split_once(':')
                 && let Ok(attempt) = attempt_str.parse::<i64>()
             {
@@ -694,22 +809,24 @@ async fn enqueue_one(
             } else {
                 sanitized
             };
-            let err_msg = format!("Scan échoué: {detailed_msg}");
-            let errors_json = serde_json::to_string(&vec![err_msg])
-                .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
-            let _ = inventory::fence::report(
-                &store,
-                inventory::ScanAttempt {
-                    library_id: &job_id,
-                    node_id: &node_id_err,
-                    scan_id: &scan_id,
-                },
-                inventory::fence::JobReport::Failed {
-                    errors_json: &errors_json,
-                    reset_warnings: true,
-                },
-            )
-            .await;
+            if !is_monitor {
+                let err_msg = format!("Scan échoué: {detailed_msg}");
+                let errors_json = serde_json::to_string(&vec![err_msg])
+                    .unwrap_or_else(|_| "[\"Scan échoué ou interrompu\"]".into());
+                let _ = inventory::fence::report(
+                    &store,
+                    inventory::ScanAttempt {
+                        library_id: &job_id,
+                        node_id: &node_id_err,
+                        scan_id: &scan_id,
+                    },
+                    inventory::fence::JobReport::Failed {
+                        errors_json: &errors_json,
+                        reset_warnings: true,
+                    },
+                )
+                .await;
+            }
             if let Some((task_id, attempt_str)) = scan_id_err.split_once(':')
                 && let Ok(attempt) = attempt_str.parse::<i64>()
             {

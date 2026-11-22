@@ -54,6 +54,9 @@ export interface ScheduledTask {
   afterScan?: boolean | null;
   /** For a queued media sub-task: the earlier phase of its library it waits for. */
   waitingFor?: 'identify' | 'artwork' | 'trickplay' | 'chapters' | null;
+  /** Why a queued library scan has not started yet. */
+  waitingReason?: 'node_busy' | 'node_offline' | 'retry' | 'prerequisite' | 'dispatching' | null;
+  waitingDetail?: string | null;
 }
 export interface TriggerDraft {
   type: TriggerType;
@@ -136,7 +139,7 @@ const phaseKeys: Record<NonNullable<ScheduledTask['waitingFor']>, TranslationKey
   chapters: 'sched_phase_chapters'
 };
 
-export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 'lastRun' | 'waitingFor'>, now: number, t: Translate): { text: string; tone: SummaryTone } {
+export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 'lastRun' | 'waitingFor' | 'waitingReason' | 'waitingDetail'>, now: number, t: Translate): { text: string; tone: SummaryTone } {
   if (task.state === 'running') {
     return { text: task.progress !== null && task.progress > 0 ? t('sched_running_progress', { progress: task.progress }) : t('sched_running'), tone: 'active' };
   }
@@ -145,7 +148,18 @@ export function lastRunSummary(task: Pick<ScheduledTask, 'state' | 'progress' | 
   }
   if (task.state === 'queued') {
     const phase = task.waitingFor ? phaseKeys[task.waitingFor] : undefined;
-    return { text: phase ? t('sched_waiting_for', { phase: t(phase) }) : t('sched_queued'), tone: 'active' };
+    if (phase) return { text: t('sched_waiting_for', { phase: t(phase) }), tone: 'active' };
+    if (task.waitingReason === 'node_busy') {
+      const tasks: Record<string, TranslationKey> = { scan: 'task_kind_scan', analyze: 'task_kind_analyze', prepare: 'task_kind_prepare', image: 'task_kind_image', trickplay: 'task_kind_trickplay', system: 'task_kind_system' };
+      return { text: `${t('sched_queued')} · ${t('scan_waiting_node_busy', { task: t(tasks[task.waitingDetail ?? ''] ?? 'task_kind_system') })}`, tone: 'active' };
+    }
+    if (task.waitingReason === 'node_offline') return { text: `${t('sched_queued')} · ${t('scan_waiting_node_offline')}`, tone: 'warning' };
+    if (task.waitingReason === 'retry') {
+      const detail = task.waitingDetail ? t('scan_waiting_retry_after', { error: task.waitingDetail }) : t('scan_waiting_retry');
+      return { text: `${t('sched_queued')} · ${detail}`, tone: 'warning' };
+    }
+    if (task.waitingReason === 'prerequisite') return { text: `${t('sched_queued')} · ${t('scan_waiting_prerequisite')}`, tone: 'active' };
+    return { text: t('sched_queued'), tone: 'active' };
   }
   const run = task.lastRun;
   if (!run) return { text: t('sched_never'), tone: 'muted' };
@@ -237,6 +251,11 @@ export function taskName(task: Pick<ScheduledTask, 'kind' | 'name' | 'libraryId'
 export function statsLabel(task: Pick<ScheduledTask, 'kind' | 'stats'>, t: Translate): string {
   const stats = task.stats;
   if (!stats) return '';
+  if (task.kind === 'scan') {
+    const parts = [t('discovered_analysed_reused', { discovered: stats.done, probed: stats.images ?? 0, reused: stats.pending })];
+    if (stats.failed) parts.push(t('sched_stats_failed', { count: stats.failed }));
+    return parts.join(' · ');
+  }
   const parts = task.kind === 'artwork'
     ? [t('sched_stats_works', { count: stats.done }), t('sched_stats_images', { count: stats.images ?? 0 })]
     : [t('sched_stats_done', { count: stats.done })];

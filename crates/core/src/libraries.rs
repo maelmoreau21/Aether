@@ -60,6 +60,10 @@ pub(crate) struct Library {
     pub image_kinds: Vec<String>,
     #[sqlx(skip)]
     pub image_versions: std::collections::BTreeMap<String, String>,
+    #[sqlx(skip)]
+    pub works_count: i64,
+    #[sqlx(skip)]
+    pub episodes_count: i64,
 }
 #[derive(Clone, Deserialize, Serialize, sqlx::FromRow)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -94,6 +98,7 @@ struct LibraryInput {
 pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
     Router::new()
         .route("/api/v1/libraries", get(accessible))
+        .route("/api/v1/libraries/{id}/images/{kind}", get(accessible_image))
         .route("/api/v1/admin/libraries", get(list).post(create))
         .route(
             "/api/v1/admin/libraries/{id}",
@@ -104,6 +109,10 @@ pub fn router(auth: AuthState, local_root: PathBuf) -> Router {
         .route(
             "/api/v1/admin/filesystem/check",
             axum::routing::post(check_filesystem),
+        )
+        .route(
+            "/api/v1/admin/libraries/{id}/images/generate",
+            axum::routing::post(generate_images),
         )
         .route(
             "/api/v1/admin/libraries/{id}/images/{kind}",
@@ -120,7 +129,8 @@ async fn accessible(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let actor = state.auth.authenticate(&headers).await?;
-    let rows:Vec<(String,String,String)> = crate::database::query_as("SELECT l.id,l.name,l.kind \
+    let rows: Vec<(String, String, String, String)> = crate::database::query_as(
+        "SELECT l.id,l.name,l.kind,l.options_json \
             FROM libraries l \
             JOIN media_nodes n ON n.id=l.node_id \
             WHERE NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) \
@@ -133,11 +143,91 @@ async fn accessible(
             AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
             OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
             AND p.user_id=?)) \
-            ORDER BY l.name,l.id")
-        .bind(actor.user.role.as_str()).bind(actor.user.id).fetch_all(&state.auth.store.pool).await.map_err(database)?;
-    Ok(Json(
-        serde_json::json!({"libraries":rows.into_iter().map(|(id,name,kind)|serde_json::json!({"id":id,"name":name,"kind":kind})).collect::<Vec<_>>()}),
-    ))
+            ORDER BY l.name,l.id",
+    )
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .fetch_all(&state.auth.store.pool)
+    .await
+    .map_err(database)?;
+    let mut items = Vec::with_capacity(rows.len());
+    for (id, name, kind, options_json) in rows {
+        let anime = serde_json::from_str::<crate::library_options::LibraryOptions>(&options_json)
+            .is_ok_and(|opts| opts.anime);
+        let art: Option<(String, String)> = crate::database::query_as(
+            "SELECT kind,revision FROM library_artwork WHERE library_id=? ORDER BY CASE kind WHEN 'backdrop' THEN 0 ELSE 1 END LIMIT 1",
+        )
+        .bind(&id)
+        .fetch_optional(&state.auth.store.pool)
+        .await
+        .map_err(database)?;
+        let image_url = art.map(|(art_kind, rev)| {
+            format!("/api/v1/libraries/{id}/images/{art_kind}?width=320&v={rev}")
+        });
+        let cover_urls: Vec<String> = crate::database::query_scalar(
+            "SELECT COALESCE((SELECT '/api/v1/works/' || w.id || '/images/' || wi.id || \
+                '?width=320' FROM work_image_entries wi WHERE wi.work_id=w.id AND wi.kind='poster' \
+                ORDER BY wi.position,wi.id LIMIT 1),(SELECT '/api/v1/works/' || w.id || '/poster' \
+                FROM work_posters wp \
+                WHERE wp.work_id=w.id),(SELECT '/api/v1/assets/' || i.id || '/image?width=320' \
+                FROM inventory_images i WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 \
+                AND i.root_snapshot=l.root ORDER BY i.priority,i.id LIMIT 1)) AS url \
+                FROM inventory_works w \
+                JOIN libraries l ON l.id=w.library_id \
+                JOIN media_nodes n ON n.id=l.node_id \
+                WHERE (l.id=? OR l.id IN (SELECT library_id FROM library_folders WHERE parent_id=? \
+                AND active=1)) AND l.enabled=1 AND n.status='connected' \
+                AND w.kind IN ('film','series') AND w.has_available_asset = 1 \
+                AND (EXISTS(SELECT 1 FROM work_image_entries wi \
+                WHERE wi.work_id=w.id AND wi.kind='poster') OR EXISTS(SELECT 1 FROM work_posters wp \
+                WHERE wp.work_id=w.id) OR EXISTS(SELECT 1 FROM inventory_images i \
+                WHERE i.work_id=w.id AND i.role='poster' AND i.available=1 \
+                AND i.root_snapshot=l.root)) \
+                ORDER BY w.title_sort,w.id \
+                LIMIT 4",
+        )
+        .bind(&id)
+        .bind(&id)
+        .fetch_all(&state.auth.store.pool)
+        .await
+        .map_err(database)?;
+        items.push(serde_json::json!({
+            "id": id,
+            "name": name,
+            "kind": kind,
+            "anime": anime,
+            "imageUrl": image_url,
+            "coverUrls": cover_urls,
+        }));
+    }
+    Ok(Json(serde_json::json!({ "libraries": items })))
+}
+async fn accessible_image(
+    State(state): State<LibraryState>,
+    Path((id, kind)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(options): Query<crate::artwork::PreviewOptions>,
+) -> Result<Response, StatusCode> {
+    let actor = state.auth.authenticate(&headers).await?;
+    let allowed: i64 = crate::database::query_scalar(
+        "SELECT COUNT(*) FROM libraries l \
+         WHERE l.id=? AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=l.id) \
+         AND l.enabled=1 AND ((?='administrator' AND NOT EXISTS(SELECT 1 FROM libraries hx LEFT \
+         JOIN library_folders hxf ON hxf.library_id=hx.id AND hxf.active=1 LEFT \
+         JOIN libraries hxp ON hxp.id=hxf.parent_id WHERE hx.id=l.id \
+         AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
+         OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id AND p.user_id=?))",
+    )
+    .bind(&id)
+    .bind(actor.user.role.as_str())
+    .bind(&actor.user.id)
+    .fetch_one(&state.auth.store.pool)
+    .await
+    .map_err(database)?;
+    if allowed == 0 {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    serve_library_image(&state, &id, &kind, &headers, options).await
 }
 async fn administrator(
     state: &LibraryState,
@@ -250,6 +340,33 @@ async fn load(store: &IdentityStore) -> Result<Vec<Library>, StatusCode> {
                 ORDER BY w.title_sort,w.id \
                 LIMIT 4")
             .bind(&library.id).bind(&library.id).fetch_all(&mut *tx).await.map_err(database)?;
+        if library.kind == "music" {
+            let (albums, tracks): (i64, i64) = crate::database::query_as(
+                "SELECT COUNT(DISTINCT album), COUNT(*) FROM music_tracks \
+                 WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND available=1",
+            )
+            .bind(&library.id)
+            .bind(&library.id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap_or((0, 0));
+            library.works_count = albums;
+            library.episodes_count = tracks;
+        } else {
+            let (works, episodes): (i64, i64) = crate::database::query_as(
+                "SELECT COALESCE(SUM(CASE WHEN kind IN ('film','series') THEN 1 ELSE 0 END),0), \
+                        COALESCE(SUM(CASE WHEN kind='episode' THEN 1 ELSE 0 END),0) \
+                 FROM inventory_works \
+                 WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) AND has_available_asset=1",
+            )
+            .bind(&library.id)
+            .bind(&library.id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap_or((0, 0));
+            library.works_count = works;
+            library.episodes_count = episodes;
+        }
     }
     let grants = crate::database::query(
         "SELECT library_id,user_id FROM library_permissions ORDER BY user_id",
@@ -784,7 +901,16 @@ async fn image(
     Query(options): Query<crate::artwork::PreviewOptions>,
 ) -> Result<Response, StatusCode> {
     administrator(&state, &headers, false).await?;
-    image_target(&state, &id, &kind).await?;
+    serve_library_image(&state, &id, &kind, &headers, options).await
+}
+async fn serve_library_image(
+    state: &LibraryState,
+    id: &str,
+    kind: &str,
+    headers: &HeaderMap,
+    options: crate::artwork::PreviewOptions,
+) -> Result<Response, StatusCode> {
+    image_target(state, id, kind).await?;
     let width = options.width.unwrap_or(0);
     if ![0, 320, 640, 1280].contains(&width) {
         return Err(StatusCode::BAD_REQUEST);
@@ -792,9 +918,11 @@ async fn image(
     let sha256: String = crate::database::query_scalar(
         "SELECT COALESCE((SELECT sha256 FROM library_artwork_previews WHERE library_id=? AND kind=? AND width=?),sha256) FROM library_artwork WHERE library_id=? AND kind=?",
     )
-    .bind(&id).bind(&kind).bind(i64::from(width))
-    .bind(&id)
-    .bind(&kind)
+    .bind(id)
+    .bind(kind)
+    .bind(i64::from(width))
+    .bind(id)
+    .bind(kind)
     .fetch_optional(&state.auth.store.pool)
     .await
     .map_err(database)?
@@ -803,7 +931,7 @@ async fn image(
         .auth
         .store
         .assets
-        .response_after_authorization(&sha256, &headers)
+        .response_after_authorization(&sha256, headers)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     response.headers_mut().insert(
@@ -811,6 +939,41 @@ async fn image(
         header::HeaderValue::from_static("private, no-store"),
     );
     Ok(response)
+}
+async fn save_library_image_bytes(
+    store: &IdentityStore,
+    id: &str,
+    kind: &str,
+    bytes: Bytes,
+    content_type: String,
+    revision: String,
+) -> Result<(), StatusCode> {
+    let encoded = crate::artwork::prepare(bytes, content_type, kind.to_owned()).await?;
+    let mut stored = Vec::new();
+    let mut leases = Vec::new();
+    for (width, mime, data) in encoded.variants {
+        let meta = store
+            .assets
+            .put_bytes(&data, mime)
+            .await
+            .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
+        leases.push(
+            store
+                .assets
+                .lease(&meta.sha256)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        );
+        stored.push((width, meta.sha256));
+    }
+    let mut tx = store.pool.begin().await.map_err(database)?;
+    crate::database::query("INSERT INTO library_artwork(library_id,kind,sha256,revision) VALUES(?,?,?,?) ON CONFLICT(library_id,kind) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
+        .bind(id).bind(kind).bind(&stored[0].1).bind(revision).execute(&mut *tx).await.map_err(database)?;
+    for (width, sha) in stored.iter().filter(|v| v.0 != 0) {
+        crate::database::query("INSERT INTO library_artwork_previews(library_id,kind,width,sha256) VALUES(?,?,?,?) ON CONFLICT(library_id,kind,width) DO UPDATE SET sha256=excluded.sha256")
+            .bind(id).bind(kind).bind(width).bind(sha).execute(&mut *tx).await.map_err(database)?;
+    }
+    tx.commit().await.map_err(database)?;
+    Ok(())
 }
 async fn upload_image(
     State(state): State<LibraryState>,
@@ -825,36 +988,393 @@ async fn upload_image(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_owned();
-    let encoded = crate::artwork::prepare(bytes, content, kind.clone()).await?;
-    let mut stored = Vec::new();
-    let mut leases = Vec::new();
-    for (width, mime, data) in encoded.variants {
-        let meta = state
-            .auth
-            .store
-            .assets
-            .put_bytes(&data, mime)
-            .await
-            .map_err(|_| StatusCode::INSUFFICIENT_STORAGE)?;
-        leases.push(
-            state
-                .auth
-                .store
-                .assets
-                .lease(&meta.sha256)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
-        );
-        stored.push((width, meta.sha256));
-    }
-    let mut tx = state.auth.store.pool.begin().await.map_err(database)?;
-    crate::database::query("INSERT INTO library_artwork(library_id,kind,sha256,revision) VALUES(?,?,?,?) ON CONFLICT(library_id,kind) DO UPDATE SET sha256=excluded.sha256,revision=excluded.revision")
-        .bind(&id).bind(&kind).bind(&stored[0].1).bind(uuid::Uuid::new_v4().to_string()).execute(&mut *tx).await.map_err(database)?;
-    for (width, sha) in stored.iter().filter(|v| v.0 != 0) {
-        crate::database::query("INSERT INTO library_artwork_previews(library_id,kind,width,sha256) VALUES(?,?,?,?) ON CONFLICT(library_id,kind,width) DO UPDATE SET sha256=excluded.sha256")
-            .bind(&id).bind(&kind).bind(width).bind(sha).execute(&mut *tx).await.map_err(database)?;
-    }
-    tx.commit().await.map_err(database)?;
+    save_library_image_bytes(
+        &state.auth.store,
+        &id,
+        &kind,
+        bytes,
+        content,
+        uuid::Uuid::new_v4().to_string(),
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+async fn generate_images(
+    State(state): State<LibraryState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Result<StatusCode, StatusCode> {
+    administrator(&state, &headers, true).await?;
+    generate_library_artwork(&state.auth.store, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Automatically generate `poster` and `backdrop` cover artwork for a library when it has none yet
+/// (or when its existing auto-generated image had no work posters and work posters are now available).
+/// Manual uploads are never overwritten.
+pub(crate) async fn ensure_generated_library_artwork(
+    store: &IdentityStore,
+    id: &str,
+) -> Result<(), StatusCode> {
+    let target_id: String = crate::database::query_scalar(
+        "SELECT COALESCE((SELECT parent_id FROM library_folders WHERE library_id=? AND active=1), ?)",
+    )
+    .bind(id)
+    .bind(id)
+    .fetch_one(&store.pool)
+    .await
+    .map_err(database)?;
+    if target_id.starts_with("fixture-") {
+        return Ok(());
+    }
+    let revisions: Vec<String> = crate::database::query_scalar(
+        "SELECT revision FROM library_artwork WHERE library_id=?",
+    )
+    .bind(&target_id)
+    .fetch_all(&store.pool)
+    .await
+    .map_err(database)?;
+    // Never overwrite manual uploads (revisions that do not start with "auto-").
+    if revisions.iter().any(|rev| !rev.starts_with("auto-")) {
+        return Ok(());
+    }
+    let has_collage = revisions.len() >= 2 && revisions.iter().all(|rev| rev.starts_with("auto-collage-"));
+    if has_collage {
+        return Ok(());
+    }
+    generate_library_artwork(store, &target_id).await
+}
+
+pub(crate) async fn generate_library_artwork(
+    store: &IdentityStore,
+    id: &str,
+) -> Result<(), StatusCode> {
+    let row: Option<(String, String, String)> = crate::database::query_as(
+        "SELECT name,kind,options_json FROM libraries WHERE id=? AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.library_id=libraries.id)",
+    )
+    .bind(id)
+    .fetch_optional(&store.pool)
+    .await
+    .map_err(database)?;
+    let (name, kind, options_json) = row.ok_or(StatusCode::NOT_FOUND)?;
+    let is_anime = serde_json::from_str::<crate::library_options::LibraryOptions>(&options_json)
+        .is_ok_and(|opts| opts.anime);
+    let content_kind = if kind == "series" && is_anime {
+        "anime"
+    } else {
+        kind.as_str()
+    };
+
+    let mut shas: Vec<String> = crate::database::query_scalar(
+        "SELECT sha FROM (SELECT w.title_sort,w.id,COALESCE( \
+            (SELECT d.sha256 FROM work_image_entries wi JOIN work_image_data d ON d.image_id=wi.id \
+             WHERE wi.work_id=w.id AND wi.kind='poster' AND d.width IN (640,320,0) \
+             ORDER BY CASE d.width WHEN 640 THEN 0 WHEN 320 THEN 1 ELSE 2 END, wi.pinned DESC, wi.position, wi.id LIMIT 1), \
+            (SELECT wp.sha256 FROM work_posters wp WHERE wp.work_id=w.id) \
+         ) AS sha \
+         FROM inventory_works w \
+         WHERE (w.library_id=? OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+         AND w.has_available_asset=1) sub \
+         WHERE sha IS NOT NULL \
+         ORDER BY title_sort,id \
+         LIMIT 64",
+    )
+    .bind(id)
+    .bind(id)
+    .fetch_all(&store.pool)
+    .await
+    .map_err(database)?;
+
+    let mut seed = (uuid::Uuid::new_v4().as_u128() as u64) | 1;
+    let mut next_rand = || -> usize {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed as usize
+    };
+    for i in (1..shas.len()).rev() {
+        shas.swap(i, next_rand() % (i + 1));
+    }
+
+    let mut posters = Vec::new();
+    for sha in shas {
+        if posters.len() >= 4 {
+            break;
+        }
+        if let Ok((_, bytes)) = store.assets.read_all(&sha).await
+            && let Ok(decoded) = image::load_from_memory(&bytes)
+        {
+            posters.push(decoded);
+        }
+    }
+    if posters.len() < 4 {
+        let mut local_paths: Vec<(String, String)> = crate::database::query_as(
+            "SELECT i.root_snapshot,i.relative_path \
+             FROM inventory_images i \
+             JOIN inventory_works w ON w.id=i.work_id \
+             JOIN libraries l ON l.id=w.library_id \
+             WHERE (l.id=? OR l.id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+             AND l.node_id='local' AND i.role='poster' AND i.available=1 AND i.root_snapshot=l.root \
+             ORDER BY w.title_sort,w.id,i.priority \
+             LIMIT 64",
+        )
+        .bind(id)
+        .bind(id)
+        .fetch_all(&store.pool)
+        .await
+        .map_err(database)?;
+        for i in (1..local_paths.len()).rev() {
+            local_paths.swap(i, next_rand() % (i + 1));
+        }
+        for (root_snap, rel) in local_paths {
+            if posters.len() >= 4 {
+                break;
+            }
+            let full = std::path::Path::new(&root_snap).join(&rel);
+            if let Ok(bytes) = tokio::fs::read(&full).await
+                && let Ok(decoded) = image::load_from_memory(&bytes)
+            {
+                posters.push(decoded);
+            }
+        }
+    }
+
+    let rev_prefix = if posters.is_empty() {
+        "auto-empty"
+    } else {
+        "auto-collage"
+    };
+    let id_owned = id.to_owned();
+    let name_owned = name.clone();
+    let kind_owned = content_kind.to_owned();
+    let (backdrop_png, poster_png) = tokio::task::spawn_blocking(move || {
+        let backdrop = render_library_card(640, 360, &id_owned, &name_owned, &kind_owned, &posters);
+        let poster = render_library_card(400, 600, &id_owned, &name_owned, &kind_owned, &posters);
+        (backdrop, poster)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let backdrop_png = backdrop_png.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let poster_png = poster_png.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    save_library_image_bytes(
+        store,
+        id,
+        "backdrop",
+        Bytes::from(backdrop_png),
+        "image/png".into(),
+        format!("{rev_prefix}-{}", uuid::Uuid::new_v4()),
+    )
+    .await?;
+    save_library_image_bytes(
+        store,
+        id,
+        "poster",
+        Bytes::from(poster_png),
+        "image/png".into(),
+        format!("{rev_prefix}-{}", uuid::Uuid::new_v4()),
+    )
+    .await?;
+    Ok(())
+}
+
+fn render_library_card(
+    width: u32,
+    height: u32,
+    id: &str,
+    name: &str,
+    content_kind: &str,
+    posters: &[image::DynamicImage],
+) -> Option<Vec<u8>> {
+    use image::{DynamicImage, ImageFormat, Rgba, RgbaImage, imageops};
+    let hash = id
+        .bytes()
+        .chain(name.bytes())
+        .fold(0x811c_9dc5_u32, |acc, b| {
+            (acc ^ u32::from(b)).wrapping_mul(0x0100_0193)
+        });
+    let shift = ((hash % 37) as i32) - 18;
+    let clamp = |v: i32| v.clamp(0, 255) as u8;
+    let (bg_dark, bg_mid, accent) = match content_kind {
+        "films" => (
+            [clamp(22 + shift / 2), 14, 18],
+            [clamp(142 + shift), clamp(46 + shift / 2), 34],
+            [clamp(245 + shift / 3), clamp(158 + shift), 24],
+        ),
+        "series" => (
+            [12, 18, clamp(34 + shift / 2)],
+            [28, clamp(86 + shift), clamp(195 + shift)],
+            [56, clamp(189 + shift / 2), 248],
+        ),
+        "anime" => (
+            [clamp(24 + shift / 2), 12, 36],
+            [clamp(138 + shift), 44, clamp(198 + shift / 2)],
+            [244, clamp(114 + shift), 182],
+        ),
+        _ => (
+            [10, clamp(26 + shift / 2), 24],
+            [16, clamp(135 + shift), clamp(108 + shift)],
+            [52, 211, clamp(153 + shift)],
+        ),
+    };
+
+    let mut canvas = RgbaImage::new(width, height);
+    let w_f = width.max(1) as f32;
+    let h_f = height.max(1) as f32;
+    for y in 0..height {
+        let ty = y as f32 / h_f;
+        for x in 0..width {
+            let tx = x as f32 / w_f;
+            let diag = (tx * 0.65 + ty * 0.35).clamp(0.0, 1.0);
+            let dx = tx - 0.78;
+            let dy = ty - 0.22;
+            let glow = (1.0 - (dx * dx + dy * dy).sqrt() * 1.45).clamp(0.0, 1.0);
+            let r = (f32::from(bg_dark[0]) * (1.0 - diag)
+                + f32::from(bg_mid[0]) * diag
+                + f32::from(accent[0]) * glow * 0.25)
+                .clamp(0.0, 255.0) as u8;
+            let g = (f32::from(bg_dark[1]) * (1.0 - diag)
+                + f32::from(bg_mid[1]) * diag
+                + f32::from(accent[1]) * glow * 0.25)
+                .clamp(0.0, 255.0) as u8;
+            let b = (f32::from(bg_dark[2]) * (1.0 - diag)
+                + f32::from(bg_mid[2]) * diag
+                + f32::from(accent[2]) * glow * 0.25)
+                .clamp(0.0, 255.0) as u8;
+            canvas.put_pixel(x, y, Rgba([r, g, b, 255]));
+        }
+    }
+
+    if !posters.is_empty() {
+        let landscape = width >= height;
+        let pad = 14u32;
+        let gap = 8u32;
+        let slots: Vec<(u32, u32, u32, u32)> = if landscape {
+            let cols = posters.len().min(4) as u32;
+            let avail_w = width.saturating_sub(pad * 2 + gap * cols.saturating_sub(1));
+            let tile_w = (avail_w / cols).max(16);
+            let tile_h = height.saturating_sub(pad * 2 + 6).max(16);
+            (0..cols)
+                .map(|i| (pad + i * (tile_w + gap), pad, tile_w, tile_h))
+                .collect()
+        } else if posters.len() == 1 {
+            vec![(
+                pad,
+                pad,
+                width.saturating_sub(pad * 2),
+                height.saturating_sub(pad * 2 + 6),
+            )]
+        } else {
+            let cols = 2u32;
+            let rows = if posters.len() >= 3 { 2u32 } else { 1u32 };
+            let tile_w = (width.saturating_sub(pad * 2 + gap)) / cols;
+            let tile_h = (height.saturating_sub(pad * 2 + 6 + gap * rows.saturating_sub(1))) / rows;
+            let mut list = Vec::new();
+            for r in 0..rows {
+                for c in 0..cols {
+                    list.push((
+                        pad + c * (tile_w + gap),
+                        pad + r * (tile_h + gap),
+                        tile_w,
+                        tile_h,
+                    ));
+                }
+            }
+            list
+        };
+
+        for (idx, (sx, sy, sw, sh)) in slots.into_iter().enumerate() {
+            let src = &posters[idx % posters.len()];
+            let (iw, ih) = (src.width().max(1), src.height().max(1));
+            let target_ratio = sw as f32 / sh.max(1) as f32;
+            let src_ratio = iw as f32 / ih as f32;
+            let (cx, cy, cw, ch) = if src_ratio > target_ratio {
+                let new_w = ((ih as f32 * target_ratio).round() as u32).clamp(1, iw);
+                ((iw - new_w) / 2, 0, new_w, ih)
+            } else {
+                let new_h = ((iw as f32 / target_ratio).round() as u32).clamp(1, ih);
+                (0, (ih - new_h) / 2, iw, new_h)
+            };
+            let cropped = src.crop_imm(cx, cy, cw, ch);
+            let resized = imageops::resize(&cropped, sw, sh, imageops::FilterType::Triangle);
+            let radius = 10i32;
+            for ty in 0..sh {
+                for tx in 0..sw {
+                    let dx = if (tx as i32) < radius {
+                        radius - (tx as i32)
+                    } else if (tx as i32) >= (sw as i32) - radius {
+                        (tx as i32) - ((sw as i32) - radius - 1)
+                    } else {
+                        0
+                    };
+                    let dy = if (ty as i32) < radius {
+                        radius - (ty as i32)
+                    } else if (ty as i32) >= (sh as i32) - radius {
+                        (ty as i32) - ((sh as i32) - radius - 1)
+                    } else {
+                        0
+                    };
+                    if dx * dx + dy * dy > radius * radius {
+                        continue;
+                    }
+                    let px = sx + tx;
+                    let py = sy + ty;
+                    if px < width && py < height {
+                        let p = resized.get_pixel(tx, ty);
+                        let v_fade = (py as f32 / h_f).powi(2) * 0.38;
+                        let r = (f32::from(p[0]) * (1.0 - v_fade) + f32::from(bg_dark[0]) * v_fade)
+                            as u8;
+                        let g = (f32::from(p[1]) * (1.0 - v_fade) + f32::from(bg_dark[1]) * v_fade)
+                            as u8;
+                        let b = (f32::from(p[2]) * (1.0 - v_fade) + f32::from(bg_dark[2]) * v_fade)
+                            as u8;
+                        canvas.put_pixel(px, py, Rgba([r, g, b, 255]));
+                    }
+                }
+            }
+        }
+    } else {
+        // Stylized decorative cards & emblem when the library has no work posters yet.
+        let cx = (width / 2) as i32;
+        let cy = (height / 2) as i32;
+        let card_w = (width.min(height) as i32 * 34 / 100).max(40);
+        let card_h = (card_w * 135 / 100).max(56);
+        for (offset_x, offset_y, alpha) in [(-card_w / 2, 8, 0.22_f32), (card_w / 2, 8, 0.22), (0, -4, 0.38)] {
+            let x0 = (cx + offset_x - card_w / 2).max(12) as u32;
+            let y0 = (cy + offset_y - card_h / 2).max(12) as u32;
+            let x1 = (cx + offset_x + card_w / 2).min(width as i32 - 12) as u32;
+            let y1 = (cy + offset_y + card_h / 2).min(height as i32 - 16) as u32;
+            for py in y0..y1 {
+                for px in x0..x1 {
+                    let border = px == x0 || px + 1 == x1 || py == y0 || py + 1 == y1;
+                    let weight = if border { (alpha + 0.25).min(0.85) } else { alpha };
+                    let cur = canvas.get_pixel(px, py);
+                    let r = (f32::from(cur[0]) * (1.0 - weight) + f32::from(accent[0]) * weight) as u8;
+                    let g = (f32::from(cur[1]) * (1.0 - weight) + f32::from(accent[1]) * weight) as u8;
+                    let b = (f32::from(cur[2]) * (1.0 - weight) + f32::from(accent[2]) * weight) as u8;
+                    canvas.put_pixel(px, py, Rgba([r, g, b, 255]));
+                }
+            }
+        }
+    }
+
+    // Signature accent bar along the bottom edge so each library's color identity pops.
+    let bar_h = 6.min(height);
+    for py in (height - bar_h)..height {
+        for px in 0..width {
+            let t = px as f32 / w_f;
+            let r = (f32::from(accent[0]) * (1.0 - t * 0.25) + f32::from(bg_mid[0]) * (t * 0.25)) as u8;
+            let g = (f32::from(accent[1]) * (1.0 - t * 0.25) + f32::from(bg_mid[1]) * (t * 0.25)) as u8;
+            let b = (f32::from(accent[2]) * (1.0 - t * 0.25) + f32::from(bg_mid[2]) * (t * 0.25)) as u8;
+            canvas.put_pixel(px, py, Rgba([r, g, b, 255]));
+        }
+    }
+
+    let mut out = Vec::new();
+    DynamicImage::ImageRgba8(canvas)
+        .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::Png)
+        .ok()?;
+    Some(out)
 }
 async fn remove_image(
     State(state): State<LibraryState>,

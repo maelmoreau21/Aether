@@ -30,6 +30,9 @@
   import TonightMosaic from './TonightMosaic.svelte';
   import { pickTonight, pickTonightFrom } from './tonight';
   import DiscoverFeed from './DiscoverFeed.svelte';
+  import Icon from '../ui/Icon.svelte';
+  import { accessibleLibraries } from './libraries';
+  import { homeLibraryCardsEnabled } from '../config/presentation';
   import { page } from '$app/state';
   import { t } from '../i18n';
 
@@ -106,10 +109,71 @@
   {#if showHero}
     <!-- Couche d'ambiance unique : teinte de l'œuvre à l'affiche (aucun formulaire sur l'accueil). -->
     <div class="ambient" aria-hidden="true" style:--ambient-tint={heroTint ?? 'transparent'}></div>
+  {:else if $homeLibraryCardsEnabled && !library && $accessibleLibraries.length > 0}
+    <section class="home-libraries-row" aria-labelledby="home-libraries-heading">
+      <h2 id="home-libraries-heading">{$t('media_library')}</h2>
+      <div class="home-libraries-grid">
+        {#each $accessibleLibraries as lib (lib.id)}
+          {@const visualKind = lib.kind === 'series' && lib.anime ? 'anime' : lib.kind}
+          {@const kindLabel = lib.kind === 'music' ? $t('music') : lib.kind === 'films' ? $t('films') : lib.anime ? $t('anime') : $t('series')}
+          {@const libHref = lib.kind === 'music' ? resolve('music/') : resolve(`${lib.kind}/?library=${encodeURIComponent(lib.id)}` as `films/?${string}`)}
+          <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- libHref is already resolved above. -->
+          <a class="home-library-card" href={libHref}>
+            <span class="home-lib-art" data-kind={visualKind}>
+              {#if lib.imageUrl}
+                <img class="home-lib-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" />
+              {:else if lib.coverUrls?.length}
+                <span class="home-lib-collage" data-count={Math.min(lib.coverUrls.length, 4)} aria-hidden="true">
+                  {#each lib.coverUrls.slice(0, 4) as url (url)}
+                    <img src={url} alt="" loading="lazy" decoding="async" />
+                  {/each}
+                </span>
+              {/if}
+              <span class="home-lib-overlay" aria-hidden="true"></span>
+              <span class="home-lib-info">
+                <span class="home-lib-badge"><Icon name={lib.kind === 'films' ? 'film' : lib.kind === 'music' ? 'playlist' : 'tv'} size={15} /> {kindLabel}</span>
+                <span class="home-lib-title">{lib.name}</span>
+              </span>
+            </span>
+          </a>
+        {/each}
+      </div>
+    </section>
   {/if}
   {#each sections as section (section)}
     {#if section === 'hero'}
       <HeroBanner featured={activeFeatured} candidates={heroCandidates} {onPlay} onTint={color => (heroTint = color)} />
+      {#if $homeLibraryCardsEnabled && !library && $accessibleLibraries.length > 0}
+        <section class="home-libraries-row" aria-labelledby="home-libraries-heading">
+          <h2 id="home-libraries-heading">{$t('media_library')}</h2>
+          <div class="home-libraries-grid">
+            {#each $accessibleLibraries as lib (lib.id)}
+              {@const visualKind = lib.kind === 'series' && lib.anime ? 'anime' : lib.kind}
+              {@const kindLabel = lib.kind === 'music' ? $t('music') : lib.kind === 'films' ? $t('films') : lib.anime ? $t('anime') : $t('series')}
+              {@const libHref = lib.kind === 'music' ? resolve('music/') : resolve(`${lib.kind}/?library=${encodeURIComponent(lib.id)}` as `films/?${string}`)}
+              <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- libHref is already resolved above. -->
+              <a class="home-library-card" href={libHref}>
+                <span class="home-lib-art" data-kind={visualKind}>
+                  {#if lib.imageUrl}
+                    <img class="home-lib-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" />
+                  {:else if lib.coverUrls?.length}
+                    <span class="home-lib-collage" data-count={Math.min(lib.coverUrls.length, 4)} aria-hidden="true">
+                      {#each lib.coverUrls.slice(0, 4) as url (url)}
+                        <img src={url} alt="" loading="lazy" decoding="async" />
+                      {/each}
+                    </span>
+                  {/if}
+                  <span class="home-lib-overlay" aria-hidden="true"></span>
+                  <span class="home-lib-info">
+                    <span class="home-lib-badge"><Icon name={lib.kind === 'films' ? 'film' : lib.kind === 'music' ? 'playlist' : 'tv'} size={15} /> {kindLabel}</span>
+                    <span class="home-lib-title">{lib.name}</span>
+                  </span>
+                </span>
+              </a>
+            {/each}
+          </div>
+        </section>
+      {/if}
     {:else if section === 'continue'}
       <ContinueWatching works={allWorks} />
     {:else if section === 'tonight' && tonight.length}
@@ -175,4 +239,25 @@
   .catalog-home > p a { color: var(--tx); font-weight: 700; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 3px; }
   .catalog-home > p a:hover { text-decoration-color: var(--tx); }
   .catalog-home > p a:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; border-radius: 4px; }
+
+  .home-libraries-row { display: flex; flex-direction: column; gap: 14px; }
+  .home-libraries-row h2 { margin: 0; font-size: calc(22px * var(--ui-scale, 1)); font-weight: 800; letter-spacing: -0.02em; color: var(--tx); }
+  .home-libraries-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+  .home-library-card { display: block; border-radius: var(--r-md, 14px); text-decoration: none; color: #fff; transition: transform var(--t-fast) ease, box-shadow var(--t-fast) ease; }
+  .home-library-card:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgb(0 0 0 / 0.35); }
+  .home-library-card:focus-visible { outline: 2px solid var(--ac); outline-offset: 3px; }
+  .home-lib-art { position: relative; display: block; width: 100%; aspect-ratio: 16 / 9; border-radius: inherit; overflow: hidden; border: 1px solid rgb(255 255 255 / 0.12); background: linear-gradient(135deg, #1c1218 0%, #9a3412 100%); }
+  .home-lib-art[data-kind='series'] { background: linear-gradient(135deg, #0c1426 0%, #1d4ed8 100%); }
+  .home-lib-art[data-kind='anime'] { background: linear-gradient(135deg, #1a0f2e 0%, #7e22ce 100%); }
+  .home-lib-art[data-kind='music'] { background: linear-gradient(135deg, #09201c 0%, #059669 100%); }
+  .home-lib-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .home-lib-collage { display: grid; grid-template-columns: repeat(4, 1fr); width: 100%; height: 100%; gap: 2px; }
+  .home-lib-collage[data-count='1'] { grid-template-columns: 1fr; }
+  .home-lib-collage[data-count='2'] { grid-template-columns: repeat(2, 1fr); }
+  .home-lib-collage[data-count='3'] { grid-template-columns: repeat(3, 1fr); }
+  .home-lib-collage img { width: 100%; height: 100%; object-fit: cover; }
+  .home-lib-overlay { position: absolute; inset: 0; background: linear-gradient(180deg, rgb(0 0 0 / 0.1) 0%, rgb(0 0 0 / 0.78) 100%); pointer-events: none; }
+  .home-lib-info { position: absolute; inset: auto 14px 12px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; z-index: 2; }
+  .home-lib-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 6px; background: rgb(0 0 0 / 0.5); backdrop-filter: blur(4px); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: rgb(255 255 255 / 0.9); }
+  .home-lib-title { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; color: #fff; text-shadow: 0 2px 8px rgb(0 0 0 / 0.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 </style>

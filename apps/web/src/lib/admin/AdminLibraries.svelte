@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte';
+  import { resolve } from '$app/paths';
   import type { Library, AdminNode, Scan, RefreshMode, LibraryOptions } from './types';
   import LibraryOptionsForm, { type LibraryOptionsSection } from './LibraryOptions.svelte';
   import LibraryAccess from './LibraryAccess.svelte';
@@ -94,6 +95,26 @@
   }
   function nodeName(id: string) { return nodes.find(node => node.id === id)?.name ?? (id === 'local' ? $t('local_node') : id); }
   let deleting = $state(false), confirmDelete = $state(false), deleteError = $state('');
+  let stoppingScanId = $state<string | null>(null);
+  async function stopScan(library: Library) {
+    if (stoppingScanId) return;
+    stoppingScanId = library.id;
+    try {
+      await adminRequest(`/api/v1/admin/tasks/scan-${encodeURIComponent(library.id)}/cancel`, { method: 'POST' });
+      await onchanged();
+    } catch { /* next poll reconciles */ }
+    finally { stoppingScanId = null; }
+  }
+  function libraryImageUrl(library: Library): string | null {
+    const chosen = library.imageKinds?.includes('backdrop')
+      ? 'backdrop'
+      : library.imageKinds?.includes('poster')
+        ? 'poster'
+        : null;
+    if (!chosen) return null;
+    const rev = library.imageVersions?.[chosen] ?? '';
+    return `/api/v1/admin/libraries/${encodeURIComponent(library.id)}/images/${chosen}?width=320&v=${encodeURIComponent(rev)}`;
+  }
   // Intro/credits analysis of a whole series library (fingerprints queued again where they failed).
   let markersBusy = $state(false), markersNotice = $state(''), markersError = $state('');
   async function analyzeLibraryMarkers(library: Library) {
@@ -173,6 +194,8 @@
       {@const folderCount = library.folders?.length ?? 1}
       {@const serverNames = [...new Set((library.folders ?? [{ nodeId: library.nodeId }]).map(folder => folder.nodeId))].map(nodeName)}
       {@const kindLabel = library.kind === 'music' ? $t('music') : library.kind === 'films' ? $t('films') : library.options?.anime ? $t('anime') : $t('series')}
+      {@const visualKind = library.kind === 'series' && library.options?.anime ? 'anime' : library.kind}
+      {@const artUrl = libraryImageUrl(library)}
       {@const scan = scans[library.id]}
       {@const scanning = ['queued','running'].includes(scan?.status)}
       {@const unavailable = !library.enabled || pending.includes(library.id) || scanning}
@@ -180,17 +203,28 @@
       <tr class="library-row" class:disabled-library={!library.enabled}>
         <th scope="row" class="name-cell">
           <button class="library-name" onclick={() => manage(library)} aria-label={$t('manage', { name: library.name })}>
-            <span class="kind-icon"><Icon name={library.kind === 'films' ? 'film' : library.kind === 'music' ? 'playlist' : 'tv'} size={20} /></span>
-            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : $t('disabled_2')} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
+            <span class="kind-icon library-cover-thumb" data-kind={visualKind}>
+              {#if artUrl}
+                <img class="thumb-custom" src={artUrl} alt="" loading="lazy" decoding="async" />
+              {:else if library.coverUrls?.length}
+                <span class="thumb-collage" data-count={Math.min(library.coverUrls.length, 4)} aria-hidden="true">
+                  {#each library.coverUrls.slice(0, 4) as url (url)}
+                    <img src={url} alt="" loading="lazy" decoding="async" />
+                  {/each}
+                </span>
+              {/if}
+              <span class="thumb-badge" aria-hidden="true"><Icon name={library.kind === 'films' ? 'film' : library.kind === 'music' ? 'playlist' : 'tv'} size={15} /></span>
+            </span>
+            <span class="name-text"><span class="name">{library.name}</span><span class="row-meta">{kindLabel}{library.enabled ? '' : $t('disabled_2')}{#if (library.worksCount ?? 0) > 0} · {$t('sched_stats_works', { count: library.worksCount ?? 0 })}{#if library.kind === 'series' && (library.episodesCount ?? 0) > 0} ({library.episodesCount} {$t('episodes').toLowerCase()}){/if}{/if} · {folderCount} {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.join(', ')}</span></span>
           </button>
         </th>
-        <td class="type-cell">{kindLabel}{#if !library.enabled}<span class="badge">{$t('disabled')}</span>{/if}</td>
+        <td class="type-cell">{kindLabel}{#if (library.worksCount ?? 0) > 0}<span class="works-meta"> · {$t('sched_stats_works', { count: library.worksCount ?? 0 })}{#if library.kind === 'series' && (library.episodesCount ?? 0) > 0} ({library.episodesCount}){/if}</span>{/if}{#if !library.enabled}<span class="badge">{$t('disabled')}</span>{/if}</td>
         <td class="node-cell">{serverNames.join(', ')}</td>
         <td class="folders-cell numeric">{folderCount}<span class="h-sr"> {folderCount > 1 ? 'dossiers' : 'dossier'} · {serverNames.length} {serverNames.length > 1 ? 'serveurs' : 'serveur'}</span></td>
         <td class="status-cell">
           {#if scan}
             <div class="scan-status scan-counters" role="status">
-              <span class="badge" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning}><span class="h-sr">{$t('admin_scan')} </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</span>
+              <a class="badge scan-badge-link" class:ok={scan.status === 'completed' && !scanErrors} class:warn={scan.status === 'completed' && scanErrors > 0} class:err={scan.status === 'error'} class:ac={scanning} href={resolve(`admin/libraries/#tasks-section?task=scan-${encodeURIComponent(library.id)}`)}><span class="h-sr">{$t('admin_scan')} </span>{scanLabels[scan.status]}{scan.status === 'completed' && scanErrors > 0 ? ` · ${scanErrors} erreur(s)` : ''}</a>
               {#if scan.waitingReason}<span class="counters waiting-reason">{scanWaitingText(scan)}</span>{/if}
               <span class="counters">{scan.waitingReason ? $t('previous_scan_counters', { counters: $t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused }) }) : $t('discovered_analysed_reused', { discovered: scan.discovered, probed: scan.probed, reused: scan.reused })}</span>
             </div>
@@ -199,7 +233,13 @@
         </td>
         <td class="actions-cell">
           <div class="row-actions">
+            {#if scanning}
+              <button class="icon-action" disabled={stoppingScanId === library.id} aria-label={$t('sched_stop', { name: library.name })} title={$t('sched_stop_short')} onclick={() => void stopScan(library)}><Icon name="close" size={18} /></button>
+            {/if}
             <button class="icon-action" disabled={unavailable} aria-label={$t('scan_2', { name: library.name })} title={$t('scan_the_library')} onclick={() => void onscan(library)}><Icon name="refresh" size={18} /></button>
+            {#if library.kind !== 'music'}
+              <button class="icon-action" aria-label={`${$t('edit_artwork')} ${library.name}`} title={$t('edit_artwork')} onclick={() => { imageTarget = library; }}><Icon name="image" size={18} /></button>
+            {/if}
             <button class="icon-action" aria-label={$t('extension_settings_for', { name: library.name })} title={$t('manage_the_library')} onclick={() => manage(library)}><Icon name="settings" size={18} /></button>
           </div>
         </td>
@@ -348,14 +388,31 @@
   .library-name { justify-content: flex-start; gap: 12px; width: 100%; min-height: 48px; padding: 4px 8px; border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; }
   .library-name:hover:not(:disabled) { background: transparent; }
   .kind-icon { display: grid; flex: none; place-items: center; width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--pn-2); color: var(--mu); }
+  .library-cover-thumb { position: relative; overflow: hidden; isolation: isolate; width: 76px; height: 44px; border: 1px solid var(--color-line-subtle); border-radius: var(--r-sm); background: linear-gradient(135deg, #1b1520 0%, #7c2d12 100%); color: #fff; box-shadow: 0 2px 8px rgb(0 0 0 / 0.25); }
+  .library-cover-thumb[data-kind='films'] { background: linear-gradient(135deg, #1c1218 0%, #9a3412 65%, #f59e0b 100%); border-bottom: 2px solid #f59e0b; }
+  .library-cover-thumb[data-kind='series'] { background: linear-gradient(135deg, #0c1426 0%, #1d4ed8 65%, #38bdf8 100%); border-bottom: 2px solid #38bdf8; }
+  .library-cover-thumb[data-kind='anime'] { background: linear-gradient(135deg, #1a0f2e 0%, #7e22ce 65%, #f472b6 100%); border-bottom: 2px solid #f472b6; }
+  .library-cover-thumb[data-kind='music'] { background: linear-gradient(135deg, #0a1c1a 0%, #047857 65%, #34d399 100%); border-bottom: 2px solid #34d399; }
+  .thumb-custom { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+  .thumb-collage { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; z-index: 0; }
+  .thumb-collage[data-count='1'] { grid-template-columns: 1fr; }
+  .thumb-collage[data-count='2'] { grid-template-columns: repeat(2, 1fr); }
+  .thumb-collage[data-count='3'] { grid-template-columns: repeat(3, 1fr); }
+  .thumb-collage img { width: 100%; height: 100%; object-fit: cover; }
+  .library-cover-thumb::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgb(0 0 0 / 0.08) 0%, rgb(0 0 0 / 0.55) 100%); z-index: 1; pointer-events: none; }
+  .thumb-badge { position: relative; z-index: 2; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: rgb(0 0 0 / 0.45); backdrop-filter: blur(4px); color: #fff; }
   .name-text { display: grid; gap: 2px; min-width: 0; }
   .name { font-size: 15px; font-weight: 700; color: var(--tx); overflow-wrap: anywhere; }
   .row-meta { display: none; color: var(--mu); font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
   .type-cell { white-space: nowrap; }
   .type-cell .badge { margin-left: 8px; }
+  .works-meta { color: var(--mu); font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
   .library-table td.node-cell { min-width: 120px; color: var(--mu); overflow-wrap: anywhere; }
   .disabled-library .kind-icon, .disabled-library .name { opacity: 0.7; }
   .badge { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: var(--r-xs); background: var(--pn-2); color: var(--tx); font-size: 12px; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .scan-badge-link { text-decoration: none; cursor: pointer; transition: filter var(--t-fast) ease; }
+  .scan-badge-link:hover { filter: brightness(1.12); text-decoration: underline; text-underline-offset: 2px; }
+  .scan-badge-link:focus-visible { outline: 2px solid var(--ac); outline-offset: 2px; }
   .badge.ok { background: var(--ok-soft); color: var(--ok); }
   .badge.warn { background: var(--warn-soft); color: var(--warn); }
   .badge.err { background: var(--err-soft); color: var(--err); }

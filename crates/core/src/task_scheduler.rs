@@ -143,6 +143,9 @@ pub(crate) async fn admit(
                 .bind(library)
                 .fetch_one(pool)
                 .await?;
+            if active == 0 {
+                crate::scans::preempt_monitoring_polls(&auth.store, None, library, now).await?;
+            }
             let legacy_running: i64 = query_scalar(
                 "SELECT COUNT(*) FROM scan_jobs WHERE library_id=? AND status IN ('queued','running')",
             )

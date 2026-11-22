@@ -164,6 +164,30 @@
     }
   }
 
+  async function generateLibraryImages() {
+    if (busy || !library) return;
+    busy = true;
+    error = '';
+    try {
+      const response = await fetch(`${base}/generate`, {
+        method: 'POST',
+        headers: { 'x-csrf-token': $session?.csrfToken ?? '' },
+        signal: AbortSignal.timeout(20000)
+      });
+      if (!response.ok) throw new Error($t('image_not_saved_http', { status: response.status }));
+      const rev = crypto.randomUUID();
+      entries = [
+        { id: 'poster', kind: 'poster', url: `${base}/poster?v=${rev}`, origin: 'manual' },
+        { id: 'backdrop', kind: 'backdrop', url: `${base}/backdrop?v=${rev}`, origin: 'manual' }
+      ];
+      await onchanged();
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : 'Erreur';
+    } finally {
+      busy = false;
+    }
+  }
+
   async function remove(entry: Entry) {
     if (busy) return;
     busy = true;
@@ -423,6 +447,13 @@
   <div class="manager-content">
     {#if error}<p role="alert" class="alert-box">{error}</p>{/if}
     {#if loading}<p role="status">{$t('loading_images')}</p>{/if}
+
+    {#if library && $session?.user.role === 'administrator'}
+      <div class="toolbar" role="group" aria-label={$t('image_tools')}>
+        <button type="button" disabled={busy || loading} onclick={generateLibraryImages}><Icon name="sparkles" size={16} /> {$t('collect_images')}</button>
+        <span class="toolbar-hint">{$t('library_action_artwork_hint')}</span>
+      </div>
+    {/if}
 
     {#if workId && $session?.user.role === 'administrator'}
       <div class="toolbar" role="group" aria-label={$t('image_tools')}>

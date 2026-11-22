@@ -110,6 +110,9 @@ pub struct Settings {
     /// Maximum number of `.media-backup` archives kept in `MEDIA_BACKUP_DIR` (`0` = unlimited).
     #[serde(default)]
     pub backup_retention_count: u32,
+    /// Visual row of library cards at the top of the home page: off by default.
+    #[serde(default)]
+    pub home_library_cards_enabled: bool,
 }
 fn default_log_retention() -> u32 {
     crate::server_log::DEFAULT_RETENTION_DAYS
@@ -210,6 +213,7 @@ struct SettingsInput {
     downloads_enabled: Option<bool>,
     backup_assets_mode: Option<crate::assets::BackupAssetsMode>,
     backup_retention_count: Option<u32>,
+    home_library_cards_enabled: Option<bool>,
 }
 
 impl Default for Settings {
@@ -252,6 +256,7 @@ impl Default for Settings {
             downloads_enabled: true,
             backup_assets_mode: crate::assets::BackupAssetsMode::default(),
             backup_retention_count: 0,
+            home_library_cards_enabled: false,
         }
     }
 }
@@ -478,6 +483,9 @@ async fn write(
             .backup_retention_count
             .filter(|&count| count <= 1000)
             .unwrap_or(previous.backup_retention_count),
+        home_library_cards_enabled: input
+            .home_library_cards_enabled
+            .unwrap_or(previous.home_library_cards_enabled),
     };
     if !valid_resume(&input)
         || !valid_language(&input.preferred_metadata_language)

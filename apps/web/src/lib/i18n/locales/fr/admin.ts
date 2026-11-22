@@ -1027,4 +1027,5 @@ export const admin = {
   backup_retention_hint: "Supprime automatiquement les archives .media-backup les plus anciennes au-delà de cette limite.",
   backup_save_policy: "Enregistrer les options",
   backup_policy_saved: "Options de sauvegarde enregistrées.",
+  enable_home_library_cards: "Afficher la rangée « Mes bibliothèques » sur la page d’accueil",
 } as const;

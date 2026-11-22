@@ -15,6 +15,7 @@
   let minResumePct = $state(0), maxResumePct = $state(90), minResumeDurationSeconds = $state(0);
   let activityLogRetentionDays = $state(30), corsHosts = $state('');
   let clusterEnabled = $state(false);
+  let homeLibraryCardsEnabled = $state(false);
   let loading = $state(true), saving = $state(false);
   let network = $state<{ publicUrl: string; secureCookies: boolean; webPath: string; apiPath: string } | null>(null);
   let clearingFingerprints = $state(false);
@@ -46,6 +47,7 @@
           minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
           activityLogRetentionDays?: number; corsHosts?: string[];
           clusterEnabled?: boolean;
+          homeLibraryCardsEnabled?: boolean;
         }>('/api/v1/admin/settings');
         blockSsoLocalAccounts = data.blockSsoLocalAccounts;
         name = data.serverName;
@@ -69,6 +71,7 @@
         activityLogRetentionDays = data.activityLogRetentionDays ?? 30;
         corsHosts = (data.corsHosts ?? []).join(', ');
         clusterEnabled = data.clusterEnabled === true;
+        homeLibraryCardsEnabled = data.homeLibraryCardsEnabled === true;
       }
       else network = await adminRequest('/api/v1/admin/network');
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
@@ -89,6 +92,7 @@
           minResumePct, maxResumePct, minResumeDurationSeconds,
           activityLogRetentionDays,
           clusterEnabled,
+          homeLibraryCardsEnabled,
           corsHosts: corsHosts.split(/[\n,]+/).map((s: string) => s.trim()).filter(Boolean)
         })
       });
@@ -101,6 +105,7 @@
         minResumePct?: number; maxResumePct?: number; minResumeDurationSeconds?: number;
         activityLogRetentionDays?: number; corsHosts?: string[];
         clusterEnabled?: boolean;
+        homeLibraryCardsEnabled?: boolean;
       }>('/api/v1/admin/settings');
       blockSsoLocalAccounts = saved.blockSsoLocalAccounts;
       name = saved.serverName;
@@ -124,6 +129,7 @@
       activityLogRetentionDays = saved.activityLogRetentionDays ?? 30;
       corsHosts = (saved.corsHosts ?? []).join(', ');
       clusterEnabled = saved.clusterEnabled === true;
+      homeLibraryCardsEnabled = saved.homeLibraryCardsEnabled === true;
       serverPresentation.set(saved);
       notice = $t('settings_saved');
     } catch (cause) { error = cause instanceof Error ? cause.message : $t('operation_failed'); }
@@ -139,6 +145,7 @@
     <label>{$t('welcome_message')}<textarea bind:value={welcome} maxlength="500" rows="3"></textarea></label>
     <label>{$t('sso_button_label')}<input bind:value={ssoLabel} required maxlength="80" placeholder={$t('sign_in_with_authentik')} /></label>
     <label class="policy-toggle"><input type="checkbox" bind:checked={blockSsoLocalAccounts} />{$t('block_sso_local')}</label>
+    <label class="policy-toggle"><input type="checkbox" bind:checked={homeLibraryCardsEnabled} />{$t('enable_home_library_cards')}</label>
     <p class="hint">{$t('playback_settings_moved')}</p>
     </div>
 

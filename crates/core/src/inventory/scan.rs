@@ -657,11 +657,41 @@ async fn stage(
         }
     }
 
+    let batch_discovered = batch.files.len() as i64;
+    let batch_reused = batch.files.iter().filter(|f| f.reused).count() as i64;
+    let batch_probed = batch_discovered.saturating_sub(batch_reused);
+    if batch_discovered > 0 {
+        query(
+            "UPDATE scan_jobs \
+             SET discovered=discovered+?, probed=probed+?, reused=reused+? \
+             WHERE library_id=? AND status IN ('queued','running')",
+        )
+        .bind(batch_discovered)
+        .bind(batch_probed)
+        .bind(batch_reused)
+        .bind(library_id)
+        .execute(&mut *tx)
+        .await?;
+    }
     if let Some((job, attempt)) = scan_id.split_once(':')
         && let Ok(attempt) = attempt.parse::<i64>()
     {
-        query("UPDATE durable_tasks SET processed_items=processed_items+? WHERE id=? AND attempt=? AND status='running'")
-            .bind(batch.files.len() as i64).bind(job).bind(attempt).execute(&mut *tx).await?;
+        query(
+            "UPDATE durable_tasks \
+             SET processed_items=processed_items+?, \
+                 progress=CASE \
+                     WHEN (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1)>0 \
+                     THEN MIN(99, MAX(1, ((processed_items+?) * 100) / (SELECT COUNT(*) FROM inventory_assets a WHERE a.library_id=durable_tasks.library_id AND a.available=1))) \
+                     ELSE progress \
+                 END \
+             WHERE id=? AND attempt=? AND status='running'",
+        )
+        .bind(batch_discovered)
+        .bind(batch_discovered)
+        .bind(job)
+        .bind(attempt)
+        .execute(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
     crate::system_memory::trim_memory();

@@ -29,6 +29,7 @@
   let filter = $state<Filter>('all');
   let now = $state(Math.floor(Date.now() / 1000));
   let editor = $state<HTMLDialogElement>();
+  let editingTriggerId = $state<string | null>(null);
   let draft = $state<TriggerDraft>({ type: 'daily', dayOfWeek: 1, timeOfDayMinutes: 180, intervalMinutes: 1440, maxRuntimeHours: null });
   let refreshPromise: Promise<void> | undefined;
 
@@ -142,22 +143,52 @@
     }
   }
 
-  function openEditor() {
-    draft = { type: 'daily', dayOfWeek: 1, timeOfDayMinutes: 180, intervalMinutes: selected?.kind === 'backup' ? 1440 : 720, maxRuntimeHours: null };
+  function openEditor(trigger?: TaskTrigger) {
+    editingTriggerId = trigger?.id ?? null;
+    draft = trigger
+      ? {
+          type: trigger.type,
+          dayOfWeek: trigger.dayOfWeek ?? 1,
+          timeOfDayMinutes: trigger.timeOfDayMinutes ?? 180,
+          intervalMinutes: trigger.intervalMinutes ?? (selected?.kind === 'backup' ? 1440 : 720),
+          maxRuntimeHours: trigger.maxRuntimeSeconds ? Math.round((trigger.maxRuntimeSeconds / 3600) * 10) / 10 : null
+        }
+      : { type: 'daily', dayOfWeek: 1, timeOfDayMinutes: 180, intervalMinutes: selected?.kind === 'backup' ? 1440 : 720, maxRuntimeHours: null };
     error = '';
     editor?.showModal();
   }
 
-  async function addTrigger(event: SubmitEvent) {
+  async function saveTrigger(event: SubmitEvent) {
     event.preventDefault();
     const task = selected;
     if (!task || saving) return;
     if (draft.maxRuntimeHours !== null && !(draft.maxRuntimeHours >= 0 && draft.maxRuntimeHours <= 168)) { error = $t('sched_action_failed'); return; }
     saving = true; error = ''; notice = '';
     try {
-      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/triggers`, { method: 'POST', body: JSON.stringify(triggerPayload(draft)) });
+      if (editingTriggerId) {
+        await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/triggers/${encodeURIComponent(editingTriggerId)}`, { method: 'PUT', body: JSON.stringify(triggerPayload(draft)) });
+      } else {
+        await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/triggers`, { method: 'POST', body: JSON.stringify(triggerPayload(draft)) });
+      }
       editor?.close();
+      editingTriggerId = null;
       notice = $t('sched_trigger_added');
+      await refresh();
+    } catch (cause) {
+      error = message(cause);
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function toggleTrigger(task: ScheduledTask, trigger: TaskTrigger) {
+    if (saving) return;
+    saving = true; error = ''; notice = '';
+    try {
+      await adminRequest(`/api/v1/admin/tasks/${encodeURIComponent(task.id)}/triggers/${encodeURIComponent(trigger.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ enabled: !trigger.enabled })
+      });
       await refresh();
     } catch (cause) {
       error = message(cause);
@@ -256,7 +287,7 @@
         <div class="card" role="region" aria-labelledby="schedule-heading">
           <header class="card-header">
             <h3 id="schedule-heading">{$t('sched_schedule')}</h3>
-            {#if !isMediaTask(task)}<button class="ghost" disabled={saving || !!loadError} onclick={openEditor}><span aria-hidden="true">+</span> {$t('sched_add_trigger')}</button>{/if}
+            {#if !isMediaTask(task)}<button class="ghost" disabled={saving || !!loadError} onclick={() => openEditor()}><span aria-hidden="true">+</span> {$t('sched_add_trigger')}</button>{/if}
           </header>
           {#if isMediaTask(task)}
             <div class="trigger-row">
@@ -271,16 +302,27 @@
           {/if}
           {#each task.triggers as trigger (trigger.id)}
             <div class="trigger-row" class:disabled={!trigger.enabled}>
+              <input
+                class="trigger-check"
+                type="checkbox"
+                checked={trigger.enabled}
+                disabled={saving}
+                aria-label={$t(trigger.enabled ? 'feature_mode_enabled' : 'feature_mode_disabled')}
+                title={$t(trigger.enabled ? 'feature_mode_enabled' : 'feature_mode_disabled')}
+                onchange={() => void toggleTrigger(task, trigger)}
+              />
               <Icon name="clock" size={18} />
               <div class="trigger-text">
                 <p>{triggerLabel(trigger, $t)}</p>
-                {#if trigger.nextFireAt || trigger.maxRuntimeSeconds}
+                {#if trigger.nextFireAt || trigger.maxRuntimeSeconds || !trigger.enabled}
                   <small>
-                    {#if trigger.nextFireAt}{$t('sched_next', { date: date(trigger.nextFireAt) })}{/if}
-                    {#if trigger.maxRuntimeSeconds}{trigger.nextFireAt ? ' · ' : ''}{$t('sched_time_limit', { duration: durationLabel(trigger.maxRuntimeSeconds) })}{/if}
+                    {#if !trigger.enabled}{$t('feature_mode_disabled')}{/if}
+                    {#if trigger.enabled && trigger.nextFireAt}{$t('sched_next', { date: date(trigger.nextFireAt) })}{/if}
+                    {#if trigger.maxRuntimeSeconds}{(trigger.enabled && trigger.nextFireAt) || !trigger.enabled ? ' · ' : ''}{$t('sched_time_limit', { duration: durationLabel(trigger.maxRuntimeSeconds) })}{/if}
                   </small>
                 {/if}
               </div>
+              <button class="icon" disabled={saving} aria-label={$t('edit')} title={$t('edit')} onclick={() => openEditor(trigger)}><Icon name="edit" size={17} /></button>
               <button class="icon danger" disabled={saving} aria-label={$t('sched_delete_trigger')} title={$t('sched_delete_trigger')} onclick={() => void removeTrigger(task, trigger)}><Icon name="trash" size={18} /></button>
             </div>
           {:else}
@@ -366,8 +408,8 @@
 </section>
 
 <dialog bind:this={editor} aria-labelledby="trigger-title" oncancel={(event) => { if (saving) event.preventDefault(); }}>
-  <form onsubmit={addTrigger}>
-    <h2 id="trigger-title">{$t('sched_add_trigger')}</h2>
+  <form onsubmit={saveTrigger}>
+    <h2 id="trigger-title">{$t(editingTriggerId ? 'edit' : 'sched_add_trigger')}</h2>
     {#if selected}<p>{nameOf(selected)}</p>{/if}
     <label>{$t('sched_trigger_type')}
       <select bind:value={draft.type} disabled={saving}>
@@ -402,8 +444,8 @@
     </label>
     {#if error}<p class="feedback error" role="alert">{error}</p>{/if}
     <div class="dialog-actions">
-      <button type="button" class="ghost" disabled={saving} onclick={() => editor?.close()}>{$t('sched_cancel')}</button>
-      <button class="primary" type="submit" disabled={saving}>{$t('sched_add')}</button>
+      <button type="button" class="ghost" disabled={saving} onclick={() => { editingTriggerId = null; editor?.close(); }}>{$t('sched_cancel')}</button>
+      <button class="primary" type="submit" disabled={saving}>{$t(editingTriggerId ? 'save' : 'sched_add')}</button>
     </div>
   </form>
 </dialog>
@@ -503,8 +545,9 @@
   .card-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 52px; }
   .card-header h3 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-muted); }
   .card-header .ghost { margin-right: -12px; }
-  .trigger-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--color-line-subtle); color: var(--color-muted); }
-  .trigger-row.disabled { opacity: 0.6; }
+  .trigger-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--color-line-subtle); color: var(--color-muted); }
+  .trigger-row.disabled .trigger-text { opacity: 0.6; }
+  .trigger-check { width: 18px; height: 18px; min-height: 18px; padding: 0; flex: none; accent-color: var(--color-accent-solid); cursor: pointer; }
   .trigger-text { flex: 1; min-width: 0; }
   .trigger-text p { margin: 0 0 2px; font-size: 15px; font-weight: 600; color: var(--color-text); }
   .card-foot { margin: 8px 0 0; font-size: 14px; }

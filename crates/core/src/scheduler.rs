@@ -463,12 +463,14 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
             ('1','true') AND NOT EXISTS(SELECT 1 FROM durable_tasks t \
             WHERE t.owner='library-monitor' AND (t.library_id=l.id \
             OR t.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id \
-            AND active=1)) AND (t.status IN ('queued','running','paused') OR t.created_at>? \
+            AND active=1)) AND (t.status IN ('queued','running','paused') \
+            OR COALESCE(t.finished_at,t.updated_at,t.created_at)>? \
             OR (t.status='error' AND COALESCE(t.finished_at,t.updated_at)>?))) \
             AND NOT EXISTS(SELECT 1 FROM durable_tasks a WHERE a.category='scan' \
-            AND a.status IN ('queued','running','paused') AND (a.library_id=l.id \
+            AND a.status IN ('queued','running','paused') AND (a.node_id=l.node_id \
+            OR a.library_id=l.id \
             OR a.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=l.id))) \
-            ORDER BY COALESCE((SELECT MAX(t.created_at) FROM durable_tasks t \
+            ORDER BY COALESCE((SELECT MAX(COALESCE(t.finished_at,t.updated_at,t.created_at)) FROM durable_tasks t \
             WHERE t.library_id=l.id AND t.owner='library-monitor'),0),l.id \
             LIMIT 1",
     )
@@ -729,7 +731,7 @@ pub async fn dispatch_once(
                     && statuses.iter().any(|(id, _, _)| id == &scan)
             })
         };
-        if live && job.lease_until.is_some_and(|until| until - timestamp <= 30) {
+        if live && job.lease_until.is_some_and(|until| until - timestamp <= 45) {
             crate::task_engine::renew(
                 &auth.store,
                 &job.id,
@@ -747,6 +749,7 @@ pub async fn dispatch_once(
     crate::database::query("DELETE FROM active_task_runs WHERE NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE active_task_runs.run_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NOT NULL)")
         .execute(&auth.store.pool).await?;
     for scan in expired {
+        jobs.cancel_scan(&scan);
         let _ = crate::inventory::clean_staging(&auth.store, &scan).await;
     }
     // Old scan status cannot block a safely fenced retry forever after a crash.
@@ -754,9 +757,16 @@ pub async fn dispatch_once(
         "UPDATE scan_jobs \
             SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
             WHERE status IN ('queued','running') AND EXISTS(SELECT 1 FROM active_scan_runs r \
-            JOIN durable_tasks j ON j.library_id=r.library_id \
-            WHERE r.library_id=scan_jobs.library_id \
-            AND r.scan_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NULL)",
+            WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks j \
+            WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
+    )
+    .execute(&auth.store.pool)
+    .await?;
+    crate::database::query(
+        "DELETE FROM active_scan_runs WHERE scan_id LIKE '%:%' \
+            AND NOT EXISTS(SELECT 1 FROM durable_tasks j \
+            WHERE active_scan_runs.scan_id=j.id || ':' || CAST(j.attempt AS TEXT) AND j.lease_until IS NOT NULL)",
     )
     .execute(&auth.store.pool)
     .await?;
@@ -842,6 +852,7 @@ pub async fn dispatch_once(
                 scan,
                 serde_json::from_value(serde_json::Value::String(job.refresh_mode.clone()))
                     .map_err(|_| sqlx::Error::Protocol("Invalid task refresh mode".into()))?,
+                job.owner == "library-monitor",
             )
             .await
             .is_err()

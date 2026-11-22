@@ -1029,4 +1029,5 @@ export const admin: Readonly<Record<keyof typeof source, string>> = {
   backup_retention_hint: "Automatically deletes the oldest .media-backup archives beyond this limit.",
   backup_save_policy: "Save options",
   backup_policy_saved: "Backup options saved.",
+  enable_home_library_cards: "Show the “My libraries” cards row on the home page",
 };

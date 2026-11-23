@@ -493,6 +493,7 @@ async fn run_library_automation(auth: &AuthState, timestamp: i64) -> Result<(), 
         crate::database::query("UPDATE durable_tasks SET max_attempts=1 WHERE owner='library-monitor' AND status='queued' AND attempt=0 AND max_attempts>1")
             .execute(&auth.store.pool)
             .await?;
+        crate::task_engine::WAKE.notify_one();
     }
     let online: Option<(String, String)> = crate::database::query_as(
         "SELECT l.id,l.options_json \
@@ -689,7 +690,12 @@ pub async fn dispatch_once(
             .await?;
             continue;
         }
-        if let Some((_, status, errors)) = statuses.iter().find(|(id, _, _)| id == &scan)
+        // Local `library-monitor` polls leave `scan_jobs.status` at the previous scan's
+        // terminal value ('completed' / 'error') while running so the UI does not flicker,
+        // and call `task_engine::finish` themselves when done. Reading `scan_jobs.status`
+        // here would prematurely release the lease and fence the active monitor scan.
+        if !(job.node_id == "local" && job.owner == "library-monitor")
+            && let Some((_, status, errors)) = statuses.iter().find(|(id, _, _)| id == &scan)
             && matches!(status.as_str(), "completed" | "error")
         {
             crate::task_engine::finish(

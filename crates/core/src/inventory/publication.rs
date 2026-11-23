@@ -821,6 +821,214 @@ async fn publish(
                 last_new_path = last.get("relative_path");
             }
         }
+
+        // Reconcile unchanged (`reused=1`) series files whose parsed episode identity changed
+        // (e.g. after a filename parser improvement) or whose `inventory_episodes` link is missing,
+        // without requiring a full re-probe.
+        let mut last_reused_path = String::new();
+        loop {
+            let chunk = query(
+                "SELECT s.relative_path, s.title, s.year, s.external_ids_json, s.mime,
+                        s.series_identity_key, s.season_number, s.episode_number,
+                        a.id AS existing_asset_id, w.id AS existing_work_id,
+                        w.identity_key AS existing_identity_key,
+                        CAST(EXISTS(
+                            SELECT 1 FROM inventory_episodes ep
+                            JOIN inventory_seasons sea ON sea.id = ep.season_id
+                            WHERE ep.work_id = w.id
+                              AND sea.season_number = s.season_number
+                              AND ep.episode_number = s.episode_number
+                        ) AS INTEGER) AS has_episode_link
+                 FROM scan_staging_files s
+                 JOIN inventory_assets a ON a.library_id = s.library_id AND a.relative_path = s.relative_path
+                 JOIN inventory_sources src ON src.id = a.source_id
+                 JOIN inventory_versions v ON v.id = src.version_id
+                 JOIN inventory_editions e ON e.id = v.edition_id
+                 JOIN inventory_works w ON w.id = e.work_id
+                 WHERE s.scan_id = ? AND s.reused = 1 AND s.relative_path > ?
+                   AND s.series_identity_key IS NOT NULL
+                   AND s.season_number IS NOT NULL
+                   AND s.episode_number IS NOT NULL
+                 ORDER BY s.relative_path ASC
+                 LIMIT 250",
+            )
+            .bind(scan_id)
+            .bind(&last_reused_path)
+            .fetch_all(&mut *tx)
+            .await?;
+
+            if chunk.is_empty() {
+                break;
+            }
+
+            for row in &chunk {
+                let relative_path: String = row.get("relative_path");
+                let series_identity_key: String = row.get("series_identity_key");
+                let season_number: i64 = row.get("season_number");
+                let episode_number: i64 = row.get("episode_number");
+                let existing_asset_id: String = row.get("existing_asset_id");
+                let existing_work_id: String = row.get("existing_work_id");
+                let existing_identity_key: String = row.get("existing_identity_key");
+                let has_episode_link: i64 = row.get("has_episode_link");
+
+                let expected_identity_key = format!(
+                    "{}\n{}/s{:02}e{:02}",
+                    root_snapshot, series_identity_key, season_number, episode_number
+                );
+                if existing_identity_key == expected_identity_key && has_episode_link != 0 {
+                    continue;
+                }
+
+                let title: String = row.get("title");
+                let year: Option<i64> = row.get("year");
+                let external_ids_json: String = row.get("external_ids_json");
+                let mime: String = row.get("mime");
+
+                let target_work_id = if existing_identity_key == expected_identity_key {
+                    existing_work_id.clone()
+                } else {
+                    let work = query(
+                        "SELECT id FROM inventory_works WHERE library_id=? AND identity_key=?",
+                    )
+                    .bind(library_id)
+                    .bind(&expected_identity_key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    if let Some(work_row) = work {
+                        work_row.get::<String, _>("id")
+                    } else {
+                        let wid = id();
+                        let title_sort = title.to_lowercase();
+                        query(
+                            "INSERT INTO inventory_works(id,library_id,identity_key,title,year,external_ids_json,title_sort,kind) VALUES(?,?,?,?,?,?,?,'episode')",
+                        )
+                        .bind(&wid)
+                        .bind(library_id)
+                        .bind(&expected_identity_key)
+                        .bind(&title)
+                        .bind(year)
+                        .bind(&external_ids_json)
+                        .bind(title_sort)
+                        .execute(&mut *tx)
+                        .await?;
+                        wid
+                    }
+                };
+
+                if let Some(season_id) = season_map.get(&(series_identity_key, season_number)) {
+                    query(
+                        "INSERT INTO inventory_episodes(id, season_id, episode_number, work_id)
+                         VALUES(?, ?, ?, ?)
+                         ON CONFLICT(season_id, episode_number) DO UPDATE SET work_id=excluded.work_id",
+                    )
+                    .bind(id())
+                    .bind(season_id)
+                    .bind(episode_number)
+                    .bind(&target_work_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+
+                if existing_work_id != target_work_id {
+                    let existing_probe_json: String =
+                        query_scalar("SELECT probe_json FROM inventory_assets WHERE id=?")
+                            .bind(&existing_asset_id)
+                            .fetch_optional(&mut *tx)
+                            .await?
+                            .unwrap_or_else(|| "{}".into());
+                    let edition_spec = crate::consolidation::derive_edition_spec(&relative_path);
+                    let parsed_probe = decode(&existing_probe_json).unwrap_or_default();
+                    let version_spec =
+                        crate::consolidation::derive_version_spec(&parsed_probe, &mime);
+                    let edition_id = query_scalar::<_, String>(
+                        "SELECT e.id FROM inventory_editions e \
+                         LEFT JOIN inventory_edition_metadata em ON em.edition_id=e.id \
+                         WHERE e.work_id=? AND COALESCE(em.edition_key,'standard')=? LIMIT 1",
+                    )
+                    .bind(&target_work_id)
+                    .bind(&edition_spec.key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let edition_id = if let Some(edition_id) = edition_id {
+                        edition_id
+                    } else {
+                        let edition_id = id();
+                        query("INSERT INTO inventory_editions VALUES(?,?)")
+                            .bind(&edition_id)
+                            .bind(&target_work_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        query(
+                            "INSERT INTO inventory_edition_metadata(edition_id,edition_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(edition_id) DO UPDATE SET edition_key=excluded.edition_key,label=excluded.label",
+                        )
+                        .bind(&edition_id)
+                        .bind(&edition_spec.key)
+                        .bind(&edition_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
+                        edition_id
+                    };
+
+                    let existing_version_id = query_scalar::<_, String>(
+                        "SELECT v.id FROM inventory_versions v \
+                         LEFT JOIN inventory_version_metadata vm ON vm.version_id=v.id \
+                         WHERE v.edition_id=? AND COALESCE(vm.version_key,'default')=? LIMIT 1",
+                    )
+                    .bind(&edition_id)
+                    .bind(&version_spec.key)
+                    .fetch_optional(&mut *tx)
+                    .await?;
+                    let version_id = if let Some(version_id) = existing_version_id {
+                        version_id
+                    } else {
+                        let version_id = id();
+                        query("INSERT INTO inventory_versions VALUES(?,?)")
+                            .bind(&version_id)
+                            .bind(&edition_id)
+                            .execute(&mut *tx)
+                            .await?;
+                        query(
+                            "INSERT INTO inventory_version_metadata(version_id,version_key,label) VALUES(?,?,?) \
+                             ON CONFLICT(version_id) DO UPDATE SET version_key=excluded.version_key,label=excluded.label",
+                        )
+                        .bind(&version_id)
+                        .bind(&version_spec.key)
+                        .bind(&version_spec.label)
+                        .execute(&mut *tx)
+                        .await?;
+                        version_id
+                    };
+
+                    let source_id = id();
+                    query("DELETE FROM inventory_editorial WHERE asset_id=?")
+                        .bind(&existing_asset_id)
+                        .execute(&mut *tx)
+                        .await?;
+                    query(
+                        "INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,?,?)",
+                    )
+                    .bind(&source_id)
+                    .bind(&version_id)
+                    .bind(library_id)
+                    .bind(&root_snapshot)
+                    .execute(&mut *tx)
+                    .await?;
+                    query("UPDATE inventory_assets SET source_id=?, available=1 WHERE id=?")
+                        .bind(&source_id)
+                        .bind(&existing_asset_id)
+                        .execute(&mut *tx)
+                        .await?;
+
+                    affected_work_ids.insert(existing_work_id);
+                }
+                affected_work_ids.insert(target_work_id);
+            }
+
+            if let Some(last) = chunk.last() {
+                last_reused_path = last.get("relative_path");
+            }
+        }
     } else {
         // Keyset pagination in bounded chunks (250 items at a time) for new / modified files.
         // Avoids loading all probe_json blobs into RAM simultaneously, strictly bounding RSS.

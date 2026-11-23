@@ -822,3 +822,34 @@ fn parse_series_episode_handles_mid_name_e_ep_and_dash_numbers() {
     assert_eq!(ep.season_number, 1);
     assert_eq!(ep.episode_number, 1);
 }
+
+#[test]
+fn parse_series_episode_handles_french_accents_season_tags_and_trailing_numbers() {
+    let ep = parse_series_episode(Path::new(
+        "Frieren/Saison 02 (2026)/Frieren - Épisode 03 - Le Départ.mkv",
+    ))
+    .unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 3);
+    assert_eq!(ep.episode_title, "Le Départ");
+
+    let ep = parse_series_episode(Path::new(
+        "Solo Leveling/Solo Leveling - Saison 2 [1080p]/[SubGroup] Solo Leveling 04 [1080p][AV1].mkv",
+    ))
+    .unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 4);
+
+    let ep = parse_series_episode(Path::new("One Piece/Saison 02/One Piece – 06.mkv")).unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 6);
+
+    let ep = parse_series_episode(Path::new("Demon Slayer/Season 3/Demon_Slayer_05.mkv")).unwrap();
+    assert_eq!(ep.season_number, 3);
+    assert_eq!(ep.episode_number, 5);
+
+    // A year inside a season folder must not be mistaken for an episode number.
+    let ep = parse_series_episode(Path::new("Arcane/Season 2/Arcane 2024 [1080p].mkv")).unwrap();
+    assert_eq!(ep.season_number, 2);
+    assert_eq!(ep.episode_number, 1);
+}

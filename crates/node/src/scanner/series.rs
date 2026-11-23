@@ -181,7 +181,7 @@ pub(super) fn extract_x_pattern(stem: &str) -> Option<(u32, u32, Option<String>)
 }
 
 pub(super) fn extract_season_from_folder(parent: &str) -> Option<u32> {
-    let lower = parent.to_ascii_lowercase();
+    let lower = parent.to_lowercase();
     let lower = lower.trim();
     if lower == "specials"
         || lower == "special"
@@ -194,31 +194,57 @@ pub(super) fn extract_season_from_folder(parent: &str) -> Option<u32> {
     {
         return Some(0);
     }
-    for prefix in ["season", "saison", "staffel"] {
-        if let Some(rem) = lower.strip_prefix(prefix) {
-            let digits: String = rem.chars().filter(|c| c.is_ascii_digit()).collect();
-            if let Ok(num) = digits.parse::<u32>() {
+    let lower_bytes = lower.as_bytes();
+    for keyword in ["season", "saison", "staffel"] {
+        let mut search_from = 0;
+        while let Some(rel_idx) = lower[search_from..].find(keyword) {
+            let idx = search_from + rel_idx;
+            search_from = idx + keyword.len();
+            let boundary_before = idx == 0
+                || matches!(
+                    lower_bytes[idx - 1],
+                    b'.' | b' ' | b'_' | b'-' | b'[' | b'('
+                );
+            if !boundary_before {
+                continue;
+            }
+            let after = lower[idx + keyword.len()..].trim_start_matches(['.', ' ', '_', '-']);
+            let digits_len = after.bytes().take_while(|b| b.is_ascii_digit()).count();
+            if digits_len == 0 || digits_len > 4 {
+                continue;
+            }
+            let next_byte = after.as_bytes().get(digits_len).copied();
+            if next_byte.is_some_and(|b| b.is_ascii_alphabetic()) {
+                continue;
+            }
+            if let Ok(num) = after[..digits_len].parse::<u32>() {
                 return Some(num);
             }
         }
     }
     if let Some(rem) = lower.strip_prefix('s') {
-        let digits: String = rem.chars().filter(|c| c.is_ascii_digit()).collect();
-        if let Ok(num) = digits.parse::<u32>() {
-            return Some(num);
+        let digits_len = rem.bytes().take_while(|b| b.is_ascii_digit()).count();
+        if (1..=4).contains(&digits_len) {
+            let next_byte = rem.as_bytes().get(digits_len).copied();
+            if !next_byte.is_some_and(|b| b.is_ascii_alphabetic())
+                && let Ok(num) = rem[..digits_len].parse::<u32>()
+            {
+                return Some(num);
+            }
         }
     }
     None
 }
 
 pub(super) fn extract_episode_from_filename(stem: &str) -> Option<(u32, Option<String>)> {
-    let lower = stem.to_ascii_lowercase();
+    let lower = stem.to_lowercase();
     let lower_bytes = lower.as_bytes();
-    for prefix in ["episode", "ep", "e"] {
+    let use_original_slice = lower.len() == stem.len();
+    for prefix in ["episode", "épisode", "ep", "e"] {
         let mut search_from = 0;
         while let Some(rel_idx) = lower[search_from..].find(prefix) {
             let idx = search_from + rel_idx;
-            search_from = idx + 1;
+            search_from = idx + prefix.len();
             let boundary_before = idx == 0
                 || matches!(
                     lower_bytes[idx - 1],
@@ -255,7 +281,11 @@ pub(super) fn extract_episode_from_filename(stem: &str) -> Option<(u32, Option<S
                 continue;
             }
             if let Ok(num) = after_trimmed[..digits_len].parse::<u32>() {
-                let rem = stem[rem_idx..].trim();
+                let rem = if use_original_slice && stem.is_char_boundary(rem_idx) {
+                    stem[rem_idx..].trim()
+                } else {
+                    lower[rem_idx..].trim()
+                };
                 let title = clean_episode_title(rem);
                 return Some((num, title));
             }
@@ -271,57 +301,138 @@ pub(super) fn extract_episode_from_filename(stem: &str) -> Option<(u32, Option<S
         let title = clean_episode_title(rem);
         return Some((num, title));
     }
-    // Dash-separated episode number (e.g. "Show - 03", "[Group] Show - 14 [1080p]", "Show - 03 - Title")
-    let mut search_from = 0;
-    while let Some(rel_idx) = lower[search_from..].find(" - ") {
-        let idx = search_from + rel_idx + 3;
-        search_from = idx;
-        let after = &lower[idx..];
-        let after_trimmed = after.trim_start();
-        let digits_len = after_trimmed
-            .bytes()
-            .take_while(|b| b.is_ascii_digit())
-            .count();
-        if digits_len == 0 || digits_len > 4 {
-            continue;
-        }
-        let rem_idx = idx + (after.len() - after_trimmed.len()) + digits_len;
-        let next_byte = lower_bytes.get(rem_idx).copied();
-        let valid_after = match next_byte {
-            None => true,
-            Some(b' ' | b'.' | b'_' | b'-' | b'[' | b'(' | b']' | b')') => true,
-            Some(b'v') => lower_bytes
-                .get(rem_idx + 1)
-                .is_some_and(|n| n.is_ascii_digit()),
-            _ => false,
-        };
-        if !valid_after {
-            continue;
-        }
-        if let Ok(num) = after_trimmed[..digits_len].parse::<u32>() {
-            if digits_len == 4 && (1900..=2100).contains(&num) {
+    // Dash-separated episode number (e.g. "Show - 03", "[Group] Show - 14 [1080p]", "Show – 03 - Title")
+    for sep in [" - ", " – ", " — "] {
+        let mut search_from = 0;
+        while let Some(rel_idx) = lower[search_from..].find(sep) {
+            let idx = search_from + rel_idx + sep.len();
+            search_from = idx;
+            let after = &lower[idx..];
+            let after_trimmed = after.trim_start();
+            let digits_len = after_trimmed
+                .bytes()
+                .take_while(|b| b.is_ascii_digit())
+                .count();
+            if digits_len == 0 || digits_len > 4 {
                 continue;
             }
-            let mut title_start = rem_idx;
-            if lower_bytes.get(title_start) == Some(&b'v')
-                && lower_bytes
-                    .get(title_start + 1)
-                    .is_some_and(|n| n.is_ascii_digit())
-            {
-                title_start += 1;
-                while lower_bytes
-                    .get(title_start)
-                    .is_some_and(|n| n.is_ascii_digit())
+            let rem_idx = idx + (after.len() - after_trimmed.len()) + digits_len;
+            let next_byte = lower_bytes.get(rem_idx).copied();
+            let valid_after = match next_byte {
+                None => true,
+                Some(b' ' | b'.' | b'_' | b'-' | b'[' | b'(' | b']' | b')') => true,
+                Some(b'v') => lower_bytes
+                    .get(rem_idx + 1)
+                    .is_some_and(|n| n.is_ascii_digit()),
+                _ => false,
+            };
+            if !valid_after {
+                continue;
+            }
+            if let Ok(num) = after_trimmed[..digits_len].parse::<u32>() {
+                if digits_len == 4 && (1900..=2100).contains(&num) {
+                    continue;
+                }
+                let mut title_start = rem_idx;
+                if lower_bytes.get(title_start) == Some(&b'v')
+                    && lower_bytes
+                        .get(title_start + 1)
+                        .is_some_and(|n| n.is_ascii_digit())
                 {
                     title_start += 1;
+                    while lower_bytes
+                        .get(title_start)
+                        .is_some_and(|n| n.is_ascii_digit())
+                    {
+                        title_start += 1;
+                    }
                 }
+                let rem = if use_original_slice && stem.is_char_boundary(title_start) {
+                    stem[title_start..].trim()
+                } else {
+                    lower[title_start..].trim()
+                };
+                let title = clean_episode_title(rem);
+                return Some((num, title));
             }
-            let rem = stem[title_start..].trim();
-            let title = clean_episode_title(rem);
-            return Some((num, title));
         }
     }
     None
+}
+
+/// Trailing episode number inside a known Season folder (e.g. "Show 04 [1080p]", "Show_05").
+/// Only used when the parent directory explicitly identifies a season, so years and release
+/// tags are stripped from the tail before inspecting the trailing number.
+pub(super) fn extract_trailing_episode_in_season(stem: &str) -> Option<u32> {
+    let mut working = stem.trim();
+    loop {
+        let trimmed = working.trim_end_matches([' ', '.', '_', '-']);
+        if let Some(stripped) = trimmed
+            .strip_suffix(']')
+            .and_then(|s| s.rsplit_once('[').map(|(head, _)| head))
+        {
+            working = stripped;
+            continue;
+        }
+        if let Some(stripped) = trimmed
+            .strip_suffix(')')
+            .and_then(|s| s.rsplit_once('(').map(|(head, _)| head))
+        {
+            working = stripped;
+            continue;
+        }
+        working = trimmed;
+        break;
+    }
+    let lower = working.to_ascii_lowercase();
+    let lower_bytes = lower.as_bytes();
+    let mut end = lower.len();
+    for &tag in RELEASE_TAGS {
+        let tag_len = tag.len();
+        let mut pos = 0;
+        while let Some(idx) = lower[pos..end].find(tag) {
+            let actual_idx = pos + idx;
+            let prev_delim = actual_idx == 0 || is_delim(lower_bytes[actual_idx - 1]);
+            let next_delim = actual_idx + tag_len == lower_bytes.len()
+                || actual_idx + tag_len == end
+                || is_delim(lower_bytes[actual_idx + tag_len]);
+            if prev_delim && next_delim {
+                end = end.min(actual_idx);
+                break;
+            }
+            pos = actual_idx + 1;
+            if pos >= end {
+                break;
+            }
+        }
+    }
+    let mut core = lower[..end].trim_end_matches([' ', '.', '_', '-']);
+    // Strip optional version suffix like "04v2".
+    if let Some(v_pos) = core.rfind('v')
+        && v_pos > 0
+        && core.as_bytes()[v_pos - 1].is_ascii_digit()
+        && core[v_pos + 1..].bytes().all(|b| b.is_ascii_digit())
+        && v_pos + 1 < core.len()
+    {
+        core = &core[..v_pos];
+    }
+    let digits_len = core
+        .bytes()
+        .rev()
+        .take_while(|b| b.is_ascii_digit())
+        .count();
+    if digits_len == 0 || digits_len > 4 || digits_len == core.len() {
+        return None;
+    }
+    let sep_idx = core.len() - digits_len - 1;
+    if !matches!(core.as_bytes()[sep_idx], b' ' | b'.' | b'_' | b'-') {
+        return None;
+    }
+    let num = core[core.len() - digits_len..].parse::<u32>().ok()?;
+    if digits_len == 4 && (1900..=2100).contains(&num) {
+        return None;
+    }
+    Some(num)
 }
 
 pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
@@ -396,6 +507,7 @@ pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
     let season_from_parent = extract_season_from_folder(parent_name);
     if let Some(s) = season_from_parent
         && let Some((e, remaining_title)) = extract_episode_from_filename(stem)
+            .or_else(|| extract_trailing_episode_in_season(stem).map(|e| (e, None)))
     {
         let ep_title = remaining_title.unwrap_or_else(|| format!("S{:02}E{:02}", s, e));
         return Some(ParsedSeriesEpisode {

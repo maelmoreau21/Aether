@@ -736,3 +736,130 @@ async fn random_catalogue_pages_vary_by_seed_and_stay_in_the_eligible_pool() {
         "samples cover more than one fixed top list"
     );
 }
+
+#[tokio::test]
+async fn reused_series_episode_relinks_when_parsed_episode_number_changes() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = IdentityStore::open(&temp.path().join("reused-episode-relink.sqlite"))
+        .await
+        .unwrap();
+    let root = Path::new("/series");
+    query(
+        "INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('ser','Series','series','local','/series',1)",
+    )
+    .execute(&store.pool)
+    .await
+    .unwrap();
+
+    let probe: Probe = serde_json::from_value(json!({
+        "streams": [{"index": 0, "codec_type": "video", "codec_name": "av1"}],
+        "format": {}
+    }))
+    .unwrap();
+
+    // Scan 1: Episode 1 and Episode 3 were initially both parsed as S02E01 (simulating
+    // an older filename parser before episode detection improvements).
+    let ep1 = ScannedFile {
+        relative_path: "Show/Season 2/Show - 01.mkv".into(),
+        size: 1000,
+        modified_ns: "100".into(),
+        title: "S02E01".into(),
+        identity_key: "episode:folder:Show:s02e01".into(),
+        mime: "video/x-matroska".into(),
+        probe: probe.clone(),
+        series_identity_key: Some("folder:Show".into()),
+        series_title: Some("Show".into()),
+        season_number: Some(2),
+        episode_number: Some(1),
+        ..Default::default()
+    };
+    let ep3_old = ScannedFile {
+        relative_path: "Show/Season 2/Show 03 [1080p].mkv".into(),
+        size: 2000,
+        modified_ns: "200".into(),
+        title: "Show 03".into(),
+        identity_key: "episode:folder:Show:s02e01".into(),
+        mime: "video/x-matroska".into(),
+        probe: probe.clone(),
+        series_identity_key: Some("folder:Show".into()),
+        series_title: Some("Show".into()),
+        season_number: Some(2),
+        episode_number: Some(1),
+        ..Default::default()
+    };
+    super::stage_batch(
+        &store,
+        "scan-1",
+        "ser",
+        &crate::node::scanner::InventoryBatch {
+            scan_id: "scan-1".into(),
+            sequence: 1,
+            files: vec![ep1.clone(), ep3_old],
+            errors: vec![],
+            warnings: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    super::publish_staged_scan(&store, "scan-1", "ser", root, true)
+        .await
+        .unwrap();
+
+    let initial_episodes: Vec<i64> =
+        query_scalar("SELECT episode_number FROM inventory_episodes ORDER BY episode_number")
+            .fetch_all(&store.pool)
+            .await
+            .unwrap();
+    assert_eq!(initial_episodes, vec![1]);
+
+    // Scan 2 (incremental): both files are unchanged on disk (`reused = true`),
+    // but the improved parser now detects Episode 3 properly.
+    let ep1_reused = ScannedFile {
+        reused: true,
+        probe: Probe::default(),
+        ..ep1
+    };
+    let ep3_reused = ScannedFile {
+        relative_path: "Show/Season 2/Show 03 [1080p].mkv".into(),
+        size: 2000,
+        modified_ns: "200".into(),
+        title: "S02E03".into(),
+        identity_key: "episode:folder:Show:s02e03".into(),
+        mime: "video/x-matroska".into(),
+        probe: Probe::default(),
+        reused: true,
+        series_identity_key: Some("folder:Show".into()),
+        series_title: Some("Show".into()),
+        season_number: Some(2),
+        episode_number: Some(3),
+        ..Default::default()
+    };
+    super::stage_batch(
+        &store,
+        "scan-2",
+        "ser",
+        &crate::node::scanner::InventoryBatch {
+            scan_id: "scan-2".into(),
+            sequence: 1,
+            files: vec![ep1_reused, ep3_reused],
+            errors: vec![],
+            warnings: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    super::publish_staged_scan(&store, "scan-2", "ser", root, true)
+        .await
+        .unwrap();
+
+    let relinked_episodes: Vec<i64> =
+        query_scalar("SELECT episode_number FROM inventory_episodes ORDER BY episode_number")
+            .fetch_all(&store.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        relinked_episodes,
+        vec![1, 3],
+        "incremental scan must re-link reused episodes whose parsed episode number changed"
+    );
+}

@@ -1098,4 +1098,104 @@ mod tests {
         assert_eq!(status, "error");
         store.close().await;
     }
+
+    #[tokio::test]
+    async fn local_monitor_poll_is_not_prematurely_finished_by_previous_completed_scan_job() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+        let store = crate::identity::IdentityStore::open(&root.join("monitor.sqlite"))
+            .await
+            .unwrap();
+        let pool = &store.pool;
+        crate::database::query(
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) \
+             VALUES('films','Films','films','local',?,1,'{\"realtimeMonitoring\":true}')",
+        )
+        .bind(root.to_str().unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+        // Simulate a library that already completed an earlier scan: scan_jobs stays 'completed'.
+        crate::database::query(
+            "INSERT INTO scan_jobs(library_id,status,discovered,probed,reused,errors_count,warnings_count,refresh_mode) \
+             VALUES('films','completed',1,1,0,0,0,'incremental')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let jobs = Arc::new(ScanJobs::default());
+        let now = media_contracts::protocol::unix_now();
+        // Hold all scan permits so the monitor scan stays active while dispatch_once ticks again.
+        let permits = jobs
+            .slots
+            .clone()
+            .acquire_many_owned(u32::try_from(jobs.slots.available_permits()).unwrap())
+            .await
+            .unwrap();
+
+        // Queue and dispatch a local library-monitor poll.
+        crate::scheduler::run_due(&auth, &root, &jobs, now + 120)
+            .await
+            .unwrap();
+        crate::scheduler::dispatch_once(&auth, &root, &jobs, now + 120)
+            .await
+            .unwrap();
+
+        // A second dispatch pass while the monitor scan is still running must NOT mark it completed
+        // or clear its active_scan_runs fence because of the stale 'completed' scan_jobs row.
+        crate::scheduler::dispatch_once(&auth, &root, &jobs, now + 121)
+            .await
+            .unwrap();
+
+        let (status, lease_until): (String, Option<i64>) = crate::database::query_as(
+            "SELECT status, lease_until FROM durable_tasks WHERE owner='library-monitor' ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            status, "running",
+            "local library-monitor must stay running while its scan task is active"
+        );
+        assert!(
+            lease_until.is_some(),
+            "local library-monitor lease must not be cleared prematurely"
+        );
+        let active_fences: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM active_scan_runs WHERE library_id='films'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            active_fences, 1,
+            "active_scan_runs fence must remain intact for the running local monitor"
+        );
+
+        // Release permits and let the monitor finish cleanly.
+        drop(permits);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let current: String = crate::database::query_scalar(
+                "SELECT status FROM durable_tasks WHERE owner='library-monitor' ORDER BY created_at DESC LIMIT 1",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if current == "completed" {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "local library-monitor did not complete cleanly (status={current})"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        jobs.shutdown().await;
+        store.close().await;
+    }
 }

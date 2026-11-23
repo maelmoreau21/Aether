@@ -756,11 +756,8 @@ pub async fn dispatch_once(
     crate::database::query(
         "UPDATE scan_jobs \
             SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
-            WHERE status IN ('queued','running') \
-            AND (EXISTS(SELECT 1 FROM active_scan_runs r \
+            WHERE status IN ('queued','running') AND EXISTS(SELECT 1 FROM active_scan_runs r \
             WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
-            OR NOT EXISTS(SELECT 1 FROM active_scan_runs r \
-            WHERE r.library_id=scan_jobs.library_id)) \
             AND NOT EXISTS(SELECT 1 FROM durable_tasks j \
             WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
     )

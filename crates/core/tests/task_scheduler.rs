@@ -383,7 +383,7 @@ async fn orphaned_scan_job_without_active_run_never_blocks_scheduled_scan() {
     let (cookie, csrf) = login(&app).await;
     let now = media_contracts::protocol::unix_now();
 
-    // Simulate a scan_jobs row left in 'running' after active_scan_runs was cleared.
+    // Simulate a scan_jobs row left in 'running' with an expired durable run fence.
     query(
         "INSERT INTO scan_jobs(library_id,status,errors_count,warnings_count,refresh_mode) \
          VALUES('films','running',0,0,'incremental')",
@@ -391,6 +391,10 @@ async fn orphaned_scan_job_without_active_run_never_blocks_scheduled_scan() {
     .execute(pool)
     .await
     .unwrap();
+    query("INSERT INTO active_scan_runs(library_id,scan_id,node_id) VALUES('films','dead-task:1','local')")
+        .execute(pool)
+        .await
+        .unwrap();
 
     let (status, body, _) = call(
         &app,

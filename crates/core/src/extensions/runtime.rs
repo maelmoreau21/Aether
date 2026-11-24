@@ -422,11 +422,25 @@ fn write_host_result_to_guest<T: Serialize>(caller: &mut Caller<'_, HostState>, 
     let Ok(alloc_typed) = alloc_func.typed::<u32, u32>(&caller) else {
         return 0;
     };
-    let Ok(ptr) = alloc_typed.call(&mut *caller, bytes.len() as u32) else {
-        return 0;
-    };
     let Some(Extern::Memory(memory)) = caller.get_export("memory") else {
         return 0;
+    };
+    let ptr = match alloc_typed.call(&mut *caller, bytes.len() as u32) {
+        Ok(ptr) if ptr != 0 => ptr,
+        _ => {
+            // Older guests cap `media_alloc` at MAX_JSON (64 KiB) or MAX_INPUT_JSON (256 KiB),
+            // which is smaller than a JSON-encoded HostHttpResponse body. Append dedicated
+            // pages at the end of linear memory (still bounded by StoreLimits 64 MiB) instead
+            // of writing at address 0 and corrupting guest stack/static data.
+            let pages = (bytes.len() as u64).div_ceil(65_536);
+            let Ok(prev_pages) = memory.grow(&mut *caller, pages) else {
+                return 0;
+            };
+            let Ok(grown_ptr) = u32::try_from(prev_pages.saturating_mul(65_536)) else {
+                return 0;
+            };
+            grown_ptr
+        }
     };
     if memory.write(&mut *caller, ptr as usize, &bytes).is_err() {
         return 0;
@@ -507,9 +521,9 @@ fn execute_inner(
     let mut store = Store::new(&engine, host_state);
     store.limiter(|state| &mut state.limits);
     // JSON byte arrays cross the broker before the guest parses provider data.
-    // Ordinary populated responses exceed two million fuel units, and large
-    // TMDb/TVDB/fanart.tv payloads need headroom for JSON parsing.
-    store.set_fuel(400_000_000).map_err(|_| "runtime_error")?;
+    // Multi-season TMDb/TVDB/fanart.tv details issue up to ten HTTP calls and
+    // parse large JSON payloads inside the Wasmi interpreter.
+    store.set_fuel(2_000_000_000).map_err(|_| "runtime_error")?;
 
     let mut linker = Linker::new(&engine);
     let _ = linker.func_wrap(
@@ -553,7 +567,15 @@ fn execute_inner(
                 );
             }
 
-            write_host_result_to_guest(&mut caller, result)
+            let packed = write_host_result_to_guest(&mut caller, result);
+            if packed == 0 {
+                let err_res: Result<HostHttpResponse, HostHttpError> = Err(HostHttpError {
+                    code: "response_too_large".into(),
+                    message: "Response exceeds guest allocation limit".into(),
+                });
+                return write_host_result_to_guest(&mut caller, err_res);
+            }
+            packed
         },
     );
 
@@ -855,5 +877,141 @@ mod storage_frames {
             read_frame::<serde_json::Value>(&mut &bytes[..], MAX_JSON).unwrap()["kind"],
             "storage"
         );
+    }
+
+    #[test]
+    fn host_http_refused_guest_alloc_never_writes_at_zero_and_returns_structured_error() {
+        let req_json = r#"{"url":"https://api.themoviedb.org/3/tv/1","method":"GET","headers":{}}"#;
+        let escaped_req: String = req_json
+            .as_bytes()
+            .iter()
+            .map(|b| format!("\\{b:02x}"))
+            .collect();
+        // Sentinel bytes at address 0: must remain untouched if media_alloc refuses (> 4096).
+        // When media_alloc refuses the oversized Ok(HostHttpResponse), the host falls back to
+        // writing a small Err(HostHttpError) which media_alloc accepts at offset 16384.
+        // media_run returns a JSON ExtensionResponse wrapping the sentinel byte and host error.
+        let ok_json = r#"{"apiVersion":1,"result":{"sentinelOk":true}}"#;
+        let bad_json = r#"{"apiVersion":1,"result":{"sentinelOk":false}}"#;
+        let escape =
+            |s: &str| -> String { s.as_bytes().iter().map(|b| format!("\\{b:02x}")).collect() };
+        let wat = format!(
+            r#"(module
+                (import "aether" "aether_host_http" (func $http (param i32 i32) (result i64)))
+                (memory (export "memory") 2 2)
+                (data (i32.const 0) "\de\ad\be\ef")
+                (data (i32.const 8192) "{escaped_req}")
+                (data (i32.const 32768) "{ok_esc}")
+                (data (i32.const 33024) "{bad_esc}")
+                (func (export "media_alloc") (param $len i32) (result i32)
+                    (if (i32.gt_u (local.get $len) (i32.const 4096))
+                        (then (return (i32.const 0)))
+                    )
+                    (i32.const 16384)
+                )
+                (func (export "media_run") (param i32 i32) (result i64)
+                    (local $packed i64)
+                    (local $ptr i32)
+                    (local $len i32)
+                    (local.set $packed (call $http (i32.const 8192) (i32.const {req_len})))
+                    (local.set $ptr (i32.wrap_i64 (i64.shr_u (local.get $packed) (i64.const 32))))
+                    (local.set $len (i32.wrap_i64 (local.get $packed)))
+                    ;; Verify address 0 sentinel was NOT overwritten AND host returned a non-null error buffer
+                    (if (i32.and
+                            (i32.eq (i32.load (i32.const 0)) (i32.const 0xefbeadde))
+                            (i32.and (i32.eq (local.get $ptr) (i32.const 16384)) (i32.gt_u (local.get $len) (i32.const 10)))
+                        )
+                        (then
+                            (return (i64.or (i64.shl (i64.const 32768) (i64.const 32)) (i64.const {ok_len})))
+                        )
+                    )
+                    (i64.or (i64.shl (i64.const 33024) (i64.const 32)) (i64.const {bad_len}))
+                )
+            )"#,
+            req_len = req_json.len(),
+            ok_esc = escape(ok_json),
+            bad_esc = escape(bad_json),
+            ok_len = ok_json.len(),
+            bad_len = bad_json.len(),
+        );
+        let wasm = wat::parse_str(&wat).unwrap();
+        // Body of 2000 bytes expands to ~8000 bytes as a JSON byte array, exceeding the guest's 4096 cap.
+        TEST_HTTP_BODY.with(|v| *v.borrow_mut() = Some(vec![b'x'; 2000]));
+        let mut invocation = Invocation::new(
+            STANDARD.encode(wasm),
+            ExtensionRequest {
+                api_version: 1,
+                operation: "metadata.details".into(),
+                input: serde_json::json!({}),
+            },
+        );
+        invocation.allowed_hosts = vec!["api.themoviedb.org".into()];
+        let response = execute(invocation).expect(
+            "refused guest allocation must return structured HostHttpError without trapping",
+        );
+        assert_eq!(response.result["sentinelOk"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn host_http_grows_memory_safely_when_legacy_guest_alloc_caps_large_response() {
+        let req_json = r#"{"url":"https://api.themoviedb.org/3/tv/1","method":"GET","headers":{}}"#;
+        let escape =
+            |s: &str| -> String { s.as_bytes().iter().map(|b| format!("\\{b:02x}")).collect() };
+        let ok_json = r#"{"apiVersion":1,"result":{"grownOk":true}}"#;
+        let bad_json = r#"{"apiVersion":1,"result":{"grownOk":false}}"#;
+        let wat = format!(
+            r#"(module
+                (import "aether" "aether_host_http" (func $http (param i32 i32) (result i64)))
+                (memory (export "memory") 2 16)
+                (data (i32.const 0) "\de\ad\be\ef")
+                (data (i32.const 8192) "{req_esc}")
+                (data (i32.const 32768) "{ok_esc}")
+                (data (i32.const 33024) "{bad_esc}")
+                (func (export "media_alloc") (param $len i32) (result i32)
+                    (if (i32.gt_u (local.get $len) (i32.const 4096))
+                        (then (return (i32.const 0)))
+                    )
+                    (i32.const 16384)
+                )
+                (func (export "media_run") (param i32 i32) (result i64)
+                    (local $packed i64)
+                    (local $ptr i32)
+                    (local $len i32)
+                    (local.set $packed (call $http (i32.const 8192) (i32.const {req_len})))
+                    (local.set $ptr (i32.wrap_i64 (i64.shr_u (local.get $packed) (i64.const 32))))
+                    (local.set $len (i32.wrap_i64 (local.get $packed)))
+                    ;; Verify address 0 sentinel was NOT overwritten AND host placed response at page 2 (131072)
+                    (if (i32.and
+                            (i32.eq (i32.load (i32.const 0)) (i32.const 0xefbeadde))
+                            (i32.and (i32.eq (local.get $ptr) (i32.const 131072)) (i32.gt_u (local.get $len) (i32.const 4096)))
+                        )
+                        (then
+                            (return (i64.or (i64.shl (i64.const 32768) (i64.const 32)) (i64.const {ok_len})))
+                        )
+                    )
+                    (i64.or (i64.shl (i64.const 33024) (i64.const 32)) (i64.const {bad_len}))
+                )
+            )"#,
+            req_esc = escape(req_json),
+            req_len = req_json.len(),
+            ok_esc = escape(ok_json),
+            bad_esc = escape(bad_json),
+            ok_len = ok_json.len(),
+            bad_len = bad_json.len(),
+        );
+        let wasm = wat::parse_str(&wat).unwrap();
+        TEST_HTTP_BODY.with(|v| *v.borrow_mut() = Some(vec![b'x'; 2000]));
+        let mut invocation = Invocation::new(
+            STANDARD.encode(wasm),
+            ExtensionRequest {
+                api_version: 1,
+                operation: "metadata.details".into(),
+                input: serde_json::json!({}),
+            },
+        );
+        invocation.allowed_hosts = vec!["api.themoviedb.org".into()];
+        let response =
+            execute(invocation).expect("legacy guest alloc cap must grow linear memory safely");
+        assert_eq!(response.result["grownOk"], serde_json::json!(true));
     }
 }

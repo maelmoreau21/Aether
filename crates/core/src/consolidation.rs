@@ -275,7 +275,7 @@ pub async fn sync_work_summary_tx(
     work_id: &str,
 ) -> Result<(), sqlx::Error> {
     let row = query(
-        "SELECT kind, title, title_sort, year, external_ids_json, editorial_json, manual_json \
+        "SELECT kind, title, title_sort, year, external_ids_json, editorial_json, manual_json, added_at \
          FROM inventory_works WHERE id = ?",
     )
     .bind(work_id)
@@ -291,6 +291,7 @@ pub async fn sync_work_summary_tx(
     let external_ids_json: String = row.get("external_ids_json");
     let editorial_json: String = row.get("editorial_json");
     let manual_json: Option<String> = row.get("manual_json");
+    let added_at: Option<i64> = row.get("added_at");
 
     let manual_val: Value = manual_json
         .as_deref()
@@ -459,11 +460,38 @@ pub async fn sync_work_summary_tx(
         (avail, 0, 0)
     };
 
+    // When a new episode arrives in an ongoing season, advance the series's `added_at`
+    // (unless manually overridden) so it surfaces in "Recently Added".
+    let effective_added_at: Option<i64> =
+        if kind == "series" && manual_val.get("added_at").and_then(Value::as_i64).is_none() {
+            let latest_episode_added: Option<i64> = query_scalar(
+                "SELECT MAX(ew.added_at) FROM inventory_seasons s \
+                 JOIN inventory_episodes ep ON ep.season_id = s.id \
+                 JOIN inventory_works ew ON ew.id = ep.work_id \
+                 JOIN inventory_editions e ON e.work_id = ew.id \
+                 JOIN inventory_versions v ON v.edition_id = e.id \
+                 JOIN inventory_sources src ON src.version_id = v.id \
+                 JOIN inventory_assets a ON a.source_id = src.id \
+                 WHERE s.series_id = ? AND a.available = 1",
+            )
+            .bind(work_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            match (added_at, latest_episode_added) {
+                (Some(current), Some(ep)) => Some(current.max(ep)),
+                (None, Some(ep)) => Some(ep),
+                (current, None) => current,
+            }
+        } else {
+            added_at
+        };
+
     query(
         "UPDATE inventory_works \
          SET display_title_sort = ?, effective_year = ?, max_height = ?, \
              codecs_csv = ?, languages_csv = ?, genres_csv = ?, \
-             has_available_asset = ?, season_count_cached = ?, episode_count_cached = ? \
+             has_available_asset = ?, season_count_cached = ?, episode_count_cached = ?, \
+             added_at = COALESCE(?, added_at) \
          WHERE id = ?",
     )
     .bind(&display_title_sort)
@@ -475,6 +503,7 @@ pub async fn sync_work_summary_tx(
     .bind(has_available_asset)
     .bind(season_count)
     .bind(episode_count)
+    .bind(effective_added_at)
     .bind(work_id)
     .execute(&mut *tx)
     .await?;

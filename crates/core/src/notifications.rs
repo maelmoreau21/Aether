@@ -520,7 +520,16 @@ pub(crate) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
         enqueue(store, timestamp, &event, attempt, &status).await?;
     }
     // Only additions after a subscription started qualify; existing catalogue is not announced.
-    let content: Vec<(String, String, i64)> = query_as("SELECT w.id,w.library_id,w.added_at \
+    // Skip scanning `inventory_works` entirely when no user subscribes to content notifications.
+    let has_content_subscribers: i64 = query_scalar(
+        "SELECT CAST(EXISTS(SELECT 1 FROM notification_content_preferences p \
+            JOIN notification_preferences base ON base.user_id=p.user_id \
+            WHERE p.enabled=1 AND base.enabled=1) AS BIGINT)",
+    )
+    .fetch_one(store.pool())
+    .await?;
+    let content: Vec<(String, String, i64)> = if has_content_subscribers == 1 {
+        query_as("SELECT w.id,w.library_id,w.added_at \
             FROM inventory_works w \
             WHERE w.added_at>? AND w.added_at<=? AND w.kind IN ('film','series','episode') \
             AND w.has_available_asset=1 AND EXISTS(SELECT 1 FROM notification_content_preferences p \
@@ -530,7 +539,13 @@ pub(crate) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
             AND e.occurred_at=w.added_at) \
             ORDER BY w.added_at,w.id \
             LIMIT 100")
-        .bind(timestamp-LOOKBACK).bind(timestamp).fetch_all(store.pool()).await?;
+            .bind(timestamp - LOOKBACK)
+            .bind(timestamp)
+            .fetch_all(store.pool())
+            .await?
+    } else {
+        Vec::new()
+    };
     for (work, library, at) in content {
         let event = Event {
             id: format!("event-{:x}", Sha256::digest(format!("content:{work}:{at}"))),

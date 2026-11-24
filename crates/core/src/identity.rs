@@ -272,6 +272,13 @@ impl IdentityStore {
                     crate::database::query("SET plan_cache_mode = force_generic_plan")
                         .execute(&mut *conn)
                         .await?;
+                    // Prevent parallel query workers from allocating dynamic POSIX shared
+                    // memory segments in Docker's default 64 MiB `/dev/shm`, which triggers
+                    // `could not resize shared memory segment "/PostgreSQL...": Out of memory`
+                    // under background notification/catalogue scans on large libraries.
+                    crate::database::query("SET max_parallel_workers_per_gather = 0")
+                        .execute(&mut *conn)
+                        .await?;
                     Ok(())
                 })
             })

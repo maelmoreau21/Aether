@@ -547,7 +547,17 @@ const LIBRARY_CONCURRENCY_FILTER: &str = "(NOT EXISTS(SELECT 1 FROM durable_task
 const NODE_CONCURRENCY_FILTER: &str = "(NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup'))) \
     OR (j.category='trickplay' \
     AND NOT EXISTS(SELECT 1 FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND busy.category<>'trickplay' AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup'))) \
-    AND (SELECT COUNT(*) FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup')))<2))";
+    AND (SELECT COUNT(*) FROM durable_tasks busy WHERE busy.node_id=j.node_id AND busy.lease_until IS NOT NULL AND (busy.category<>'system' OR busy.target_id IN ('optimize-database','backup')))<2 \
+    AND NOT EXISTS(SELECT 1 FROM durable_tasks higher \
+        JOIN libraries hl ON hl.id=higher.library_id \
+        WHERE higher.node_id=j.node_id AND higher.status='queued' AND higher.lease_until IS NULL \
+        AND higher.available_at<=? AND higher.failure_count<higher.max_attempts \
+        AND higher.category<>'trickplay' AND higher.priority>j.priority \
+        AND hl.node_id=higher.node_id AND ((hl.enabled=1 AND NOT EXISTS(SELECT 1 FROM library_folders hown WHERE hown.library_id=hl.id)) \
+            OR EXISTS(SELECT 1 FROM library_folders hf JOIN libraries hparent ON hparent.id=hf.parent_id WHERE hf.library_id=hl.id AND hf.active=1 AND hparent.enabled=1)) \
+        AND NOT EXISTS(SELECT 1 FROM automation_dependencies hd JOIN durable_tasks hp ON hp.id=hd.prerequisite_id WHERE hd.task_id=higher.id AND hp.status!='completed') \
+        AND NOT EXISTS(SELECT 1 FROM scan_jobs hs WHERE hs.library_id=higher.library_id AND hs.status IN ('queued','running')) \
+        AND NOT EXISTS(SELECT 1 FROM automation_task_links hal JOIN automation_provider_limits hpl ON hpl.provider=hal.provider WHERE hal.task_id=higher.id AND hpl.next_allowed_at>?))))";
 
 /// Bounded production admission: one commit covers up to 100 ready Nodes.
 /// No worker starts before this transaction has committed every returned lease.
@@ -619,7 +629,11 @@ pub async fn claim_batch(
     for node in nodes {
         mutation = mutation.bind(node);
     }
-    mutation = mutation.bind(now).bind(now.saturating_sub(45));
+    mutation = mutation
+        .bind(now)
+        .bind(now)
+        .bind(now)
+        .bind(now.saturating_sub(45));
     for _ in 0..gate.matches('?').count() {
         mutation = mutation.bind(now);
     }
@@ -671,7 +685,7 @@ async fn claim_in_transaction(
             FROM active_playbacks p WHERE p.paused=0 AND p.updated_at>?)) AND NOT EXISTS(SELECT 1 \
             FROM scan_jobs s WHERE s.library_id=j.library_id AND s.status IN ('queued','running')) \
             AND {gate} ORDER BY j.priority DESC,j.created_at,j.id \
-            LIMIT 1"))).bind(node_id).bind(now).bind(now.saturating_sub(45));
+            LIMIT 1"))).bind(node_id).bind(now).bind(now).bind(now).bind(now.saturating_sub(45));
     for _ in 0..gate.matches('?').count() {
         candidate = candidate.bind(now);
     }
@@ -1399,5 +1413,55 @@ mod pipeline_tests {
         let last = claim_batch(&store, &local, 100, 60).await.unwrap();
         assert_eq!(last.len(), 1);
         assert_eq!(last[0].id, "other");
+    }
+
+    #[tokio::test]
+    async fn trickplay_drains_instead_of_starving_higher_priority_scan_or_monitor() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&temp.path().join("db.sqlite"))
+            .await
+            .unwrap();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local','/media',1)")
+            .execute(store.pool())
+            .await
+            .unwrap();
+        task(&store, "tp-1", "trickplay", "", pipeline::TRICKPLAY).await;
+        task(&store, "tp-2", "trickplay", "", pipeline::TRICKPLAY).await;
+        task(&store, "tp-3", "trickplay", "", pipeline::TRICKPLAY).await;
+
+        let local = vec!["local".to_owned()];
+        assert_eq!(
+            claim_batch(&store, &local, 100, 60).await.unwrap()[0].id,
+            "tp-1"
+        );
+        assert_eq!(
+            claim_batch(&store, &local, 100, 60).await.unwrap()[0].id,
+            "tp-2"
+        );
+
+        // A higher-priority library-monitor scan arrives while both trickplay slots are busy.
+        task(&store, "monitor", "scan", "", pipeline::MONITOR_SCAN).await;
+
+        // When tp-1 finishes, tp-3 must NOT refill the freed slot and ping-pong forever.
+        release(&store, "tp-1", "completed").await;
+        assert!(
+            claim_batch(&store, &local, 100, 60)
+                .await
+                .unwrap()
+                .is_empty(),
+            "trickplay must drain to 0 active slots when a higher-priority scan is queued"
+        );
+
+        // Once tp-2 finishes, the monitor scan claims immediately before tp-3.
+        release(&store, "tp-2", "completed").await;
+        let claimed = claim_batch(&store, &local, 100, 60).await.unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].id, "monitor");
+
+        // After the monitor scan finishes, trickplay resumes cleanly.
+        release(&store, "monitor", "completed").await;
+        let resumed = claim_batch(&store, &local, 100, 60).await.unwrap();
+        assert_eq!(resumed.len(), 1);
+        assert_eq!(resumed[0].id, "tp-3");
     }
 }

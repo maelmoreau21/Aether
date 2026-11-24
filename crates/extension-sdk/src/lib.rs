@@ -16,6 +16,10 @@ pub const MAX_JSON: usize = 65_536;
 /// calls and storage stay within [`MAX_JSON`]; hosts send more than [`MAX_JSON`] only to a
 /// package whose `targetAbi` is at least 1.1.
 pub const MAX_INPUT_JSON: usize = 262_144;
+/// Largest host-supplied buffer `media_alloc` will allocate (covers JSON-encoded HTTP
+/// responses up to 2 MiB raw body ≈ 8 MiB as a JSON byte array). `media_run` still
+/// strictly enforces [`MAX_INPUT_JSON`] on incoming extension requests.
+pub const MAX_HOST_ALLOC: usize = 10 * 1024 * 1024;
 
 /// Generic ABI envelope. Host adapters authorize operations before invocation.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -704,7 +708,7 @@ macro_rules! extension {
         #[cfg(target_arch = "wasm32")]
         #[unsafe(no_mangle)]
         pub extern "C" fn media_alloc(len: u32) -> u32 {
-            if len as usize > $crate::MAX_INPUT_JSON {
+            if len as usize > $crate::MAX_HOST_ALLOC {
                 return 0;
             }
             let buffer = vec![0u8; len as usize].into_boxed_slice();

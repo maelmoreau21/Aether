@@ -1467,6 +1467,49 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(ep_count, 2);
+
+        // Adding a later episode to an existing ongoing season advances the parent series's
+        // `added_at` so it surfaces in "Recently Added", while respecting manual overrides.
+        crate::database::query("UPDATE inventory_works SET added_at=1000 WHERE library_id='shows'")
+            .execute(pool)
+            .await
+            .unwrap();
+        let mut ep1_reused_again = make_ep("Show/Season 1/Show.S01E01.mkv", 1);
+        ep1_reused_again.reused = true;
+        let mut ep2_reused = make_ep("Show/Season 1/Show.S01E02.mkv", 2);
+        ep2_reused.reused = true;
+        inventory::stage_batch(
+            &store,
+            "scan-3",
+            "shows",
+            &inventory::InventoryBatch {
+                scan_id: media_contracts::ids::ScanId::new("scan-3"),
+                sequence: 1,
+                files: vec![
+                    ep1_reused_again,
+                    ep2_reused,
+                    make_ep("Show/Season 1/Show.S01E03.mkv", 3),
+                ],
+                errors: Vec::new(),
+                warnings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        inventory::publish_staged_scan(&store, "scan-3", "shows", &root, true)
+            .await
+            .unwrap();
+        let (series_added, ep_cached): (i64, i64) = crate::database::query_as(
+            "SELECT added_at, episode_count_cached FROM inventory_works WHERE library_id='shows' AND kind='series'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert!(
+            series_added > 1000,
+            "adding an episode to an ongoing season must advance the parent series added_at (got {series_added})"
+        );
+        assert_eq!(ep_cached, 3);
         store.close().await;
     }
 }

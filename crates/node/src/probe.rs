@@ -16,7 +16,8 @@
 //!    - Strictly bounded memory allocations (`-max_alloc 67108864`).
 //!    - Bounded analysis windows (`-probesize 5000000`, `-analyzeduration 5000000`).
 //!    - Hard process execution timeouts (`10 seconds`) with `kill_on_drop(true)`.
-//!    - Maximum output stdout capture limit (`take(1_048_577)` / 1 MiB).
+//!    - Maximum output stdout capture limit (`take(4_194_305)` / 4 MiB), without dumping
+//!      arbitrary attachment/subtitle binary extradata (`-show_data` is only queried for AV1 video).
 //!    - File handle identity verification before and after execution (`OpenedFile::verify_unchanged_sync`).
 pub use media_contracts::media::{Probe, Track};
 use std::{io, path::Path, process::Stdio, time::Duration};
@@ -24,13 +25,16 @@ use tokio::{io::AsyncReadExt, process::Command};
 
 use crate::files::OpenedFile;
 
+const MAX_PROBE_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_AV1_EXTRADATA_OUTPUT_BYTES: usize = 256 * 1024;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeError {
     #[error("probe I/O: {0}")]
     Io(#[from] io::Error),
     #[error("probe timeout (10 seconds)")]
     Timeout,
-    #[error("probe output exceeds 1 MiB")]
+    #[error("probe output exceeds 4 MiB")]
     TooLarge,
     #[error("invalid or unsupported media (ffprobe rejected input)")]
     Rejected,
@@ -47,6 +51,7 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
     use std::io::Seek;
     file.rewind()?;
     let native_file = file.try_clone()?;
+    let av1_file = file.try_clone()?;
     let mut child = Command::new("ffprobe")
         .args([
             "-v",
@@ -64,7 +69,6 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
             "-show_streams",
             "-show_format",
             "-show_chapters",
-            "-show_data",
             "-of",
             "json",
             "-",
@@ -78,11 +82,11 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
         .stdout
         .take()
         .ok_or(ProbeError::Rejected)?
-        .take(1_048_577);
+        .take((MAX_PROBE_OUTPUT_BYTES + 1) as u64);
     let mut bytes = Vec::new();
     let outcome = tokio::time::timeout(Duration::from_secs(10), async {
         stdout.read_to_end(&mut bytes).await?;
-        if bytes.len() > 1_048_576 {
+        if bytes.len() > MAX_PROBE_OUTPUT_BYTES {
             return Err(ProbeError::TooLarge);
         }
         if !child.wait().await?.success() {
@@ -99,6 +103,19 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
     if result.streams.is_empty() {
         return Err(ProbeError::Rejected);
     }
+    // Only AV1 video streams need `extradata` (first 4 bytes of `av1C` for RFC 6381 MIME).
+    // Querying `-show_data` globally dumps entire MKV font attachments as hex JSON (>1 MiB).
+    let av1_indexes: Vec<u32> = result
+        .streams
+        .iter()
+        .filter(|s| {
+            s.codec_type.as_deref() == Some("video") && s.codec_name.as_deref() == Some("av1")
+        })
+        .map(|s| s.index)
+        .collect();
+    if !av1_indexes.is_empty() {
+        attach_av1_extradata(av1_file, &av1_indexes, &mut result.streams).await;
+    }
     // Validate the bounded native extractor during discovery, never infer its
     // support from codec names or ffprobe stream ordinals alone.
     if let Ok(Ok(ids)) =
@@ -109,6 +126,93 @@ pub async fn probe_file(mut file: std::fs::File) -> Result<Probe, ProbeError> {
             .insert("native_opus_tracks_v1".into(), serde_json::json!(ids));
     }
     Ok(result)
+}
+
+#[derive(serde::Deserialize)]
+struct ExtradataProbe {
+    #[serde(default)]
+    streams: Vec<ExtradataStream>,
+}
+
+#[derive(serde::Deserialize)]
+struct ExtradataStream {
+    index: u32,
+    extradata: Option<String>,
+}
+
+/// Fetch `extradata` strictly for the given AV1 video stream indices so embedded attachments
+/// (fonts, cover art) and subtitle tracks are never hex-dumped into probe JSON.
+async fn attach_av1_extradata(mut file: std::fs::File, av1_indexes: &[u32], streams: &mut [Track]) {
+    use std::io::Seek;
+    for &index in av1_indexes {
+        if file.rewind().is_err() {
+            return;
+        }
+        let Ok(cloned) = file.try_clone() else {
+            return;
+        };
+        let selector = index.to_string();
+        let Ok(mut child) = Command::new("ffprobe")
+            .args([
+                "-v",
+                "error",
+                "-protocol_whitelist",
+                "fd,pipe",
+                "-format_whitelist",
+                "matroska,webm,mov,mp4,ogg,mp3,flac,wav,aac,obu",
+                "-max_alloc",
+                "67108864",
+                "-probesize",
+                "5000000",
+                "-analyzeduration",
+                "5000000",
+                "-select_streams",
+                &selector,
+                "-show_entries",
+                "stream=index,extradata",
+                "-show_data",
+                "-of",
+                "json",
+                "-",
+            ])
+            .stdin(Stdio::from(cloned))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+        else {
+            continue;
+        };
+        let Some(stdout) = child.stdout.take() else {
+            continue;
+        };
+        let mut stdout = stdout.take((MAX_AV1_EXTRADATA_OUTPUT_BYTES + 1) as u64);
+        let mut bytes = Vec::new();
+        let ok = tokio::time::timeout(Duration::from_secs(5), async {
+            stdout.read_to_end(&mut bytes).await.ok()?;
+            if bytes.len() > MAX_AV1_EXTRADATA_OUTPUT_BYTES {
+                return None;
+            }
+            if !child.wait().await.ok()?.success() {
+                return None;
+            }
+            serde_json::from_slice::<ExtradataProbe>(&bytes).ok()
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(parsed) = ok {
+            for entry in parsed.streams {
+                if let Some(dump) = entry.extradata
+                    && let Some(track) = streams.iter_mut().find(|t| t.index == entry.index)
+                {
+                    track
+                        .details
+                        .insert("extradata".into(), serde_json::Value::String(dump));
+                }
+            }
+        }
+    }
 }
 
 /// Probe an already-confined `OpenedFile` and verify that the underlying handle
@@ -470,5 +574,73 @@ mod tests {
         assert_eq!(probe_hevc.streams[1].codec_name.as_deref(), Some("eac3"));
         assert_eq!(probe_hevc.streams[2].codec_name.as_deref(), Some("ac3"));
         assert_eq!(probe_hevc.streams[3].codec_name.as_deref(), Some("subrip"));
+    }
+
+    #[tokio::test]
+    async fn probe_mkv_with_large_font_attachment_succeeds_and_keeps_av1_extradata() {
+        let ffmpeg_check = std::process::Command::new("ffmpeg")
+            .arg("-version")
+            .output();
+        if ffmpeg_check.is_err() {
+            eprintln!("ffmpeg not found, skipping large attachment probe test");
+            return;
+        }
+
+        let temp = tempfile::tempdir().unwrap();
+        let font_path = temp.path().join("anime-font.ttf");
+        // 350 KiB attachment: with global `-show_data`, hex-dumping this exceeds 1.5 MiB.
+        std::fs::write(&font_path, vec![0x41u8; 350 * 1024]).unwrap();
+
+        let mkv_path = temp.path().join("anime-episode.mkv");
+        let source_mkv = fixture_root().join("av1-opus.mkv");
+        let output = std::process::Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-i",
+                source_mkv.to_str().unwrap(),
+                "-map",
+                "0",
+                "-c",
+                "copy",
+                "-attach",
+                font_path.to_str().unwrap(),
+                "-metadata:s:t:0",
+                "mimetype=application/x-truetype-font",
+                mkv_path.to_str().unwrap(),
+            ])
+            .output()
+            .expect("ffmpeg failed to attach font to mkv");
+        assert!(
+            output.status.success(),
+            "ffmpeg must attach font: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let probed = probe_file(std::fs::File::open(&mkv_path).unwrap())
+            .await
+            .expect("probe_file must succeed on MKV with large font attachments");
+        let video = probed
+            .streams
+            .iter()
+            .find(|s| s.codec_type.as_deref() == Some("video"))
+            .expect("video stream missing");
+        assert_eq!(video.codec_name.as_deref(), Some("av1"));
+        assert!(
+            video
+                .details
+                .get("extradata")
+                .and_then(|v| v.as_str())
+                .is_some_and(|s| s.contains("00000000:")),
+            "AV1 video stream must retain its av1C extradata"
+        );
+        let attachment = probed
+            .streams
+            .iter()
+            .find(|s| s.codec_type.as_deref() == Some("attachment"))
+            .expect("attachment stream missing");
+        assert!(
+            !attachment.details.contains_key("extradata"),
+            "attachment stream must never hex-dump binary font data into probe JSON"
+        );
     }
 }

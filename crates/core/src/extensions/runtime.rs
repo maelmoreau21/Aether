@@ -523,7 +523,16 @@ fn execute_inner(
     // JSON byte arrays cross the broker before the guest parses provider data.
     // Multi-season TMDb/TVDB/fanart.tv details issue up to ten HTTP calls and
     // parse large JSON payloads inside the Wasmi interpreter.
-    store.set_fuel(2_000_000_000).map_err(|_| "runtime_error")?;
+    // Unoptimized debug builds interpret Wasmi ~10x slower, so keep a lower
+    // ceiling there so infinite-loop tests still trap well before the 65 s timeout.
+    const MAX_EXECUTION_FUEL: u64 = if cfg!(debug_assertions) {
+        400_000_000
+    } else {
+        2_000_000_000
+    };
+    store
+        .set_fuel(MAX_EXECUTION_FUEL)
+        .map_err(|_| "runtime_error")?;
 
     let mut linker = Linker::new(&engine);
     let _ = linker.func_wrap(

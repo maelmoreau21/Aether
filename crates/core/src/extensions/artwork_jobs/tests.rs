@@ -82,3 +82,182 @@ async fn durable_collection_resumes_an_expired_lease_and_revokes_cancelled_or_di
         seeded
     );
 }
+
+fn synthetic_png(r: u8, g: u8, b: u8) -> Vec<u8> {
+    let mut buf = std::io::Cursor::new(Vec::new());
+    let img = image::RgbImage::from_pixel(16, 9, image::Rgb([r, g, b]));
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
+    buf.into_inner()
+}
+
+#[tokio::test]
+async fn episode_still_import_keeps_strictly_one_thumb_per_episode_and_respects_locks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = crate::identity::IdentityStore::open(&temp.path().join("ep-stills.sqlite"))
+        .await
+        .unwrap();
+    crate::libraries::initialize_local(&store).await.unwrap();
+    query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('shows','Shows','series','local','unused',1)")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,kind) VALUES('ep-1','shows','show/s01e01','Ep 1','{}','episode')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    query("INSERT INTO inventory_works(id,library_id,identity_key,title,external_ids_json,kind) VALUES('ep-2','shows','show/s01e02','Ep 2','{}','episode')")
+        .execute(store.pool())
+        .await
+        .unwrap();
+
+    // First import for ep-1 and ep-2 gives each episode its own single thumb.
+    assert_eq!(
+        adapters::store_episode_still_bytes(
+            &store,
+            "tmdb",
+            "ep-1",
+            "https://image.tmdb.org/t/p/w500/ep1.png",
+            "image/png".into(),
+            synthetic_png(220, 40, 40),
+            false,
+        )
+        .await
+        .unwrap(),
+        adapters::EpisodeStillOutcome::Imported
+    );
+    assert_eq!(
+        adapters::store_episode_still_bytes(
+            &store,
+            "tmdb",
+            "ep-2",
+            "https://image.tmdb.org/t/p/w500/ep2.png",
+            "image/png".into(),
+            synthetic_png(40, 200, 80),
+            false,
+        )
+        .await
+        .unwrap(),
+        adapters::EpisodeStillOutcome::Imported
+    );
+
+    // Second non-replacing import skips cleanly — strictly 1 image per episode, never a pool.
+    assert_eq!(
+        adapters::store_episode_still_bytes(
+            &store,
+            "tmdb",
+            "ep-1",
+            "https://image.tmdb.org/t/p/w500/ep1-alt.png",
+            "image/png".into(),
+            synthetic_png(20, 20, 220),
+            false,
+        )
+        .await
+        .unwrap(),
+        adapters::EpisodeStillOutcome::SkippedExisting
+    );
+
+    // Replacing with the same URL is a no-op; replacing with a new URL replaces in place (still 1 image).
+    assert_eq!(
+        adapters::store_episode_still_bytes(
+            &store,
+            "tmdb",
+            "ep-1",
+            "https://image.tmdb.org/t/p/w500/ep1.png",
+            "image/png".into(),
+            synthetic_png(220, 40, 40),
+            true,
+        )
+        .await
+        .unwrap(),
+        adapters::EpisodeStillOutcome::SkippedExisting
+    );
+    assert_eq!(
+        adapters::store_episode_still_bytes(
+            &store,
+            "tmdb",
+            "ep-1",
+            "https://image.tmdb.org/t/p/w500/ep1-v2.png",
+            "image/png".into(),
+            synthetic_png(40, 40, 220),
+            true,
+        )
+        .await
+        .unwrap(),
+        adapters::EpisodeStillOutcome::Imported
+    );
+
+    // Locked episode artwork is never modified.
+    query("UPDATE inventory_works SET manual_json='{\"artwork_locked\":true}' WHERE id='ep-2'")
+        .execute(store.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        adapters::store_episode_still_bytes(
+            &store,
+            "tmdb",
+            "ep-2",
+            "https://image.tmdb.org/t/p/w500/ep2-v2.png",
+            "image/png".into(),
+            synthetic_png(250, 250, 250),
+            true,
+        )
+        .await
+        .unwrap(),
+        adapters::EpisodeStillOutcome::SkippedLocked
+    );
+
+    let count_ep1: i64 = query_scalar(
+        "SELECT COUNT(*) FROM work_image_entries WHERE work_id='ep-1' AND kind='thumb'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    let count_ep2: i64 = query_scalar(
+        "SELECT COUNT(*) FROM work_image_entries WHERE work_id='ep-2' AND kind='thumb'",
+    )
+    .fetch_one(store.pool())
+    .await
+    .unwrap();
+    assert_eq!(count_ep1, 1);
+    assert_eq!(count_ep2, 1);
+}
+
+#[test]
+fn pick_series_details_provider_prefers_tmdb_for_episode_stills() {
+    let make_pkg = |id: &str| {
+        (
+            id.to_owned(),
+            Package {
+                manifest: Manifest {
+                    id: id.to_owned(),
+                    permissions: vec![
+                        "metadata.read".into(),
+                        "metadata.write".into(),
+                        "images".into(),
+                    ],
+                    ..Default::default()
+                },
+                publisher_id: String::new(),
+                wasm: String::new(),
+                sha256: String::new(),
+                signature: String::new(),
+            },
+        )
+    };
+    let extensions = vec![make_pkg("tvdb"), make_pkg("tmdb")];
+    let options = crate::library_options::LibraryOptions::default();
+    let mut ids = std::collections::BTreeMap::new();
+    ids.insert("tvdb".into(), "81189".into());
+    ids.insert("tmdb".into(), "1396".into());
+
+    assert_eq!(
+        pick_series_details_provider(&extensions, &options, &ids),
+        Some(("tmdb".into(), "1396".into()))
+    );
+
+    ids.remove("tmdb");
+    assert_eq!(
+        pick_series_details_provider(&extensions, &options, &ids),
+        Some(("tvdb".into(), "81189".into()))
+    );
+}

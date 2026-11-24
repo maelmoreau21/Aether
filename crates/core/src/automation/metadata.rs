@@ -226,6 +226,7 @@ pub async fn apply_missing_metadata(
             .bind(&work)
             .fetch_optional(&mut **tx)
             .await?;
+        let mut episode_stills: Vec<(String, String)> = Vec::new();
         if kind.as_deref() == Some("series")
             && let Some(seasons) = proposal.get("seasons").and_then(Value::as_array)
         {
@@ -291,9 +292,16 @@ pub async fn apply_missing_metadata(
                             if let Some(r) = ep.get("runtimeMinutes").and_then(Value::as_u64) {
                                 ep_meta.insert("runtime".into(), json!(r));
                             }
-                            if let Some(st) = ep.get("stillUrl").and_then(Value::as_str) {
+                            if let Some(st) = ep
+                                .get("stillUrl")
+                                .and_then(Value::as_str)
+                                .filter(|s| s.starts_with("https://"))
+                            {
                                 ep_meta.insert("still_url".into(), json!(st));
                                 ep_meta.insert("thumb_url".into(), json!(st));
+                                if episode_stills.len() < 40 {
+                                    episode_stills.push((ep_wid.clone(), st.to_owned()));
+                                }
                             }
                             if let Some(rt) = ep.get("rating").and_then(Value::as_f64) {
                                 ep_meta.insert("rating".into(), json!(rt));
@@ -393,10 +401,18 @@ pub async fn apply_missing_metadata(
             None
         };
 
+        let episode_stills = if images_allowed
+            && (options.fetch_poster || options.fetch_backdrop || options.fetch_thumb)
+        {
+            episode_stills
+        } else {
+            Vec::new()
+        };
+
         // The background image filler completes the other kinds (logo, banner…) or the
         // multi-image pool of this newly identified work on its next pass.
         crate::extensions::request_artwork_check();
-        if (poster_url.is_some() || backdrop_url.is_some())
+        if (poster_url.is_some() || backdrop_url.is_some() || !episode_stills.is_empty())
             && let Some(store) = crate::identity::active_store()
         {
             let ext_id = extension.to_string();
@@ -429,6 +445,12 @@ pub async fn apply_missing_metadata(
                             append: false,
                             apply_collection_policy: false,
                         },
+                    )
+                    .await;
+                }
+                for (ep_wid, url) in episode_stills {
+                    let _ = crate::extensions::adapters::import_episode_still(
+                        &store, &ext_id, &ep_wid, &url, false,
                     )
                     .await;
                 }

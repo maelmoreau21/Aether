@@ -368,10 +368,25 @@ pub(crate) async fn scan_fenced(
     cancel: &AtomicBool,
     run: Option<&str>,
 ) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
-    let patterns: String = query_scalar("SELECT excluded_patterns FROM libraries WHERE id=?")
-        .bind(library)
-        .fetch_one(&store.pool)
-        .await?;
+    let (configured_root, patterns): (String, String) =
+        query_as("SELECT root,excluded_patterns FROM libraries WHERE id=?")
+            .bind(library)
+            .fetch_one(&store.pool)
+            .await?;
+    let root_str = root.to_str().unwrap_or("");
+    let configured_clean = configured_root
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&configured_root);
+    let root_clean = root_str.strip_prefix(r"\\?\").unwrap_or(root_str);
+    let root_snapshot = if configured_root == root_str
+        || DiskPath::new(&configured_root) == root
+        || configured_clean == root_clean
+        || DiskPath::new(configured_clean) == DiskPath::new(root_clean)
+    {
+        configured_root
+    } else {
+        root.to_string_lossy().into_owned()
+    };
     let patterns: Vec<String> = patterns
         .split([',', ';', '\n', '\r'])
         .map(str::trim)
@@ -385,7 +400,7 @@ pub(crate) async fn scan_fenced(
     let count = media_node::music::scan_with_exclusions(root, cancel, &patterns, |track| {
         let store = store.clone();
         let library = library.to_owned();
-        let root = root.to_string_lossy().into_owned();
+        let root = root_snapshot.clone();
         let scan = scan.clone();
         async move {
             let _effects = crate::task_engine::EFFECT_GATE.lock().await;

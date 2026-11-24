@@ -419,6 +419,7 @@ pub(super) async fn apply(
     .map_err(db)?;
 
     // Enrich seasons and episodes if this is a series
+    let mut episode_stills: Vec<(String, String)> = Vec::new();
     if kind == "series"
         && let Some(seasons) = proposal.get("seasons").and_then(Value::as_array)
     {
@@ -482,9 +483,16 @@ pub(super) async fn apply(
                         if let Some(r) = ep.get("runtimeMinutes").and_then(Value::as_u64) {
                             ep_meta.insert("runtime".into(), json!(r));
                         }
-                        if let Some(st) = ep.get("stillUrl").and_then(Value::as_str) {
+                        if let Some(st) = ep
+                            .get("stillUrl")
+                            .and_then(Value::as_str)
+                            .filter(|s| s.starts_with("https://"))
+                        {
                             ep_meta.insert("still_url".into(), json!(st));
                             ep_meta.insert("thumb_url".into(), json!(st));
+                            if episode_stills.len() < 500 {
+                                episode_stills.push((ep_wid.clone(), st.to_owned()));
+                            }
                         }
                         if let Some(rt) = ep.get("rating").and_then(Value::as_f64) {
                             ep_meta.insert("rating".into(), json!(rt));
@@ -500,6 +508,12 @@ pub(super) async fn apply(
                         )
                         .bind(&ep_json)
                         .bind(&ep_json)
+                        .bind(&ep_wid)
+                        .execute(&mut *tx)
+                        .await;
+                        let _ = query(
+                            "DELETE FROM artwork_auto_attempts WHERE work_id=? AND mode='episode-still'",
+                        )
                         .bind(&ep_wid)
                         .execute(&mut *tx)
                         .await;
@@ -564,7 +578,19 @@ pub(super) async fn apply(
             )
             .await;
         }
+
+        if !episode_stills.is_empty() {
+            let store = auth.store.clone();
+            let provider = input.provider.clone();
+            tokio::spawn(async move {
+                for (ep_wid, url) in episode_stills {
+                    let _ = adapters::import_episode_still(&store, &provider, &ep_wid, &url, true)
+                        .await;
+                }
+            });
+        }
     }
+    super::request_artwork_check();
 
     Ok(Json(json!({
         "success": true,

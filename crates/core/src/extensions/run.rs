@@ -211,12 +211,14 @@ pub(super) async fn permitted(
 pub(super) enum Background<'a> {
     Task(&'a crate::task_engine::Job),
     Artwork(&'a super::artwork_jobs::Job),
+    EpisodeStill { owner: &'a str },
 }
 impl Background<'_> {
     fn owner(self) -> String {
         match self {
             Self::Task(j) => j.owner.clone(),
             Self::Artwork(j) => j.owner.clone(),
+            Self::EpisodeStill { owner } => owner.to_owned(),
         }
     }
 }
@@ -687,6 +689,35 @@ pub(super) async fn worker_permitted(
         Some(Background::Artwork(job)) => {
             return super::artwork_jobs::provider_permitted(auth, job, id, library, generation)
                 .await;
+        }
+        Some(Background::EpisodeStill { owner }) => {
+            let valid: i64 = query_scalar(
+                "SELECT COUNT(*) \
+                 FROM users u \
+                 JOIN extensions e ON e.id=? \
+                 JOIN extension_publishers p ON p.id=e.publisher_id \
+                 JOIN libraries l ON l.id=? \
+                 JOIN media_nodes n ON n.id=l.node_id \
+                 WHERE u.id=? AND u.role='administrator' AND u.disabled_at IS NULL \
+                 AND e.generation=? AND e.enabled=1 AND p.active=1 \
+                 AND l.enabled=1 AND n.status!='revoked' \
+                 AND NOT EXISTS(SELECT 1 FROM library_folders f JOIN libraries parent \
+                     ON parent.id=f.parent_id WHERE f.library_id=l.id AND (f.active=0 OR parent.enabled=0)) \
+                 AND (e.all_libraries=1 OR EXISTS(SELECT 1 FROM extension_grants g \
+                     WHERE g.extension_id=e.id AND g.library_id=l.id) \
+                     OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f \
+                     ON f.parent_id=g.library_id WHERE g.extension_id=e.id AND f.library_id=l.id AND f.active=1)) \
+                 AND NOT EXISTS(SELECT 1 FROM automation_policies policy \
+                     WHERE policy.extension_id=e.id AND policy.library_id=l.id AND policy.mode='disabled')",
+            )
+            .bind(id)
+            .bind(library)
+            .bind(owner)
+            .bind(generation)
+            .fetch_one(auth.store.pool())
+            .await
+            .map_err(db)?;
+            return Ok(valid == 1);
         }
         Some(Background::Task(job)) => job,
     };

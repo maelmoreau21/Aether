@@ -747,6 +747,209 @@ pub(crate) async fn import_image_direct(
 ) -> Result<Json<Value>, Error> {
     import_image_checked(store, id, input, None).await
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EpisodeStillOutcome {
+    Imported,
+    SkippedExisting,
+    SkippedLocked,
+}
+
+enum EpisodeStillPlan {
+    Proceed {
+        replace_id: Option<String>,
+        source_url_hash: String,
+    },
+    Skip(EpisodeStillOutcome),
+}
+
+async fn plan_episode_still(
+    store: &IdentityStore,
+    work_id: &str,
+    url: &str,
+    replace_existing: bool,
+) -> Result<EpisodeStillPlan, Error> {
+    let row: Option<(String, Option<String>)> =
+        query_as("SELECT kind, manual_json FROM inventory_works WHERE id=?")
+            .bind(work_id)
+            .fetch_optional(store.pool())
+            .await
+            .map_err(db)?;
+    let Some((kind, manual_json)) = row else {
+        return Err(err(StatusCode::NOT_FOUND, "unknown_work"));
+    };
+    if kind != "episode" {
+        return Err(err(StatusCode::BAD_REQUEST, "episode_required"));
+    }
+    let locked = manual_json
+        .as_deref()
+        .and_then(|v| serde_json::from_str::<Value>(v).ok())
+        .and_then(|v| v.get("artwork_locked").and_then(Value::as_bool))
+        .unwrap_or(false);
+    if locked {
+        return Ok(EpisodeStillPlan::Skip(EpisodeStillOutcome::SkippedLocked));
+    }
+
+    let existing_entries: Vec<(String, Option<String>, Option<String>, i64)> = query_as(
+        "SELECT e.id, e.provider, e.source_url_hash, CAST(COALESCE(a.pinned, 0) AS INTEGER) \
+         FROM work_image_entries e \
+         LEFT JOIN artwork_annotations a ON a.work_id=e.work_id AND a.image_id=e.id \
+         WHERE e.work_id=? AND e.kind='thumb' \
+         ORDER BY COALESCE(a.pinned, 0) DESC, e.position ASC, e.id ASC",
+    )
+    .bind(work_id)
+    .fetch_all(store.pool())
+    .await
+    .map_err(db)?;
+
+    let local_thumbs: i64 = query_scalar(
+        "SELECT COUNT(*) FROM inventory_images i \
+         LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+         WHERE i.work_id=? AND i.role='thumb' AND i.available=1 AND h.image_id IS NULL",
+    )
+    .bind(work_id)
+    .fetch_one(store.pool())
+    .await
+    .map_err(db)?;
+
+    let source_url_hash = format!("{:x}", Sha256::digest(url.as_bytes()));
+    if !replace_existing {
+        if !existing_entries.is_empty() || local_thumbs > 0 {
+            return Ok(EpisodeStillPlan::Skip(EpisodeStillOutcome::SkippedExisting));
+        }
+        return Ok(EpisodeStillPlan::Proceed {
+            replace_id: None,
+            source_url_hash,
+        });
+    }
+
+    if existing_entries
+        .iter()
+        .any(|(_, provider, _, pinned)| provider.is_none() || *pinned != 0)
+    {
+        return Ok(EpisodeStillPlan::Skip(EpisodeStillOutcome::SkippedLocked));
+    }
+    if existing_entries
+        .iter()
+        .any(|(_, _, hash, _)| hash.as_deref() == Some(source_url_hash.as_str()))
+    {
+        return Ok(EpisodeStillPlan::Skip(EpisodeStillOutcome::SkippedExisting));
+    }
+    let replace_id = existing_entries
+        .iter()
+        .find(|(_, provider, _, _)| provider.is_some())
+        .map(|(id, _, _, _)| id.clone());
+    Ok(EpisodeStillPlan::Proceed {
+        replace_id,
+        source_url_hash,
+    })
+}
+
+async fn upload_episode_still(
+    store: &IdentityStore,
+    extension_id: &str,
+    work_id: &str,
+    replace_id: Option<String>,
+    source_url_hash: String,
+    content_type: String,
+    bytes: Vec<u8>,
+) -> Result<(), Error> {
+    let _ = crate::artwork::upload_internal(
+        store,
+        work_id.to_owned(),
+        "thumb".into(),
+        crate::artwork::ImageQuery {
+            append: false,
+            replace: replace_id,
+            language: None,
+            provider: Some(extension_id.to_owned()),
+            source_url_hash: Some(source_url_hash),
+            apply_collection_policy: false,
+            ..Default::default()
+        },
+        content_type,
+        bytes.into(),
+    )
+    .await
+    .map_err(|s| err(s, "image_import_failed"))?;
+    Ok(())
+}
+
+/// Persist strictly one `thumb` image for an episode work (never building a multi-image pool).
+#[cfg(test)]
+pub(crate) async fn store_episode_still_bytes(
+    store: &IdentityStore,
+    extension_id: &str,
+    work_id: &str,
+    url: &str,
+    content_type: String,
+    bytes: Vec<u8>,
+    replace_existing: bool,
+) -> Result<EpisodeStillOutcome, Error> {
+    let (replace_id, source_url_hash) =
+        match plan_episode_still(store, work_id, url, replace_existing).await? {
+            EpisodeStillPlan::Skip(outcome) => return Ok(outcome),
+            EpisodeStillPlan::Proceed {
+                replace_id,
+                source_url_hash,
+            } => (replace_id, source_url_hash),
+        };
+    upload_episode_still(
+        store,
+        extension_id,
+        work_id,
+        replace_id,
+        source_url_hash,
+        content_type,
+        bytes,
+    )
+    .await?;
+    Ok(EpisodeStillOutcome::Imported)
+}
+
+/// Download and store strictly one `thumb` image per episode through the provider's allowlisted hosts.
+pub(crate) async fn import_episode_still(
+    store: &IdentityStore,
+    extension_id: &str,
+    work_id: &str,
+    url: &str,
+    replace_existing: bool,
+) -> Result<EpisodeStillOutcome, Error> {
+    let (replace_id, source_url_hash) =
+        match plan_episode_still(store, work_id, url, replace_existing).await? {
+            EpisodeStillPlan::Skip(outcome) => return Ok(outcome),
+            EpisodeStillPlan::Proceed {
+                replace_id,
+                source_url_hash,
+            } => (replace_id, source_url_hash),
+        };
+    let stored: Option<String> =
+        query_scalar("SELECT package_json FROM extensions WHERE id=? AND enabled=1")
+            .bind(extension_id)
+            .fetch_optional(store.pool())
+            .await
+            .map_err(db)?;
+    let stored = stored.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_extension"))?;
+    let package: Package = serde_json::from_str(&stored)
+        .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "invalid_package"))?;
+    for permission in ["images", "metadata.write"] {
+        if !package.manifest.permissions.iter().any(|p| p == permission) {
+            return Err(err(StatusCode::FORBIDDEN, "extension_permission_denied"));
+        }
+    }
+    let (bytes, content_type) = download_provider_image(&package, url).await?;
+    upload_episode_still(
+        store,
+        extension_id,
+        work_id,
+        replace_id,
+        source_url_hash,
+        content_type,
+        bytes,
+    )
+    .await?;
+    Ok(EpisodeStillOutcome::Imported)
+}
 async fn import_image_checked(
     store: &IdentityStore,
     id: &str,

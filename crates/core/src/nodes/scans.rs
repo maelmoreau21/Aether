@@ -674,6 +674,7 @@ pub(super) async fn receive_scan_complete(
         },
     )
     .await;
+    crate::task_engine::WAKE.notify_one();
 
     let inventory_sync = build_library_inventory_sync(&state.auth.store, lib_id)
         .await
@@ -764,6 +765,7 @@ pub(super) async fn receive_scan_fail(
         },
     )
     .await;
+    crate::task_engine::WAKE.notify_one();
 
     signed_core_response(
         &rec,

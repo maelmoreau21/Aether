@@ -104,12 +104,24 @@ async fn publish(
     };
 
     // The mode is fixed by the Core when the unique library job is queued; the Node cannot choose it.
-    let refresh_mode: String =
-        query_scalar("SELECT refresh_mode FROM scan_jobs WHERE library_id=?")
+    // Durable tasks carry their own refresh_mode so a background monitor poll never inherits
+    // a stale manual scan_jobs.refresh_mode (such as 'new_only' or 'full').
+    let task_refresh_mode: Option<String> = if let Some((task_id, _)) = scan_id.split_once(':') {
+        query_scalar("SELECT refresh_mode FROM durable_tasks WHERE id=?")
+            .bind(task_id)
+            .fetch_optional(&mut *tx)
+            .await?
+    } else {
+        None
+    };
+    let refresh_mode: String = match task_refresh_mode {
+        Some(mode) if !mode.is_empty() => mode,
+        _ => query_scalar("SELECT refresh_mode FROM scan_jobs WHERE library_id=?")
             .bind(library_id)
             .fetch_optional(&mut *tx)
             .await?
-            .unwrap_or_else(|| "incremental".into());
+            .unwrap_or_else(|| "incremental".into()),
+    };
     let mut affected_work_ids = std::collections::BTreeSet::new();
 
     // A film or episode renamed or moved inside this library keeps its asset (and so its work, corrections and
@@ -392,7 +404,7 @@ async fn publish(
             let s_title_sort = s_title.to_lowercase();
 
             let existing_series = query(
-                "SELECT id, editorial_json FROM inventory_works WHERE library_id=? AND identity_key=?",
+                "SELECT id, title, year, external_ids_json, editorial_json FROM inventory_works WHERE library_id=? AND identity_key=?",
             )
             .bind(library_id)
             .bind(&series_scoped_key)
@@ -401,21 +413,59 @@ async fn publish(
 
             let series_work_id = if let Some(row) = existing_series {
                 let swid: String = row.get("id");
+                let prev_title: String = row.get("title");
+                let prev_year: Option<i64> = row.get("year");
+                let prev_ext_ids: String = row.get("external_ids_json");
                 let prev_editorial: String = row.get("editorial_json");
-                // Preserve already-validated NFO metadata if the replacement NFO in this scan is invalid.
+                let prev_is_nfo = serde_json::from_str::<Value>(&prev_editorial)
+                    .ok()
+                    .is_some_and(|v| v.get("provenance").and_then(Value::as_str) == Some("nfo"));
+                // Preserve already-validated NFO metadata if the replacement NFO in this scan is invalid,
+                // and preserve provider-enriched metadata/external IDs when there is no local tvshow.nfo.
+                let preserve_provider = is_valid_nfo == 0
+                    && has_invalid_nfo == 0
+                    && !prev_is_nfo
+                    && (prev_editorial != "{}" || prev_ext_ids != "{}");
                 if refresh_mode == "new_only"
-                    || (refresh_mode == "missing_metadata"
-                        && serde_json::from_str::<Value>(&prev_editorial)
-                            .ok()
-                            .is_some_and(|v| {
-                                v.get("provenance").and_then(Value::as_str) == Some("nfo")
-                            }))
+                    || (refresh_mode == "missing_metadata" && prev_is_nfo)
                     || (is_valid_nfo == 0 && has_invalid_nfo == 1 && prev_editorial != "{}")
                 {
                     query("UPDATE inventory_works SET kind='series' WHERE id=?")
                         .bind(&swid)
                         .execute(&mut *tx)
                         .await?;
+                } else if preserve_provider {
+                    let merged_ext_ids = {
+                        let mut merged =
+                            serde_json::from_str::<serde_json::Map<String, Value>>(&prev_ext_ids)
+                                .unwrap_or_default();
+                        if let Ok(scanned) =
+                            serde_json::from_str::<serde_json::Map<String, Value>>(&s_ext_ids)
+                        {
+                            for (k, v) in scanned {
+                                merged.entry(k).or_insert(v);
+                            }
+                        }
+                        Value::Object(merged).to_string()
+                    };
+                    let keep_title = if prev_editorial != "{}" && !prev_title.trim().is_empty() {
+                        prev_title
+                    } else {
+                        s_title.clone()
+                    };
+                    let keep_title_sort = keep_title.to_lowercase();
+                    let keep_year = prev_year.or(s_year);
+                    query(
+                        "UPDATE inventory_works SET title=?, year=?, external_ids_json=?, title_sort=?, editorial_json=?, kind='series' WHERE id=?",
+                    )
+                    .bind(&keep_title)
+                    .bind(keep_year)
+                    .bind(&merged_ext_ids)
+                    .bind(&keep_title_sort)
+                    .bind(&prev_editorial)
+                    .bind(&swid)
+                    .execute(&mut *tx)
+                    .await?;
                 } else {
                     query(
                         "UPDATE inventory_works SET title=?, year=?, external_ids_json=?, title_sort=?, editorial_json=?, kind='series' WHERE id=?",

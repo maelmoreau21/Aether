@@ -290,7 +290,8 @@ async fn status(
             SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
             WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
             AND status IN ('queued','running') \
-            AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+            AND (EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+            OR EXISTS(SELECT 1 FROM durable_tasks h WHERE h.category='scan' AND h.library_id=scan_jobs.library_id)) \
             AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
     )
     .bind(&id)
@@ -698,6 +699,7 @@ async fn enqueue_one(
                         None,
                     )
                     .await;
+                    crate::task_engine::WAKE.notify_one();
                 }
                 return Ok(());
             }
@@ -755,13 +757,16 @@ async fn enqueue_one(
             let _ = inventory::clean_staging(&store, &scan_id).await;
 
             let should_report = if is_monitor {
-                let current_status: Option<String> = crate::database::query_scalar(
-                    "SELECT status FROM scan_jobs WHERE library_id=?",
+                let prev: Option<(String, i64)> = crate::database::query_as(
+                    "SELECT status, discovered FROM scan_jobs WHERE library_id=?",
                 )
                 .bind(&job_id)
                 .fetch_optional(&store.pool)
                 .await?;
-                report.probed > 0 || current_status.as_deref() == Some("idle")
+                report.probed > 0
+                    || prev.as_ref().is_none_or(|(status, discovered)| {
+                        status == "idle" || *discovered != report.discovered as i64
+                    })
             } else {
                 true
             };
@@ -797,6 +802,7 @@ async fn enqueue_one(
                     if report.interrupted { Some("Scan interrupted") } else { None },
                 )
                 .await;
+                crate::task_engine::WAKE.notify_one();
             }
             Ok(())
         }.await;
@@ -840,15 +846,27 @@ async fn enqueue_one(
                 && let Ok(attempt) = attempt_str.parse::<i64>()
             {
                 let now = media_contracts::protocol::unix_now();
+                let task_error = if LOCAL_STREAMS.load(Ordering::Relaxed) > 0
+                    || detailed_msg.contains("preempted for playback")
+                    || detailed_msg.contains("node_busy_playback_priority")
+                    || detailed_msg.contains("preparation_busy")
+                    || detailed_msg.contains("Scan arrêté")
+                    || detailed_msg.contains("Music scan interrupted")
+                {
+                    "playback_preempted"
+                } else {
+                    detailed_msg.as_str()
+                };
                 let _ = crate::task_engine::finish(
                     &store_err,
                     task_id,
                     attempt,
                     &node_id_err,
                     now,
-                    Some(&detailed_msg),
+                    Some(task_error),
                 )
                 .await;
+                crate::task_engine::WAKE.notify_one();
             }
         }
         if let Ok(mut tokens) = runner_jobs.cancellations.lock() {
@@ -1196,6 +1214,259 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
         }
         jobs.shutdown().await;
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn default_options_enable_monitoring_and_orphaned_durable_scan_recovers() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+        let store = crate::identity::IdentityStore::open(&root.join("monitor-default.sqlite"))
+            .await
+            .unwrap();
+        let pool = &store.pool;
+        // Default options_json ('{}') omits realtimeMonitoring; LibraryOptions defaults it to true.
+        crate::database::query(
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) \
+             VALUES('films','Films','films','local',?,1,'{}')",
+        )
+        .bind(root.to_str().unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+        // Simulate an orphaned durable scan: durable task finished, active_scan_runs gone,
+        // yet scan_jobs remained stuck in 'running' with stale refresh_mode='new_only'.
+        crate::database::query(
+            "INSERT INTO durable_tasks(id,library_id,node_id,owner,category,refresh_mode,status,priority,idempotency_key,available_at,created_at,updated_at,finished_at) \
+             VALUES('old-scan','films','local','admin','scan','new_only','error',200,'old-scan',10,10,10,10)",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+        crate::database::query(
+            "INSERT INTO scan_jobs(library_id,status,discovered,probed,reused,errors_count,warnings_count,refresh_mode) \
+             VALUES('films','running',0,0,0,0,0,'new_only')",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let jobs = Arc::new(ScanJobs::default());
+        let now = media_contracts::protocol::unix_now();
+
+        // run_due must queue a library-monitor poll even with default '{}' options_json.
+        crate::scheduler::run_due(&auth, &root, &jobs, now + 120)
+            .await
+            .unwrap();
+        let queued: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM durable_tasks WHERE library_id='films' AND owner='library-monitor' AND status='queued'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            queued, 1,
+            "default options_json must enable realtime monitoring"
+        );
+
+        // dispatch_once must recover the orphaned scan_jobs row and execute the monitor scan.
+        crate::scheduler::dispatch_once(&auth, &root, &jobs, now + 120)
+            .await
+            .unwrap();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let current: String = crate::database::query_scalar(
+                "SELECT status FROM durable_tasks WHERE owner='library-monitor' ORDER BY created_at DESC LIMIT 1",
+            )
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if current == "completed" {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "recovered monitor scan did not complete (status={current})"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        jobs.shutdown().await;
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn local_monitor_playback_preemption_avoids_error_backoff() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+        let store = crate::identity::IdentityStore::open(&root.join("monitor-preempt.sqlite"))
+            .await
+            .unwrap();
+        let pool = &store.pool;
+        crate::database::query(
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) \
+             VALUES('films','Films','films','local',?,1,'{\"realtimeMonitoring\":true}')",
+        )
+        .bind(root.to_str().unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
+            .await
+            .unwrap();
+        let jobs = Arc::new(ScanJobs::default());
+        let now = media_contracts::protocol::unix_now();
+        let permits = jobs
+            .slots
+            .clone()
+            .acquire_many_owned(u32::try_from(jobs.slots.available_permits()).unwrap())
+            .await
+            .unwrap();
+
+        crate::scheduler::run_due(&auth, &root, &jobs, now + 120)
+            .await
+            .unwrap();
+        crate::scheduler::dispatch_once(&auth, &root, &jobs, now + 120)
+            .await
+            .unwrap();
+
+        let (task_id, attempt): (String, i64) = crate::database::query_as(
+            "SELECT id, attempt FROM durable_tasks WHERE owner='library-monitor' ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        // Cancel the running local monitor as playback preemption does, then release permits.
+        jobs.cancel_scan(&format!("{task_id}:{attempt}"));
+        drop(permits);
+
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let (status, failures, err_msg): (String, i64, String) = crate::database::query_as(
+                "SELECT status, failure_count, error FROM durable_tasks WHERE id=?",
+            )
+            .bind(&task_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if status != "running" {
+                assert_ne!(
+                    status, "error",
+                    "playback preemption must not mark library-monitor as error (err={err_msg})"
+                );
+                assert_eq!(failures, 0);
+                assert_eq!(err_msg, "playback_preempted");
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "preempted monitor did not release lease"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        jobs.shutdown().await;
+        store.close().await;
+    }
+
+    #[tokio::test]
+    async fn incremental_series_rescan_preserves_provider_metadata_and_external_ids() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = tokio::fs::canonicalize(temp.path()).await.unwrap();
+        let store = crate::identity::IdentityStore::open(&root.join("series-preserve.sqlite"))
+            .await
+            .unwrap();
+        let pool = &store.pool;
+        crate::database::query(
+            "INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('shows','Shows','series','local',?,1)",
+        )
+        .bind(root.to_str().unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+
+        let make_ep = |rel: &str, ep_num: u32| media_contracts::inventory::ScannedFile {
+            relative_path: rel.into(),
+            identity_key: format!("show/s01e{ep_num:02}"),
+            title: format!("S01E{ep_num:02}"),
+            size: 1000,
+            modified_ns: "1".into(),
+            mime: "video/x-matroska".into(),
+            series_identity_key: Some("show".into()),
+            series_title: Some("Show".into()),
+            series_year: Some(2024),
+            season_number: Some(1),
+            episode_number: Some(ep_num),
+            ..Default::default()
+        };
+
+        // First scan publishes Show S01E01.
+        inventory::stage_batch(
+            &store,
+            "scan-1",
+            "shows",
+            &inventory::InventoryBatch {
+                scan_id: media_contracts::ids::ScanId::new("scan-1"),
+                sequence: 1,
+                files: vec![make_ep("Show/Season 1/Show.S01E01.mkv", 1)],
+                errors: Vec::new(),
+                warnings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        inventory::publish_staged_scan(&store, "scan-1", "shows", &root, true)
+            .await
+            .unwrap();
+
+        // Provider enrichment writes TMDb ID and editorial metadata on the series work.
+        crate::database::query(
+            "UPDATE inventory_works SET title='Show Officiel', external_ids_json='{\"tmdb\":\"12345\"}', editorial_json='{\"plot\":\"Provider plot\",\"provenance\":\"extension:tmdb\"}' \
+             WHERE library_id='shows' AND kind='series'",
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+        // Second incremental scan adds S01E02 (no tvshow.nfo on disk).
+        let mut ep1_reused = make_ep("Show/Season 1/Show.S01E01.mkv", 1);
+        ep1_reused.reused = true;
+        inventory::stage_batch(
+            &store,
+            "scan-2",
+            "shows",
+            &inventory::InventoryBatch {
+                scan_id: media_contracts::ids::ScanId::new("scan-2"),
+                sequence: 1,
+                files: vec![ep1_reused, make_ep("Show/Season 1/Show.S01E02.mkv", 2)],
+                errors: Vec::new(),
+                warnings: Vec::new(),
+            },
+        )
+        .await
+        .unwrap();
+        inventory::publish_staged_scan(&store, "scan-2", "shows", &root, true)
+            .await
+            .unwrap();
+
+        let (title, ext_ids, editorial): (String, String, String) = crate::database::query_as(
+            "SELECT title, external_ids_json, editorial_json FROM inventory_works WHERE library_id='shows' AND kind='series'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(title, "Show Officiel");
+        assert!(ext_ids.contains("\"tmdb\":\"12345\""), "ext_ids={ext_ids}");
+        assert!(editorial.contains("Provider plot"), "editorial={editorial}");
+        let ep_count: i64 = crate::database::query_scalar(
+            "SELECT COUNT(*) FROM inventory_works WHERE library_id='shows' AND kind='episode'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(ep_count, 2);
         store.close().await;
     }
 }

@@ -301,7 +301,17 @@
         ] as const)
       );
       for (const [id, scan] of results) {
-        if (scans[id]?.status !== scan.status && !['queued', 'running'].includes(scan.status)) invalidateCatalog(id);
+        const previous = scans[id];
+        const terminal = !['queued', 'running'].includes(scan.status);
+        if (
+          terminal &&
+          (!previous ||
+            previous.status !== scan.status ||
+            previous.discovered !== scan.discovered ||
+            previous.probed !== scan.probed)
+        ) {
+          invalidateCatalog(id);
+        }
         scans[id] = scan;
       }
     } catch (failure) {

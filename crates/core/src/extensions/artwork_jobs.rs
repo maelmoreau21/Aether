@@ -111,9 +111,471 @@ async fn next_auto_work(
     }
 }
 async fn mark_auto_attempt(auth: &AuthState, work: &str, mode: &str) -> Result<(), Error> {
+    mark_auto_attempt_at(auth, work, mode, now()).await
+}
+async fn mark_auto_attempt_at(
+    auth: &AuthState,
+    work: &str,
+    mode: &str,
+    attempted_at: i64,
+) -> Result<(), Error> {
     query("INSERT INTO artwork_auto_attempts(work_id,mode,attempted_at) VALUES(?,?,?) ON CONFLICT(work_id,mode) DO UPDATE SET attempted_at=excluded.attempted_at")
-        .bind(work).bind(mode).bind(now()).execute(auth.store.pool()).await.map_err(db)?;
+        .bind(work).bind(mode).bind(attempted_at).execute(auth.store.pool()).await.map_err(db)?;
     Ok(())
+}
+
+const EPISODE_STILL_MODE: &str = "episode-still";
+
+fn extract_https_still(manual_json: Option<&str>, editorial_json: &str) -> Option<String> {
+    for raw in [manual_json, Some(editorial_json)].into_iter().flatten() {
+        let Ok(val) = serde_json::from_str::<Value>(raw) else {
+            continue;
+        };
+        for key in ["still_url", "stillUrl", "thumb_url", "thumbUrl"] {
+            if let Some(url) = val.get(key).and_then(Value::as_str)
+                && url.starts_with("https://")
+            {
+                return Some(url.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn merge_series_external_ids(
+    external_ids_json: &str,
+    manual_json: Option<&str>,
+) -> std::collections::BTreeMap<String, String> {
+    let mut ids =
+        serde_json::from_str::<std::collections::BTreeMap<String, String>>(external_ids_json)
+            .unwrap_or_default();
+    if let Some(manual) = manual_json.and_then(|s| serde_json::from_str::<Value>(s).ok())
+        && let Some(extra) = manual.get("external_ids").and_then(Value::as_object)
+    {
+        for (k, v) in extra {
+            if let Some(s) = v.as_str()
+                && !s.trim().is_empty()
+            {
+                ids.insert(k.clone(), s.to_owned());
+            }
+        }
+    }
+    ids
+}
+
+fn pick_series_details_provider(
+    extensions: &[(String, Package)],
+    options: &crate::library_options::LibraryOptions,
+    ids: &std::collections::BTreeMap<String, String>,
+) -> Option<(String, String)> {
+    let mut candidates: Vec<(bool, i64, String, String)> = Vec::new();
+    for (ext_id, package) in extensions {
+        let perms = &package.manifest.permissions;
+        if !perms.iter().any(|p| p == "metadata.read")
+            || !perms.iter().any(|p| p == "images")
+            || !perms.iter().any(|p| p == "metadata.write")
+        {
+            continue;
+        }
+        let Some(img_prio) = crate::library_options::LibraryOptions::provider_priority(
+            &options.image_providers,
+            ext_id,
+            100,
+        ) else {
+            continue;
+        };
+        let lower = ext_id.to_ascii_lowercase();
+        let candidate_id = if lower.contains("tmdb") {
+            ids.get("tmdb").cloned()
+        } else if lower.contains("tvdb") {
+            ids.get("tvdb").cloned()
+        } else {
+            ids.get(ext_id)
+                .or_else(|| ids.get("tmdb"))
+                .or_else(|| ids.get("tvdb"))
+                .or_else(|| ids.get("imdb"))
+                .cloned()
+        };
+        if let Some(cid) = candidate_id.filter(|s| !s.trim().is_empty()) {
+            // Prefer TMDb when available because TMDb details include per-episode stillUrl.
+            candidates.push((lower.contains("tmdb"), img_prio, ext_id.clone(), cid));
+        }
+    }
+    candidates.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
+    candidates
+        .into_iter()
+        .next()
+        .map(|(_, _, ext_id, cid)| (ext_id, cid))
+}
+
+async fn load_permitted_extensions(
+    auth: &AuthState,
+    library_id: &str,
+) -> Result<Vec<(String, Package)>, Error> {
+    let rows: Vec<(String, String)> = query_as(
+        "SELECT e.id, e.package_json \
+         FROM extensions e \
+         JOIN extension_publishers p ON p.id=e.publisher_id \
+         WHERE e.enabled=1 AND p.active=1 \
+         AND (e.all_libraries=1 \
+              OR EXISTS(SELECT 1 FROM extension_grants g WHERE g.extension_id=e.id AND g.library_id=?) \
+              OR EXISTS(SELECT 1 FROM extension_grants g JOIN library_folders f ON f.parent_id=g.library_id \
+                        WHERE g.extension_id=e.id AND f.library_id=? AND f.active=1)) \
+         AND NOT EXISTS(SELECT 1 FROM automation_policies policy \
+                        WHERE policy.extension_id=e.id AND policy.library_id=? AND policy.mode='disabled') \
+         ORDER BY e.id",
+    )
+    .bind(library_id)
+    .bind(library_id)
+    .bind(library_id)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(id, raw)| serde_json::from_str::<Package>(&raw).ok().map(|p| (id, p)))
+        .collect())
+}
+
+/// Fetch strictly one unique thumbnail per TV episode (never downloading multi-image pools):
+/// 1. Imports any pending `still_url` already stored on an episode into `work_image_entries`.
+/// 2. Otherwise queries `metadata.details` once for an identified series that still has episodes
+///    missing both a local `thumb` and a `still_url`, storing the returned episode `still_url`s
+///    for subsequent 1-by-1 local import.
+pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error> {
+    let owner: Option<String> = query_scalar(
+        "SELECT id FROM users WHERE role='administrator' AND disabled_at IS NULL ORDER BY id LIMIT 1",
+    )
+    .fetch_optional(auth.store.pool())
+    .await
+    .map_err(db)?;
+    let Some(owner) = owner else {
+        return Ok(false);
+    };
+    let retry_cutoff = now() - AUTO_RETRY_AFTER;
+
+    // Step A: import 1 episode that already has an https:// still_url/thumb_url.
+    let pending_stills: Vec<(String, String, String, String, Option<String>)> = query_as(
+        "SELECT w.id, w.library_id, COALESCE(parent.options_json, l.options_json), \
+                w.editorial_json, w.manual_json \
+         FROM inventory_works w \
+         JOIN libraries l ON l.id=w.library_id \
+         LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
+         LEFT JOIN libraries parent ON parent.id=f.parent_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE w.kind='episode' AND l.kind='series' AND l.enabled=1 \
+         AND (parent.id IS NULL OR parent.enabled=1) AND n.status!='revoked' \
+         AND NOT EXISTS(SELECT 1 FROM work_image_entries e WHERE e.work_id=w.id AND e.kind='thumb') \
+         AND NOT EXISTS(SELECT 1 FROM inventory_images i \
+                        LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+                        WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND h.image_id IS NULL) \
+         AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a \
+                        WHERE a.work_id=w.id AND a.mode=? AND a.attempted_at>?) \
+         AND COALESCE( \
+                json_extract(w.manual_json, '$.still_url'), \
+                json_extract(w.manual_json, '$.stillUrl'), \
+                json_extract(w.manual_json, '$.thumb_url'), \
+                json_extract(w.manual_json, '$.thumbUrl'), \
+                json_extract(w.editorial_json, '$.still_url'), \
+                json_extract(w.editorial_json, '$.stillUrl'), \
+                json_extract(w.editorial_json, '$.thumb_url'), \
+                json_extract(w.editorial_json, '$.thumbUrl'), \
+                '' \
+             ) LIKE 'https://%' \
+         ORDER BY w.id \
+         LIMIT 8",
+    )
+    .bind(EPISODE_STILL_MODE)
+    .bind(retry_cutoff)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
+
+    for (ep_id, ep_library_id, options_json, editorial_json, manual_json) in pending_stills {
+        let options = crate::library_options::LibraryOptions::from_json(&options_json);
+        if !(options.fetch_poster || options.fetch_backdrop || options.fetch_thumb) {
+            continue;
+        }
+        let locked = manual_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Value>(s).ok())
+            .and_then(|v| v.get("artwork_locked").and_then(Value::as_bool))
+            .unwrap_or(false);
+        if locked {
+            mark_auto_attempt(auth, &ep_id, EPISODE_STILL_MODE).await?;
+            continue;
+        }
+        let Some(still_url) = extract_https_still(manual_json.as_deref(), &editorial_json) else {
+            mark_auto_attempt(auth, &ep_id, EPISODE_STILL_MODE).await?;
+            continue;
+        };
+        let Some(host) = reqwest::Url::parse(&still_url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+        else {
+            mark_auto_attempt(auth, &ep_id, EPISODE_STILL_MODE).await?;
+            continue;
+        };
+        let extensions = load_permitted_extensions(auth, &ep_library_id).await?;
+        let chosen = extensions
+            .iter()
+            .filter_map(|(ext_id, package)| {
+                let perms = &package.manifest.permissions;
+                if !perms.iter().any(|p| p == "images")
+                    || !perms.iter().any(|p| p == "metadata.write")
+                    || !package.manifest.http_hosts.iter().any(|h| h == &host)
+                {
+                    return None;
+                }
+                let prio = crate::library_options::LibraryOptions::provider_priority(
+                    &options.image_providers,
+                    ext_id,
+                    100,
+                )?;
+                Some((prio, ext_id.clone()))
+            })
+            .max_by(|a, b| a.0.cmp(&b.0).then_with(|| b.1.cmp(&a.1)))
+            .map(|(_, ext_id)| ext_id);
+        let Some(ext_id) = chosen else {
+            mark_auto_attempt(auth, &ep_id, EPISODE_STILL_MODE).await?;
+            continue;
+        };
+        let Some(_slot) = crate::extensions::runtime::try_acquire_execution(
+            &ext_id,
+            crate::extensions::runtime::ExecutionClass::Background,
+        ) else {
+            return Ok(false);
+        };
+        match adapters::import_episode_still(&auth.store, &ext_id, &ep_id, &still_url, false).await
+        {
+            Ok(_) => {
+                mark_auto_attempt(auth, &ep_id, EPISODE_STILL_MODE).await?;
+            }
+            Err((
+                StatusCode::BAD_GATEWAY
+                | StatusCode::REQUEST_TIMEOUT
+                | StatusCode::SERVICE_UNAVAILABLE
+                | StatusCode::TOO_MANY_REQUESTS,
+                _,
+            )) => {
+                mark_auto_attempt_at(auth, &ep_id, EPISODE_STILL_MODE, retry_cutoff + 3600).await?;
+            }
+            Err(_) => {
+                mark_auto_attempt(auth, &ep_id, EPISODE_STILL_MODE).await?;
+            }
+        }
+        return Ok(true);
+    }
+
+    // Step B: find 1 identified series with episodes missing both a thumb and a still_url,
+    // and populate episode still_urls via one metadata.details call.
+    let series_candidates: Vec<(String, String, String, String, Option<String>)> = query_as(
+        "SELECT w.id, w.library_id, COALESCE(parent.options_json, l.options_json), \
+                w.external_ids_json, w.manual_json \
+         FROM inventory_works w \
+         JOIN libraries l ON l.id=w.library_id \
+         LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
+         LEFT JOIN libraries parent ON parent.id=f.parent_id \
+         JOIN media_nodes n ON n.id=l.node_id \
+         WHERE w.kind='series' AND l.kind='series' AND l.enabled=1 \
+         AND (parent.id IS NULL OR parent.enabled=1) AND n.status!='revoked' \
+         AND (w.external_ids_json NOT IN ('','{}') \
+              OR COALESCE(json_extract(w.manual_json, '$.external_ids'), '{}') NOT IN ('','{}')) \
+         AND EXISTS( \
+             SELECT 1 FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_works ew ON ew.id=ep.work_id \
+             WHERE s.series_id=w.id AND ew.kind='episode' \
+             AND COALESCE(CAST(json_extract(ew.manual_json,'$.artwork_locked') AS TEXT),'0') NOT IN ('1','true') \
+             AND NOT EXISTS(SELECT 1 FROM work_image_entries e WHERE e.work_id=ew.id AND e.kind='thumb') \
+             AND NOT EXISTS(SELECT 1 FROM inventory_images i \
+                            LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+                            WHERE i.work_id=ew.id AND i.role='thumb' AND i.available=1 AND h.image_id IS NULL) \
+             AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a \
+                            WHERE a.work_id=ew.id AND a.mode=? AND a.attempted_at>?) \
+             AND COALESCE( \
+                    json_extract(ew.manual_json, '$.still_url'), \
+                    json_extract(ew.manual_json, '$.stillUrl'), \
+                    json_extract(ew.manual_json, '$.thumb_url'), \
+                    json_extract(ew.manual_json, '$.thumbUrl'), \
+                    json_extract(ew.editorial_json, '$.still_url'), \
+                    json_extract(ew.editorial_json, '$.stillUrl'), \
+                    json_extract(ew.editorial_json, '$.thumb_url'), \
+                    json_extract(ew.editorial_json, '$.thumbUrl'), \
+                    '' \
+                 ) NOT LIKE 'https://%' \
+         ) \
+         ORDER BY w.id \
+         LIMIT 4",
+    )
+    .bind(EPISODE_STILL_MODE)
+    .bind(retry_cutoff)
+    .fetch_all(auth.store.pool())
+    .await
+    .map_err(db)?;
+
+    for (series_id, series_library_id, options_json, external_ids_json, manual_json) in
+        series_candidates
+    {
+        let options = crate::library_options::LibraryOptions::from_json(&options_json);
+        if !(options.fetch_poster || options.fetch_backdrop || options.fetch_thumb) {
+            continue;
+        }
+        let pending_episodes: Vec<(String, i64, i64, String)> = query_as(
+            "SELECT ew.id, s.season_number, ep.episode_number, ew.editorial_json \
+             FROM inventory_seasons s \
+             JOIN inventory_episodes ep ON ep.season_id=s.id \
+             JOIN inventory_works ew ON ew.id=ep.work_id \
+             WHERE s.series_id=? AND ew.kind='episode' \
+             AND COALESCE(CAST(json_extract(ew.manual_json,'$.artwork_locked') AS TEXT),'0') NOT IN ('1','true') \
+             AND NOT EXISTS(SELECT 1 FROM work_image_entries e WHERE e.work_id=ew.id AND e.kind='thumb') \
+             AND NOT EXISTS(SELECT 1 FROM inventory_images i \
+                            LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+                            WHERE i.work_id=ew.id AND i.role='thumb' AND i.available=1 AND h.image_id IS NULL) \
+             AND NOT EXISTS(SELECT 1 FROM artwork_auto_attempts a \
+                            WHERE a.work_id=ew.id AND a.mode=? AND a.attempted_at>?) \
+             ORDER BY s.season_number, ep.episode_number \
+             LIMIT 250",
+        )
+        .bind(&series_id)
+        .bind(EPISODE_STILL_MODE)
+        .bind(retry_cutoff)
+        .fetch_all(auth.store.pool())
+        .await
+        .map_err(db)?;
+        if pending_episodes.is_empty() {
+            continue;
+        }
+        let ids = merge_series_external_ids(&external_ids_json, manual_json.as_deref());
+        let extensions = load_permitted_extensions(auth, &series_library_id).await?;
+        let Some((ext_id, candidate_id)) =
+            pick_series_details_provider(&extensions, &options, &ids)
+        else {
+            for (ep_id, _, _, _) in &pending_episodes {
+                mark_auto_attempt(auth, ep_id, EPISODE_STILL_MODE).await?;
+            }
+            continue;
+        };
+
+        let response = run::run_with_context(
+            auth,
+            &HeaderMap::new(),
+            &ext_id,
+            run::Run {
+                work_id: series_id.clone(),
+                operation: "metadata.details".into(),
+                input: json!({ "id": candidate_id }),
+            },
+            Some(run::Background::EpisodeStill { owner: &owner }),
+        )
+        .await;
+
+        let proposal = match response {
+            Ok(Json(body)) => body.get("proposal").cloned().unwrap_or(Value::Null),
+            Err((StatusCode::CONFLICT, _)) => return Ok(false),
+            Err(_) => {
+                for (ep_id, _, _, _) in &pending_episodes {
+                    mark_auto_attempt_at(auth, ep_id, EPISODE_STILL_MODE, retry_cutoff + 3600)
+                        .await?;
+                }
+                return Ok(false);
+            }
+        };
+
+        let mut stills_by_ep: std::collections::HashMap<(i64, i64), Value> =
+            std::collections::HashMap::new();
+        if let Some(seasons) = proposal.get("seasons").and_then(Value::as_array) {
+            for season in seasons {
+                let s_num = season
+                    .get("seasonNumber")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                if let Some(episodes) = season.get("episodes").and_then(Value::as_array) {
+                    for ep in episodes {
+                        if let Some(ep_num) = ep.get("episodeNumber").and_then(Value::as_i64) {
+                            stills_by_ep.insert((s_num, ep_num), ep.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut populated = 0usize;
+        for (ep_id, s_num, ep_num, editorial_json) in &pending_episodes {
+            let still = stills_by_ep
+                .get(&(*s_num, *ep_num))
+                .and_then(|ep| ep.get("stillUrl").and_then(Value::as_str))
+                .filter(|s| s.starts_with("https://"));
+            if let Some(st) = still {
+                let mut ep_meta =
+                    serde_json::from_str::<serde_json::Map<String, Value>>(editorial_json)
+                        .unwrap_or_default();
+                ep_meta.insert("still_url".into(), json!(st));
+                ep_meta.insert("thumb_url".into(), json!(st));
+                if let Some(ep_obj) = stills_by_ep.get(&(*s_num, *ep_num)) {
+                    if !ep_meta.contains_key("title")
+                        && let Some(t) = ep_obj
+                            .get("title")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.trim().is_empty())
+                    {
+                        ep_meta.insert("title".into(), json!(t));
+                        let _ = query(
+                            "UPDATE inventory_works SET title=? WHERE id=? AND (title LIKE 'S%E%' OR title LIKE 'Episode%' OR title='')",
+                        )
+                        .bind(t)
+                        .bind(ep_id)
+                        .execute(auth.store.pool())
+                        .await;
+                    }
+                    if !ep_meta.contains_key("plot")
+                        && let Some(p) = ep_obj
+                            .get("overview")
+                            .and_then(Value::as_str)
+                            .filter(|s| !s.trim().is_empty())
+                    {
+                        ep_meta.insert("plot".into(), json!(p));
+                        ep_meta.insert("outline".into(), json!(p));
+                    }
+                    if !ep_meta.contains_key("premiered")
+                        && let Some(d) = ep_obj.get("airDate").and_then(Value::as_str)
+                    {
+                        ep_meta.insert("premiered".into(), json!(d));
+                    }
+                    if !ep_meta.contains_key("runtime")
+                        && let Some(r) = ep_obj.get("runtimeMinutes").and_then(Value::as_u64)
+                    {
+                        ep_meta.insert("runtime".into(), json!(r));
+                    }
+                    if !ep_meta.contains_key("rating")
+                        && let Some(rt) = ep_obj.get("rating").and_then(Value::as_f64)
+                    {
+                        ep_meta.insert("rating".into(), json!(rt));
+                    }
+                }
+                let encoded = Value::Object(ep_meta).to_string();
+                let _ = query("UPDATE inventory_works SET editorial_json=? WHERE id=?")
+                    .bind(&encoded)
+                    .bind(ep_id)
+                    .execute(auth.store.pool())
+                    .await;
+                populated += 1;
+            } else {
+                mark_auto_attempt(auth, ep_id, EPISODE_STILL_MODE).await?;
+            }
+        }
+        if populated > 0 {
+            crate::inventory::catalogue_changed(&auth.store).await;
+            return Ok(true);
+        }
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 static LAST_AUTO_CHECK: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 /// Asks the next worker tick to look for works to fill (new identification, saved settings).
@@ -460,7 +922,9 @@ pub(crate) async fn tick(auth: &AuthState) -> Result<bool, Error> {
     let next: Option<String> = query_scalar(sqlx::AssertSqlSafe(format!("SELECT j.id FROM artwork_collection_jobs j WHERE (j.status='queued' OR (j.status='running' AND j.lease_until<=?)) AND j.next_run_at<=? AND NOT {own} AND NOT EXISTS(SELECT 1 FROM library_folders f WHERE f.parent_id=j.library_id AND f.active=1 AND {folder}) ORDER BY j.updated_at,j.id LIMIT 1")))
         .bind(now()).bind(now()).bind(now()).bind(now()).fetch_optional(&mut *tx).await.map_err(db)?;
     let Some(id) = next else {
-        return Ok(false);
+        drop(tx);
+        drop(conn);
+        return episode_stills_tick(auth).await;
     };
     query("UPDATE artwork_collection_jobs SET status='running',lease_token=?,lease_until=?,updated_at=? WHERE id=?")
         .bind(&token).bind(now()+120).bind(now()).bind(&id).execute(&mut *tx).await.map_err(db)?;

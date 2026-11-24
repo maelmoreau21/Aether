@@ -152,7 +152,8 @@ pub(crate) async fn admit(
                      SET status='error',errors_json='[\"Worker lease expired\"]',errors_count=1 \
                      WHERE (library_id=? OR library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
                      AND status IN ('queued','running') \
-                     AND EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+                     AND (EXISTS(SELECT 1 FROM active_scan_runs r WHERE r.library_id=scan_jobs.library_id AND r.scan_id LIKE '%:%') \
+                     OR EXISTS(SELECT 1 FROM durable_tasks h WHERE h.category='scan' AND h.library_id=scan_jobs.library_id)) \
                      AND NOT EXISTS(SELECT 1 FROM durable_tasks j WHERE j.category='scan' AND j.library_id=scan_jobs.library_id AND j.lease_until IS NOT NULL)",
                 )
                 .bind(library)

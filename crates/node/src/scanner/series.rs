@@ -538,7 +538,28 @@ pub fn parse_series_episode(relative: &Path) -> Option<ParsedSeriesEpisode> {
         });
     }
 
-    // 5. Standalone video file in a folder (e.g. a movie or single episode in a folder)
+    // 5. Trailing episode number inside a series folder without a Season subfolder
+    //    (e.g. "Show/Show 01.mkv", "Show/Show 02 [1080p].mkv"), skipping stems that equal
+    //    the series title itself (e.g. "Apollo 13/Apollo 13.mkv").
+    if components.len() >= 2 && season_from_parent.is_none() {
+        let (file_title, _, _) = metadata_name(stem);
+        if !file_title.eq_ignore_ascii_case(&series_raw_title)
+            && let Some(e) = extract_trailing_episode_in_season(stem)
+        {
+            return Some(ParsedSeriesEpisode {
+                series_dir,
+                series_raw_title,
+                series_year,
+                series_external_ids,
+                series_identity_key,
+                season_number: 1,
+                episode_number: e,
+                episode_title: format!("S01E{:02}", e),
+            });
+        }
+    }
+
+    // 6. Standalone video file in a folder (e.g. a movie or single episode in a folder)
     if components.len() >= 2 {
         let (file_title, _, _) = metadata_name(stem);
         let ep_title =

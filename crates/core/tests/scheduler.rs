@@ -80,7 +80,7 @@ async fn metadata_refresh_is_durable_bounded_and_reuses_the_scan_runner() {
     let auth = AuthState::new(store.clone(), "http://127.0.0.1:3000".into())
         .await
         .unwrap();
-    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json,next_metadata_refresh_at) VALUES('metadata','Films','films','local',?,1,'{\"automaticRefreshIntervalDays\":30}',1000)").bind(root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json,next_metadata_refresh_at) VALUES('metadata','Films','films','local',?,1,'{\"automaticRefreshIntervalDays\":30,\"realtimeMonitoring\":false}',1000)").bind(root.to_string_lossy().as_ref()).execute(store.pool()).await.unwrap();
     let jobs = Arc::new(ScanJobs::default());
     scheduler::run_due(&auth, &root, &jobs, 999).await.unwrap();
     assert_eq!(
@@ -157,7 +157,7 @@ async fn schedules_require_admin_csrf_validate_persist_and_dispatch_real_scans()
     aether_core::libraries::initialize_local(&store)
         .await
         .unwrap();
-    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('films','Films','films','local',?,1)")
+    aether_core::database::query("INSERT INTO libraries(id,name,kind,node_id,root,enabled,options_json) VALUES('films','Films','films','local',?,1,'{\"realtimeMonitoring\":false}')")
         .bind(root.to_str().unwrap())
         .execute(store.pool())
         .await

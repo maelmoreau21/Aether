@@ -853,3 +853,26 @@ fn parse_series_episode_handles_french_accents_season_tags_and_trailing_numbers(
     assert_eq!(ep.season_number, 2);
     assert_eq!(ep.episode_number, 1);
 }
+
+#[test]
+fn parse_series_episode_handles_trailing_numbers_without_season_folder() {
+    let ep1 = parse_series_episode(Path::new("My Show/My Show 01.mkv")).unwrap();
+    assert_eq!(ep1.season_number, 1);
+    assert_eq!(ep1.episode_number, 1);
+
+    let ep2 = parse_series_episode(Path::new("My Show/My Show 02 [1080p].mkv")).unwrap();
+    assert_eq!(ep2.season_number, 1);
+    assert_eq!(ep2.episode_number, 2);
+
+    // A standalone work whose filename equals the folder title with a trailing number
+    // must keep episode 1 rather than splitting the title number into an episode number.
+    let movie = parse_series_episode(Path::new("Apollo 13/Apollo 13.mkv")).unwrap();
+    assert_eq!(movie.season_number, 1);
+    assert_eq!(movie.episode_number, 1);
+    assert_eq!(movie.episode_title, "Apollo 13");
+
+    // Years without a season folder must still never be treated as episode numbers.
+    let year_file = parse_series_episode(Path::new("Arcane/Arcane 2024 [1080p].mkv")).unwrap();
+    assert_eq!(year_file.season_number, 1);
+    assert_eq!(year_file.episode_number, 1);
+}

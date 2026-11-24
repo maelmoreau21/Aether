@@ -101,7 +101,7 @@ fn work(row: &sqlx::any::AnyRow) -> Value {
             "logo": row.try_get::<Option<String>,_>("logo_url").ok().flatten()
                 .or_else(|| metadata["logo_url"].as_str().or_else(|| metadata["logoUrl"].as_str()).map(str::to_owned)),
             "thumb": row.try_get::<Option<String>,_>("thumb_url").ok().flatten()
-                .or_else(|| metadata["thumb_url"].as_str().or_else(|| metadata["thumbUrl"].as_str()).or_else(|| metadata["still_url"].as_str()).or_else(|| metadata["stillUrl"].as_str()).map(str::to_owned))
+                .or_else(|| metadata["thumb_url"].as_str().or_else(|| metadata["thumbUrl"].as_str()).or_else(|| metadata["still_url"].as_str()).or_else(|| metadata["stillUrl"].as_str()).filter(|u| u.starts_with('/')).map(str::to_owned))
         },
         "translations": metadata.get("translations").cloned().unwrap_or_else(|| json!({})),
         "nodeId": node_id.unwrap_or_else(|| "local".to_string()),
@@ -1768,7 +1768,17 @@ pub async fn detail_window(
 
         let ep_rows = query(
             "SELECT ep.season_id, ep.episode_number, w.*, wl.node_id AS node_id, wn.status AS node_status, \
-             (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS thumb_url \
+             COALESCE(\
+                (SELECT '/api/v1/works/' || w.id || '/images/' || e.id FROM work_image_entries e \
+                 LEFT JOIN artwork_annotations a ON a.work_id=e.work_id AND a.image_id=e.id \
+                 LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id \
+                 WHERE e.work_id=w.id AND e.kind='thumb' \
+                 ORDER BY COALESCE(a.pinned,0) DESC, COALESCE(o.position,e.position) ASC, e.id ASC LIMIT 1), \
+                (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i \
+                 LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+                 WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND h.image_id IS NULL AND i.root_snapshot=wl.root AND wn.status='connected' \
+                 ORDER BY i.priority,i.relative_path,i.id LIMIT 1)\
+             ) AS thumb_url \
              FROM inventory_seasons s \
              JOIN inventory_episodes ep ON ep.season_id=s.id \
              JOIN inventory_works w ON w.id=ep.work_id \
@@ -1889,7 +1899,17 @@ async fn populate_episode_page(
     };
     let page_sql = format!(
         "SELECT ep.season_id,s.season_number,ep.episode_number,w.*,wl.node_id,wn.status AS node_status, \
-         (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND i.root_snapshot=wl.root AND wn.status='connected' ORDER BY i.priority,i.relative_path,i.id LIMIT 1) AS thumb_url \
+         COALESCE(\
+            (SELECT '/api/v1/works/' || w.id || '/images/' || e.id FROM work_image_entries e \
+             LEFT JOIN artwork_annotations a ON a.work_id=e.work_id AND a.image_id=e.id \
+             LEFT JOIN work_image_order o ON o.work_id=e.work_id AND o.image_id=e.id \
+             WHERE e.work_id=w.id AND e.kind='thumb' \
+             ORDER BY COALESCE(a.pinned,0) DESC, COALESCE(o.position,e.position) ASC, e.id ASC LIMIT 1), \
+            (SELECT '/api/v1/assets/' || i.id || '/image?v=' || i.modified_ns || '-' || i.size FROM inventory_images i \
+             LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
+             WHERE i.work_id=w.id AND i.role='thumb' AND i.available=1 AND h.image_id IS NULL AND i.root_snapshot=wl.root AND wn.status='connected' \
+             ORDER BY i.priority,i.relative_path,i.id LIMIT 1)\
+         ) AS thumb_url \
          FROM inventory_seasons s JOIN inventory_episodes ep ON ep.season_id=s.id JOIN inventory_works w ON w.id=ep.work_id \
          JOIN libraries wl ON wl.id=w.library_id JOIN media_nodes wn ON wn.id=wl.node_id \
          WHERE s.series_id=? AND {eligible} \
@@ -2444,5 +2464,136 @@ mod tests {
                     .is_none()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn series_episodes_use_distinct_local_work_image_thumbs_and_block_external_still_urls() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = IdentityStore::open(&dir.path().join("ep-thumbs.sqlite"))
+            .await
+            .unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        query("INSERT INTO libraries(id,name,kind,node_id,root,enabled) VALUES('shows','Shows','series','local',?,1)")
+            .bind(&root)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,external_ids_json,kind) VALUES('series-1','shows','show','Show','show','{}','series')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        query("INSERT INTO inventory_seasons(id,series_id,season_number,title) VALUES('season-1','series-1',1,'Saison 1')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        for (ep_id, ep_num, still) in [
+            ("ep-1", 1_i64, "https://image.tmdb.org/t/p/w500/ep1.jpg"),
+            ("ep-2", 2_i64, "https://image.tmdb.org/t/p/w500/ep2.jpg"),
+        ] {
+            query("INSERT INTO inventory_works(id,library_id,identity_key,title,title_sort,external_ids_json,kind,editorial_json) VALUES(?,?,?,?,?,'{}','episode',?)")
+                .bind(ep_id)
+                .bind("shows")
+                .bind(format!("show/s01e0{ep_num}"))
+                .bind(format!("Episode {ep_num}"))
+                .bind(format!("episode {ep_num}"))
+                .bind(json!({"still_url": still, "thumb_url": still}).to_string())
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            query("INSERT INTO inventory_episodes(id,season_id,episode_number,work_id) VALUES(?,'season-1',?,?)")
+                .bind(format!("link-{ep_num}"))
+                .bind(ep_num)
+                .bind(ep_id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            let ed_id = format!("ed-{ep_num}");
+            let ver_id = format!("ver-{ep_num}");
+            let src_id = format!("src-{ep_num}");
+            let asset_id = format!("asset-{ep_num}");
+            query("INSERT INTO inventory_editions(id,work_id) VALUES(?,?)")
+                .bind(&ed_id)
+                .bind(ep_id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            query("INSERT INTO inventory_versions(id,edition_id) VALUES(?,?)")
+                .bind(&ver_id)
+                .bind(&ed_id)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            query("INSERT INTO inventory_sources(id,version_id,library_id,root_snapshot) VALUES(?,?,'shows',?)")
+                .bind(&src_id)
+                .bind(&ver_id)
+                .bind(&root)
+                .execute(&store.pool)
+                .await
+                .unwrap();
+            query("INSERT INTO inventory_assets(id,source_id,library_id,relative_path,size,modified_ns,mime,probe_json,available) VALUES(?,?,'shows',?,1000,'1','video/x-matroska','{}',1)")
+                .bind(&asset_id)
+                .bind(&src_id)
+                .bind(format!("Show/S01E0{ep_num}.mkv"))
+                .execute(&store.pool)
+                .await
+                .unwrap();
+        }
+
+        // Import a local work_image_entries thumb for ep-1 only first.
+        query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height,provider) VALUES('img-ep-1','ep-1','thumb',0,640,360,'tmdb')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let unpaged = detail_window(&store, "series-1", None)
+            .await
+            .unwrap()
+            .expect("series detail");
+        let eps = unpaged["seasons"][0]["episodes"].as_array().unwrap();
+        assert_eq!(eps.len(), 2);
+        assert_eq!(
+            eps[0]["artwork"]["thumb"],
+            "/api/v1/works/ep-1/images/img-ep-1"
+        );
+        assert!(
+            eps[1]["artwork"]["thumb"].is_null(),
+            "raw external still_url must never be exposed under strict img-src 'self' CSP"
+        );
+
+        // Now add a distinct local thumb for ep-2 and verify paged detail_window too.
+        query("INSERT INTO work_image_entries(id,work_id,kind,position,width,height,provider) VALUES('img-ep-2','ep-2','thumb',0,640,360,'tmdb')")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let paged = detail_window(
+            &store,
+            "series-1",
+            Some(&EpisodePage {
+                user: "admin".into(),
+                role: "administrator".into(),
+                season: Some(1),
+                offset: 0,
+                limit: 10,
+                after: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .expect("paged series detail");
+        let paged_eps = paged["seasons"][0]["episodes"].as_array().unwrap();
+        assert_eq!(paged_eps.len(), 2);
+        assert_eq!(
+            paged_eps[0]["artwork"]["thumb"],
+            "/api/v1/works/ep-1/images/img-ep-1"
+        );
+        assert_eq!(
+            paged_eps[1]["artwork"]["thumb"],
+            "/api/v1/works/ep-2/images/img-ep-2"
+        );
+        assert_ne!(
+            paged_eps[0]["artwork"]["thumb"],
+            paged_eps[1]["artwork"]["thumb"]
+        );
     }
 }

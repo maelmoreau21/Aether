@@ -508,11 +508,10 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
                 .map(str::trim)
                 .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
             if let Some(tmdb_id) = resolved_tmdb {
-                let mut stored_ids =
-                    serde_json::from_str::<std::collections::BTreeMap<String, String>>(
-                        &external_ids_json,
-                    )
-                    .unwrap_or_default();
+                let mut stored_ids = serde_json::from_str::<
+                    std::collections::BTreeMap<String, String>,
+                >(&external_ids_json)
+                .unwrap_or_default();
                 if !stored_ids.contains_key("tmdb") {
                     stored_ids.insert("tmdb".into(), tmdb_id.to_owned());
                     if let Ok(encoded_ids) = serde_json::to_string(&stored_ids) {

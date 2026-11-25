@@ -522,9 +522,9 @@ pub(crate) async fn collect(store: &IdentityStore, timestamp: i64) -> Result<(),
     // Only additions after a subscription started qualify; existing catalogue is not announced.
     // Skip scanning `inventory_works` entirely when no user subscribes to content notifications.
     let has_content_subscribers: i64 = query_scalar(
-        "SELECT CAST(EXISTS(SELECT 1 FROM notification_content_preferences p \
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM notification_content_preferences p \
             JOIN notification_preferences base ON base.user_id=p.user_id \
-            WHERE p.enabled=1 AND base.enabled=1) AS BIGINT)",
+            WHERE p.enabled=1 AND base.enabled=1) THEN 1 ELSE 0 END",
     )
     .fetch_one(store.pool())
     .await?;

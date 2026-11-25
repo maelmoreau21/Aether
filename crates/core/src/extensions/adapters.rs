@@ -640,7 +640,7 @@ pub(super) async fn download_provider_image(
         if !response.status().is_success() {
             return Err(err(StatusCode::BAD_GATEWAY, "image_download_failed"));
         }
-        let content = response
+        let raw_content = response
             .headers()
             .get(header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
@@ -648,7 +648,13 @@ pub(super) async fn download_provider_image(
             .split(';')
             .next()
             .unwrap_or("")
-            .to_owned();
+            .trim()
+            .to_ascii_lowercase();
+        let content = if raw_content == "image/jpg" {
+            "image/jpeg".to_owned()
+        } else {
+            raw_content
+        };
         let mut bytes = Vec::new();
         while let Some(chunk) = response
             .chunk()

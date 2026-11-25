@@ -124,7 +124,7 @@ async fn mark_auto_attempt_at(
     Ok(())
 }
 
-const EPISODE_STILL_MODE: &str = "episode-still";
+const EPISODE_STILL_MODE: &str = "episode-still-v2";
 
 fn extract_https_still(manual_json: Option<&str>, editorial_json: &str) -> Option<String> {
     for raw in [manual_json, Some(editorial_json)].into_iter().flatten() {
@@ -186,7 +186,13 @@ fn pick_series_details_provider(
         };
         let lower = ext_id.to_ascii_lowercase();
         let candidate_id = if lower.contains("tmdb") {
-            ids.get("tmdb").cloned()
+            // TMDb natively resolves IMDb and TVDB IDs via `/find/{id}` when no TMDb ID is stored yet
+            // (for example on series identified with TVDB, the default provider for series).
+            // Prefix TVDB IDs so TMDb never mistakes a numeric TVDB ID for a TMDb ID.
+            ids.get("tmdb")
+                .cloned()
+                .or_else(|| ids.get("imdb").cloned())
+                .or_else(|| ids.get("tvdb").map(|id| format!("tvdb:{id}")))
         } else if lower.contains("tvdb") {
             ids.get("tvdb").cloned()
         } else {
@@ -486,15 +492,53 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
             }
         };
 
+        // Persist any newly resolved TMDb ID on the series so future passes skip `/find/`.
+        if !ids.contains_key("tmdb") {
+            let resolved_tmdb = proposal
+                .get("externalIds")
+                .and_then(|v| v.get("tmdb"))
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    ext_id
+                        .to_ascii_lowercase()
+                        .contains("tmdb")
+                        .then(|| proposal.get("providerId").and_then(Value::as_str))
+                        .flatten()
+                })
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+            if let Some(tmdb_id) = resolved_tmdb {
+                let mut stored_ids =
+                    serde_json::from_str::<std::collections::BTreeMap<String, String>>(
+                        &external_ids_json,
+                    )
+                    .unwrap_or_default();
+                if !stored_ids.contains_key("tmdb") {
+                    stored_ids.insert("tmdb".into(), tmdb_id.to_owned());
+                    if let Ok(encoded_ids) = serde_json::to_string(&stored_ids) {
+                        let _ = query("UPDATE inventory_works SET external_ids_json=? WHERE id=?")
+                            .bind(&encoded_ids)
+                            .bind(&series_id)
+                            .execute(auth.store.pool())
+                            .await;
+                    }
+                }
+            }
+        }
+
         let mut stills_by_ep: std::collections::HashMap<(i64, i64), Value> =
             std::collections::HashMap::new();
+        let mut returned_seasons = std::collections::HashSet::new();
         if let Some(seasons) = proposal.get("seasons").and_then(Value::as_array) {
             for season in seasons {
                 let s_num = season
                     .get("seasonNumber")
                     .and_then(Value::as_i64)
                     .unwrap_or(0);
-                if let Some(episodes) = season.get("episodes").and_then(Value::as_array) {
+                if let Some(episodes) = season.get("episodes").and_then(Value::as_array)
+                    && !episodes.is_empty()
+                {
+                    returned_seasons.insert(s_num);
                     for ep in episodes {
                         if let Some(ep_num) = ep.get("episodeNumber").and_then(Value::as_i64) {
                             stills_by_ep.insert((s_num, ep_num), ep.clone());
@@ -564,8 +608,13 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
                     .execute(auth.store.pool())
                     .await;
                 populated += 1;
-            } else {
+            } else if returned_seasons.contains(s_num) {
                 mark_auto_attempt(auth, ep_id, EPISODE_STILL_MODE).await?;
+            } else {
+                // The provider did not return episode data for this season (e.g. a provider without
+                // episode stills or a truncated response): back off for 6 hours instead of 30 days.
+                mark_auto_attempt_at(auth, ep_id, EPISODE_STILL_MODE, retry_cutoff + 6 * 3600)
+                    .await?;
             }
         }
         if populated > 0 {
@@ -713,6 +762,21 @@ pub(crate) async fn queue_library_pass(
     query("INSERT INTO artwork_collection_jobs(id,library_id,owner,parameters,cursor_work,created_at,updated_at) VALUES(?,?,?,?,'',?,?)")
         .bind(uuid::Uuid::new_v4().to_string()).bind(library).bind(owner).bind(parameters).bind(now()).bind(now())
         .execute(&mut *tx).await.map_err(db)?;
+    // Also retry missing episode thumbnails for this library on an explicit artwork pass.
+    query(
+        "DELETE FROM artwork_auto_attempts \
+         WHERE mode=? AND work_id IN ( \
+             SELECT w.id FROM inventory_works w \
+             WHERE w.kind='episode' AND (w.library_id=? \
+                 OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
+         )",
+    )
+    .bind(EPISODE_STILL_MODE)
+    .bind(library)
+    .bind(library)
+    .execute(&mut *tx)
+    .await
+    .map_err(db)?;
     tx.commit().await.map_err(db)?;
     Ok(true)
 }

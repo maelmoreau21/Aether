@@ -255,9 +255,25 @@ fn pick_series_details_provider_prefers_tmdb_for_episode_stills() {
         Some(("tmdb".into(), "1396".into()))
     );
 
+    // Without a stored TMDb ID (typical for TVDB-identified series), TMDb is still preferred
+    // because it resolves IMDb and TVDB IDs via `/find/` and returns per-episode stillUrls.
     ids.remove("tmdb");
+    ids.insert("imdb".into(), "tt0903747".into());
     assert_eq!(
         pick_series_details_provider(&extensions, &options, &ids),
+        Some(("tmdb".into(), "tt0903747".into()))
+    );
+
+    ids.remove("imdb");
+    assert_eq!(
+        pick_series_details_provider(&extensions, &options, &ids),
+        Some(("tmdb".into(), "tvdb:81189".into()))
+    );
+
+    // When TMDb is not available, fall back to TVDB.
+    let tvdb_only = vec![make_pkg("tvdb")];
+    assert_eq!(
+        pick_series_details_provider(&tvdb_only, &options, &ids),
         Some(("tvdb".into(), "81189".into()))
     );
 }

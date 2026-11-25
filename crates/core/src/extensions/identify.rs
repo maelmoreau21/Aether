@@ -418,6 +418,24 @@ pub(super) async fn apply(
     .await
     .map_err(db)?;
 
+    // Always reset episode-still attempts for a newly identified series so the background
+    // episode-still worker fetches unique thumbnails even when the chosen provider (e.g. TVDB)
+    // does not include episode still URLs in its series details response.
+    if kind == "series" {
+        let _ = query(
+            "DELETE FROM artwork_auto_attempts \
+             WHERE mode IN ('episode-still', 'episode-still-v2') \
+             AND work_id IN ( \
+                 SELECT ep.work_id FROM inventory_episodes ep \
+                 JOIN inventory_seasons s ON s.id=ep.season_id \
+                 WHERE s.series_id=? \
+             )",
+        )
+        .bind(&input.work_id)
+        .execute(&mut *tx)
+        .await;
+    }
+
     // Enrich seasons and episodes if this is a series
     let mut episode_stills: Vec<(String, String)> = Vec::new();
     if kind == "series"
@@ -508,12 +526,6 @@ pub(super) async fn apply(
                         )
                         .bind(&ep_json)
                         .bind(&ep_json)
-                        .bind(&ep_wid)
-                        .execute(&mut *tx)
-                        .await;
-                        let _ = query(
-                            "DELETE FROM artwork_auto_attempts WHERE work_id=? AND mode='episode-still'",
-                        )
                         .bind(&ep_wid)
                         .execute(&mut *tx)
                         .await;

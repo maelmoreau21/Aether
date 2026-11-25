@@ -124,7 +124,7 @@ async fn mark_auto_attempt_at(
     Ok(())
 }
 
-const EPISODE_STILL_MODE: &str = "episode-still-v2";
+const EPISODE_STILL_MODE: &str = "episode-still-v3";
 
 fn extract_https_still(manual_json: Option<&str>, editorial_json: &str) -> Option<String> {
     for raw in [manual_json, Some(editorial_json)].into_iter().flatten() {
@@ -142,23 +142,36 @@ fn extract_https_still(manual_json: Option<&str>, editorial_json: &str) -> Optio
     None
 }
 
+fn merge_external_ids_object(
+    target: &mut std::collections::BTreeMap<String, String>,
+    object: &serde_json::Map<String, Value>,
+) {
+    for (k, v) in object {
+        let value = v
+            .as_str()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .or_else(|| v.as_u64().map(|n| n.to_string()))
+            .or_else(|| v.as_i64().filter(|n| *n > 0).map(|n| n.to_string()));
+        if let Some(s) = value {
+            target.insert(k.clone(), s);
+        }
+    }
+}
+
 fn merge_series_external_ids(
     external_ids_json: &str,
     manual_json: Option<&str>,
 ) -> std::collections::BTreeMap<String, String> {
-    let mut ids =
-        serde_json::from_str::<std::collections::BTreeMap<String, String>>(external_ids_json)
-            .unwrap_or_default();
+    let mut ids = std::collections::BTreeMap::new();
+    if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(external_ids_json) {
+        merge_external_ids_object(&mut ids, &map);
+    }
     if let Some(manual) = manual_json.and_then(|s| serde_json::from_str::<Value>(s).ok())
         && let Some(extra) = manual.get("external_ids").and_then(Value::as_object)
     {
-        for (k, v) in extra {
-            if let Some(s) = v.as_str()
-                && !s.trim().is_empty()
-            {
-                ids.insert(k.clone(), s.to_owned());
-            }
-        }
+        merge_external_ids_object(&mut ids, extra);
     }
     ids
 }
@@ -377,11 +390,22 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
         return Ok(true);
     }
 
+    #[derive(sqlx::FromRow)]
+    struct SeriesStillCandidate {
+        id: String,
+        library_id: String,
+        options_json: String,
+        title: String,
+        year: Option<i64>,
+        external_ids_json: String,
+        manual_json: Option<String>,
+    }
+
     // Step B: find 1 identified series with episodes missing both a thumb and a still_url,
     // and populate episode still_urls via one metadata.details call.
-    let series_candidates: Vec<(String, String, String, String, Option<String>)> = query_as(
-        "SELECT w.id, w.library_id, COALESCE(parent.options_json, l.options_json), \
-                w.external_ids_json, w.manual_json \
+    let series_candidates: Vec<SeriesStillCandidate> = query_as(
+        "SELECT w.id, w.library_id, COALESCE(parent.options_json, l.options_json) AS options_json, \
+                w.title, w.year, w.external_ids_json, w.manual_json \
          FROM inventory_works w \
          JOIN libraries l ON l.id=w.library_id \
          LEFT JOIN library_folders f ON f.library_id=l.id AND f.active=1 \
@@ -424,8 +448,15 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
     .await
     .map_err(db)?;
 
-    for (series_id, series_library_id, options_json, external_ids_json, manual_json) in
-        series_candidates
+    for SeriesStillCandidate {
+        id: series_id,
+        library_id: series_library_id,
+        options_json,
+        title: series_title,
+        year: series_year,
+        external_ids_json,
+        manual_json,
+    } in series_candidates
     {
         let options = crate::library_options::LibraryOptions::from_json(&options_json);
         if !(options.fetch_poster || options.fetch_backdrop || options.fetch_thumb) {
@@ -467,7 +498,7 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
             continue;
         };
 
-        let response = run::run_with_context(
+        let mut response = run::run_with_context(
             auth,
             &HeaderMap::new(),
             &ext_id,
@@ -479,6 +510,56 @@ pub(super) async fn episode_stills_tick(auth: &AuthState) -> Result<bool, Error>
             Some(run::Background::EpisodeStill { owner: &owner }),
         )
         .await;
+
+        // If TMDb could not resolve a TVDB/IMDb external ID via `/find/` (common on anime and
+        // newer shows without cross-links), fall back to a strict title+year search on TMDb.
+        if response.is_err()
+            && !matches!(response, Err((StatusCode::CONFLICT, _)))
+            && ext_id.to_ascii_lowercase().contains("tmdb")
+            && !ids.contains_key("tmdb")
+            && let Ok(Json(search_body)) = run::run_with_context(
+                auth,
+                &HeaderMap::new(),
+                &ext_id,
+                run::Run {
+                    work_id: series_id.clone(),
+                    operation: "metadata.search".into(),
+                    input: json!({ "externalIds": {} }),
+                },
+                Some(run::Background::EpisodeStill { owner: &owner }),
+            )
+            .await
+            && let Some(items) = search_body.get("proposal").and_then(Value::as_array)
+        {
+            let effective_title = manual_json
+                .as_deref()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .and_then(|v| v.get("title").and_then(Value::as_str).map(str::to_owned))
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| series_title.clone());
+            let match_input = json!({
+                "title": effective_title,
+                "year": series_year,
+                "mediaType": "tv_show",
+            });
+            if let Some(found_id) = super::matching::trusted_metadata_candidate(items, &match_input)
+                .and_then(|item| item.get("id").and_then(Value::as_str))
+                .filter(|id| !id.trim().is_empty())
+            {
+                response = run::run_with_context(
+                    auth,
+                    &HeaderMap::new(),
+                    &ext_id,
+                    run::Run {
+                        work_id: series_id.clone(),
+                        operation: "metadata.details".into(),
+                        input: json!({ "id": found_id }),
+                    },
+                    Some(run::Background::EpisodeStill { owner: &owner }),
+                )
+                .await;
+            }
+        }
 
         let proposal = match response {
             Ok(Json(body)) => body.get("proposal").cloned().unwrap_or(Value::Null),
@@ -764,13 +845,12 @@ pub(crate) async fn queue_library_pass(
     // Also retry missing episode thumbnails for this library on an explicit artwork pass.
     query(
         "DELETE FROM artwork_auto_attempts \
-         WHERE mode=? AND work_id IN ( \
+         WHERE mode LIKE 'episode-still%' AND work_id IN ( \
              SELECT w.id FROM inventory_works w \
              WHERE w.kind='episode' AND (w.library_id=? \
                  OR w.library_id IN (SELECT library_id FROM library_folders WHERE parent_id=? AND active=1)) \
          )",
     )
-    .bind(EPISODE_STILL_MODE)
     .bind(library)
     .bind(library)
     .execute(&mut *tx)

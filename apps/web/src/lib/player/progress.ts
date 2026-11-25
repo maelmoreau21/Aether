@@ -4,7 +4,7 @@ import { serverPresentation } from '../config/presentation';
 import type { PlaybackState } from './types';
 
 import { tr } from '../i18n';
-export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string }
+export interface Progress { workId: string; position: number; duration: number; watched: boolean; revision: number; title?: string; kind?: string; seriesId?: string; thumbUrl?: string | null; imageUrl?: string | null }
 
 const warmed = new Map<string, { at: number; value: Promise<Progress> }>();
 /** Writes still on the wire: a read issued meanwhile would return the revision they are replacing. */

@@ -334,7 +334,9 @@ pub(super) async fn run_with_context(
         payload["country"] = settings["country"].clone();
         payload["countryCode"] = settings["countryCode"].clone();
     }
-    if input.operation == "metadata.details" {
+    if input.operation == "metadata.details"
+        && !matches!(background, Some(Background::EpisodeStill { .. }))
+    {
         // Plugins on the first contract ignore this field and answer in one language.
         let wanted = crate::translations::wanted_locales(&auth.store, preferred_lang, 6)
             .await

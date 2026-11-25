@@ -484,13 +484,62 @@ async fn list(
             (resolved_id, v)
         })
         .collect();
-    let mut allowed = Vec::new();
+    let mut allowed: Vec<(String, Option<String>, String, Value)> = Vec::new();
     for (resolved_id, item) in items.drain(..) {
         if crate::product::parental_allowed(&auth.store, &identity.user.id, &resolved_id).await? {
-            allowed.push(item);
+            let series_id = item["seriesId"].as_str().map(str::to_owned);
+            let kind = item["kind"].as_str().unwrap_or_default().to_owned();
+            allowed.push((resolved_id, series_id, kind, item));
         }
     }
-    Ok(Json(json!({"items":allowed})))
+    let mut art_ids: Vec<String> = Vec::new();
+    for (resolved_id, series_id, _, _) in &allowed {
+        if !art_ids.contains(resolved_id) {
+            art_ids.push(resolved_id.clone());
+        }
+        if let Some(sid) = series_id
+            && !art_ids.contains(sid)
+        {
+            art_ids.push(sid.clone());
+        }
+    }
+    let artwork_entries = crate::artwork::entries(&auth.store, &art_ids)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let pick_artwork = |work_id: &str, roles: &[&str]| -> Option<String> {
+        for role in roles {
+            if let Some(entry) = artwork_entries
+                .iter()
+                .find(|entry| entry.work_id == work_id && entry.kind == *role)
+            {
+                return Some(entry.url.clone());
+            }
+        }
+        None
+    };
+    let result: Vec<Value> = allowed
+        .into_iter()
+        .map(|(resolved_id, series_id, kind, mut item)| {
+            if kind == "episode" {
+                item["thumbUrl"] = json!(pick_artwork(&resolved_id, &["thumb"]));
+            }
+            let target_id = series_id.as_deref().unwrap_or(&resolved_id);
+            let image_url = pick_artwork(target_id, &["landscape", "backdrop", "thumb", "poster"])
+                .or_else(|| {
+                    (target_id != resolved_id.as_str())
+                        .then(|| {
+                            pick_artwork(
+                                &resolved_id,
+                                &["thumb", "landscape", "backdrop", "poster"],
+                            )
+                        })
+                        .flatten()
+                });
+            item["imageUrl"] = json!(image_url);
+            item
+        })
+        .collect();
+    Ok(Json(json!({"items":result})))
 }
 
 #[cfg(test)]

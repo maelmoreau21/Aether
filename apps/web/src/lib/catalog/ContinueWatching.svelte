@@ -4,7 +4,7 @@
   import { resolve } from '$app/paths';
   import { session } from '../auth/session';
   import { history, loadHistory, markWatched } from './watch-state';
-  import { isResumable } from '../player/progress';
+  import { isResumable, type Progress } from '../player/progress';
   import { serverPresentation } from '../config/presentation';
   import Icon from '../ui/Icon.svelte';
   import type { Work } from './api';
@@ -12,8 +12,20 @@
   import { imagePreviewUrl } from './image-url';
   import { t } from '../i18n';
   let { works = [] }: { works?: Work[] } = $props();
-  // landscape.jpg is the 16:9 artwork made for resume cards; backdrop and thumb are fallbacks.
-  function thumbnail(id: string, seriesId?: string) { const work=works.find(work=>work.id===(seriesId || id)); const artwork=selectArtwork(work, $session); return imagePreviewUrl(artwork.landscape || artwork.backdrop || artwork.thumb,640); }
+  // Prefer episode still for episodes, then 16:9 landscape/backdrop/thumb, server-provided imageUrl, or poster.
+  function thumbnail(item: Progress) {
+    const work = works.find(work => work.id === (item.seriesId || item.workId));
+    const artwork = selectArtwork(work, $session);
+    return imagePreviewUrl(
+      (item.kind === 'episode' ? item.thumbUrl : null) ||
+        artwork.landscape ||
+        artwork.backdrop ||
+        artwork.thumb ||
+        item.imageUrl ||
+        artwork.poster,
+      640
+    );
+  }
   let failedImages = $state<string[]>([]);
 
   let error = $state('');
@@ -131,7 +143,7 @@
       onscroll={updateScrollState}
     >
       {#each continuing as item (item.workId)}
-        {@const image = thumbnail(item.workId,item.seriesId)}
+        {@const image = thumbnail(item)}
         <div class="continue-item">
         <a
           class="continue-card"

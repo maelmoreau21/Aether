@@ -424,7 +424,7 @@ pub(super) async fn apply(
     if kind == "series" {
         let _ = query(
             "DELETE FROM artwork_auto_attempts \
-             WHERE mode IN ('episode-still', 'episode-still-v2') \
+             WHERE mode LIKE 'episode-still%' \
              AND work_id IN ( \
                  SELECT ep.work_id FROM inventory_episodes ep \
                  JOIN inventory_seasons s ON s.id=ep.season_id \

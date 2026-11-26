@@ -59,12 +59,12 @@
   async function leaveGroup() { const id = selectedGroup; selectedGroup = ''; await tick(); [...(covers?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(button => button.dataset.group === id)?.focus(); }
 
   const albumCoverUrls = $derived.by(() => {
-    const map = new Map<string, string>();
+    const map: Record<string, string> = Object.create(null);
     for (const track of tracks) {
       if (!track.coverUrl) continue;
       const artist = track.albumArtist || track.artist;
       const key = track.album ? `${artist}\0${track.album}` : track.id;
-      if (!map.has(key)) map.set(key, imagePreviewUrl(track.coverUrl, 320));
+      if (!map[key]) map[key] = imagePreviewUrl(track.coverUrl, 320);
     }
     return map;
   });
@@ -73,7 +73,7 @@
     if (!track.coverUrl) return null;
     const artist = track.albumArtist || track.artist;
     const key = track.album ? `${artist}\0${track.album}` : track.id;
-    return albumCoverUrls.get(key) ?? imagePreviewUrl(track.coverUrl, 320);
+    return albumCoverUrls[key] ?? imagePreviewUrl(track.coverUrl, 320);
   }
 
   function groupCover(items: Track[]): string | null {

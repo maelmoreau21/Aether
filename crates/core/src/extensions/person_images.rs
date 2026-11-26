@@ -28,8 +28,9 @@ const MAX_CREDITS: usize = 100;
 static DOWNLOADS: Semaphore = Semaphore::const_new(4);
 
 type PortraitMapCacheEntry = (i64, u64, String, HashMap<String, String>);
-static WORK_PORTRAIT_URLS: LazyLock<Mutex<HashMap<(u64, String), PortraitMapCacheEntry>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+type PortraitMapCache = HashMap<(u64, String), PortraitMapCacheEntry>;
+static WORK_PORTRAIT_URLS: LazyLock<std::sync::Mutex<PortraitMapCache>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
 
 async fn work_portrait_url(
     auth: &AuthState,

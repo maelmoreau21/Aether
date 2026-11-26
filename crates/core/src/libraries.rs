@@ -939,7 +939,7 @@ async fn serve_library_image(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     response.headers_mut().insert(
         header::CACHE_CONTROL,
-        header::HeaderValue::from_static("private, no-cache"),
+        header::HeaderValue::from_static("private, no-store"),
     );
     Ok(response)
 }

@@ -165,7 +165,7 @@ async fn avatar(
         .map_err(|_| error(StatusCode::INTERNAL_SERVER_ERROR, "storage_error"))?;
     resp.headers_mut().insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("private, no-cache"),
+        HeaderValue::from_static("private, no-store"),
     );
     Ok(resp)
 }

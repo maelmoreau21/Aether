@@ -858,8 +858,8 @@ async fn work_search_titles_fts_avoids_full_table_scan_and_zero_results_are_fast
     // Populate alternate search titles for works
     for i in 0..500 {
         sqlx::query("INSERT INTO work_search_titles(work_id, title_search) VALUES(?, ?) ON CONFLICT DO NOTHING")
-            .bind(format!("work-{:05}", i))
-            .bind(format!("titre alternatif {}", i))
+            .bind(format!("work-{:06}", i))
+            .bind(format!("titre alternatif {:04}", i))
             .execute(store.pool())
             .await
             .unwrap();
@@ -895,7 +895,7 @@ async fn work_search_titles_fts_avoids_full_table_scan_and_zero_results_are_fast
         &store,
         &all_libs,
         None,
-        "alternatif 42",
+        "alternatif 0042",
         "title-asc",
         0,
         24,

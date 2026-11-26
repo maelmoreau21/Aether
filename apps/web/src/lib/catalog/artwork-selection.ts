@@ -116,7 +116,7 @@ function hash(value: string): number {
 /** Display choices only: authorization and image storage remain owned by Core. */
 export function selectArtwork(work: Work | null | undefined, current: Session | null, languages: string[] = [preferences().locale ?? 'fr', 'en']): Record<string, string | null> {
   const policy = artworkRotationPolicy();
-  if (!work) return { ...work?.artwork };
+  if (!work) return {};
   const owner = current?.user.id ?? 'anonymous';
   const period = Math.floor(Date.now() / ROTATION_PERIOD_MS);
   const cacheKey = `${owner}:${pageVisit}:${period}:${policyId(policy)}:${languages.join(',')}`;

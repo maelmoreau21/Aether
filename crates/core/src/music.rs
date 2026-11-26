@@ -95,7 +95,7 @@ async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result
 }
 async fn allowed_actor(
     auth: &AuthState,
-    actor: &crate::identity::Authenticated,
+    actor: &crate::auth::Authenticated,
     library: &str,
 ) -> Result<(), StatusCode> {
     let exists: i64 = query_scalar(

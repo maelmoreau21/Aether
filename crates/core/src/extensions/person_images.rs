@@ -8,8 +8,10 @@
 use super::*;
 use crate::assets::AssetError;
 use axum::response::Response;
+use std::collections::HashMap;
 #[cfg(test)]
 use std::io::Cursor;
+use std::sync::LazyLock;
 
 /// Longest accepted provider URL (TMDb portraits are about 60 bytes).
 const MAX_SOURCE_URL: usize = 2048;

@@ -24,7 +24,8 @@
 
   onMount(() => {
     initTheme();
-    const refresh=()=>{if(document.visibilityState==='visible'&&!isDownloads)void hydratePreferences().then(saved=>{if(saved){setTheme(saved.theme??'system',false);setLocale(saved.locale??'fr',false);}}).catch(()=>{});};
+    let lastFocusRefreshAt = 0;
+    const refresh=()=>{if(document.visibilityState!=='visible'||isDownloads)return;const now=Date.now();if(now-lastFocusRefreshAt<60_000)return;lastFocusRefreshAt=now;void hydratePreferences().then(saved=>{if(saved){setTheme(saved.theme??'system',false);setLocale(saved.locale??'fr',false);}}).catch(()=>{});};
     window.addEventListener('focus',refresh);
     const uninstallTv=installTvNavigation();
     return()=>{window.removeEventListener('focus',refresh);uninstallTv();};

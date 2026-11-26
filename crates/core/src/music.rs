@@ -91,6 +91,13 @@ async fn lyrics(
 }
 async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result<(), StatusCode> {
     let actor = auth.authenticate(headers).await?;
+    allowed_actor(auth, &actor, library).await
+}
+async fn allowed_actor(
+    auth: &AuthState,
+    actor: &crate::identity::Authenticated,
+    library: &str,
+) -> Result<(), StatusCode> {
     let exists: i64 = query_scalar(
         "SELECT COUNT(*) \
             FROM libraries l \
@@ -117,6 +124,42 @@ async fn allowed(auth: &AuthState, headers: &HeaderMap, library: &str) -> Result
         Ok(())
     }
 }
+static MUSIC_FTS_SCOPES: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u64, bool>>,
+> = std::sync::OnceLock::new();
+
+async fn has_music_tracks_fts(store: &IdentityStore) -> bool {
+    let map = MUSIC_FTS_SCOPES.get_or_init(Default::default);
+    if let Ok(guard) = map.lock()
+        && let Some(&cached) = guard.get(&store.cache_scope)
+    {
+        return cached;
+    }
+    let is_sqlite = store
+        .pool
+        .acquire()
+        .await
+        .is_ok_and(|conn| conn.backend_name() == "SQLite");
+    let has_fts = if is_sqlite {
+        query_scalar::<_, i64>(
+            "SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='music_tracks_fts') THEN 1 ELSE 0 END AS BIGINT)",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap_or(0)
+            != 0
+    } else {
+        false
+    };
+    if let Ok(mut guard) = map.lock() {
+        if guard.len() >= 256 {
+            guard.clear();
+        }
+        guard.insert(store.cache_scope, has_fts);
+    }
+    has_fts
+}
+
 #[derive(Default, Deserialize)]
 struct Filter {
     library: Option<String>,
@@ -141,17 +184,31 @@ async fn list(
     if library.len() > 128 {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let term = format!(
-        "%{}%",
-        filter
-            .q
-            .unwrap_or_default()
-            .to_lowercase()
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_")
-    );
-    let total: i64 = query_scalar(
+    let q_clean = filter.q.unwrap_or_default().trim().to_lowercase();
+    let use_fts = !q_clean.is_empty()
+        && q_clean.chars().count() >= 3
+        && has_music_tracks_fts(&auth.store).await;
+    let search_bind = if q_clean.is_empty() {
+        None
+    } else if use_fts {
+        Some(format!("\"{}\"", q_clean.replace('"', "\"\"")))
+    } else {
+        Some(format!(
+            "%{}%",
+            q_clean
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        ))
+    };
+    let search_clause = if q_clean.is_empty() {
+        ""
+    } else if use_fts {
+        " AND t.id IN (SELECT track_id FROM music_tracks_fts WHERE music_tracks_fts.search_text MATCH ?)"
+    } else {
+        " AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'"
+    };
+    let count_sql = format!(
         "SELECT COUNT(*) \
             FROM music_tracks t \
             JOIN libraries l ON l.id=t.library_id \
@@ -165,19 +222,27 @@ async fn list(
             AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
             OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
             AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f \
-            WHERE f.library_id=l.id AND f.active=1),l.id)=?) \
-            AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\'",
-    )
-    .bind(&actor.user.id)
-    .bind(actor.user.role.as_str())
-    .bind(&actor.user.id)
-    .bind(&library)
-    .bind(&library)
-    .bind(&term)
-    .fetch_one(&auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let rows = query(
+            WHERE f.library_id=l.id AND f.active=1),l.id)=?){search_clause}"
+    );
+    let mut count_q = query_scalar(sqlx::AssertSqlSafe(count_sql))
+        .bind(&actor.user.id)
+        .bind(actor.user.role.as_str())
+        .bind(&actor.user.id)
+        .bind(&library)
+        .bind(&library);
+    if let Some(ref bind_val) = search_bind {
+        count_q = count_q.bind(bind_val);
+    }
+    let total: i64 = count_q
+        .fetch_one(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if total == 0 || offset >= total {
+        return Ok(Json(
+            json!({"items":[],"total":total,"offset":offset,"limit":limit}),
+        ));
+    }
+    let rows_sql = format!(
         "SELECT t.* \
             FROM music_tracks t \
             JOIN libraries l ON l.id=t.library_id \
@@ -191,22 +256,25 @@ async fn list(
             AND COALESCE(hxp.options_json,hx.options_json) LIKE '%adminAccess__false%')) \
             OR EXISTS(SELECT 1 FROM effective_library_permissions p WHERE p.library_id=l.id \
             AND p.user_id=?)) AND (?='' OR COALESCE((SELECT f.parent_id FROM library_folders f \
-            WHERE f.library_id=l.id AND f.active=1),l.id)=?) \
-            AND lower(t.title || ' ' || t.artist || ' ' || t.album) LIKE ? ESCAPE '\\' \
+            WHERE f.library_id=l.id AND f.active=1),l.id)=?){search_clause} \
             ORDER BY t.album_artist,t.album,t.disc_number,t.track_number,t.title,t.id \
-            LIMIT ? OFFSET ?",
-    )
-    .bind(&actor.user.id)
-    .bind(actor.user.role.as_str())
-    .bind(&actor.user.id)
-    .bind(&library)
-    .bind(&library)
-    .bind(term)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(&auth.store.pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            LIMIT ? OFFSET ?"
+    );
+    let mut rows_q = query(sqlx::AssertSqlSafe(rows_sql))
+        .bind(&actor.user.id)
+        .bind(actor.user.role.as_str())
+        .bind(&actor.user.id)
+        .bind(&library)
+        .bind(&library);
+    if let Some(bind_val) = search_bind {
+        rows_q = rows_q.bind(bind_val);
+    }
+    let rows = rows_q
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&auth.store.pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let items: Vec<Value> = rows
         .into_iter()
         .map(|r| {
@@ -241,19 +309,16 @@ async fn cover(
     Path(id): Path<String>,
     request: Request,
 ) -> Result<Response, StatusCode> {
-    auth.authenticate(request.headers()).await?;
+    let actor = auth.authenticate(request.headers()).await?;
+    let preview_width = media_node::image_preview_width(request.uri().query())
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
     let row = query("SELECT t.*,l.root,l.node_id FROM music_tracks t JOIN libraries l ON l.id=t.library_id WHERE t.id=? AND t.available=1 AND t.root_snapshot=l.root")
         .bind(id)
         .fetch_optional(&auth.store.pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
-    allowed(
-        &auth,
-        request.headers(),
-        &row.get::<String, _>("library_id"),
-    )
-    .await?;
+    allowed_actor(&auth, &actor, &row.get::<String, _>("library_id")).await?;
     let cover_path: String = row
         .get::<Option<String>, _>("cover_path")
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -293,6 +358,24 @@ async fn cover(
         && opened.size() != expected_size as u64
     {
         return Err(StatusCode::CONFLICT);
+    }
+    if let Some(width) = preview_width {
+        let etag = format!(
+            "\"cover-v1-{}-{:x}-{width}\"",
+            opened.modified_ns(),
+            opened.size()
+        );
+        if let Ok(response) = media_node::serve_image_preview(
+            &opened,
+            request.method(),
+            request.headers(),
+            width,
+            &etag,
+        )
+        .await
+        {
+            return Ok(response.map(axum::body::Body::new));
+        }
     }
     let response = media_node::serve_opened(opened, &request, &cover_mime)
         .await

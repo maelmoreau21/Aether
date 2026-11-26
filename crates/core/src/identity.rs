@@ -428,6 +428,12 @@ impl IdentityStore {
         crate::database::query("PRAGMA foreign_keys = ON")
             .execute(&mut *conn)
             .await?;
+        let _ = crate::database::query("PRAGMA analysis_limit = 400")
+            .execute(&mut *conn)
+            .await;
+        let _ = crate::database::query("PRAGMA optimize")
+            .execute(&mut *conn)
+            .await;
         drop(conn);
         let store = Self {
             assets: open_assets(&pool, Some(path))?,

@@ -8,6 +8,7 @@
   import { musicQueue } from '../../lib/music/queue';
   import AddToPlaylist from '../../lib/music/AddToPlaylist.svelte';
   import MusicArtwork from '../../lib/music/MusicArtwork.svelte';
+  import { imagePreviewUrl } from '../../lib/catalog/image-url';
   import Icon from '../../lib/ui/Icon.svelte';
   import { t } from '../../lib/i18n';
 
@@ -26,6 +27,7 @@
 
   let tracks = $state<Track[]>([]);
   let query = $state('');
+  let submittedQuery = $state('');
   let error = $state('');
   let busy = $state(false);
   let offset = $state(0);
@@ -56,8 +58,27 @@
   async function selectGroup(id: string) { selectedGroup = id; await tick(); groupHeading?.focus(); }
   async function leaveGroup() { const id = selectedGroup; selectedGroup = ''; await tick(); [...(covers?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(button => button.dataset.group === id)?.focus(); }
 
+  const albumCoverUrls = $derived.by(() => {
+    const map = new Map<string, string>();
+    for (const track of tracks) {
+      if (!track.coverUrl) continue;
+      const artist = track.albumArtist || track.artist;
+      const key = track.album ? `${artist}\0${track.album}` : track.id;
+      if (!map.has(key)) map.set(key, imagePreviewUrl(track.coverUrl, 320));
+    }
+    return map;
+  });
+
+  function trackCover(track: Track): string | null {
+    if (!track.coverUrl) return null;
+    const artist = track.albumArtist || track.artist;
+    const key = track.album ? `${artist}\0${track.album}` : track.id;
+    return albumCoverUrls.get(key) ?? imagePreviewUrl(track.coverUrl, 320);
+  }
+
   function groupCover(items: Track[]): string | null {
-    return items.find(t => t.coverUrl)?.coverUrl ?? null;
+    const first = items.find(t => t.coverUrl);
+    return first ? trackCover(first) : null;
   }
 
   function time(value: number | null) {
@@ -72,6 +93,7 @@
     const controller = new AbortController();
     pending = controller;
     const timer = setTimeout(() => controller.abort(), 8000);
+    submittedQuery = query.trim();
     busy = true;
     error = '';
     try {
@@ -148,7 +170,7 @@
         <div class="tracks">
           {#each visibleTracks as track, index (track.id)}
             <article class:playing={$musicQueue.tracks[$musicQueue.index]?.id === track.id} aria-label={track.title}>
-              <span class="track-number">{track.trackNumber ?? index + 1}</span><span class="track-art"><MusicArtwork src={track.coverUrl} label={track.album || track.title} /></span>
+              <span class="track-number">{track.trackNumber ?? index + 1}</span><span class="track-art"><MusicArtwork src={trackCover(track)} label={track.album || track.title} /></span>
               <div class="track-title"><strong>{track.title}</strong><p>{track.artist || $t('unknown_artist')}{#if !group && track.album}<span> · {track.album}</span>{/if}</p></div>
               <span class="duration">{time(track.duration)}</span><button class="track-play" onclick={() => play(track)} aria-label={$t('play_title', { title: track.title })}><Icon name="play" size={20} /></button>
               <details class="track-actions"><summary aria-label={$t('track_options', { title: track.title })}><Icon name="more" size={20} /></summary><div class="track-menu"><button onclick={() => enqueueMusic(track)} aria-label={$t('add_to_queue')}>{$t('add_to_queue')}</button><AddToPlaylist id={track.id} inline /><p>{time(track.duration)} · {track.codec}</p></div></details>
@@ -156,7 +178,7 @@
           {/each}
         </div>
       {/if}
-      {#if !tracks.length && !busy && !error}<div class="empty"><h2>{query ? $t('no_results') : $t('music_empty')}</h2><p>{query ? $t('try_another_search') : $t('music_setup')}</p>{#if query}<button onclick={() => { query = ''; void load(); }}>{$t('clear_search')}</button>{/if}</div>{/if}
+      {#if !tracks.length && !busy && !error}<div class="empty"><h2>{submittedQuery ? $t('no_results') : $t('music_empty')}</h2><p>{submittedQuery ? $t('try_another_search') : $t('music_setup')}</p>{#if submittedQuery}<button onclick={() => { query = ''; void load(); }}>{$t('clear_search')}</button>{/if}</div>{/if}
     {/if}
   </div>
   <nav class="pagination" aria-label={$t('music_presentation')}><button disabled={busy || offset === 0} onclick={() => load(Math.max(0, offset - 100))}>{$t('previous')}</button><span>{$t('page')} {Math.floor(offset / 100) + 1}</span><button disabled={busy || offset + tracks.length >= total} onclick={() => load(offset + 100)}>{$t('next')}</button></nav>

@@ -22,9 +22,9 @@
     ambient
       ? [imagePreviewUrl(artwork.poster, 1280), artwork.poster ?? ''].filter(Boolean)
       : [
+          imagePreviewUrl(artwork.backdrop || artwork.landscape, 1280),
           artwork.backdrop,
           artwork.landscape,
-          imagePreviewUrl(artwork.backdrop || artwork.landscape, 1280),
           artwork.poster ? imagePreviewUrl(artwork.poster, 1280) : ''
         ].filter(Boolean) as string[]
   );
@@ -73,7 +73,7 @@
 
     <div class="layout" class:has-aside={hasAside}>
       <!-- folder.jpg : l'affiche reste nette ; son cadre suit le ratio réel de l'image -->
-      <div class="poster-col"><Poster {work} showMetadata={false} /></div>
+      <div class="poster-col"><Poster {work} showMetadata={false} eager={true} /></div>
 
       <div class="identity">
         <div class="essential-meta">

@@ -14,24 +14,34 @@
   let mounted = $state(false);
   let controller: AbortController | undefined;
   let owner = '';
-  async function load() {
+  async function load(clearExisting = false) {
     controller?.abort(); const current = new AbortController(); controller = current;
-    items = []; enabled = false; error = '';
+    if (clearExisting) { items = []; enabled = false; }
+    error = '';
     try {
       const response = await fetch('/api/v1/account/recommendations', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(15000)]) });
       if (!response.ok) throw new Error();
       const result = await response.json();
       if (current.signal.aborted) return;
       enabled = result.enabled; mode = result.mode; items = result.items;
-    } catch { if (!current.signal.aborted) error = $t('recommendations_are_temporarily_unavailable'); }
+    } catch { if (!current.signal.aborted && !items.length) error = $t('recommendations_are_temporarily_unavailable'); }
   }
   $effect(() => {
     const next = $session?.user.id ?? '';
-    if (mounted && next !== owner) { owner = next; if (next) void load(); else { controller?.abort(); items = []; enabled = false; } }
+    if (mounted && next !== owner) { owner = next; if (next) void load(true); else { controller?.abort(); items = []; enabled = false; } }
   });
   onMount(() => {
     mounted = true;
-    const refresh = () => { if ($session) void load(); };
+    let lastFocusRefreshAt = 0;
+    const refresh = (event?: Event) => {
+      if (!$session) return;
+      if (event?.type === 'focus') {
+        const now = Date.now();
+        if (now - lastFocusRefreshAt < 60_000) return;
+        lastFocusRefreshAt = now;
+      }
+      void load(false);
+    };
     window.addEventListener('focus', refresh); window.addEventListener('media-recommendations-changed', refresh);
     return () => { controller?.abort(); window.removeEventListener('focus', refresh); window.removeEventListener('media-recommendations-changed', refresh); };
   });

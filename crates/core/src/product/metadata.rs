@@ -561,12 +561,13 @@ pub(crate) async fn poster(
     Path(work): Path<String>,
     axum::extract::Query(options): axum::extract::Query<crate::artwork::PreviewOptions>,
 ) -> Result<Response, Error> {
-    crate::feedback::authorized(&auth, &headers, &work, false).await?;
-    match crate::artwork::legacy(&auth.store, &work, options.width.unwrap_or(0), &headers).await {
+    crate::permissions::require_work_read(&auth, &headers, &work).await?;
+    let width = options.width.unwrap_or(0);
+    match crate::artwork::legacy(&auth.store, &work, width, &headers).await {
         Ok(response) => Ok(response),
         Err(StatusCode::NOT_FOUND) => {
-            let local_id: Option<String> = query_scalar(
-                "SELECT i.id FROM inventory_images i \
+            let local: Option<(String, String, i64)> = query_as(
+                "SELECT i.id, i.modified_ns, i.size FROM inventory_images i \
                  JOIN libraries l ON l.id=i.library_id \
                  JOIN media_nodes n ON n.id=l.node_id \
                  LEFT JOIN work_image_hidden h ON h.work_id=i.work_id AND h.image_id=i.id \
@@ -579,12 +580,13 @@ pub(crate) async fn poster(
             .fetch_optional(&auth.store.pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            if let Some(id) = local_id {
+            if let Some((id, modified_ns, size)) = local {
                 use axum::response::IntoResponse;
-                return Ok(axum::response::Redirect::temporary(&format!(
-                    "/api/v1/assets/{id}/image"
-                ))
-                .into_response());
+                let mut url = format!("/api/v1/assets/{id}/image?v={modified_ns}-{size}");
+                if width > 0 {
+                    url.push_str(&format!("&width={width}"));
+                }
+                return Ok(axum::response::Redirect::temporary(&url).into_response());
             }
             Err(StatusCode::NOT_FOUND)
         }

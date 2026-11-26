@@ -262,25 +262,27 @@ pub(super) async fn image(
             .join("repository-images")
             .join(format!("{digest}.txt"))
     };
-    let cached = image_cache()
+    let mem_cached = image_cache()
         .lock()
         .ok()
         .and_then(|cache| cache.get(&url).cloned())
         .filter(|(time, _)| time.elapsed() < Duration::from_secs(86400))
-        .map(|(_, data)| data)
-        .or_else(|| {
-            std::fs::read_to_string(&disk_path)
-                .ok()
-                .filter(|data| data.starts_with("data:image/"))
-                .inspect(|data| {
-                    if let Ok(mut cache) = image_cache().lock() {
-                        if cache.len() >= 128 {
-                            cache.clear();
-                        }
-                        cache.insert(url.clone(), (Instant::now(), data.clone()));
+        .map(|(_, data)| data);
+    let cached = match mem_cached {
+        Some(data) => Some(data),
+        None => tokio::fs::read_to_string(&disk_path)
+            .await
+            .ok()
+            .filter(|data| data.starts_with("data:image/"))
+            .inspect(|data| {
+                if let Ok(mut cache) = image_cache().lock() {
+                    if cache.len() >= 128 {
+                        cache.clear();
                     }
-                })
-        });
+                    cache.insert(url.clone(), (Instant::now(), data.clone()));
+                }
+            }),
+    };
     let data = match cached {
         Some(data) => data,
         None => {
@@ -303,9 +305,9 @@ pub(super) async fn image(
                 .ok_or_else(|| err(StatusCode::BAD_GATEWAY, "extension_image_invalid"))?;
             let data = format!("data:{kind};base64,{}", STANDARD.encode(&bytes));
             if let Some(parent) = disk_path.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                let _ = tokio::fs::create_dir_all(parent).await;
             }
-            let _ = std::fs::write(&disk_path, &data);
+            let _ = tokio::fs::write(&disk_path, &data).await;
             if let Ok(mut cache) = image_cache().lock() {
                 if cache.len() >= 128 {
                     cache.clear();

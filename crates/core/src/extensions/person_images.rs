@@ -25,6 +25,64 @@ const MAX_CREDITS: usize = 100;
 
 static DOWNLOADS: Semaphore = Semaphore::const_new(4);
 
+type PortraitMapCacheEntry = (i64, u64, String, HashMap<String, String>);
+static WORK_PORTRAIT_URLS: LazyLock<Mutex<HashMap<(u64, String), PortraitMapCacheEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+async fn work_portrait_url(
+    auth: &AuthState,
+    work: &str,
+    key: &str,
+) -> Result<(String, Option<String>), Error> {
+    let shared = auth.store.shared_with_other_cores();
+    let epoch = auth.store.coherence.catalogue_epoch();
+    let cache_gen: i64 = if !shared {
+        query_scalar("SELECT CAST(COALESCE((SELECT gen FROM inventory_cache_generation WHERE id=1), 0) AS BIGINT)")
+            .fetch_one(auth.store.pool())
+            .await
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    if !shared && cache_gen > 0 {
+        let cache = WORK_PORTRAIT_URLS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((cached_gen, cached_epoch, library, map)) =
+            cache.get(&(auth.store.cache_scope, work.to_owned()))
+            && *cached_gen == cache_gen
+            && *cached_epoch == epoch
+        {
+            return Ok((library.clone(), map.get(key).cloned()));
+        }
+    }
+    let row: Option<(String, String, Option<String>)> =
+        query_as("SELECT library_id,editorial_json,manual_json FROM inventory_works WHERE id=?")
+            .bind(work)
+            .fetch_optional(auth.store.pool())
+            .await
+            .map_err(db)?;
+    let (library, editorial, manual) =
+        row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
+    let mut map = HashMap::new();
+    for credit in credits_of(&editorial, manual.as_deref()) {
+        if let Some(url) = source_url(&credit) {
+            let k = source_hash(url)[..KEY_LEN].to_owned();
+            map.entry(k).or_insert_with(|| url.to_owned());
+        }
+    }
+    let found = map.get(key).cloned();
+    if !shared && cache_gen > 0 {
+        let mut cache = WORK_PORTRAIT_URLS.lock().unwrap_or_else(|e| e.into_inner());
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(
+            (auth.store.cache_scope, work.to_owned()),
+            (cache_gen, epoch, library.clone(), map),
+        );
+    }
+    Ok((library, found))
+}
+
 /// Accepted provider portrait URL of one credit object, if any.
 pub(crate) fn source_url(credit: &Value) -> Option<&str> {
     ["thumbUrl", "thumb_url", "thumb"]
@@ -187,23 +245,12 @@ pub(super) async fn read(
     if !valid_key(&key) {
         return Err(err(StatusCode::NOT_FOUND, "unknown_person_image"));
     }
-    crate::feedback::authorized(&auth, &headers, &work, false)
+    crate::permissions::require_work_read(&auth, &headers, &work)
         .await
         .map_err(|status| err(status, "work_denied"))?;
-    let row: Option<(String, String, Option<String>)> =
-        query_as("SELECT library_id,editorial_json,manual_json FROM inventory_works WHERE id=?")
-            .bind(&work)
-            .fetch_optional(auth.store.pool())
-            .await
-            .map_err(db)?;
-    let (library, editorial, manual) =
-        row.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_work"))?;
     // The key must name a credit of this work: no arbitrary URL or foreign cache entry is reachable.
-    let url = credits_of(&editorial, manual.as_deref())
-        .iter()
-        .filter_map(|credit| source_url(credit).map(str::to_owned))
-        .find(|url| source_hash(url)[..KEY_LEN] == key)
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_person_image"))?;
+    let (library, url) = work_portrait_url(&auth, &work, &key).await?;
+    let url = url.ok_or_else(|| err(StatusCode::NOT_FOUND, "unknown_person_image"))?;
     let hash = source_hash(&url);
     let fresh_failure = |at: i64| now() - at < RETRY_FAILED_AFTER;
     match cached(&auth, &hash).await? {

@@ -6,6 +6,53 @@ import { artworkRotationPolicy, type ArtworkRotationPolicy } from './artwork-rot
 
 type Choice = { session: number; image: string; switchedAt?: number };
 const history = new Map<string, Record<string, Choice>>();
+const pendingWrites = new Map<string, string>();
+let writeTimer: ReturnType<typeof setTimeout> | undefined;
+let selectionCache = new WeakMap<Work, { key: string; result: Record<string, string | null> }>();
+const policyIds = new WeakMap<ArtworkRotationPolicy, number>();
+let nextPolicyId = 1;
+
+function policyId(policy: ArtworkRotationPolicy): number {
+  let id = policyIds.get(policy);
+  if (!id) {
+    id = nextPolicyId++;
+    policyIds.set(policy, id);
+  }
+  return id;
+}
+
+function flushPendingWrites(): void {
+  if (writeTimer !== undefined) {
+    clearTimeout(writeTimer);
+    writeTimer = undefined;
+  }
+  if (typeof localStorage === 'undefined' || pendingWrites.size === 0) return;
+  for (const [storageKey, payload] of pendingWrites) {
+    try { localStorage.setItem(storageKey, payload); } catch { /* Optional history only. */ }
+  }
+  pendingWrites.clear();
+}
+
+function scheduleStorageWrite(storageKey: string, choices: Record<string, Choice>): void {
+  if (typeof localStorage === 'undefined') return;
+  const payload = JSON.stringify(choices);
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    try { localStorage.setItem(storageKey, payload); } catch { /* Optional history only. */ }
+    return;
+  }
+  pendingWrites.set(storageKey, payload);
+  if (writeTimer === undefined) {
+    writeTimer = setTimeout(flushPendingWrites, 250);
+  }
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('pagehide', flushPendingWrites);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingWrites();
+  });
+}
+
 /** Rich pools are renewed regularly, even during a long visit. */
 const ROTATION_PERIOD_MS = 3_600_000;
 /** Scene images carry no title and can rotate like posters; logos stay stable. */
@@ -16,8 +63,8 @@ const MIN_ROTATION_POOL = 3;
 // page is open and when a work opened from it shows its details.
 const newVisit = () => globalThis.crypto?.randomUUID?.() ?? `${Date.now()}:${Math.random()}`;
 let pageVisit = newVisit();
-onSessionGenerationChange(() => { history.clear(); pageVisit = newVisit(); });
-export function renewArtworkVisit(): void { pageVisit = newVisit(); }
+onSessionGenerationChange(() => { history.clear(); pendingWrites.clear(); selectionCache = new WeakMap(); pageVisit = newVisit(); });
+export function renewArtworkVisit(): void { selectionCache = new WeakMap(); pageVisit = newVisit(); }
 
 function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVariants']>, current: Session | null, policy: ArtworkRotationPolicy): string {
   const owner = current?.user.id ?? 'anonymous';
@@ -56,9 +103,7 @@ function choose(work: Work, kind: string, candidates: NonNullable<Work['imageVar
   delete choices[key];
   choices[key] = { session, image: selected.id, switchedAt: Date.now() };
   while (Object.keys(choices).length > 512) delete choices[Object.keys(choices)[0]];
-  if (typeof localStorage !== 'undefined') {
-    try { localStorage.setItem(storageKey, JSON.stringify(choices)); } catch { /* Optional history only. */ }
-  }
+  scheduleStorageWrite(storageKey, choices);
   return selected.url;
 }
 
@@ -71,8 +116,13 @@ function hash(value: string): number {
 /** Display choices only: authorization and image storage remain owned by Core. */
 export function selectArtwork(work: Work | null | undefined, current: Session | null, languages: string[] = [preferences().locale ?? 'fr', 'en']): Record<string, string | null> {
   const policy = artworkRotationPolicy();
-  const selected = { ...work?.artwork };
-  if (!work) return selected;
+  if (!work) return { ...work?.artwork };
+  const owner = current?.user.id ?? 'anonymous';
+  const period = Math.floor(Date.now() / ROTATION_PERIOD_MS);
+  const cacheKey = `${owner}:${pageVisit}:${period}:${policyId(policy)}:${languages.join(',')}`;
+  const memoized = selectionCache.get(work);
+  if (memoized?.key === cacheKey) return memoized.result;
+  const selected = { ...work.artwork };
   if (!selected.poster && work.posterUrl) selected.poster = work.posterUrl;
   const variants = work.imageVariants ?? [];
   for (const kind of new Set(variants.map(image => image.kind))) {
@@ -162,5 +212,6 @@ export function selectArtwork(work: Work | null | undefined, current: Session | 
       selected[kind] = rotates ? choose(work, kind, candidates.slice(0, kind === 'poster' ? policy.poolSize : 24), current, policy) : candidates[0].url;
     }
   }
+  selectionCache.set(work, { key: cacheKey, result: selected });
   return selected;
 }

@@ -580,12 +580,13 @@ pub async fn locale_chain(
     locale_chain_with_prefs(store, saved.as_deref(), requested).await
 }
 
-/// Build a caller's locale chain from already-loaded `user_preferences.preferences_json`.
-pub(crate) async fn locale_chain_with_prefs(
-    store: &IdentityStore,
+/// Build a caller's locale chain from already-loaded `user_preferences.preferences_json` and
+/// server default metadata language.
+pub(crate) fn locale_chain_from_parts(
     saved_prefs: Option<&str>,
     requested: Option<&str>,
-) -> Result<Vec<String>, sqlx::Error> {
+    default_language: Option<&str>,
+) -> Vec<String> {
     let mut preferred: Vec<String> = requested.map(str::to_owned).into_iter().collect();
     let mut fallbacks: Vec<String> = Vec::new();
     if let Some(prefs) = saved_prefs.and_then(|s| serde_json::from_str::<Value>(s).ok()) {
@@ -601,13 +602,26 @@ pub(crate) async fn locale_chain_with_prefs(
             fallbacks.extend(list.iter().filter_map(Value::as_str).map(str::to_owned));
         }
     }
+    ml::chain(
+        None,
+        preferred.iter().chain(fallbacks.iter()),
+        default_language,
+    )
+}
+
+/// Build a caller's locale chain from already-loaded `user_preferences.preferences_json`.
+pub(crate) async fn locale_chain_with_prefs(
+    store: &IdentityStore,
+    saved_prefs: Option<&str>,
+    requested: Option<&str>,
+) -> Result<Vec<String>, sqlx::Error> {
     let default = crate::server_settings::load(store)
         .await
         .ok()
         .map(|s| s.preferred_metadata_language);
-    Ok(ml::chain(
-        None,
-        preferred.iter().chain(fallbacks.iter()),
+    Ok(locale_chain_from_parts(
+        saved_prefs,
+        requested,
         default.as_deref(),
     ))
 }

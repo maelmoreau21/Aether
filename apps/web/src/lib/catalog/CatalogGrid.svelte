@@ -1,19 +1,20 @@
 <script lang="ts">
   import { SvelteSet } from 'svelte/reactivity';
   import { page } from '$app/state';
-  import { onMount, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { slide } from 'svelte/transition';
   import { resolve } from '$app/paths';
   import { goto } from '$app/navigation';
   import type { Work } from './api';
   import { loadCatalog } from './page-cache';
   import Poster from './Poster.svelte';
+  import CatalogSkeleton from './CatalogSkeleton.svelte';
   import Icon from '../ui/Icon.svelte';
   import { t } from '../i18n';
   import { session } from '../auth/session';
   import { accessibleLibraries } from './libraries';
   import {
-    features, loadFeatures, discoverRequests, loadMyPolicy, posterUrl, requestPayload,
+    features, loadFeatures, discoverRequests, loadDestinations, loadMyPolicy, posterUrl, requestPayload,
     statusLabels, statusTone, applicationRequest,
     type DestinationServer, type MediaRequest, type MyPolicy, type SearchResult
   } from '../applications/api';
@@ -26,6 +27,8 @@
     totalSeries = 0,
     moreFilms = false,
     moreSeries = false,
+    loading = false,
+    pendingCatalogKinds = 0,
     search = $bindable(''),
     sort = $bindable('title-asc'),
     selectedKindFilter = $bindable('all'),
@@ -41,6 +44,8 @@
     totalSeries: number | null;
     moreFilms?: boolean;
     moreSeries?: boolean;
+    loading?: boolean;
+    pendingCatalogKinds?: number;
     search: string;
     sort: string;
     selectedKindFilter: 'all' | 'film' | 'series';
@@ -127,8 +132,27 @@
     focusSearch();
   });
 
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  function clearSearchDebounce() {
+    if (searchDebounceTimer !== undefined) {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = undefined;
+    }
+  }
+  onDestroy(clearSearchDebounce);
+
+  function handleSearchInput() {
+    clearSearchDebounce();
+    if (search.trim() === query.trim()) return;
+    searchDebounceTimer = setTimeout(() => {
+      searchDebounceTimer = undefined;
+      handleFilterSubmit();
+    }, 220);
+  }
+
   function handleFilterSubmit(event?: SubmitEvent) {
     if (event) event.preventDefault();
+    clearSearchDebounce();
     const params = new URLSearchParams();
     const library = page.url.searchParams.get('library');
     if (library) params.set('library', library);
@@ -205,6 +229,7 @@
 
   // On-demand discovery state
   let discoverResults = $state<SearchResult[]>([]);
+  let discoverLoading = $state(false);
   // Posters that failed to load fall back to the placeholder (reactive set).
   const failedPosters = new SvelteSet<string>();
   const discoverMissing = $derived.by(() => {
@@ -255,22 +280,25 @@
     // filtering the films or series catalogue.
     if (section !== 'search' || !$features.requests || trimmed.length < 2) {
       discoverResults = [];
+      discoverLoading = false;
       return;
     }
     const controller = new AbortController();
+    discoverLoading = true;
     void Promise.all([
       discoverRequests(trimmed, controller.signal)
-        .then(data => { discoverResults = data.results ?? []; })
-        .catch(() => { discoverResults = []; }),
+        .then(data => { if (!controller.signal.aborted) discoverResults = data.results ?? []; })
+        .catch(() => { if (!controller.signal.aborted) discoverResults = []; })
+        .finally(() => { if (!controller.signal.aborted) discoverLoading = false; }),
       destinations.length
         ? Promise.resolve()
-        : applicationRequest<{ servers: DestinationServer[] }>('/api/v1/requests/destinations', { signal: controller.signal })
-            .then(d => { destinations = d.servers ?? []; })
+        : loadDestinations(controller.signal)
+            .then(servers => { if (!controller.signal.aborted) destinations = servers; })
             .catch(() => {}),
       myPolicy
         ? Promise.resolve()
-        : loadMyPolicy()
-            .then(p => { myPolicy = p; })
+        : loadMyPolicy(controller.signal)
+            .then(p => { if (!controller.signal.aborted) myPolicy = p; })
             .catch(() => {})
     ]);
     return () => controller.abort();
@@ -377,6 +405,7 @@
           type="search"
           name="q"
           bind:value={search}
+          oninput={handleSearchInput}
           placeholder={$t('admin_search')}
           maxlength="200"
           autocomplete="off"
@@ -525,11 +554,11 @@
         >
           <span class="lib-card-thumb" data-kind={visualKind}>
             {#if lib.imageUrl}
-              <img class="lib-card-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" />
+              <img class="lib-card-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
             {:else if lib.coverUrls?.length}
               <span class="lib-card-collage" data-count={Math.min(lib.coverUrls.length, 4)} aria-hidden="true">
                 {#each lib.coverUrls.slice(0, 4) as url (url)}
-                  <img src={url} alt="" loading="lazy" decoding="async" />
+                  <img src={url} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                 {/each}
               </span>
             {:else}
@@ -566,6 +595,10 @@
     </div>
   {/if}
 
+  {#if loading && filteredFilms.length === 0 && filteredSeries.length === 0}
+    <CatalogSkeleton label={$t('searching')} />
+  {/if}
+
   <!-- Films Shelf / Grid -->
   {#if section !== 'series' && (selectedKindFilter === 'all' || selectedKindFilter === 'film') && (section !== 'search' || filteredFilms.length > 0)}
     <section class="shelf" aria-labelledby={section === 'search' ? 'shelf-films-title' : undefined}>
@@ -578,14 +611,16 @@
 
       <div class="media-grid">
         {#each filteredFilms as work, index (work.id)}
-          <Poster {work} href={detailUrl(work)} eager={index < 12} />
+          <Poster {work} href={detailUrl(work)} eager={index < 8} priority={index < 4 ? 'high' : 'auto'} />
         {:else}
-          <div class="empty-media-box">
-            <Icon name="film" size={32} />
-            <p>
-              {query ? $t('no_film_matches_your_search') : $t('no_films_in_this_library')}
-            </p>
-          </div>
+          {#if !loading && pendingCatalogKinds === 0}
+            <div class="empty-media-box">
+              <Icon name="film" size={32} />
+              <p>
+                {query ? $t('no_film_matches_your_search') : $t('no_films_in_this_library')}
+              </p>
+            </div>
+          {/if}
         {/each}
       </div>
     </section>
@@ -603,20 +638,22 @@
 
       <div class="media-grid">
         {#each filteredSeries as work, index (work.id)}
-          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length < 12 && index < 12 - filteredFilms.length} />
+          <Poster {work} href={detailUrl(work)} eager={filteredFilms.length < 8 && index < 8 - filteredFilms.length} priority={filteredFilms.length < 4 && index < 4 - filteredFilms.length ? 'high' : 'auto'} />
         {:else}
-          <div class="empty-media-box">
-            <Icon name="tv" size={32} />
-            <p>
-              {query ? $t('no_series_matches_your_search') : $t('no_series_in_this_library')}
-            </p>
-          </div>
+          {#if !loading && pendingCatalogKinds === 0}
+            <div class="empty-media-box">
+              <Icon name="tv" size={32} />
+              <p>
+                {query ? $t('no_series_matches_your_search') : $t('no_series_in_this_library')}
+              </p>
+            </div>
+          {/if}
         {/each}
       </div>
     </section>
   {/if}
 
-  {#if section === 'search' && filteredFilms.length === 0 && filteredSeries.length === 0 && discoverMissing.length === 0}
+  {#if section === 'search' && !loading && pendingCatalogKinds === 0 && filteredFilms.length === 0 && filteredSeries.length === 0 && discoverMissing.length === 0 && !discoverLoading}
     <div class="empty-media-box">
       <Icon name="search" size={32} />
       <p>{$t('no_results_search')}</p>

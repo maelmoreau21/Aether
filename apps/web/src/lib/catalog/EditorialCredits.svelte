@@ -16,6 +16,12 @@
 
   const people = $derived(creditPeople(work));
 
+  function checkLoaded(node: HTMLImageElement, key: string) {
+    if (node.complete && node.naturalWidth > 0 && !loadedPhotos[key]) {
+      loadedPhotos = { ...loadedPhotos, [key]: true };
+    }
+  }
+
   function updateScrollState() {
     if (!track) return;
     canScrollLeft = track.scrollLeft > 10;
@@ -89,6 +95,7 @@
                 height="600"
                 loading="lazy"
                 decoding="async"
+                use:checkLoaded={person.key}
                 onload={() => {
                   loadedPhotos = { ...loadedPhotos, [person.key]: true };
                 }}

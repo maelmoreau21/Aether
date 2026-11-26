@@ -28,7 +28,7 @@ pub async fn response(
         let (mut parts, body) = response.into_parts();
         parts.headers.insert(
             header::CACHE_CONTROL,
-            axum::http::HeaderValue::from_static("private, no-store"),
+            axum::http::HeaderValue::from_static("private, max-age=86400"),
         );
         parts.headers.insert(
             header::X_CONTENT_TYPE_OPTIONS,

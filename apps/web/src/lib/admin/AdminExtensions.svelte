@@ -449,8 +449,8 @@
   {#if bannerSrc}
     <!-- Any image ratio fills the frame: a blurred copy covers it, the image itself is shown whole. -->
     <span class="extension-artwork has-banner">
-      <img class="banner-fill" src={bannerSrc} alt="" aria-hidden="true" />
-      <img class="banner-img" src={bannerSrc} alt="" />
+      <img class="banner-fill" src={bannerSrc} alt="" aria-hidden="true" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+      <img class="banner-img" src={bannerSrc} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
     </span>
   {:else}
     <span class="extension-artwork" style={`--art-hue:${hueOf(manifest.id)}`}>

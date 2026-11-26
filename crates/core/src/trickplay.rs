@@ -591,7 +591,7 @@ pub async fn tile(
             );
             parts.headers.insert(
                 axum::http::header::CACHE_CONTROL,
-                axum::http::HeaderValue::from_static("public, max-age=86400"),
+                axum::http::HeaderValue::from_static("private, max-age=86400"),
             );
             Response::from_parts(parts, Body::new(body))
         }

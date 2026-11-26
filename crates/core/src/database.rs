@@ -250,7 +250,7 @@ pub struct MigrationStep {
 }
 
 /// Current persisted schema version.
-pub const CURRENT_SCHEMA_VERSION: i64 = 10;
+pub const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 /// Sequential migrations applied after the frozen v1 baseline.
 pub const MIGRATIONS: &[MigrationStep] = &[
@@ -342,7 +342,65 @@ ALTER TABLE library_media_task_runs ADD CONSTRAINT library_media_task_runs_task_
         sqlite_sql: NODE_HEALTH_SQL,
         postgres_sql: NODE_HEALTH_SQL,
     },
+    MigrationStep {
+        version: 11,
+        name: "0011_search_fts_and_indexes",
+        sqlite_sql: SEARCH_FTS_AND_INDEXES_SQLITE_SQL,
+        postgres_sql: SEARCH_FTS_AND_INDEXES_POSTGRES_SQL,
+    },
 ];
+
+const SEARCH_FTS_AND_INDEXES_SQLITE_SQL: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS work_search_titles_fts USING fts5(
+    work_id UNINDEXED,
+    title_search,
+    tokenize = 'trigram'
+);
+INSERT INTO work_search_titles_fts(work_id, title_search)
+    SELECT work_id, title_search FROM work_search_titles;
+CREATE TRIGGER IF NOT EXISTS work_search_titles_fts_ai AFTER INSERT ON work_search_titles BEGIN
+    INSERT INTO work_search_titles_fts(work_id, title_search) VALUES (NEW.work_id, NEW.title_search);
+END;
+CREATE TRIGGER IF NOT EXISTS work_search_titles_fts_ad AFTER DELETE ON work_search_titles BEGIN
+    DELETE FROM work_search_titles_fts WHERE length(OLD.title_search) >= 3 AND title_search MATCH '\"' || replace(OLD.title_search, '\"', '\"\"') || '\"' AND work_id = OLD.work_id;
+    DELETE FROM work_search_titles_fts WHERE length(OLD.title_search) < 3 AND work_id = OLD.work_id;
+END;
+CREATE TRIGGER IF NOT EXISTS work_search_titles_fts_au AFTER UPDATE ON work_search_titles BEGIN
+    DELETE FROM work_search_titles_fts WHERE length(OLD.title_search) >= 3 AND title_search MATCH '\"' || replace(OLD.title_search, '\"', '\"\"') || '\"' AND work_id = OLD.work_id;
+    DELETE FROM work_search_titles_fts WHERE length(OLD.title_search) < 3 AND work_id = OLD.work_id;
+    INSERT INTO work_search_titles_fts(work_id, title_search) VALUES (NEW.work_id, NEW.title_search);
+END;
+
+CREATE VIRTUAL TABLE IF NOT EXISTS music_tracks_fts USING fts5(
+    track_id UNINDEXED,
+    search_text,
+    tokenize = 'trigram'
+);
+INSERT INTO music_tracks_fts(track_id, search_text)
+    SELECT id, lower(title || ' ' || artist || ' ' || album) FROM music_tracks;
+CREATE TRIGGER IF NOT EXISTS music_tracks_fts_ai AFTER INSERT ON music_tracks BEGIN
+    INSERT INTO music_tracks_fts(track_id, search_text) VALUES (NEW.id, lower(NEW.title || ' ' || NEW.artist || ' ' || NEW.album));
+END;
+CREATE TRIGGER IF NOT EXISTS music_tracks_fts_ad AFTER DELETE ON music_tracks BEGIN
+    DELETE FROM music_tracks_fts WHERE length(OLD.title || ' ' || OLD.artist || ' ' || OLD.album) >= 3 AND search_text MATCH '\"' || replace(lower(OLD.title || ' ' || OLD.artist || ' ' || OLD.album), '\"', '\"\"') || '\"' AND track_id = OLD.id;
+    DELETE FROM music_tracks_fts WHERE length(OLD.title || ' ' || OLD.artist || ' ' || OLD.album) < 3 AND track_id = OLD.id;
+END;
+CREATE TRIGGER IF NOT EXISTS music_tracks_fts_au AFTER UPDATE OF title, artist, album ON music_tracks BEGIN
+    DELETE FROM music_tracks_fts WHERE length(OLD.title || ' ' || OLD.artist || ' ' || OLD.album) >= 3 AND search_text MATCH '\"' || replace(lower(OLD.title || ' ' || OLD.artist || ' ' || OLD.album), '\"', '\"\"') || '\"' AND track_id = OLD.id;
+    DELETE FROM music_tracks_fts WHERE length(OLD.title || ' ' || OLD.artist || ' ' || OLD.album) < 3 AND track_id = OLD.id;
+    INSERT INTO music_tracks_fts(track_id, search_text) VALUES (NEW.id, lower(NEW.title || ' ' || NEW.artist || ' ' || NEW.album));
+END;
+
+DROP INDEX IF EXISTS inventory_display_sort;
+DROP INDEX IF EXISTS inventory_library_display_sort;
+DROP INDEX IF EXISTS inventory_sources_library;
+";
+
+const SEARCH_FTS_AND_INDEXES_POSTGRES_SQL: &str = "
+DROP INDEX IF EXISTS inventory_display_sort;
+DROP INDEX IF EXISTS inventory_library_display_sort;
+DROP INDEX IF EXISTS inventory_sources_library;
+";
 
 const NODE_HEALTH_SQL: &str = "CREATE TABLE node_health (
  node_id TEXT PRIMARY KEY NOT NULL REFERENCES media_nodes(id) ON DELETE CASCADE,

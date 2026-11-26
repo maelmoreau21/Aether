@@ -231,7 +231,7 @@
   {#each shelves as shelf (shelf.key)}
     <div class="feed-item">
       <MediaShelf title={shelf.title}>
-        {#each shelf.items as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={index < 4} />{/each}
+        {#each shelf.items as work (work.id)}<Poster {work} href={detailUrl(work)} />{/each}
       </MediaShelf>
     </div>
   {/each}

@@ -423,6 +423,79 @@ pub struct Lease {
 
 type LeaseTable = StdMutex<HashMap<String, usize>>;
 
+const META_CACHE_CAP: usize = 8192;
+
+#[derive(Default)]
+struct MetaCache {
+    entries: HashMap<String, (u64, AssetMeta)>,
+    order: std::collections::VecDeque<(String, u64)>,
+    seq: u64,
+}
+
+impl MetaCache {
+    fn get(&mut self, sha: &str) -> Option<AssetMeta> {
+        let meta = self.entries.get(sha)?.1.clone();
+        self.seq = self.seq.wrapping_add(1).max(1);
+        let seq = self.seq;
+        if let Some(entry) = self.entries.get_mut(sha) {
+            entry.0 = seq;
+        }
+        self.order.push_back((sha.to_owned(), seq));
+        if self.order.len() > self.entries.len().saturating_mul(4).saturating_add(64) {
+            self.compact();
+        }
+        Some(meta)
+    }
+
+    fn insert(&mut self, meta: AssetMeta) {
+        self.seq = self.seq.wrapping_add(1).max(1);
+        let seq = self.seq;
+        if !self.entries.contains_key(&meta.sha256) {
+            while self.entries.len() >= META_CACHE_CAP {
+                let evicted = loop {
+                    let Some((cand, cand_seq)) = self.order.pop_front() else {
+                        break false;
+                    };
+                    if self.entries.get(&cand).is_some_and(|e| e.0 == cand_seq) {
+                        self.entries.remove(&cand);
+                        break true;
+                    }
+                };
+                if !evicted {
+                    if let Some(k) = self.entries.keys().next().cloned() {
+                        self.entries.remove(&k);
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        let key = meta.sha256.clone();
+        self.entries.insert(key.clone(), (seq, meta));
+        self.order.push_back((key, seq));
+        if self.order.len() > self.entries.len().saturating_mul(4).saturating_add(64) {
+            self.compact();
+        }
+    }
+
+    fn remove(&mut self, sha: &str) {
+        self.entries.remove(sha);
+    }
+
+    fn compact(&mut self) {
+        let mut live: Vec<(u64, String)> = self
+            .entries
+            .iter()
+            .map(|(k, (seq, _))| (*seq, k.clone()))
+            .collect();
+        live.sort_unstable_by_key(|(seq, _)| *seq);
+        self.order.clear();
+        for (seq, k) in live {
+            self.order.push_back((k, seq));
+        }
+    }
+}
+
 impl Drop for Lease {
     fn drop(&mut self) {
         if let Ok(mut table) = self.store.lock()
@@ -446,6 +519,7 @@ pub struct AssetStore {
     /// Serializes quota check + publish + row insertion (short critical section).
     commit: Mutex<()>,
     leases: Arc<LeaseTable>,
+    meta_cache: StdMutex<MetaCache>,
 }
 
 fn now() -> i64 {
@@ -487,6 +561,7 @@ impl AssetStore {
             gate: RwLock::new(()),
             commit: Mutex::new(()),
             leases: Arc::new(StdMutex::new(HashMap::new())),
+            meta_cache: StdMutex::new(MetaCache::default()),
         }
     }
 
@@ -648,11 +723,21 @@ impl AssetStore {
         if !is_sha256_hex(sha256) {
             return Err(AssetError::InvalidDigest);
         }
-        crate::database::query_as("SELECT sha256, size, mime FROM assets WHERE sha256=?")
-            .bind(sha256)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or(AssetError::NotFound)
+        if let Ok(mut cache) = self.meta_cache.lock()
+            && let Some(meta) = cache.get(sha256)
+        {
+            return Ok(meta);
+        }
+        let meta: AssetMeta =
+            crate::database::query_as("SELECT sha256, size, mime FROM assets WHERE sha256=?")
+                .bind(sha256)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(AssetError::NotFound)?;
+        if let Ok(mut cache) = self.meta_cache.lock() {
+            cache.insert(meta.clone());
+        }
+        Ok(meta)
     }
 
     /// Hold an asset against collection for as long as the returned guard lives.
@@ -681,19 +766,28 @@ impl AssetStore {
     /// Open for streaming. Verifies the stored length (cheap) but not the digest (see `verify`).
     pub async fn open(&self, sha256: &str) -> Result<(AssetMeta, tokio::fs::File), AssetError> {
         let meta = self.meta(sha256).await?;
+        let file = self.open_with_meta(&meta).await?;
+        Ok((meta, file))
+    }
+
+    async fn open_with_meta(&self, meta: &AssetMeta) -> Result<tokio::fs::File, AssetError> {
         let (backend, sha) = (self.backend.clone(), meta.sha256.clone());
-        let file = tokio::task::spawn_blocking(move || backend.open(&sha))
-            .await
-            .map_err(|_| io::Error::other("storage worker failed"))?;
-        let file = match file {
-            Ok(file) => file,
+        let opened = tokio::task::spawn_blocking(move || {
+            let file = backend.open(&sha)?;
+            let len = file.metadata()?.len();
+            Ok::<_, io::Error>((file, len))
+        })
+        .await
+        .map_err(|_| io::Error::other("storage worker failed"))?;
+        let (file, actual_len) = match opened {
+            Ok(pair) => pair,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Err(AssetError::Corrupt),
             Err(e) => return Err(e.into()),
         };
-        if file.metadata()?.len() != meta.size as u64 {
+        if actual_len != meta.size as u64 {
             return Err(AssetError::Corrupt);
         }
-        Ok((meta, tokio::fs::File::from_std(file)))
+        Ok(tokio::fs::File::from_std(file))
     }
 
     /// Whole-object read for small assets only (bounded by `max_object_bytes`).
@@ -713,7 +807,7 @@ impl AssetStore {
         sha256: &str,
         request: &HeaderMap,
     ) -> Result<Response, AssetError> {
-        let (meta, file) = self.open(sha256).await?;
+        let meta = self.meta(sha256).await?;
         let etag = format!("\"{}\"", meta.sha256);
         let mut builder = Response::builder()
             .header(header::ETAG, &etag)
@@ -737,6 +831,7 @@ impl AssetStore {
                 .body(Body::empty())
                 .map_err(|_| AssetError::Corrupt);
         }
+        let file = self.open_with_meta(&meta).await?;
         let content_type =
             HeaderValue::from_str(&meta.mime).map_err(|_| AssetError::InvalidMime)?;
         if meta.mime == "image/svg+xml" {
@@ -1120,6 +1215,9 @@ impl AssetStore {
             .bind(sha)
             .execute(&mut *tx)
             .await?;
+            if let Ok(mut cache) = self.meta_cache.lock() {
+                cache.remove(sha);
+            }
         }
         // Reset artwork auto-attempts so automatic artwork collection re-fetches omitted posters.
         let _ = crate::database::query("DELETE FROM artwork_auto_attempts")
@@ -1214,6 +1312,9 @@ impl AssetStore {
             .await;
             match deleted {
                 Ok(done) if done.rows_affected() == 1 => {
+                    if let Ok(mut cache) = self.meta_cache.lock() {
+                        cache.remove(&sha);
+                    }
                     report.deleted_assets += 1;
                     report.deleted_bytes += size as u64;
                     let (backend, file) = (self.backend.clone(), sha.clone());

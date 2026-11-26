@@ -34,12 +34,14 @@
     work,
     href = '',
     showMetadata = true,
-    eager = false
+    eager = false,
+    priority = 'auto'
   }: {
     work: Work;
     href?: string;
     showMetadata?: boolean;
     eager?: boolean;
+    priority?: 'high' | 'auto' | 'low';
   } = $props();
 
   const displayTitle = $derived(localizedTitle(work, $locale));
@@ -49,7 +51,17 @@
   const wide = $derived($tvLayout && showMetadata && Boolean(landscapeUrl));
   const posterUrl = $derived(wide ? landscapeUrl : artwork.poster);
   const previewUrl = $derived(imagePreviewUrl(posterUrl, showMetadata ? 320 : 640));
-  const imageUrl = $derived([previewUrl, posterUrl ?? ''].find(url => url && !failedUrls.includes(url)) ?? '');
+  const hasCorePreview = $derived(
+    Boolean(
+      previewUrl &&
+        posterUrl &&
+        previewUrl !== posterUrl &&
+        (/^\/api\/v1\/assets\/[^/]+\/image/.test(posterUrl) || /^\/api\/v1\/works\/[^/]+\/images\/[^/]+/.test(posterUrl))
+    )
+  );
+  const imageUrl = $derived(
+    (hasCorePreview ? [previewUrl] : [previewUrl, posterUrl ?? '']).find(url => url && !failedUrls.includes(url)) ?? ''
+  );
   let imgElement = $state<HTMLImageElement | null>(null);
   let loadedUrl = $state('');
   let instantUrl = $state('');
@@ -185,7 +197,7 @@
         width="400"
         height="600"
         loading={eager ? 'eager' : 'lazy'}
-        fetchpriority={eager ? 'high' : 'auto'}
+        fetchpriority={priority}
         decoding="async"
         use:checkLoaded
         use:fitArtwork

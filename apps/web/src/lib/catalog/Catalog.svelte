@@ -433,6 +433,7 @@
     const start = offset;
     const filters=Object.fromEntries(['genre','year','quality','codec','language'].flatMap(key=>{const value=page.url.searchParams.get(key);return value?[[key,value]]:[];}));
     const currentSection = section;
+    const kindParam = page.url.searchParams.get('kind');
     const activeSessionKey = $session ? `${$session.user.id}:${$session.csrfToken}` : 'anonymous';
     void activeSessionKey;
     const effectSessionGen = getSessionGeneration();
@@ -440,6 +441,9 @@
 
     search = q;
     sort = sorting;
+    if (currentSection === 'search') {
+      selectedKindFilter = kindParam === 'film' || kindParam === 'series' ? kindParam : 'all';
+    }
 
     launching = false;
     pendingCatalogKinds = 0;
@@ -454,7 +458,15 @@
     moreSeries = false;
     playingEpisode = null;
 
-    const kinds = currentSection === 'films' ? ['film'] : currentSection === 'series' ? ['series'] : ['film', 'series'];
+    const kinds = currentSection === 'films'
+      ? ['film']
+      : currentSection === 'series'
+        ? ['series']
+        : kindParam === 'film'
+          ? ['film']
+          : kindParam === 'series'
+            ? ['series']
+            : ['film', 'series'];
     const requests = kinds.map(kind => {
       const url = `/api/v1/catalog?${new URLSearchParams({ ...filters, ...(currentLibrary ? {library: currentLibrary} : {}), ...(currentSection === 'home' ? { scope: 'latest' } : {}), kind, q, sort: currentSection === 'home' ? 'added-desc' : sorting, offset: String(start), limit: '24', count: 'false' })}`;
       return { kind, url, key: url };
@@ -526,12 +538,12 @@
                 pendingRequests.map(async ({kind, key, url}) => {
                   try {
                     let result: CatalogPage;
-                    try { result = await loadCatalog(key, url); }
+                    try { result = await loadCatalog(key, url, controller.signal); }
                     catch (cause) {
                       // A shared request can be cancelled under us (another shelf got a 403, the cache was
                       // invalidated): that is not this page's answer. Ask once more for our own.
                       if (!isAbortError(cause) || controller.signal.aborted || effectSessionGen !== getSessionGeneration()) throw cause;
-                      result = await loadCatalog(key, url);
+                      result = await loadCatalog(key, url, controller.signal);
                     }
                     if (controller.signal.aborted || effectSessionGen !== getSessionGeneration()) return;
                     if (kind === 'film') {
@@ -610,7 +622,7 @@
     />
     {:catch}<p role="alert">{$t('settings_load_failed')}</p>{/await}
 
-  {:else if busy}
+  {:else if busy && (section === 'home' || Boolean(workId))}
     <div class="page-heading">
       <span class="eyebrow">{title}</span>
       <h1>{$t('all_media_library')}</h1>
@@ -696,6 +708,8 @@
       {totalSeries}
       {moreFilms}
       {moreSeries}
+      loading={busy}
+      {pendingCatalogKinds}
       bind:search
       bind:sort
       bind:selectedKindFilter

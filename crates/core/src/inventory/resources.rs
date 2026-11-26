@@ -898,7 +898,14 @@ pub async fn image(
             pq.push('?');
             pq.push_str(query);
         }
-        return crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
+        let mut res = crate::nodes::relay_from_remote_node(store, &rec, &pq, request).await;
+        if versioned && matches!(res.status(), StatusCode::OK | StatusCode::NOT_MODIFIED) {
+            res.headers_mut().insert(
+                axum::http::header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("private, max-age=31536000, immutable"),
+            );
+        }
+        return res;
     }
     let mut grant = ReadGrant {
         target: ReadTarget::Image {

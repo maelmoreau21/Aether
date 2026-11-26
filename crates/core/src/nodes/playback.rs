@@ -289,6 +289,7 @@ pub async fn relay_from_remote_node(
                         header::CONTENT_RANGE,
                         header::ACCEPT_RANGES,
                         header::CACHE_CONTROL,
+                        header::ETAG,
                         axum::http::HeaderName::from_static("x-media-preparation-error"),
                     ] {
                         if let Some(val) = stream_res.headers.get(&header_name) {
@@ -528,6 +529,7 @@ pub async fn relay_from_remote_node(
         header::CONTENT_RANGE,
         header::ACCEPT_RANGES,
         header::CACHE_CONTROL,
+        header::ETAG,
         axum::http::HeaderName::from_static("x-media-preparation-error"),
     ] {
         if let Some(val) = parts.headers.get(&header_name) {

@@ -14,6 +14,17 @@ pub mod hls;
 mod image_preview;
 pub mod images;
 pub use image_preview::width as image_preview_width;
+
+pub async fn serve_image_preview(
+    opened: &OpenedFile,
+    method: &http::Method,
+    headers: &http::HeaderMap,
+    width: u32,
+    etag: &str,
+) -> io::Result<Response<BoxStreamBody>> {
+    let preview = image_preview::generate(opened, width).await?;
+    image_preview::response(preview, method, headers, etag)
+}
 pub mod chapter_images;
 pub mod inventory;
 pub mod mp4_audio;

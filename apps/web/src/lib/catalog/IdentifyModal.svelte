@@ -1,7 +1,7 @@
 <script lang="ts">
   import { providerErrorText } from './provider-errors';
   import { providerImagePreview } from './provider-image';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { resolve } from '$app/paths';
   import { session } from '../../lib/auth/session';
   import Icon from '../ui/Icon.svelte';
@@ -53,6 +53,14 @@
   let applyingId = $state<string | null>(null);
   let error = $state('');
   let successMsg = $state('');
+  let searchController: AbortController | undefined;
+
+  function cancelSearch() {
+    searchController?.abort();
+    searchController = undefined;
+    searching = false;
+  }
+  onDestroy(cancelSearch);
 
   async function performSearch() {
     const externalIds = Object.fromEntries(
@@ -64,6 +72,9 @@
       error = $t('please_enter_a_title_or_an');
       return;
     }
+    searchController?.abort();
+    const current = new AbortController();
+    searchController = current;
     searching = true;
     error = '';
     results = [];
@@ -81,7 +92,7 @@
           year: searchYear ? Number(searchYear) : undefined,
           provider: searchProvider || null
         }),
-        signal: AbortSignal.timeout(45000)
+        signal: AbortSignal.any([current.signal, AbortSignal.timeout(45000)])
       });
 
       if (!response.ok) {
@@ -89,6 +100,7 @@
       }
 
       const data = await response.json();
+      if (current.signal.aborted) return;
       results = data.results ?? [];
       providersList = data.providers ?? [];
       if (!searchProvider) {
@@ -103,9 +115,11 @@
           .join(' · ');
       }
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : $t('error_during_the_search');
+      if (!current.signal.aborted) {
+        error = cause instanceof Error ? cause.message : $t('error_during_the_search');
+      }
     } finally {
-      searching = false;
+      if (searchController === current) searching = false;
     }
   }
 
@@ -233,6 +247,9 @@
                 <span>{$t('filter_extensions')}</span>
               {/if}
             </button>
+            {#if searching}
+              <button type="button" class="btn secondary-btn" onclick={cancelSearch}>{$t('cancel')}</button>
+            {/if}
           </div>
         </div>
 

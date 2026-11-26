@@ -54,25 +54,40 @@
         if (!response.ok) throw new Error($t('chapter_images_are_unavailable'));
         chapters = (await response.json()).chapters;
       }
-      for (const chapter of chapters) {
-        if (current.signal.aborted) return;
-        if (chapter.image) continue;
-        for (let attempt = 0; attempt < 30; attempt++) {
-          const image = await fetch(chapter.imageUrl, { method: 'HEAD', signal: current.signal, cache: 'no-store' });
-          if (image.status === 200 && ['image/jpeg', 'image/webp'].includes((image.headers.get('content-type') ?? '').split(';')[0].trim())) {
-            chapter.image = chapter.imageUrl; chapter.state = ''; break;
+      const CONCURRENCY = 3;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < chapters.length && !current.signal.aborted) {
+          const idx = cursor++;
+          const chapter = chapters[idx];
+          if (!chapter || chapter.image) continue;
+          for (let attempt = 0; attempt < 30; attempt++) {
+            if (current.signal.aborted) return;
+            const image = await fetch(chapter.imageUrl, { method: 'HEAD', signal: current.signal, cache: 'no-store' });
+            if (image.status === 200 && ['image/jpeg', 'image/webp'].includes((image.headers.get('content-type') ?? '').split(';')[0].trim())) {
+              chapter.image = chapter.imageUrl;
+              chapter.state = '';
+              chapters = [...chapters];
+              break;
+            }
+            if (image.status !== 202) {
+              chapter.state = $t('unavailable_try_again_after_playback');
+              chapters = [...chapters];
+              break;
+            }
+            if (chapter.state !== $t('generating')) {
+              chapter.state = $t('generating');
+              chapters = [...chapters];
+            }
+            await new Promise<void>((resolve, reject) => {
+              const cancelled = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
+              const timer = setTimeout(() => { current.signal.removeEventListener('abort', cancelled); resolve(); }, 1000);
+              current.signal.addEventListener('abort', cancelled, { once: true });
+            });
           }
-          if (image.status !== 202) { chapter.state = $t('unavailable_try_again_after_playback'); break; }
-          chapter.state = $t('generating');
-          await new Promise<void>((resolve, reject) => {
-            const cancelled = () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); };
-            const timer = setTimeout(() => { current.signal.removeEventListener('abort', cancelled); resolve(); }, 1000);
-            current.signal.addEventListener('abort', cancelled, { once: true });
-          });
         }
-      }
-      // Mutations of the local array entries become reactive by replacing the array.
-      chapters = [...chapters];
+      };
+      await Promise.all(Array.from({ length: Math.min(CONCURRENCY, chapters.length) }, () => worker()));
     } catch (cause) {
       if (!current.signal.aborted) error = cause instanceof Error ? cause.message : $t('chapter_images_are_unavailable');
     } finally { if (imagesController === current) busy = false; }
@@ -94,7 +109,7 @@
     <div class="chapter-images">
       {#each chapters as chapter (chapter.index)}
         <figure>
-          {#if chapter.image}<img src={chapter.image} alt={$t('catalog_preview_of', { title: chapter.title })} />{:else}<p>{chapter.state ?? $t('sched_queued')}</p>{/if}
+          {#if chapter.image}<img src={chapter.image} alt={$t('catalog_preview_of', { title: chapter.title })} loading="lazy" decoding="async" onerror={() => { chapter.image = undefined; chapter.state = $t('unavailable_try_again_after_playback'); chapters = [...chapters]; }} />{:else}<p>{chapter.state ?? $t('sched_queued')}</p>{/if}
           <figcaption>{chapter.title} · {Math.floor(chapter.start / 60)}:{String(Math.floor(chapter.start % 60)).padStart(2, '0')}</figcaption>
         </figure>
       {/each}

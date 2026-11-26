@@ -141,6 +141,7 @@ fn push_search_filter(
     builder: &mut sqlx::QueryBuilder<sqlx::Any>,
     search_clean: &str,
     use_fts: bool,
+    use_titles_fts: bool,
     fast_avail: bool,
 ) {
     if search_clean.is_empty() {
@@ -148,17 +149,25 @@ fn push_search_filter(
     }
     // A work is also found by its translated and original titles. They live in
     // `work_search_titles` (one row per distinct folded title), so a work is never duplicated.
-    const ALTERNATE_TITLES: &str =
+    const ALTERNATE_TITLES_SCAN: &str =
         " OR w.id IN (SELECT st.work_id FROM work_search_titles st WHERE instr(st.title_search, ";
     if use_fts && search_clean.chars().count() >= 3 {
         let fts_query = format!("\"{}\"", search_clean.replace('"', "\"\""));
         builder
             .push(" AND (w.id IN (SELECT work_id FROM inventory_works_fts WHERE inventory_works_fts.search_text MATCH ")
-            .push_bind(fts_query)
-            .push(")")
-            .push(ALTERNATE_TITLES)
-            .push_bind(search_clean.to_owned())
-            .push(") > 0)) ");
+            .push_bind(fts_query.clone())
+            .push(")");
+        if use_titles_fts {
+            builder
+                .push(" OR w.id IN (SELECT work_id FROM work_search_titles_fts WHERE work_search_titles_fts.title_search MATCH ")
+                .push_bind(fts_query)
+                .push(")) ");
+        } else {
+            builder
+                .push(ALTERNATE_TITLES_SCAN)
+                .push_bind(search_clean.to_owned())
+                .push(") > 0)) ");
+        }
         return;
     }
     if fast_avail {
@@ -166,7 +175,7 @@ fn push_search_filter(
             .push(" AND (instr(w.display_title_sort, ")
             .push_bind(search_clean.to_owned())
             .push(") > 0")
-            .push(ALTERNATE_TITLES)
+            .push(ALTERNATE_TITLES_SCAN)
             .push_bind(search_clean.to_owned())
             .push(") > 0)) ");
     } else {
@@ -174,7 +183,7 @@ fn push_search_filter(
             .push(" AND (instr(CASE WHEN w.display_title_sort != '' THEN w.display_title_sort ELSE lower(COALESCE(json_extract(w.manual_json,'$.title'),w.title_sort)) END, ")
             .push_bind(search_clean.to_owned())
             .push(") > 0")
-            .push(ALTERNATE_TITLES)
+            .push(ALTERNATE_TITLES_SCAN)
             .push_bind(search_clean.to_owned())
             .push(") > 0)) ");
     }
@@ -433,6 +442,7 @@ fn push_group_filter(
     has_parental_policy: bool,
     fast_avail: bool,
     use_fts: bool,
+    use_titles_fts: bool,
 ) {
     if !has_groups {
         return;
@@ -476,7 +486,7 @@ fn push_group_filter(
         ids.push_bind(id);
     }
     ids.push_unseparated(") ");
-    push_search_filter(builder, search, use_fts, fast_avail);
+    push_search_filter(builder, search, use_fts, use_titles_fts, fast_avail);
     push_catalogue_filters(builder, filter, has_parental_policy, fast_avail);
     builder.push(" GROUP BY gm.group_id)) ");
 }
@@ -801,12 +811,19 @@ async fn resolve_meta_flags<'a>(
     ))
 }
 
-async fn resolve_use_fts(store: &IdentityStore, search_clean: &str, use_cache: bool) -> bool {
+async fn resolve_use_fts(
+    store: &IdentityStore,
+    search_clean: &str,
+    use_cache: bool,
+) -> (bool, bool) {
     if search_clean.chars().count() < 3 {
-        return false;
+        return (false, false);
     }
     let cached = if use_cache {
-        cache::lock_cache().get_use_fts(store.cache_scope)
+        let guard = cache::lock_cache();
+        guard
+            .get_use_fts(store.cache_scope)
+            .zip(guard.get_use_titles_fts(store.cache_scope))
     } else {
         None
     };
@@ -818,21 +835,25 @@ async fn resolve_use_fts(store: &IdentityStore, search_clean: &str, use_cache: b
         .acquire()
         .await
         .is_ok_and(|conn| conn.backend_name() == "SQLite");
-    let use_fts = if is_sqlite {
-        query_scalar::<_, i64>(
-            "SELECT CAST(CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END AS BIGINT)",
+    let (use_works_fts, use_titles_fts) = if is_sqlite {
+        let row: (i64, i64) = sqlx::query_as(
+            "SELECT \
+               CAST(CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='inventory_works_fts') THEN 1 ELSE 0 END AS BIGINT), \
+               CAST(CASE WHEN EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='work_search_titles_fts') THEN 1 ELSE 0 END AS BIGINT)",
         )
         .fetch_one(&store.pool)
         .await
-        .unwrap_or(0)
-            != 0
+        .unwrap_or((0, 0));
+        (row.0 != 0, row.1 != 0)
     } else {
-        false
+        (false, false)
     };
     if use_cache {
-        cache::lock_cache().insert_use_fts(store.cache_scope, use_fts);
+        let mut guard = cache::lock_cache();
+        guard.insert_use_fts(store.cache_scope, use_works_fts);
+        guard.insert_use_titles_fts(store.cache_scope, use_titles_fts);
     }
-    use_fts
+    (use_works_fts, use_titles_fts)
 }
 
 async fn load_and_decorate_works(
@@ -924,6 +945,7 @@ struct IdQueryParams<'a> {
     has_parental_policy: bool,
     fast_avail: bool,
     use_fts: bool,
+    use_titles_fts: bool,
 }
 
 fn build_id_query(params: &IdQueryParams<'_>, rated: bool) -> sqlx::QueryBuilder<sqlx::Any> {
@@ -951,6 +973,7 @@ fn build_id_query(params: &IdQueryParams<'_>, rated: bool) -> sqlx::QueryBuilder
         &mut id_builder,
         params.search_clean,
         params.use_fts,
+        params.use_titles_fts,
         params.fast_avail,
     );
     push_availability_filter(&mut id_builder, params.target_kind, params.fast_avail);
@@ -969,6 +992,7 @@ fn build_id_query(params: &IdQueryParams<'_>, rated: bool) -> sqlx::QueryBuilder
         params.has_parental_policy,
         params.fast_avail,
         params.use_fts,
+        params.use_titles_fts,
     );
     id_builder
 }
@@ -986,12 +1010,41 @@ pub async fn catalogue_page(
     filter: &CatalogueFilter,
     exact_count: bool,
 ) -> Result<Value, sqlx::Error> {
+    let shared = catalogue_page_shared(
+        store,
+        visible,
+        kind,
+        search,
+        sort,
+        offset,
+        limit,
+        filter,
+        exact_count,
+    )
+    .await?;
+    Ok(std::sync::Arc::unwrap_or_clone(shared))
+}
+
+/// Shared-reference variant of [`catalogue_page`] so HTTP handlers serialize cache hits without
+/// cloning the JSON tree under the cache lock.
+#[allow(clippy::too_many_arguments)]
+pub async fn catalogue_page_shared(
+    store: &IdentityStore,
+    visible: &[String],
+    kind: Option<&str>,
+    search: &str,
+    sort: &str,
+    offset: usize,
+    limit: usize,
+    filter: &CatalogueFilter,
+    exact_count: bool,
+) -> Result<std::sync::Arc<Value>, sqlx::Error> {
     let target_kind = match kind {
         Some("film") | Some("films") => Some("film"),
         Some("series") => Some("series"),
         None => None,
         Some(_) => {
-            return Ok(json!({
+            return Ok(std::sync::Arc::new(json!({
                 "items": [],
                 "total": if exact_count { Some(0usize) } else { None },
                 "hasMore": false,
@@ -999,12 +1052,12 @@ pub async fn catalogue_page(
                 "limit": limit,
                 "mode": "local-library",
                 "notice": "Bibliothèques locales indexées"
-            }));
+            })));
         }
     };
 
     if visible.is_empty() {
-        return Ok(json!({
+        return Ok(std::sync::Arc::new(json!({
             "items": [],
             "total": if exact_count { Some(0usize) } else { None },
             "hasMore": false,
@@ -1012,7 +1065,7 @@ pub async fn catalogue_page(
             "limit": limit,
             "mode": "local-library",
             "notice": "Bibliothèques locales indexées"
-        }));
+        })));
     }
 
     // Key on the database, not on this clone's address: each request owns its own clone.
@@ -1031,7 +1084,7 @@ pub async fn catalogue_page(
     let cacheable = pool_cacheable && !random;
     let cached_page = |key: &str, fp: i64| {
         if cacheable {
-            cache::lock_cache().get(key, fp)
+            cache::lock_cache().get_arc(key, fp)
         } else {
             None
         }
@@ -1055,7 +1108,7 @@ pub async fn catalogue_page(
             .await?;
 
     if valid_libs.is_empty() {
-        let response = json!({
+        let response = std::sync::Arc::new(json!({
             "items": [],
             "total": if exact_count { Some(0usize) } else { None },
             "hasMore": false,
@@ -1063,14 +1116,18 @@ pub async fn catalogue_page(
             "limit": limit,
             "mode": "local-library",
             "notice": "Bibliothèques locales indexées"
-        });
+        }));
         if cacheable {
-            cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+            cache::lock_cache().insert_arc(
+                cache_key,
+                fps.page_fp,
+                std::sync::Arc::clone(&response),
+            );
         }
         return Ok(response);
     }
 
-    // 3. Check media groups, parental policies, and whether translations exist for the sort language.
+    // 3. Check media groups, parental policies, sort translations, and FTS availability concurrently.
     let search_clean = search.trim().to_lowercase();
     let requested_sort_lang = (!random)
         .then(|| {
@@ -1080,16 +1137,17 @@ pub async fn catalogue_page(
                 .map(|first| crate::metadata_locale::language_of(first))
         })
         .flatten();
-    let (has_groups, has_parental_policy, sort_language) = resolve_meta_flags(
-        store,
-        filter.user_id.as_deref(),
-        requested_sort_lang,
-        fps.meta_fp,
-        use_aux_cache,
-    )
-    .await?;
-
-    let use_fts = resolve_use_fts(store, &search_clean, use_aux_cache).await;
+    let (meta_res, (use_fts, use_titles_fts)) = tokio::join!(
+        resolve_meta_flags(
+            store,
+            filter.user_id.as_deref(),
+            requested_sort_lang,
+            fps.meta_fp,
+            use_aux_cache,
+        ),
+        resolve_use_fts(store, &search_clean, use_aux_cache),
+    );
+    let (has_groups, has_parental_policy, sort_language) = meta_res?;
     let use_fts_index = use_fts && search_clean.chars().count() >= 3;
 
     // A random page counts its eligible pool itself.
@@ -1105,7 +1163,13 @@ pub async fn catalogue_page(
         }
         separated.push_unseparated(") ");
 
-        push_search_filter(&mut count_builder, &search_clean, use_fts, fast_avail);
+        push_search_filter(
+            &mut count_builder,
+            &search_clean,
+            use_fts,
+            use_titles_fts,
+            fast_avail,
+        );
         push_availability_filter(&mut count_builder, target_kind, fast_avail);
         push_catalogue_filters(&mut count_builder, filter, has_parental_policy, fast_avail);
         push_group_filter(
@@ -1117,6 +1181,7 @@ pub async fn catalogue_page(
             has_parental_policy,
             fast_avail,
             use_fts,
+            use_titles_fts,
         );
 
         let count_sql = crate::database::normalize_sql(count_builder.sql().as_str());
@@ -1135,13 +1200,17 @@ pub async fn catalogue_page(
     };
 
     if limit == 0 || total.is_some_and(|total| total == 0 || offset >= total) {
-        let response = json!({
+        let response = std::sync::Arc::new(json!({
             "items": [], "total": total, "hasMore": false,
             "offset": offset, "limit": limit,
             "mode": "local-library", "notice": "Bibliothèques locales indexées"
-        });
+        }));
         if cacheable {
-            cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+            cache::lock_cache().insert_arc(
+                cache_key,
+                fps.page_fp,
+                std::sync::Arc::clone(&response),
+            );
         }
         return Ok(response);
     }
@@ -1157,6 +1226,7 @@ pub async fn catalogue_page(
         has_parental_policy,
         fast_avail,
         use_fts,
+        use_titles_fts,
     };
     let (page_ids, total, has_more) = if random {
         let pool_key = pool_cacheable.then(|| {
@@ -1240,7 +1310,7 @@ pub async fn catalogue_page(
     };
     let fetch_ids: Vec<&String> = page_ids.iter().take(limit).collect();
     if fetch_ids.is_empty() {
-        let response = json!({
+        let response = std::sync::Arc::new(json!({
             "items": [],
             "total": total,
             "hasMore": false,
@@ -1248,9 +1318,13 @@ pub async fn catalogue_page(
             "limit": limit,
             "mode": "local-library",
             "notice": "Bibliothèques locales indexées"
-        });
+        }));
         if cacheable {
-            cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+            cache::lock_cache().insert_arc(
+                cache_key,
+                fps.page_fp,
+                std::sync::Arc::clone(&response),
+            );
         }
         return Ok(response);
     }
@@ -1310,7 +1384,7 @@ pub async fn catalogue_page(
         merged
     };
 
-    let response = json!({
+    let response = std::sync::Arc::new(json!({
         "items": items,
         "total": total,
         "hasMore": has_more,
@@ -1318,10 +1392,10 @@ pub async fn catalogue_page(
         "limit": limit,
         "mode": "local-library",
         "notice": "Bibliothèques locales indexées"
-    });
+    }));
 
     if cacheable {
-        cache::lock_cache().insert(cache_key, fps.page_fp, response.clone());
+        cache::lock_cache().insert_arc(cache_key, fps.page_fp, std::sync::Arc::clone(&response));
     }
 
     Ok(response)

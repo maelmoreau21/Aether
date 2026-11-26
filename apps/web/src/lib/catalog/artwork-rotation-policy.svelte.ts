@@ -10,23 +10,57 @@ export type ArtworkRotationPolicy = {
 
 export const defaultArtworkRotationPolicy: ArtworkRotationPolicy = {
   enabled: true, languageMode: 'interface', enableMovies: true, enableSeries: true,
-  rotationMode: 'random', minHoursBetweenSwitches: 0, poolSize: 12,
+  rotationMode: 'random', minHoursBetweenSwitches: 1, poolSize: 12,
   preferredLanguage: 'fr', fallbackLanguage: 'en',
   includeUnknownLanguage: true, allowAnyLanguageFallback: true,
 };
 let current = $state<ArtworkRotationPolicy>(defaultArtworkRotationPolicy);
+let loadedGeneration = -1;
 export function artworkRotationPolicy(): ArtworkRotationPolicy { return current; }
-export function setArtworkRotationPolicy(value: ArtworkRotationPolicy): void {
-  current = value;
+
+function samePolicy(a: ArtworkRotationPolicy, b: ArtworkRotationPolicy): boolean {
+  if (a === b) return true;
+  if (
+    a.enabled !== b.enabled ||
+    a.languageMode !== b.languageMode ||
+    a.enableMovies !== b.enableMovies ||
+    a.enableSeries !== b.enableSeries ||
+    a.rotationMode !== b.rotationMode ||
+    a.minHoursBetweenSwitches !== b.minHoursBetweenSwitches ||
+    a.poolSize !== b.poolSize ||
+    a.preferredLanguage !== b.preferredLanguage ||
+    a.fallbackLanguage !== b.fallbackLanguage ||
+    a.includeUnknownLanguage !== b.includeUnknownLanguage ||
+    a.allowAnyLanguageFallback !== b.allowAnyLanguageFallback
+  ) {
+    return false;
+  }
+  const libsA = a.enabledLibraries;
+  const libsB = b.enabledLibraries;
+  if (libsA === libsB) return true;
+  if (!libsA || !libsB || libsA.length !== libsB.length) return false;
+  return libsA.every((id, idx) => id === libsB[idx]);
 }
-onSessionGenerationChange(() => { setArtworkRotationPolicy(defaultArtworkRotationPolicy); });
+
+export function setArtworkRotationPolicy(value: ArtworkRotationPolicy): void {
+  if (!samePolicy(current, value)) {
+    current = value;
+  }
+}
+onSessionGenerationChange(() => {
+  loadedGeneration = -1;
+  setArtworkRotationPolicy(defaultArtworkRotationPolicy);
+});
 
 export async function loadArtworkRotationPolicy(signal?: AbortSignal): Promise<void> {
-  setArtworkRotationPolicy(defaultArtworkRotationPolicy);
   const generation = getSessionGeneration();
+  if (loadedGeneration !== generation) {
+    setArtworkRotationPolicy(defaultArtworkRotationPolicy);
+  }
   try {
     const saved = await ensurePreferences();
     if (!signal?.aborted && generation === getSessionGeneration()) {
+      loadedGeneration = generation;
       setArtworkRotationPolicy({ ...defaultArtworkRotationPolicy, ...saved?.artworkRotation });
     }
   } catch { /* Keep the default policy if preferences are unavailable. */ }

@@ -62,3 +62,6 @@ CREATE INDEX IF NOT EXISTS automation_dependencies_prereq
 
 CREATE INDEX IF NOT EXISTS artwork_auto_attempts_mode_time
     ON artwork_auto_attempts (work_id, mode, attempted_at);
+
+CREATE INDEX IF NOT EXISTS work_translations_updated_at
+    ON work_translations (updated_at);

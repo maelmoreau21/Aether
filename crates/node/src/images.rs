@@ -74,7 +74,10 @@ pub(crate) fn decode_image(
 /// Validate an already-confined `OpenedFile` handle without reopening by path.
 /// Ensures no TOCTOU substitution can occur between confinement, validation, and streaming.
 pub async fn validate_opened(opened: &OpenedFile) -> io::Result<ValidatedImage> {
-    opened.verify_unchanged_sync()?;
+    let check_handle = opened.try_clone()?;
+    tokio::task::spawn_blocking(move || check_handle.verify_unchanged_sync())
+        .await
+        .map_err(|_| io::Error::other("image validation failed"))??;
     let size = opened.size();
     if size == 0 || size > MAX_BYTES {
         return Err(invalid("image must be a regular file of at most 10 MiB"));

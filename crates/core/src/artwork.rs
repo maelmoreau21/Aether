@@ -231,8 +231,10 @@ async fn allowed(
             return Err(StatusCode::FORBIDDEN);
         }
         auth.require_csrf(headers, &actor)?;
+        crate::feedback::authorized(auth, headers, work, false).await?;
+    } else {
+        crate::permissions::require_work_read(auth, headers, work).await?;
     }
-    crate::feedback::authorized(auth, headers, work, false).await?;
     Ok(())
 }
 fn db(_: sqlx::Error) -> StatusCode {

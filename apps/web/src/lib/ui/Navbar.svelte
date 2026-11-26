@@ -85,7 +85,15 @@
     const updateScroll = () => { isScrolled = window.scrollY > 12; };
     updateScroll();
     window.addEventListener('scroll', updateScroll, { passive: true });
-    const refresh = () => { if (document.visibilityState === 'visible') { void refreshLibraries(true); void loadFeatures(true).catch(() => {}); } };
+    let lastFocusRefreshAt = 0;
+    const refresh = () => {
+      if (document.visibilityState !== 'visible') return;
+      const now = Date.now();
+      if (now - lastFocusRefreshAt < 60_000) return;
+      lastFocusRefreshAt = now;
+      void refreshLibraries(true);
+      void loadFeatures(true).catch(() => {});
+    };
     window.addEventListener('focus', refresh);
     return () => {
       window.removeEventListener('scroll', updateScroll);

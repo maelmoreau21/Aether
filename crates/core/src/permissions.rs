@@ -467,7 +467,7 @@ pub async fn permission_fingerprint(store: &IdentityStore) -> Result<i64, sqlx::
         cache.record(store.cache_scope, |m| m.fingerprint_queries += 1);
     }
     const INT_COLS: usize = 34;
-    const TOTAL_COLS: usize = 67;
+    const TOTAL_COLS: usize = 65;
     let row = query(
         "SELECT
            CAST(COALESCE((SELECT gen FROM inventory_cache_generation WHERE id = 1), 0) AS BIGINT),
@@ -532,8 +532,6 @@ pub async fn permission_fingerprint(store: &IdentityStore) -> Result<i64, sqlx::
            COALESCE((SELECT MAX(id || ':' || role) FROM users), ''),
            COALESCE((SELECT MIN(work_id || ':' || group_id) FROM media_group_members), ''),
            COALESCE((SELECT MAX(work_id || ':' || group_id) FROM media_group_members), ''),
-           COALESCE((SELECT MIN(id || ':' || library_id || ':' || root_snapshot) FROM inventory_sources), ''),
-           COALESCE((SELECT MAX(id || ':' || library_id || ':' || root_snapshot) FROM inventory_sources), ''),
            COALESCE((SELECT MAX(id) FROM inventory_works), ''),
            COALESCE((SELECT MAX(id) FROM inventory_assets), ''),
            COALESCE((SELECT MAX(id) FROM inventory_images), '')",
@@ -913,6 +911,40 @@ async fn resolve_resource_decision(
         },
     )
     .await
+}
+
+/// Cached read authorization for a single work (RBAC + library visibility + parental policy).
+pub(crate) async fn require_work_read(
+    auth: &AuthState,
+    headers: &axum::http::HeaderMap,
+    work_id: &str,
+) -> Result<String, StatusCode> {
+    let identity = auth.authenticate(headers).await?;
+    let perm_fp = permission_fingerprint_coalesced(&auth.store).await?;
+    let visible = resolve_visible_libraries(
+        &auth.store,
+        "",
+        &identity.user.id,
+        identity.user.role,
+        perm_fp,
+    )
+    .await
+    .map_err(|(status, _)| status)?;
+    let target = RouteTarget::CatalogWork(work_id.to_owned());
+    let decision = resolve_resource_decision(
+        &auth.store,
+        "",
+        &identity.user.id,
+        identity.user.role,
+        &visible,
+        &target,
+    )
+    .await
+    .map_err(|(status, _)| status)?;
+    if !decision.allowed || !decision.parental_allowed {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(identity.user.id)
 }
 
 pub async fn require_media(

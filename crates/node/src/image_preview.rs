@@ -29,8 +29,9 @@ pub(crate) struct Preview {
 }
 #[derive(Default)]
 struct Cache {
-    entries: HashMap<Key, Preview>,
-    order: VecDeque<Key>,
+    entries: HashMap<Key, (u64, Preview)>,
+    order: VecDeque<(Key, u64)>,
+    seq: u64,
     bytes: usize,
 }
 static CACHE: LazyLock<Mutex<Cache>> = LazyLock::new(|| Mutex::new(Cache::default()));
@@ -80,9 +81,25 @@ pub fn width(query: Option<&str>) -> io::Result<Option<u32>> {
 }
 fn cached(key: &Key) -> Option<Preview> {
     let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
-    let value = cache.entries.get(key)?.clone();
-    cache.order.retain(|item| item != key);
-    cache.order.push_back(key.clone());
+    let value = cache.entries.get(key)?.1.clone();
+    cache.seq = cache.seq.wrapping_add(1).max(1);
+    let seq = cache.seq;
+    if let Some(entry) = cache.entries.get_mut(key) {
+        entry.0 = seq;
+    }
+    cache.order.push_back((key.clone(), seq));
+    if cache.order.len() > cache.entries.len().saturating_mul(4).saturating_add(64) {
+        let mut live: Vec<(u64, Key)> = cache
+            .entries
+            .iter()
+            .map(|(k, (s, _))| (*s, k.clone()))
+            .collect();
+        live.sort_unstable_by_key(|(s, _)| *s);
+        cache.order.clear();
+        for (s, k) in live {
+            cache.order.push_back((k, s));
+        }
+    }
     Some(value)
 }
 fn remember(key: Key, value: Preview) {
@@ -91,16 +108,36 @@ fn remember(key: Key, value: Preview) {
         return;
     }
     while cache.bytes + value.bytes.len() > CACHE_BYTES || cache.entries.len() >= CACHE_ENTRIES {
-        let Some(oldest) = cache.order.pop_front() else {
-            break;
+        let evicted = loop {
+            let Some((oldest, oldest_seq)) = cache.order.pop_front() else {
+                break false;
+            };
+            if cache
+                .entries
+                .get(&oldest)
+                .is_some_and(|e| e.0 == oldest_seq)
+            {
+                if let Some((_, old)) = cache.entries.remove(&oldest) {
+                    cache.bytes -= old.bytes.len();
+                }
+                break true;
+            }
         };
-        if let Some(old) = cache.entries.remove(&oldest) {
-            cache.bytes -= old.bytes.len();
+        if !evicted {
+            if let Some(oldest) = cache.entries.keys().next().cloned() {
+                if let Some((_, old)) = cache.entries.remove(&oldest) {
+                    cache.bytes -= old.bytes.len();
+                }
+            } else {
+                break;
+            }
         }
     }
+    cache.seq = cache.seq.wrapping_add(1).max(1);
+    let seq = cache.seq;
     cache.bytes += value.bytes.len();
-    cache.order.push_back(key.clone());
-    cache.entries.insert(key, value);
+    cache.order.push_back((key.clone(), seq));
+    cache.entries.insert(key, (seq, value));
 }
 fn encode(image: &image::DynamicImage) -> io::Result<(Vec<u8>, &'static str)> {
     let encoded =
@@ -112,18 +149,18 @@ static VERIFIED_CACHE_DIRS: LazyLock<Mutex<HashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 
 fn dir_writable(base: &std::path::Path, cache_dir: &std::path::Path) -> bool {
-    let Ok(meta) = std::fs::metadata(base) else {
-        return false;
-    };
-    if !meta.is_dir() || meta.permissions().readonly() {
-        return false;
-    }
     if VERIFIED_CACHE_DIRS
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .contains(cache_dir)
     {
         return true;
+    }
+    let Ok(meta) = std::fs::metadata(base) else {
+        return false;
+    };
+    if !meta.is_dir() || meta.permissions().readonly() {
+        return false;
     }
     if std::fs::create_dir_all(cache_dir).is_err() {
         return false;
@@ -214,7 +251,7 @@ fn read_disk_cache(key: &Key) -> Option<Preview> {
         _ => return None,
     };
     Some(Preview {
-        bytes: Bytes::from(bytes[2..].to_vec()),
+        bytes: Bytes::from(bytes).slice(2..),
         mime,
         source_mime,
     })
@@ -268,7 +305,10 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     if ![320, 640, 1280].contains(&width) {
         return Err(invalid());
     }
-    opened.verify_unchanged_sync()?;
+    let check_handle = opened.try_clone()?;
+    tokio::task::spawn_blocking(move || check_handle.verify_unchanged_sync())
+        .await
+        .map_err(|_| invalid())??;
     let size = opened.size();
     if size == 0 || size > images::MAX_BYTES {
         return Err(invalid());
@@ -284,7 +324,6 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
     }
     let slot = acquire_in_flight(&key);
     let mut guard = slot.lock().await;
-    opened.verify_unchanged_sync()?;
     if let Some(cached_outcome) = guard.as_ref() {
         return match cached_outcome {
             Ok(preview) => Ok(preview.clone()),
@@ -308,7 +347,6 @@ pub(crate) async fn generate(opened: &OpenedFile, width: u32) -> io::Result<Prev
         .acquire()
         .await
         .map_err(|_| invalid())?;
-    opened.verify_unchanged_sync()?;
     let mut source = opened.try_clone()?;
     let blocking_result = tokio::task::spawn_blocking(move || {
         let _permit = permit;

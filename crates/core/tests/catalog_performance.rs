@@ -847,3 +847,78 @@ async fn test_migrated_database_from_0006_to_0007_then_0008_unicode_fix() {
     assert_eq!(marker_count_reopened.0, 1);
     reopened.close().await;
 }
+
+#[tokio::test]
+async fn work_search_titles_fts_avoids_full_table_scan_and_zero_results_are_fast() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = temp.path().join("fts_search_titles.sqlite");
+    let store = IdentityStore::open(&db).await.unwrap();
+    let (_, all_libs) = populate_synthetic_catalog(&store, 1000).await;
+
+    // Populate alternate search titles for works
+    for i in 0..500 {
+        sqlx::query("INSERT INTO work_search_titles(work_id, title_search) VALUES(?, ?) ON CONFLICT DO NOTHING")
+            .bind(format!("work-{:05}", i))
+            .bind(format!("titre alternatif {}", i))
+            .execute(store.pool())
+            .await
+            .unwrap();
+    }
+
+    // 1. Verify EXPLAIN QUERY PLAN uses work_search_titles_fts instead of SCAN st
+    let explain: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         SELECT w.id FROM inventory_works w INDEXED BY inventory_works_fts_sort \
+         WHERE w.library_id IN ('lib-main', 'lib-priv') \
+           AND (w.id IN (SELECT work_id FROM inventory_works_fts WHERE inventory_works_fts.search_text MATCH '\"alternatif\"') \
+             OR w.id IN (SELECT work_id FROM work_search_titles_fts WHERE work_search_titles_fts.title_search MATCH '\"alternatif\"'))",
+    )
+    .fetch_all(store.pool())
+    .await
+    .unwrap();
+    let explain_text = explain
+        .iter()
+        .map(|(_, _, _, detail)| detail.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        explain_text.contains("work_search_titles_fts"),
+        "Search query must use work_search_titles_fts: {explain_text}"
+    );
+    assert!(
+        !explain_text.contains("SCAN st"),
+        "Search query must not full-scan work_search_titles: {explain_text}"
+    );
+
+    // 2. Alternate title lookup succeeds via FTS5
+    let alt_hit = aether_core::inventory::catalogue(
+        &store,
+        &all_libs,
+        None,
+        "alternatif 42",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    assert_eq!(alt_hit["total"], 1);
+
+    // 3. Zero-result search returns quickly with empty items
+    let start_empty = Instant::now();
+    let empty_res = aether_core::inventory::catalogue(
+        &store,
+        &all_libs,
+        None,
+        "zzznonexistentqueryxyz",
+        "title-asc",
+        0,
+        24,
+    )
+    .await
+    .unwrap();
+    let elapsed_empty = start_empty.elapsed();
+    assert_eq!(empty_res["total"], 0);
+    assert!(empty_res["items"].as_array().unwrap().is_empty());
+    println!("Zero-result FTS search on 1k works: {elapsed_empty:?}");
+}

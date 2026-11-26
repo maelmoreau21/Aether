@@ -5,6 +5,7 @@
   import type { CoreHealth, AdminNode, Library, Scan } from './types';
   import type { Work } from '../catalog/api';
   import { selectArtwork } from '../catalog/artwork-selection';
+  import { imagePreviewUrl } from '../catalog/image-url';
   import { session } from '../auth/session';
   import { clusterEnabled } from '../config/presentation';
   import ClientIcon from '../ui/ClientIcon.svelte';
@@ -125,7 +126,7 @@
           {@const bg=background(item)}
           <li class="session" class:watching={!!item.playbackId}>
             <div class="session-media">
-              {#if bg}<img class="backdrop" src={bg} alt="" onerror={()=>nextBackground(item)} />{/if}
+              {#if bg}<img class="backdrop" src={imagePreviewUrl(bg, 640)} alt="" loading="lazy" decoding="async" onerror={()=>nextBackground(item)} />{/if}
               <div class="scrim"></div>
               <div class="client">
                 <span class="client-icon"><ClientIcon kind={client.kind} size={26} /></span>
@@ -134,7 +135,7 @@
               {#if item.playbackId}
                 <div class="now">
                   <div class="title-block">
-                    {#if art?.logo}<img class="logo" src={art.logo} alt={heading(item)} />{:else}<strong class="title">{heading(item)}</strong>{/if}
+                    {#if art?.logo}<img class="logo" src={imagePreviewUrl(art.logo, 640)} alt={heading(item)} loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />{:else}<strong class="title">{heading(item)}</strong>{/if}
                     {#if episodeLine(item)}<span class="episode">{episodeLine(item)}</span>{/if}
                     {#if item.year}<span>{item.year}</span>{/if}
                   </div>

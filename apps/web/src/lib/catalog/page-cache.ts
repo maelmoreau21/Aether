@@ -18,8 +18,13 @@ function storageKey(key: string): string {
 }
 
 type Entry = { data: CatalogPage; at: number; bytes: number; library: string };
+type PendingJob = {
+  controller: AbortController;
+  promise: Promise<CatalogPage>;
+  waiters: Set<symbol>;
+};
 const pages = new Map<string, Entry>();
-const pending = new Map<string, { controller: AbortController; promise: Promise<CatalogPage> }>();
+const pending = new Map<string, PendingJob>();
 export const catalogRevision = writable(0);
 let revision = 0;
 const scrolls = new Map<string, number>();
@@ -118,7 +123,13 @@ function readEntry(key: string): Entry | undefined {
 }
 
 function storeEntry(key: string, url: string, data: CatalogPage): void {
-  const size = new TextEncoder().encode(JSON.stringify(data)).byteLength;
+  const parsedUrl = new URL(url, 'http://local');
+  const isSearchQuery = Boolean(parsedUrl.searchParams.get('q')?.trim());
+  const library = parsedUrl.searchParams.get('library') ?? '';
+  const newEntry: Entry = { data, at: Date.now(), bytes: 0, library };
+  const serialized = JSON.stringify(newEntry);
+  const size = new TextEncoder().encode(serialized).byteLength;
+  newEntry.bytes = size;
   const old = pages.get(key);
   if (old) {
     bytes -= old.bytes;
@@ -128,12 +139,10 @@ function storeEntry(key: string, url: string, data: CatalogPage): void {
     }
   }
   if (size <= MAX_BYTES) {
-    const library = new URL(url, 'http://local').searchParams.get('library') ?? '';
-    const newEntry = { data, at: Date.now(), bytes: size, library };
     pages.set(key, newEntry);
     bytes += size;
-    if (typeof sessionStorage !== 'undefined') {
-      try { sessionStorage.setItem(storageKey(key), JSON.stringify(newEntry)); } catch { /* ignore */ }
+    if (!isSearchQuery && typeof sessionStorage !== 'undefined') {
+      try { sessionStorage.setItem(storageKey(key), serialized); } catch { /* ignore */ }
     }
     while (bytes > MAX_BYTES || pages.size > MAX_PAGES) {
       const first = pages.keys().next().value!;
@@ -173,23 +182,66 @@ function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function loadCatalog(rawKey: string, url: string): Promise<CatalogPage> {
+function attachCallerSignal(key: string, job: PendingJob, signal?: AbortSignal): Promise<CatalogPage> {
+  const token = Symbol('waiter');
+  job.waiters.add(token);
+  if (!signal) {
+    return job.promise.finally(() => { job.waiters.delete(token); });
+  }
+  if (signal.aborted) {
+    job.waiters.delete(token);
+    if (job.waiters.size === 0 && pending.get(key) === job) {
+      pending.delete(key);
+      job.controller.abort(signal.reason);
+    }
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  }
+  return new Promise<CatalogPage>((resolve, reject) => {
+    const onAbort = () => {
+      job.waiters.delete(token);
+      if (job.waiters.size === 0 && pending.get(key) === job) {
+        pending.delete(key);
+        job.controller.abort(signal.reason);
+      }
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    job.promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort);
+        job.waiters.delete(token);
+        resolve(value);
+      },
+      err => {
+        signal.removeEventListener('abort', onAbort);
+        job.waiters.delete(token);
+        reject(err);
+      }
+    );
+  });
+}
+
+export function loadCatalog(rawKey: string, url: string, signal?: AbortSignal): Promise<CatalogPage> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  }
   const key = scopedKey(rawKey);
   const entry = readEntry(key);
   if (entry && Date.now() - entry.at < FRESH_MS) return Promise.resolve(entry.data);
   const existing = pending.get(key);
-  if (existing) return existing.promise;
+  if (existing) return attachCallerSignal(key, existing, signal);
   if (pending.size >= MAX_PAGES) {
     const first = pending.keys().next().value!;
     pending.get(first)!.controller.abort(); pending.delete(first);
   }
+  const isSearchQuery = Boolean(new URL(url, 'http://local').searchParams.get('q')?.trim());
   const controller = new AbortController();
   const generation = epoch;
   const fetchPage = () => request<CatalogPage>(url, controller.signal);
   const promise = fetchPage().catch(async cause => {
     // A busy server (slow answer, 5xx, dropped connection) gets one more try before a shelf is
-    // reported as unavailable; access and session answers are final.
-    if (controller.signal.aborted || generation !== epoch || !isTransientCatalogError(cause)) throw cause;
+    // reported as unavailable; interactive searches fail fast and access answers are final.
+    if (isSearchQuery || controller.signal.aborted || generation !== epoch || !isTransientCatalogError(cause)) throw cause;
     await abortableDelay(RETRY_DELAY_MS, controller.signal);
     return fetchPage();
   }).then(data => {
@@ -197,8 +249,9 @@ export function loadCatalog(rawKey: string, url: string): Promise<CatalogPage> {
     storeEntry(key, url, data);
     return data;
   }).finally(() => { if (pending.get(key)?.controller === controller) pending.delete(key); });
-  pending.set(key, { controller, promise });
-  return promise;
+  const job: PendingJob = { controller, promise, waiters: new Set() };
+  pending.set(key, job);
+  return attachCallerSignal(key, job, signal);
 }
 
 /** Warm only the first bounded page on navigation intent, using the exact display key. */
@@ -432,6 +485,6 @@ export function commitStartupPreload(ticket: StartupPreloadTicket | null | undef
       .finally(() => {
         if (pending.get(key)?.controller === adoptionController) pending.delete(key);
       });
-    pending.set(key, { controller: adoptionController, promise });
+    pending.set(key, { controller: adoptionController, promise, waiters: new Set() });
   }
 }

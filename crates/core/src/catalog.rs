@@ -259,21 +259,26 @@ pub async fn list(
         && (!inventory.is_fixture_bench() || visible.0.iter().any(|id| !id.starts_with("fixture-")))
     {
         let user_id = actor.map(|v| v.0.user.id);
-        let saved_prefs: Option<String> = if let Some(user) = &user_id {
-            match crate::database::query_scalar(
-                "SELECT preferences_json FROM user_preferences WHERE user_id=?",
-            )
-            .bind(user)
-            .fetch_optional(&store.pool)
-            .await
-            {
-                Ok(saved) => saved,
-                Err(_) => {
-                    return error(StatusCode::INTERNAL_SERVER_ERROR, "preferences_unavailable");
+        let (prefs_res, settings_res) = tokio::join!(
+            async {
+                if let Some(user) = &user_id {
+                    crate::database::query_scalar::<_, String>(
+                        "SELECT preferences_json FROM user_preferences WHERE user_id=?",
+                    )
+                    .bind(user)
+                    .fetch_optional(&store.pool)
+                    .await
+                } else {
+                    Ok(None)
                 }
+            },
+            crate::server_settings::load(store),
+        );
+        let saved_prefs: Option<String> = match prefs_res {
+            Ok(saved) => saved,
+            Err(_) => {
+                return error(StatusCode::INTERNAL_SERVER_ERROR, "preferences_unavailable");
             }
-        } else {
-            None
         };
         let hide_watched = if query.unwatched == Some(true) {
             user_id.is_some()
@@ -290,16 +295,12 @@ pub async fn list(
         } else {
             false
         };
-        let locale_chain = match crate::translations::locale_chain_with_prefs(
-            store,
+        let default_lang = settings_res.ok().map(|s| s.preferred_metadata_language);
+        let locale_chain = crate::translations::locale_chain_from_parts(
             saved_prefs.as_deref(),
             query.locale.as_deref(),
-        )
-        .await
-        {
-            Ok(chain) => chain,
-            Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "inventory_unavailable"),
-        };
+            default_lang.as_deref(),
+        );
         let filter = crate::inventory::CatalogueFilter {
             locale_chain,
             bypass_cache: false,
@@ -320,7 +321,7 @@ pub async fn list(
             }),
             min_rating: query.min_rating,
         };
-        return match crate::inventory::catalogue_page(
+        return match crate::inventory::catalogue_page_shared(
             store,
             &visible.0,
             query.kind.as_deref(),

@@ -945,6 +945,79 @@ struct PosterQuery {
     src: String,
     path: String,
 }
+#[derive(Clone)]
+struct CachedPoster {
+    bytes: axum::body::Bytes,
+    content_type: &'static str,
+    etag: String,
+}
+
+#[derive(Default)]
+struct PosterCache {
+    entries: std::collections::HashMap<(String, String), (u64, CachedPoster)>,
+    order: std::collections::VecDeque<((String, String), u64)>,
+    seq: u64,
+    bytes: usize,
+}
+
+impl PosterCache {
+    const MAX_ENTRIES: usize = 256;
+    const MAX_BYTES: usize = 16 * 1024 * 1024;
+
+    fn get(&mut self, key: &(String, String)) -> Option<CachedPoster> {
+        let entry = self.entries.get(key)?.1.clone();
+        self.seq = self.seq.wrapping_add(1).max(1);
+        let seq = self.seq;
+        if let Some(slot) = self.entries.get_mut(key) {
+            slot.0 = seq;
+        }
+        self.order.push_back((key.clone(), seq));
+        Some(entry)
+    }
+
+    fn insert(&mut self, key: (String, String), value: CachedPoster) {
+        let size = value.bytes.len();
+        if size > Self::MAX_BYTES {
+            return;
+        }
+        if let Some((_, old)) = self.entries.remove(&key) {
+            self.bytes = self.bytes.saturating_sub(old.bytes.len());
+        }
+        while self.bytes.saturating_add(size) > Self::MAX_BYTES
+            || self.entries.len() >= Self::MAX_ENTRIES
+        {
+            let evicted = loop {
+                let Some((cand, cand_seq)) = self.order.pop_front() else {
+                    break false;
+                };
+                if self.entries.get(&cand).is_some_and(|e| e.0 == cand_seq) {
+                    if let Some((_, old)) = self.entries.remove(&cand) {
+                        self.bytes = self.bytes.saturating_sub(old.bytes.len());
+                    }
+                    break true;
+                }
+            };
+            if !evicted {
+                if let Some(k) = self.entries.keys().next().cloned() {
+                    if let Some((_, old)) = self.entries.remove(&k) {
+                        self.bytes = self.bytes.saturating_sub(old.bytes.len());
+                    }
+                } else {
+                    break;
+                }
+            }
+        }
+        self.seq = self.seq.wrapping_add(1).max(1);
+        let seq = self.seq;
+        self.bytes = self.bytes.saturating_add(size);
+        self.order.push_back((key.clone(), seq));
+        self.entries.insert(key, (seq, value));
+    }
+}
+
+static POSTER_CACHE: std::sync::LazyLock<std::sync::Mutex<PosterCache>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(PosterCache::default()));
+
 /// Artwork for titles that are not in the library yet. Only fixed providers and plain image
 /// paths are served; the browser never contacts them directly.
 async fn poster(
@@ -967,14 +1040,51 @@ async fn poster(
     } else {
         format!("{prefix}{}", input.path)
     };
-    let (bytes, content_type) = transport::public_image(host, &full_path).await?;
+    let cache_key = (host.to_owned(), full_path.clone());
+    let cached = POSTER_CACHE.lock().ok().and_then(|mut c| c.get(&cache_key));
+    let entry = match cached {
+        Some(hit) => hit,
+        None => {
+            let (bytes, content_type) = transport::public_image(host, &full_path).await?;
+            let etag = format!("\"{}\"", media_contracts::protocol::sha256_hex(&bytes));
+            let entry = CachedPoster {
+                bytes: axum::body::Bytes::from(bytes),
+                content_type,
+                etag,
+            };
+            if let Ok(mut c) = POSTER_CACHE.lock() {
+                c.insert(cache_key, entry.clone());
+            }
+            entry
+        }
+    };
+    let matches = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(',')
+                .map(|part| part.trim().trim_start_matches("W/"))
+                .any(|part| part == entry.etag || part == "*")
+        });
+    if matches {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, entry.etag.as_str()),
+                (header::CACHE_CONTROL, "private, max-age=86400"),
+                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            ],
+        )
+            .into_response());
+    }
     Ok((
         [
-            (header::CONTENT_TYPE, content_type),
+            (header::CONTENT_TYPE, entry.content_type),
+            (header::ETAG, entry.etag.as_str()),
             (header::CACHE_CONTROL, "private, max-age=86400"),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         ],
-        bytes,
+        entry.bytes,
     )
         .into_response())
 }

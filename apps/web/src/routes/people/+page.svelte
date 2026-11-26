@@ -39,6 +39,17 @@
     const nextOffset = append ? offset : 0;
     try {
       const search = new URLSearchParams({ person: personName, offset: String(nextOffset), limit: '24', count: 'false' });
+      const portraitTask = !append && workId
+        ? fetch(`/api/v1/catalog/${encodeURIComponent(workId)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(10000)]) })
+            .then(async details => {
+              if (details.ok) {
+                const work: Work = await details.json();
+                if (!current.signal.aborted && generation === getSessionGeneration()) source = work;
+              }
+            })
+            .catch(() => { /* The list remains useful if the source portrait is unavailable. */ })
+        : undefined;
+      void portraitTask;
       const response = await fetch(`/api/v1/catalog?${search}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(15000)]) });
       if (!response.ok) throw new Error($t('unable_to_load_the_works_try'));
       const result: { items: Work[]; hasMore?: boolean; offset: number; limit: number } = await response.json();
@@ -47,15 +58,6 @@
       items = append ? [...items, ...result.items.filter(item => !items.some(existing => existing.id === item.id))] : result.items;
       offset = result.offset + result.limit;
       hasMore = result.hasMore === true;
-      if (!append && workId) {
-        try {
-          const details = await fetch(`/api/v1/catalog/${encodeURIComponent(workId)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(10000)]) });
-          if (details.ok) {
-            const work: Work = await details.json();
-            if (!current.signal.aborted && generation === getSessionGeneration()) source = work;
-          }
-        } catch { /* The list remains useful if the source portrait is unavailable. */ }
-      }
     } catch (cause) {
       if (!current.signal.aborted && generation === getSessionGeneration()) error = cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : $t('the_server_is_taking_too_long');
     } finally {
@@ -84,7 +86,7 @@
     <header class="person-header">
       <div class="portrait">
         <span aria-hidden="true">{initials(name)}</span>
-        {#if photo && !photoFailed}<img src={photo} alt="" width="240" height="240" onerror={() => photoFailed = true} />{/if}
+        {#if photo && !photoFailed}<img src={photo} alt="" width="240" height="240" decoding="async" onerror={() => photoFailed = true} />{/if}
       </div>
       <div><p class="eyebrow">{$t('cast_crew')}</p><h1>{name}</h1><p class="subtitle">{$t('works_in_your_library')}</p></div>
     </header>

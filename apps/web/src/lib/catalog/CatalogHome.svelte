@@ -121,11 +121,11 @@
           <a class="home-library-card" href={libHref}>
             <span class="home-lib-art" data-kind={visualKind}>
               {#if lib.imageUrl}
-                <img class="home-lib-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" />
+                <img class="home-lib-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
               {:else if lib.coverUrls?.length}
                 <span class="home-lib-collage" data-count={Math.min(lib.coverUrls.length, 4)} aria-hidden="true">
                   {#each lib.coverUrls.slice(0, 4) as url (url)}
-                    <img src={url} alt="" loading="lazy" decoding="async" />
+                    <img src={url} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                   {/each}
                 </span>
               {/if}
@@ -155,11 +155,11 @@
               <a class="home-library-card" href={libHref}>
                 <span class="home-lib-art" data-kind={visualKind}>
                   {#if lib.imageUrl}
-                    <img class="home-lib-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" />
+                    <img class="home-lib-img" src={lib.imageUrl} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                   {:else if lib.coverUrls?.length}
                     <span class="home-lib-collage" data-count={Math.min(lib.coverUrls.length, 4)} aria-hidden="true">
                       {#each lib.coverUrls.slice(0, 4) as url (url)}
-                        <img src={url} alt="" loading="lazy" decoding="async" />
+                        <img src={url} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                       {/each}
                     </span>
                   {/if}
@@ -180,15 +180,15 @@
       <TonightMosaic works={tonight} {detailUrl} />
     {:else if section === 'films' && films.length}
       <MediaShelf title={$t('recently_added_movies')} viewAllHref={resolve('films/?sort=added-desc')}>
-        {#each films.slice(0, 16) as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={index < 8} />{/each}
+        {#each films.slice(0, 16) as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={sections[0] === 'films' && index < 4} />{/each}
       </MediaShelf>
     {:else if section === 'series' && series.length}
       <MediaShelf title={$t('recently_added_series')} viewAllHref={resolve('series/?sort=added-desc')}>
-        {#each series.slice(0, 16) as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={index < 8} />{/each}
+        {#each series.slice(0, 16) as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={sections[0] === 'series' && index < 4} />{/each}
       </MediaShelf>
     {:else if section === 'rated' && topRated.length >= 4}
       <MediaShelf title={$t('top_rated_library')}>
-        {#each topRated as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={sections.indexOf('rated') <= 2 && index < 8} />{/each}
+        {#each topRated as work, index (work.id)}<Poster {work} href={detailUrl(work)} eager={sections[0] === 'rated' && index < 4} />{/each}
       </MediaShelf>
     {/if}
     {#if section === 'tonight'}<RecommendationShelf />{/if}

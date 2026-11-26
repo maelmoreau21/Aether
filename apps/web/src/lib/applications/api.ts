@@ -12,7 +12,21 @@ export const defaultFeatures: Readonly<Features> = Object.freeze({ requests: fal
 export const features = writable<Features>({ ...defaultFeatures });
 let pending: Promise<Features> | undefined;
 let loadedAt = 0;
-onSessionGenerationChange(() => { features.set({ ...defaultFeatures }); pending = undefined; loadedAt = 0; });
+let cachedDestinations: DestinationServer[] | undefined;
+let pendingDestinations: Promise<DestinationServer[]> | undefined;
+let cachedPolicy: MyPolicy | undefined;
+let pendingPolicy: Promise<MyPolicy> | undefined;
+const discoverCache = new Map<string, { at: number; data: { results: SearchResult[]; errors: { error: string }[]; restricted?: boolean } }>();
+onSessionGenerationChange(() => {
+  features.set({ ...defaultFeatures });
+  pending = undefined;
+  loadedAt = 0;
+  cachedDestinations = undefined;
+  pendingDestinations = undefined;
+  cachedPolicy = undefined;
+  pendingPolicy = undefined;
+  discoverCache.clear();
+});
 
 const errors: Readonly<Record<string, string>> = translatedLabels({
   extension_disabled: 'err_extension_unavailable', extension_unavailable: 'err_extension_unavailable', feature_unavailable: 'err_extension_unavailable',
@@ -255,14 +269,44 @@ export function posterUrl(poster: { src: string; path: string } | null | undefin
 
 /** Combined discovery search across configured servers with rights and library annotations. */
 export async function discoverRequests(q: string, signal?: AbortSignal): Promise<{ results: SearchResult[]; errors: { error: string }[]; restricted?: boolean }> {
-  return applicationRequest<{ results: SearchResult[]; errors: { error: string }[]; restricted?: boolean }>(
-    `/api/v1/requests/discover?q=${encodeURIComponent(q.trim())}`,
+  const trimmed = q.trim();
+  const hit = discoverCache.get(trimmed);
+  if (hit && Date.now() - hit.at < 30_000) return hit.data;
+  const data = await applicationRequest<{ results: SearchResult[]; errors: { error: string }[]; restricted?: boolean }>(
+    `/api/v1/requests/discover?q=${encodeURIComponent(trimmed)}`,
     { signal }
   );
+  if (discoverCache.size >= 32) {
+    const oldest = discoverCache.keys().next().value;
+    if (oldest !== undefined) discoverCache.delete(oldest);
+  }
+  discoverCache.set(trimmed, { at: Date.now(), data });
+  return data;
 }
 
-export async function loadMyPolicy(): Promise<MyPolicy> {
-  return applicationRequest<MyPolicy>('/api/v1/requests/policy');
+export async function loadDestinations(signal?: AbortSignal, force = false): Promise<DestinationServer[]> {
+  if (!force && cachedDestinations) return cachedDestinations;
+  if (!force && pendingDestinations) return pendingDestinations;
+  const generation = getSessionGeneration();
+  const task = applicationRequest<{ servers: DestinationServer[] }>('/api/v1/requests/destinations', { signal }).then(d => {
+    const servers = d.servers ?? [];
+    if (generation === getSessionGeneration()) cachedDestinations = servers;
+    return servers;
+  });
+  pendingDestinations = task;
+  try { return await task; } finally { if (pendingDestinations === task) pendingDestinations = undefined; }
+}
+
+export async function loadMyPolicy(signal?: AbortSignal, force = false): Promise<MyPolicy> {
+  if (!force && cachedPolicy) return cachedPolicy;
+  if (!force && pendingPolicy) return pendingPolicy;
+  const generation = getSessionGeneration();
+  const task = applicationRequest<MyPolicy>('/api/v1/requests/policy', { signal }).then(policy => {
+    if (generation === getSessionGeneration()) cachedPolicy = policy;
+    return policy;
+  });
+  pendingPolicy = task;
+  try { return await task; } finally { if (pendingPolicy === task) pendingPolicy = undefined; }
 }
 export async function loadPolicyOverview(): Promise<PolicyOverview> {
   return applicationRequest<PolicyOverview>('/api/v1/admin/acquisition/policies');

@@ -159,24 +159,35 @@
         void refresh().catch(() => {});
       }
     }, 15000);
-    return () => clearInterval(timer);
+    return () => { clearInterval(timer); searchController?.abort(); };
   });
 
+  let searchController: AbortController | undefined;
+  function cancelSearch() {
+    searchController?.abort();
+    searchController = undefined;
+    searching = false;
+  }
   function setKind(value: RequestKind) {
     if (kind === value) return;
+    cancelSearch();
     kind = value; serverId = ''; results = []; searched = false; searchErrors = [];
   }
   async function search(event: SubmitEvent) {
     event.preventDefault();
-    if (searching || query.trim().length < 2) return;
+    if (query.trim().length < 2) return;
+    searchController?.abort();
+    const current = new AbortController();
+    searchController = current;
     searching = true; error = ''; message = ''; results = []; searchErrors = []; searched = false;
     try {
       const params = new URLSearchParams({ q: query.trim(), kind, ...(serverId ? { serverId } : {}) });
-      const data = await applicationRequest<{ results: SearchResult[]; errors?: { message?: string; error?: string }[] }>(`/api/v1/requests/search?${params}`);
+      const data = await applicationRequest<{ results: SearchResult[]; errors?: { message?: string; error?: string }[] }>(`/api/v1/requests/search?${params}`, { signal: AbortSignal.any([current.signal, AbortSignal.timeout(30000)]) });
+      if (current.signal.aborted) return;
       results = data.results; searched = true;
       searchErrors = (data.errors ?? []).map(item => item.message ?? (item.error ? errorMessage(item.error) : $t('request_search_error')));
-    } catch (cause) { error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
-    finally { searching = false; }
+    } catch (cause) { if (!current.signal.aborted) error = cause instanceof Error ? cause.message : $t('loading_impossible'); }
+    finally { if (searchController === current) searching = false; }
   }
 
   /** A film already in a library, or anything already requested, is not offered again. */
@@ -356,6 +367,7 @@
           </label>
         {/if}
         <button type="submit" class="primary" disabled={searching || !canSearch} aria-busy={searching}>{searching ? $t('searching') : $t('search_action')}</button>
+        {#if searching}<button type="button" onclick={cancelSearch}>{$t('cancel')}</button>{/if}
       </form>
       {#if myPolicy}
         <div class="rights-banner">
@@ -396,7 +408,7 @@
             {@const reason = blocked(result)}
             <li class="result-card">
               <div class="art" aria-hidden="true">
-                {#if art(result.inLibrary?.workId)}<img src={art(result.inLibrary?.workId)} alt="" loading="lazy" onerror={() => brokenArt = [...brokenArt, result.inLibrary?.workId ?? '']} />{:else if result.poster}<img src={posterUrl(result.poster)} alt="" loading="lazy" />{:else}<span>{initial(result.title)}</span>{/if}
+                {#if art(result.inLibrary?.workId)}<img src={art(result.inLibrary?.workId)} alt="" loading="lazy" decoding="async" onerror={() => brokenArt = [...brokenArt, result.inLibrary?.workId ?? '']} />{:else if result.poster}<img src={posterUrl(result.poster)} alt="" loading="lazy" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />{:else}<span>{initial(result.title)}</span>{/if}
               </div>
               <div class="result-body">
                 <h3>{result.title}{#if result.year}<span class="year">{result.year}</span>{/if}</h3>
@@ -562,7 +574,7 @@
     <form class="stack" onsubmit={submit}>
       <header class="dialog-media-header">
         {#if selected.poster}
-          <img class="dialog-poster" src={posterUrl(selected.poster)} alt="" />
+          <img class="dialog-poster" src={posterUrl(selected.poster)} alt="" decoding="async" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
         {/if}
         <div>
           <h2 id="request-dialog-title">{$t('confirm_request_for', { title: selected.title })}</h2>

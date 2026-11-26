@@ -172,12 +172,13 @@ impl<V> LruBucket<V> {
 }
 
 pub struct BoundedCatalogueCache {
-    pages: LruBucket<Value>,
+    pages: LruBucket<Arc<Value>>,
     decorated_works: LruBucket<Value>,
     locale_chains: LruBucket<Vec<String>>,
     valid_libs: LruBucket<(Vec<String>, bool)>,
     meta_flags: LruBucket<(bool, bool, bool)>,
     fts_tables: HashMap<u64, bool>,
+    title_fts_tables: HashMap<u64, bool>,
 }
 
 impl BoundedCatalogueCache {
@@ -190,6 +191,7 @@ impl BoundedCatalogueCache {
             valid_libs: LruBucket::new(bounded.min(4 * 1024 * 1024), VALID_LIBS_MAX_ENTRIES),
             meta_flags: LruBucket::new(bounded.min(2 * 1024 * 1024), META_FLAGS_MAX_ENTRIES),
             fts_tables: HashMap::new(),
+            title_fts_tables: HashMap::new(),
         }
     }
 
@@ -203,10 +205,21 @@ impl BoundedCatalogueCache {
     }
 
     pub fn get(&mut self, key: &str, current_fp: i64) -> Option<Value> {
+        self.pages
+            .get_ref(key, current_fp)
+            .map(|arc| (**arc).clone())
+    }
+
+    pub fn get_arc(&mut self, key: &str, current_fp: i64) -> Option<Arc<Value>> {
         self.pages.get_ref(key, current_fp).cloned()
     }
 
     pub fn insert(&mut self, key: String, current_fp: i64, value: Value) {
+        let size = estimate_json_bytes(&value);
+        self.pages.insert(key, current_fp, Arc::new(value), size);
+    }
+
+    pub fn insert_arc(&mut self, key: String, current_fp: i64, value: Arc<Value>) {
         let size = estimate_json_bytes(&value);
         self.pages.insert(key, current_fp, value, size);
     }
@@ -375,6 +388,17 @@ impl BoundedCatalogueCache {
         self.fts_tables.insert(scope, use_fts);
     }
 
+    pub(super) fn get_use_titles_fts(&self, scope: u64) -> Option<bool> {
+        self.title_fts_tables.get(&scope).copied()
+    }
+
+    pub(super) fn insert_use_titles_fts(&mut self, scope: u64, use_fts: bool) {
+        if self.title_fts_tables.len() >= FTS_SCOPES_MAX_ENTRIES {
+            self.title_fts_tables.clear();
+        }
+        self.title_fts_tables.insert(scope, use_fts);
+    }
+
     /// Drop every entry of one opened database (`cache_scope`), leaving the others' entries.
     pub(super) fn clear_scope(&mut self, scope: u64) {
         let other = |key: &str| key_scope(key) != Some(scope);
@@ -384,6 +408,7 @@ impl BoundedCatalogueCache {
         self.valid_libs.retain_keys(other);
         self.meta_flags.retain_keys(other);
         self.fts_tables.remove(&scope);
+        self.title_fts_tables.remove(&scope);
     }
 
     pub fn clear(&mut self) {
@@ -393,6 +418,7 @@ impl BoundedCatalogueCache {
         self.valid_libs.clear();
         self.meta_flags.clear();
         self.fts_tables.clear();
+        self.title_fts_tables.clear();
     }
 
     pub fn stats(&self) -> (usize, usize, usize) {
